@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#5b3a29">
+<title>AuditoriaModulos · Clóset Vera</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+
+:root{
+  --bg:#f6f5f3;--card:#fff;--ink:#201c17;--sub:#6b6259;--line:#e6e1d8;
+  --brand:#5b3a29;--brand-ink:#fff;--ok:#2e7d4f;--bad:#b3452c;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#17140f;--card:#211c15;--ink:#f2ece2;--sub:#a89c8a;--line:#33291f;}}
+:root[data-theme="dark"]{--bg:#17140f;--card:#211c15;--ink:#f2ece2;--sub:#a89c8a;--line:#33291f;}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;padding:12px 14px calc(8px + env(safe-area-inset-top,0px));background:var(--brand);color:var(--brand-ink);z-index:6}
+header h1{margin:0;font-size:16px}
+select#moduloSel{width:100%;margin-top:6px;padding:8px;border-radius:8px;border:none;font-weight:700;background:rgba(255,255,255,.15);color:var(--brand-ink)}
+select#moduloSel option{color:#000}
+nav{display:flex;gap:4px;overflow-x:auto;padding:8px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:122px;z-index:5}
+nav button{flex:0 0 auto;padding:8px 10px;border:none;border-radius:8px;background:transparent;color:var(--sub);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+nav button.active{background:var(--brand);color:var(--brand-ink)}
+nav button.soon{opacity:.45}
+main{max-width:760px;margin:0 auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 5px;border-bottom:1px solid var(--line)}
+th{color:var(--sub);font-size:11px}
+.tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:10.5px;color:var(--sub);margin-left:5px}
+button.btn{padding:9px 14px;border:none;border-radius:8px;background:var(--brand);color:var(--brand-ink);font-weight:600;cursor:pointer;font-size:14px}
+button.btn:disabled{opacity:.5;cursor:not-allowed}
+button.small{padding:6px 9px;font-size:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hint{color:var(--sub);font-size:12px;margin-top:4px}
+.pos{color:var(--ok);font-weight:700}.neg{color:var(--bad);font-weight:700}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wrap-x{overflow-x:auto}
+h3{margin:0 0 6px;font-size:14px}
+.warn{background:#fdf1e3;border:1px solid #e6c88a;color:#7a4f13;border-radius:8px;padding:8px;font-size:12.5px;margin-top:8px}
+:root[data-theme="dark"] .warn, @media (prefers-color-scheme: dark){.warn{background:#3a2c14;border-color:#6b4f1f;color:#e8c98a}}
+.subtabs{display:flex;gap:6px;margin-bottom:8px}
+.subtabs button{flex:1;padding:7px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);font-weight:600;font-size:12.5px;cursor:pointer}
+.subtabs button.active{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:38px;height:38px;border-radius:50%;background:#fff;color:var(--brand);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:0 0 auto}
+.brandname{font-weight:800;font-size:15px;letter-spacing:.5px;line-height:1.1}
+.brandsub{font-size:11px;opacity:.85}
+.modbar{margin-top:8px}
+.modpill{border:none;color:#fff;padding:8px 12px;border-radius:20px;font-weight:700;font-size:13px;cursor:pointer}
+.pickerTitle{font-size:19px;font-weight:800;margin:4px 2px 12px}
+.pickergrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.modcard{border-radius:14px;padding:16px;color:#fff;cursor:pointer;min-height:120px;display:flex;flex-direction:column;justify-content:flex-end;border:none;text-align:left;font-family:inherit}
+.modbadge{width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,.28);display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:16px;margin-bottom:28px}
+.modbadge span{font-size:8.5px;font-weight:700;letter-spacing:.3px}
+.modname{font-weight:800;font-size:17px}
+.modregion{font-size:12px;opacity:.85}
+
+header .topbar{display:flex;justify-content:space-between;align-items:center;gap:8px}
+#whoami{font-size:11px;opacity:.85}
+#logoutBtn{background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:8px;padding:5px 9px;font-size:11px;cursor:pointer}
+#syncBadge{display:inline-block;margin-top:6px;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600}
+</style>
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <div class="brand"><div class="logo">CV</div><div><div class="brandname">CLOSETS VERA</div><div class="brandsub">Auditoría de Módulos</div></div></div>
+    <div style="text-align:right">
+      <div id="whoami"></div>
+      <button id="logoutBtn">Salir</button>
+    </div>
+  </div>
+  <div id="modbar" class="modbar"></div>
+  <div id="syncBadge"></div>
+</header>
+<nav id="nav">
+  <button data-v="inv" class="active">Inventario</button>
+  <button data-v="mov">Entradas/Salidas</button>
+  <button data-v="aud">Auditoría física</button>
+  <button data-v="hist">Historial</button>
+  <button data-v="cat">Catálogo</button>
+  <button data-v="desp">Despiece</button>
+  <button data-v="inst">Instalaciones</button>
+  <button data-v="trasp">Traspasos</button>
+  <button data-v="rep">Reportes</button>
+</nav>
+<main id="main"></main>
+
+<script src="https://cdn.jsdelivr.net/npm/dexie@3.2.6/dist/dexie.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script type="module" src="bootstrap.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+}
+</script>
+</body>
+</html>
