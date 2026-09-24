@@ -408,7 +408,8 @@ function toggleAud(id){ const el=document.getElementById('ad-'+id); el.style.dis
 const FAMILIAS_CAT = {
   'Lateral (4 modelos)': ['Lateral Sencillo','Lateral 3 Cajones','Lateral 5 Cajones','Lateral Espejo'],
   'Central (4 modelos)': ['Central Sencillo','Central 3 Cajones','Central 5 Cajones','Central Espejo'],
-  'Doble (9 modelos)': ['Doble Sencillo','Doble 3 Cajones','Doble 5 Cajones','Doble 6 Cajones','Doble 10 Cajones','Doble Espejo','Doble 3 Cajones con Espejo','Doble 5 Cajones con Espejo','Doble Especial'],
+  'Doble (8 modelos)': ['Doble Sencillo','Doble 3 Cajones','Doble 5 Cajones','Doble 6 Cajones','Doble 10 Cajones','Doble Espejo','Doble 3 Cajones con Espejo','Doble 5 Cajones con Espejo'],
+  'Doble Especial (9 modelos, disponible a 3 mts)': ['Doble Especial Sencillo','Doble Especial 3 Cajones','Doble Especial 5 Cajones','Doble Especial 6 Cajones','Doble Especial 10 Cajones','Doble Especial con Espejo','Doble Especial 3 Cajones y Espejo','Doble Especial 5 Cajones y Espejo','Doble Especial con Dos Espejos'],
   'Triple (15 modelos)': ['Triple Sencillo','Triple 3 Cajones','Triple 5 Cajones','Triple 6 Cajones','Triple 8 Cajones','Triple 10 Cajones','Triple Espejo','Triple 3 Cajones con Espejo','Triple 5 Cajones con Espejo','Triple 6 Cajones con Espejo','Triple 8 Cajones con Espejo','Triple 10 Cajones con Espejo','Triple 2 Espejos','Triple 2 Espejos + 3 Cajones','Triple 2 Espejos + 5 Cajones'],
   'King (8 modelos, nombres del recetario — el total exacto de 8 vs. los 9 nombres mencionados aún no se confirma)': ['King Sencillo','King 3 Cajones','King 5 Cajones','King 6 Cajones','King 10 Cajones','King Espejo','King 3 Cajones con Espejo','King 5 Cajones con Espejo','King 2 Espejos']
 };
@@ -430,7 +431,15 @@ const MODELOS = [
   {nombre:'Doble Espejo', fam:'Doble', cajones:0, espejos:1},
   {nombre:'Doble 3 Cajones con Espejo', fam:'Doble', cajones:3, espejos:1},
   {nombre:'Doble 5 Cajones con Espejo', fam:'Doble', cajones:5, espejos:1},
-  {nombre:'Doble Especial', fam:'Doble Especial', cajones:0, espejos:0, nota:'Misma estructura que Doble; solo cambia en herrajes (4 tubos/4 bridas en vez de 2/2). Este catálogo aún solo trae la variante Sencilla de Doble Especial; si hay variantes con cajones/espejo, dime el nombre exacto para agregarlas'},
+  {nombre:'Doble Especial Sencillo', fam:'Doble Especial', cajones:0, espejos:0, especial3mDisponible:true, nota:'Misma estructura que Doble; solo cambia en herrajes (4 tubos/4 bridas en vez de 2/2)'},
+  {nombre:'Doble Especial 3 Cajones', fam:'Doble Especial', cajones:3, espejos:0, especial3mDisponible:true},
+  {nombre:'Doble Especial 5 Cajones', fam:'Doble Especial', cajones:5, espejos:0, especial3mDisponible:true},
+  {nombre:'Doble Especial 6 Cajones', fam:'Doble Especial', cajones:6, espejos:0, especial3mDisponible:true},
+  {nombre:'Doble Especial 10 Cajones', fam:'Doble Especial', cajones:10, espejos:0, especial3mDisponible:true},
+  {nombre:'Doble Especial con Espejo', fam:'Doble Especial', cajones:0, espejos:1, especial3mDisponible:true},
+  {nombre:'Doble Especial 3 Cajones y Espejo', fam:'Doble Especial', cajones:3, espejos:1, especial3mDisponible:true},
+  {nombre:'Doble Especial 5 Cajones y Espejo', fam:'Doble Especial', cajones:5, espejos:1, especial3mDisponible:true},
+  {nombre:'Doble Especial con Dos Espejos', fam:'Doble Especial', cajones:0, espejos:2, especial3mDisponible:true},
   {nombre:'Triple Sencillo', fam:'Triple', cajones:0, espejos:0},
   {nombre:'Triple 3 Cajones', fam:'Triple', cajones:3, espejos:0},
   {nombre:'Triple 5 Cajones', fam:'Triple', cajones:5, espejos:0},
@@ -478,7 +487,7 @@ const MEL_COLORES = ['Blanco','Cenizo','Beige','Durango','Gris','Lino','Bco Már
 // ===== Motor de despiece compartido por Despiece e Instalaciones =====
 // Devuelve { piezas:[{nombre,cantidad,dim,colorDestino,estado,nota}], maxNota }
 // Actualizado con el recetario confirmado por modelo (paredes/maleteros/cajonera/piezas de cajón/espejos/herrajes).
-function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera){
+function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera, especial3m){
   const estructuraColor = todoColor ? color : 'Blanco';
   // Color de la cajonera: independiente del frente y de "todo un color" (confirmado por el
   // usuario: "la cajonera puede ser de cualquier color y el frente también puede ser de
@@ -487,6 +496,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
   let maxNota = '';
+  let mueblesCajonera = 0; // cuántos "muebles" ocupa la cajonera normal (no espejo) — usado también para el fondo de cajonera
 
   {
     // Base por familia (paredes/maleteros).
@@ -498,7 +508,11 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     if(fam==='Lateral') add('Pared',3,'191×40 cm',estructuraColor,'ok','Incluye la pared del "maletero chico" + las 2 paredes de la entrepañera base (3 en total, fijo)');
     if(fam==='Central'){ add('Pared',2,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
     if(fam==='Doble'){ add('Pared',4,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
-    if(fam==='Doble Especial'){ add('Pared',4,'191×40 cm',estructuraColor,'ok','Confirmado: Doble Especial tiene la misma estructura que Doble; solo cambia en herrajes (4 tubos/4 bridas en vez de 2/2)'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
+    if(fam==='Doble Especial'){
+      add('Pared',4,'191×40 cm',estructuraColor,'ok','Confirmado: Doble Especial tiene la misma estructura que Doble; solo cambia en herrajes (4 tubos/4 bridas en vez de 2/2)');
+      add('Maletero normal',1,'40×244 cm',estructuraColor,'ok');
+      if(especial3m) add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Variante a 3 metros: se agrega 1 maletero chico extra (una pared), confirmado por el usuario');
+    }
     if(fam==='Triple'){ add('Pared',6,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',2,'40×244 cm',estructuraColor,'ok'); }
     if(fam==='King'){
       add('Pared',4,'191×40 cm',estructuraColor,'ok');
@@ -535,7 +549,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     } else if(cajones>0 && MUEBLES_CAJONERA[cajones]===undefined){
       add('Entrepaño','Pendiente','—','—','pendiente','La cantidad de entrepaños/muebles que ocupa la cajonera de '+cajones+' cajones no está confirmada; no se inventa');
     } else {
-      const mueblesCajonera = cajones>0 ? MUEBLES_CAJONERA[cajones] : 0;
+      mueblesCajonera = cajones>0 ? MUEBLES_CAJONERA[cajones] : 0;
       const mueblesUsados = mueblesCajonera + espejos;
       const restantes = numMuebles - mueblesUsados;
       if(restantes < 0){
@@ -579,11 +593,24 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
       if(espejos===1) add('Entrepaña normal',1,'—','—','ok','King con 1 espejo = 1 entrepaña normal + 1 entrepaña con espejo');
     }
     add('Espejo',espejos,'—','—','ok','1 "Espejos closet" por espejo (confirmado por el usuario, incluido King: "el espejo es espejo de clóset... aplica para todas las variantes de los modelos")');
-    add('Fondo cajonera con espejo (MDF 3mm)',espejos,'55×122 cm','—','ok','1 por espejo. Rendimiento confirmado: 4 fondos de cajonera por hoja de MDF 3mm');
     add('Zócalo especial',espejos,'18×52 cm',colorZocalo,'ok','1 por espejo (confirmado por el usuario)'+(cajones>0?'; color del frente (zócalos de cajonera dependen del color de frente, confirmado por el usuario)':''));
     add('Zócalo especial',espejos,'16×52 cm',colorZocalo,'ok','1 por espejo (confirmado por el usuario)');
   } else {
     add('Zócalo normal',2,'10×52 cm',colorZocalo,'ok', cajones>0?'Color del frente (zócalos de cajonera dependen del color de frente, confirmado por el usuario)':'');
+  }
+
+  // Fondo de cajonera: confirmado por el usuario — "cada mueble que sea cajonera de 1, de 3,
+  // de 5, espejo, Emma o Max lleva un fondo de cajonera, más aparte los fondos de los cajones".
+  // Las entrepañeras NO llevan fondo de cajonera. 1 fondo por cada mueble ocupado por cajonera
+  // (mueblesCajonera, ya contando que 6/8/10 cajones ocupan 2 muebles = 2 fondos) + 1 por cada
+  // espejo (cada espejo ocupa 1 mueble). Medida y rendimiento confirmados: 55×122 cm, MDF 3mm,
+  // 4 fondos por hoja.
+  const mueblesFondoCajonera = mueblesCajonera + espejos;
+  if(mueblesFondoCajonera>0){
+    add('Fondo de cajonera (MDF 3mm)', mueblesFondoCajonera, '55×122 cm', '—', 'ok',
+      (mueblesCajonera>0 && espejos>0)
+        ? (mueblesCajonera+' mueble(s) de cajonera + '+espejos+' de espejo (confirmado por el usuario)')
+        : '1 fondo por mueble de cajonera/espejo (confirmado por el usuario), aparte del fondo de cada cajón');
   }
 
   // Herrajes (tubos/bridas) por familia
@@ -603,6 +630,7 @@ function buildAdicionalPiezas(tipo, cajones, color){
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
   const CAJONERA_ENTREPANOS = {3:5, 5:4, 6:10, 8:9, 10:8};
+  const MUEBLES_CAJONERA = {3:1, 5:1, 6:2, 8:2, 10:2};
   if(tipo==='entrepanera'){
     add('Pared',2,'191×40 cm',color,'ok','Adicional: entrepañera (2 paredes + 5 entrepaños + 2 zócalos)');
     add('Entrepaño',5,'52×40 cm',color,'ok');
@@ -618,6 +646,8 @@ function buildAdicionalPiezas(tipo, cajones, color){
     add('Fondo de cajón (MDF 3mm)',cajones,'49.4×33 cm','—','ok');
     add('Juego de corredera',cajones,'—','—','ok','1 por cajón');
     add('Jaladera (por cajón)',cajones,'—',color,'ok');
+    if(MUEBLES_CAJONERA[cajones]) add('Fondo de cajonera (MDF 3mm)',MUEBLES_CAJONERA[cajones],'55×122 cm','—','ok','1 fondo de cajonera por mueble ocupado (confirmado por el usuario), aparte del fondo de cada cajón');
+    else add('Fondo de cajonera (MDF 3mm)','Pendiente','—','—','pendiente','Cantidad de muebles que ocupa la cajonera de '+cajones+' cajones no confirmada; no se inventa');
   } else if(tipo==='cajonera_emma'){
     add('Pared',2,'191×40 cm',color,'ok','Cajonera Emma: 2 paredes + 4 entrepaños + 5 zócalos de 10×52 + 4 cajones (confirmado por el usuario)');
     add('Entrepaño',4,'52×40 cm',color,'ok');
@@ -628,10 +658,11 @@ function buildAdicionalPiezas(tipo, cajones, color){
     add('Fondo de cajón (MDF 3mm)',4,'49.4×33 cm','—','ok');
     add('Juego de corredera',4,'—','—','ok','1 por cajón');
     add('Jaladera (por cajón)',4,'—',color,'ok');
+    add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Emma ocupa 1 mueble = 1 fondo de cajonera (confirmado por el usuario)');
   } else if(tipo==='cajonera_espejo'){
     add('Pared',2,'191×40 cm',color,'ok','Adicional: cajonera de espejo');
     add('Entrepaño',5,'52×40 cm',color,'ok');
-    add('Fondo cajonera con espejo (MDF 3mm)',1,'55×122 cm','—','ok','Rendimiento confirmado: 4 fondos de cajonera por hoja de MDF 3mm');
+    add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Rendimiento confirmado: 4 fondos de cajonera por hoja de MDF 3mm');
     add('Zócalo especial',1,'18×52 cm',color,'ok');
     add('Zócalo especial',1,'16×52 cm',color,'ok');
     add('Espejo',1,'—','—','ok','1 "Espejos closet"');
@@ -659,10 +690,10 @@ function buildMueblePiezasComp(value, cajonesManual, color){
 // (en vez de un modelo con nombre). Las paredes/maleteros/herrajes de la familia se toman de
 // buildDespiece con cajones=0/espejos=0 (son fijos, no cambian según qué ocupa cada mueble);
 // se descarta su entrepaño "base sencillo" porque aquí lo da la combinación elegida.
-function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera){
+function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, especial3m){
   const estructuraColor = todoColor ? color : 'Blanco';
   const colorCaj = colorCajonera || estructuraColor;
-  const base = buildDespiece(fam, 0, 0, color, todoColor, maxOn, colorCajonera);
+  const base = buildDespiece(fam, 0, 0, color, todoColor, maxOn, colorCajonera, especial3m);
   const piezasFijas = base.piezas.filter(p=>p.nombre!=='Entrepaño');
   const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
   if(hayCajonera) piezasFijas.forEach(p=>{ if(p.nombre==='Zócalo normal') p.colorDestino = color; });
@@ -739,7 +770,7 @@ function piezasAConsumo(piezas, color){
   if(fondosCajon3>0) addConsumo('MDF 3mm', fondosCajon3/14);
   const fondosCajon5Max = piezas.filter(p=>p.nombre==='Fondo de cajón (MDF 5mm, Max)' && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
   if(fondosCajon5Max>0) addConsumo('MDF 5mm', fondosCajon5Max/12);
-  const fondosCajonera = piezas.filter(p=>p.nombre.startsWith('Fondo cajonera con espejo') && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
+  const fondosCajonera = piezas.filter(p=>p.nombre.startsWith('Fondo de cajonera') && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
   if(fondosCajonera>0) addConsumo('MDF 3mm', fondosCajonera/4);
 
   // Herrajes
@@ -848,6 +879,7 @@ function renderDSelector(){
           ${m.value==='cajonera_otra'?`<input type="number" min="1" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="dMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
       ${dFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
+      ${dFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
     `;
   } else {
     wrap.innerHTML = `<select id="d-modelo" onchange="renderDespMaxToggle()">${modeloOptionsHtml()}</select><div id="d-max-wrap"></div>`;
@@ -858,9 +890,10 @@ function renderDSelector(){
 function renderDespMaxToggle(){
   const m = MODELOS.find(x=>x.nombre===$('#d-modelo').value);
   const wrap = document.getElementById('d-max-wrap');
-  if(wrap) wrap.innerHTML = m.maxDisponible
-    ? `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="d-max" style="width:auto"> Es variante Max (sustituye componentes, no los suma)</label>`
-    : '';
+  if(!wrap) return;
+  if(m.maxDisponible) wrap.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="d-max" style="width:auto"> Es variante Max (sustituye componentes, no los suma)</label>`;
+  else if(m.especial3mDisponible) wrap.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="d-especial3m" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`;
+  else wrap.innerHTML = '';
 }
 
 function calcDespiece(){
@@ -870,17 +903,19 @@ function calcDespiece(){
   let piezasModelo, maxNota, titulo, notaModelo=null;
   if(dModoComp){
     const maxOn = dFamiliaComp==='King' && document.getElementById('d-max-comp') ? document.getElementById('d-max-comp').checked : false;
+    const especial3m = dFamiliaComp==='Doble Especial' && document.getElementById('d-especial3m-comp') ? document.getElementById('d-especial3m-comp').checked : false;
     const incompletos = dMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length) return alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".');
-    const r = buildComposicion(dFamiliaComp, dMueblesComp, color, todoColor, maxOn, colorCajonera);
+    const r = buildComposicion(dFamiliaComp, dMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m);
     piezasModelo = r.piezas; maxNota = r.maxNota;
-    titulo = dFamiliaComp+' — combinación: '+dMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ');
+    titulo = dFamiliaComp+' — combinación: '+dMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ')+(especial3m?' · a 3 metros':'');
   } else {
     const modelo = MODELOS.find(x=>x.nombre===$('#d-modelo').value);
     const maxOn = modelo.maxDisponible && document.getElementById('d-max') ? document.getElementById('d-max').checked : false;
-    const r = buildDespiece(modelo.fam, modelo.cajones, modelo.espejos, color, todoColor, maxOn, colorCajonera);
+    const especial3m = modelo.especial3mDisponible && document.getElementById('d-especial3m') ? document.getElementById('d-especial3m').checked : false;
+    const r = buildDespiece(modelo.fam, modelo.cajones, modelo.espejos, color, todoColor, maxOn, colorCajonera, especial3m);
     piezasModelo = r.piezas; maxNota = r.maxNota;
-    titulo = modelo.nombre; notaModelo = modelo.nota;
+    titulo = modelo.nombre+(especial3m?' · a 3 metros':''); notaModelo = modelo.nota;
   }
   const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color));
   const piezas = piezasModelo.concat(piezasAdic);
@@ -990,6 +1025,7 @@ function renderISelector(){
           ${m.value==='cajonera_otra'?`<input type="number" min="1" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="iMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
       ${iFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
+      ${iFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
       <label class="hint" style="display:block;margin-top:8px">Color de la cajonera / cajonera de espejo (independiente del frente)</label><select id="i-color-cajonera-comp">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     `;
   } else {
@@ -1004,9 +1040,9 @@ function renderInstMaxToggle(){
   const wrapCaj = document.getElementById('i-cajcolor-wrap');
   if(!sel || !wrapMax || !wrapCaj) return;
   const m = MODELOS.find(x=>x.nombre===sel.value);
-  wrapMax.innerHTML = m.maxDisponible
-    ? `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="i-max" style="width:auto"> Es variante Max (sustituye componentes, no los suma)</label>`
-    : '';
+  if(m.maxDisponible) wrapMax.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="i-max" style="width:auto"> Es variante Max (sustituye componentes, no los suma)</label>`;
+  else if(m.especial3mDisponible) wrapMax.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="i-especial3m" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`;
+  else wrapMax.innerHTML = '';
   wrapCaj.innerHTML = (m.cajones>0 || m.espejos>0)
     ? `<label class="hint" style="display:block;margin-top:8px">Color de la cajonera${m.espejos>0?' / cajonera de espejo':''} (independiente del frente)</label><select id="i-color-cajonera">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>`
     : '';
@@ -1018,20 +1054,22 @@ function previewInst(){
   let piezasModelo, maxNota, titulo, notaModelo=null, colorCajonera;
   if(iModoComp){
     const maxOn = iFamiliaComp==='King' && document.getElementById('i-max-comp') ? document.getElementById('i-max-comp').checked : false;
+    const especial3m = iFamiliaComp==='Doble Especial' && document.getElementById('i-especial3m-comp') ? document.getElementById('i-especial3m-comp').checked : false;
     const incompletos = iMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length){ alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".'); return; }
     colorCajonera = document.getElementById('i-color-cajonera-comp') ? document.getElementById('i-color-cajonera-comp').value : null;
-    const r = buildComposicion(iFamiliaComp, iMueblesComp, color, todoColor, maxOn, colorCajonera);
+    const r = buildComposicion(iFamiliaComp, iMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m);
     piezasModelo = r.piezas; maxNota = r.maxNota;
-    titulo = iFamiliaComp+' — combinación: '+iMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ');
+    titulo = iFamiliaComp+' — combinación: '+iMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ')+(especial3m?' · a 3 metros':'');
   } else {
     const modeloSel = MODELOS.find(x=>x.nombre===$('#i-modelo').value);
     const fam = modeloSel.fam, cajones = modeloSel.cajones, espejos = modeloSel.espejos;
     const maxOn = modeloSel.maxDisponible && document.getElementById('i-max') ? document.getElementById('i-max').checked : false;
+    const especial3m = modeloSel.especial3mDisponible && document.getElementById('i-especial3m') ? document.getElementById('i-especial3m').checked : false;
     colorCajonera = (cajones>0 || espejos>0) && document.getElementById('i-color-cajonera') ? document.getElementById('i-color-cajonera').value : null;
-    const r = buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera);
+    const r = buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera, especial3m);
     piezasModelo = r.piezas; maxNota = r.maxNota;
-    titulo = modeloSel.nombre; notaModelo = modeloSel.nota;
+    titulo = modeloSel.nombre+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
   }
   const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color));
   const piezas = piezasModelo.concat(piezasAdic);
