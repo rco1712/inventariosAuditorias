@@ -24,8 +24,38 @@ para poder subirlos fácil desde el selector de archivos del celular.
 
 - ✅ Supabase: proyecto "InventariosAuditorias" creado, `schema.sql` ya ejecutado,
   llaves ya puestas en `supabase.js`.
-- ⏳ Publicación: subiendo el código a `github.com/rco1712/inventariosAuditorias` para
-  activar GitHub Pages.
+- ✅ Publicación: en `https://rco1712.github.io/inventariosAuditorias/` (GitHub Pages).
+- ✅ Roles y permisos por módulo, implementados.
+
+## Roles y permisos
+
+Cada usuario tiene un **rol** guardado en la tabla `perfiles` de Supabase:
+
+- **admin**: ve y edita los 5 módulos completos, sin restricción (inventario, despiece,
+  auditorías, instalaciones, traspasos, reportes, poner en cero). Debe haber al menos uno: tú.
+- **coordinador**: solo ve y edita el módulo que tenga asignado en la columna `modulo` de
+  su perfil (Saltillo, Escobedo, Apodaca, Guadalajara o Tlaquepaque). No ve la pestaña de
+  Traspasos (cruza módulos, así que queda solo para admin). Si un coordinador no tiene
+  módulo asignado, la app se lo dice y no lo deja avanzar hasta que tú se lo asignes.
+- **supervisor**: ve los 5 módulos (como el admin), pero de solo lectura — no le aparecen
+  las pestañas de Entradas/Salidas, Auditoría física, Instalaciones ni Traspasos, y no
+  puede editar el "Inicial" ni poner en cero.
+
+**Cómo asignar rol/módulo a cada usuario** (tú, como dueño del proyecto, desde Supabase):
+1. Ve a tu proyecto de Supabase → **Table Editor** → tabla **`perfiles`**.
+2. Ahí sale un renglón por cada persona que se haya registrado en la app (por defecto
+   quedan como `rol = coordinador` y `modulo` vacío).
+3. Edita el renglón de cada quien: pon su `rol` (`admin`, `coordinador` o `supervisor`) y,
+   si es coordinador, su `modulo` (escribe el nombre exacto: `Saltillo`, `Escobedo`,
+   `Apodaca`, `Guadalajara` o `Tlaquepaque`).
+4. La próxima vez que esa persona entre a la app (o recargue), ya le aplica el nuevo rol.
+
+> A ti mismo te toca subirte a `admin` una vez, a mano, la primera vez (por tu propia
+> seguridad, la app no deja que nadie se suba su propio rol desde el celular).
+
+Por seguridad, estas reglas están reforzadas también en la base de datos (RLS), no solo en
+la pantalla: aunque alguien intentara saltarse la app, Supabase igual bloquea la
+lectura/escritura fuera de lo que le toca a su rol.
 
 ## Estructura del proyecto
 
@@ -63,7 +93,5 @@ y abre `http://localhost:8080` en el navegador.
 
 ## Siguientes mejoras posibles (no incluidas todavía)
 
-- Restringir cada usuario a ver solo su propio módulo (hay una versión más estricta de
-  los permisos, comentada al final de `schema.sql`, lista para activar).
-- Pantalla de administración para crear/editar usuarios sin entrar a Supabase directamente.
+- Pantalla de administración para asignar rol/módulo sin entrar a Supabase directamente.
 - Notificaciones cuando el stock de algo se queda muy bajo.

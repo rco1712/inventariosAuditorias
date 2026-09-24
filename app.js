@@ -12,6 +12,13 @@ const $=s=>document.querySelector(s);
 let inicialMap={}, movs=[], resetMap={}, auditorias=[], current='inv';
 let auditCat=null, auditCapturas={};
 let moduloActual = localStorage.getItem('am_modulo') || null;
+// Perfil del usuario (rol + módulo asignado). Lo llena boot() con getMyProfile() antes de
+// llamar a init(). rol: 'admin' (ve/edita todo) | 'coordinador' (solo su módulo) |
+// 'supervisor' (ve todo, sin poder capturar nada). Sin Supabase configurado, queda null y
+// la app se comporta como antes (un solo usuario local, sin restricciones).
+let miPerfil = null;
+function puedeEscribir(){ return !miPerfil || miPerfil.rol==='admin' || miPerfil.rol==='coordinador'; }
+function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 let instSub = 'mueble';
 let instPreview = null; // {piezas, consumo:[{itemId,cantidad}], bloqueado, motivosBloqueo:[]}
 // Adicionales: muebles extra que se agregan a un modelo (cajonera, entrepañera, cajonera de
@@ -77,9 +84,19 @@ function inicialKey(mod,itemId){return mod+'__'+itemId;}
 
 function renderModBar(){
   const m = MODULOS.find(x=>x.nombre===moduloActual);
+  const puedeCambiar = !miPerfil || miPerfil.rol!=='coordinador';
   $('#modbar').innerHTML = m
-    ? `<button class="modpill" style="background:${m.color}" onclick="showPicker()">📍 ${m.nombre} · cambiar módulo</button>`
+    ? `<button class="modpill" style="background:${m.color}" ${puedeCambiar?'onclick="showPicker()"':'disabled'}>📍 ${m.nombre}${puedeCambiar?' · cambiar módulo':' (tu módulo asignado)'}</button>`
     : `<button class="modpill" style="background:#555" onclick="showPicker()">Selecciona un módulo</button>`;
+}
+
+// Muestra/oculta pestañas de navegación y acciones según el rol de quien inició sesión.
+function aplicarPermisosUI(){
+  if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
+  const ocultarTabs = miPerfil.rol==='supervisor' ? ['mov','aud','inst','trasp'] : (miPerfil.rol==='coordinador' ? ['trasp'] : []);
+  document.querySelectorAll('#nav button[data-v]').forEach(b=>{
+    b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
+  });
 }
 
 function showPicker(){
@@ -107,6 +124,17 @@ async function init(){
   document.getElementById('logoutBtn').onclick = doLogout;
   initSync();
   unsubscribeSyncBadge = onSyncStateChange(renderSyncBadge);
+  aplicarPermisosUI();
+  if(miPerfil && miPerfil.rol==='coordinador'){
+    if(!miPerfil.modulo){
+      document.getElementById('nav').style.display='none';
+      $('#main').innerHTML = `<div class="card">Tu cuenta (${getCurrentUserEmail()}) todavía no tiene un módulo asignado.
+        <p class="hint">Pídele a tu administrador que te lo asigne (tabla "perfiles" en Supabase) y vuelve a entrar.</p></div>`;
+      return;
+    }
+    moduloActual = miPerfil.modulo;
+    localStorage.setItem('am_modulo', moduloActual);
+  }
   renderModBar();
   if(!moduloActual){ showPicker(); return; }
   await loadStock();
@@ -186,12 +214,14 @@ function calcFormula(itemId){
 }
 
 async function ceroModulo(){
+  if(!puedeEscribir()) return alert('Tu cuenta es de solo lectura; no puedes poner en cero el inventario.');
   if(!confirm('¿Poner en CERO el inventario de '+modulo()+'? Esto no borra el historial, pero el stock actual de este módulo partirá de 0. Los demás módulos no se afectan.')) return;
   try{ await db.collection('resets').doc(modulo()).set({fecha:new Date().toISOString()}); alert('Inventario de '+modulo()+' reiniciado a cero.'); }
   catch(e){ alert('Error: '+e.message); }
 }
 
 async function editInicial(itemId){
+  if(!puedeEscribir()) return alert('Tu cuenta es de solo lectura; no puedes cambiar el inicial.');
   const actual = inicialMap[itemId] ?? 0;
   const val = prompt('Stock inicial (línea base) para este artículo en '+modulo(), actual);
   if(val===null || isNaN(Number(val))) return;
@@ -216,7 +246,7 @@ function renderInv(){
   ).join('');
   let html = `<div class="card"><div class="row" style="justify-content:space-between">
       <strong>Inventario · ${modulo()}</strong>
-      <button class="btn" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="ceroModulo()">Poner en cero</button>
+      ${puedeEscribir()?`<button class="btn" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="ceroModulo()">Poner en cero</button>`:''}
     </div>
     <p class="hint">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Mermas = Final. Toca "Inicial" para fijar la línea base tras un conteo físico.</p>
     <div style="margin-top:6px">${catsHtml}</div>
@@ -227,7 +257,7 @@ function renderInv(){
       ${rows.map(it=>{ const f=calcFormula(it.id);
         return `<tr>
           <td>${it.nombre}<div class="tag">${it.unidad}</div></td>
-          <td><a href="#" onclick="editInicial('${it.id}');return false;">${f.inicial}</a></td>
+          <td>${puedeEscribir()?`<a href="#" onclick="editInicial('${it.id}');return false;">${f.inicial}</a>`:f.inicial}</td>
           <td class="pos">${f.entradas}</td>
           <td class="neg">${f.salidas}</td>
           <td class="neg">${f.instalaciones}</td>
@@ -1462,7 +1492,9 @@ window.exportarRespaldo = exportarRespaldo;
       document.getElementById('nav').style.display='none';
       return;
     }
-    document.getElementById('whoami').textContent = user.email;
+    miPerfil = await getMyProfile();
+    const rolLabel = miPerfil ? ({admin:'admin', coordinador:'coordinador', supervisor:'supervisor'}[miPerfil.rol] || miPerfil.rol) : '';
+    document.getElementById('whoami').textContent = user.email + (rolLabel? ' · '+rolLabel : '');
   } else {
     document.getElementById('whoami').textContent = 'modo local';
   }

@@ -6,6 +6,7 @@ import { getSupabase, supabaseReady } from './supabase.js';
 export let currentUser = null; // {id, email}
 
 export function authAvailable(){ return supabaseReady; }
+export function getCurrentUserEmail(){ return currentUser ? currentUser.email : ''; }
 
 export async function getSession(){
   if (!supabaseReady) return null;
@@ -36,6 +37,26 @@ export async function signOut(){
   const sb = getSupabase();
   await sb.auth.signOut();
   currentUser = null;
+}
+
+// ===== Perfil (rol + módulo asignado) =====
+// Se guarda en localStorage como respaldo para que, si se abre la app sin internet,
+// se recuerde el último rol/módulo conocido en vez de bloquear al usuario.
+const PROFILE_CACHE_KEY = 'am_perfil';
+
+export async function getMyProfile(){
+  if (!supabaseReady || !currentUser) return null;
+  const sb = getSupabase();
+  try {
+    const { data, error } = await sb.from('perfiles').select('rol, modulo, email').eq('user_id', currentUser.id).single();
+    if (error || !data) throw error || new Error('sin perfil');
+    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data));
+    return data;
+  } catch (e) {
+    // Sin internet (o el perfil aún no existe): usa el último conocido, si hay.
+    const cached = localStorage.getItem(PROFILE_CACHE_KEY);
+    return cached ? JSON.parse(cached) : { rol: 'coordinador', modulo: null };
+  }
 }
 
 export function onAuthChange(cb){

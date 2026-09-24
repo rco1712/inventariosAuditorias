@@ -4,12 +4,12 @@
 // ya esté listo.
 import { db, initSync, syncAll, onSyncStateChange } from './db.js';
 import { supabaseReady } from './supabase.js';
-import { authAvailable, getSession, signIn, signUp, signOut, onAuthChange, renderLogin } from './auth.js';
+import { authAvailable, getSession, signIn, signUp, signOut, onAuthChange, renderLogin, getMyProfile, getCurrentUserEmail } from './auth.js';
 
 Object.assign(window, {
   db, initSync, syncAll, onSyncStateChange,
   supabaseReady,
-  authAvailable, getSession, signIn, signUp, signOut, onAuthChange, renderLogin
+  authAvailable, getSession, signIn, signUp, signOut, onAuthChange, renderLogin, getMyProfile, getCurrentUserEmail
 });
 
 const s = document.createElement('script');
