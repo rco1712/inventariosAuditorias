@@ -30,7 +30,7 @@ const TIPOS_ADICIONAL = {
   cajonera: 'Cajonera (cantidad libre)',
   cajonera_emma: 'Cajonera Emma (4 cajones)',
   cajonera_espejo: 'Cajonera de espejo',
-  cajonera_max: 'Cajonera Max (pendiente)',
+  cajonera_max: 'Cajonera Max (4 cajones)',
   zapatera: 'Zapatera',
   repisa: 'Repisa'
 };
@@ -46,7 +46,7 @@ const MUEBLE_TIPO_OPCIONES = [
   {value:'cajonera_5', label:'Cajonera de 5 cajones'},
   {value:'cajonera_emma', label:'Cajonera Emma (4 cajones)'},
   {value:'cajonera_espejo', label:'Cajonera de espejo'},
-  {value:'cajonera_max', label:'Cajonera Max (pendiente)'},
+  {value:'cajonera_max', label:'Cajonera Max (4 cajones)'},
   {value:'cajonera_otra', label:'Cajonera (otra cantidad)'}
 ];
 let dModoComp=false, dFamiliaComp=null, dMueblesComp=[];
@@ -548,8 +548,12 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     if(fam==='King'){
       add('Pared',4,'191×40 cm',estructuraColor,'ok');
       if(maxOn){
-        add('Maletero normal (Max)',2,'40×244 cm',estructuraColor,'ok','Max sustituye "1 maletero chico + 1 maletero grande" por 2 maleteros normales; no se duplica');
-        maxNota = 'King Max: se sustituyó "1 maletero chico + 1 maletero grande" por "2 maleteros normales". No se suman ambos.';
+        // Confirmado por el usuario: en Max el maletero chico (191×40) se sustituye por uno
+        // normal (244×40); el maletero grande que ya tenía el modelo se queda igual (toda
+        // variante Max lleva maleteros grandes). No se duplica ninguno.
+        add('Maletero normal (Max)',1,'40×244 cm',estructuraColor,'ok','Max sustituye el maletero chico (191×40) por uno normal (244×40)');
+        add('Maletero grande',1,'40×244 cm',estructuraColor,'ok','El maletero grande del King se queda igual en la variante Max (no se sustituye)');
+        maxNota = 'King Max: el maletero chico (191×40) se sustituyó por uno normal (244×40); el maletero grande se queda igual. No se suman ambos.';
       } else {
         add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Confirmado: la medida del maletero chico es la misma que una Pared (191×40 cm); se agrupa con las paredes para el cálculo de hojas');
         add('Maletero grande',1,'40×244 cm',estructuraColor,'ok','Confirmado: mismo tamaño que el maletero normal (rendimiento: 3 por hoja)');
@@ -609,7 +613,10 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
   // Piezas de cajón: confirmadas para cualquier cantidad de cajones (regla general del recetario)
   if(cajones>0){
     if(maxOn){
-      piezasCajonesMax(add, cajones, color, estructuraColor);
+      // Confirmado por el usuario: la Cajonera Max SIEMPRE lleva 4 cajones por cada mueble/unidad
+      // de cajonera Max (medida fija, no depende de si el modelo original era de 3/5/6/8/10
+      // cajones). Para King 6/10 Cajones Max (2 muebles), son 4 cajones × 2 muebles = 8 cajones.
+      piezasCajonesMax(add, 4*mueblesCajonera, color, estructuraColor);
     } else {
       add('Frente',cajones,'18×54 cm',color,'ok');
       add('Pieza chica de cajón',cajones*2,'33×16.5 cm',estructuraColor,'ok','Medida tomada del despiece confirmado de Doble 5 Cajones (única con medida documentada; aplicada como regla general de pieza de cajón)');
@@ -699,9 +706,10 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt){
     else add('Fondo de cajonera (MDF 3mm)','Pendiente','—','—','pendiente','Cantidad de muebles que ocupa la cajonera de '+cajones+' cajones no confirmada; no se inventa');
   } else if(tipo==='cajonera_max'){
     // Confirmado por el usuario: receta completa de la Cajonera Max (ver piezasCajoneraMax /
-    // piezasCajonesMax). Como adicional cuenta como 1 sola unidad, con "cajones" cajones dentro.
+    // piezasCajonesMax). Como adicional cuenta como 1 sola unidad. Confirmado: la Cajonera Max
+    // SIEMPRE lleva 4 cajones (medida fija, no la elige el cliente ni varía por modelo).
     piezasCajoneraMax(add, color, 1);
-    if(cajones>0) piezasCajonesMax(add, cajones, color, color);
+    piezasCajonesMax(add, 4, color, color);
   } else if(tipo==='cajonera_emma'){
     add('Pared',2,'191×40 cm',color,'ok','Cajonera Emma: 2 paredes + 4 entrepaños + 5 zócalos de 10×52 + 4 cajones (confirmado por el usuario)');
     add('Entrepaño',4,'52×40 cm',color,'ok');
@@ -884,9 +892,9 @@ function toggleAdicionalCajones(prefix){
   const sel = document.getElementById(prefix+'-adic-tipo');
   const wrap = document.getElementById(prefix+'-adic-cajones-wrap');
   if(!sel || !wrap) return;
-  wrap.innerHTML = (sel.value==='cajonera'||sel.value==='cajonera_max')
-    ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones${sel.value==='cajonera_max'?' (opcional; 0 si es solo el mueble sin cajones)':''}</label><input type="number" min="${sel.value==='cajonera_max'?'0':'1'}" id="${prefix}-adic-cajones" placeholder="ej. 3">`
-    : '';
+  wrap.innerHTML = (sel.value==='cajonera')
+    ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">`
+    : (sel.value==='cajonera_max' ? `<p class="hint" style="margin-top:8px">La Cajonera Max siempre lleva 4 cajones (confirmado; no se captura cantidad).</p>` : '');
 }
 function agregarAdicional(prefix){
   const tipo = document.getElementById(prefix+'-adic-tipo').value;
@@ -897,8 +905,7 @@ function agregarAdicional(prefix){
     cajones = Number(el && el.value);
     if(!cajones || cajones<=0) return alert('Captura la cantidad de cajones del adicional.');
   } else if(tipo==='cajonera_max'){
-    const el = document.getElementById(prefix+'-adic-cajones');
-    cajones = Number(el && el.value) || 0;
+    cajones = 4; // Confirmado por el usuario: la Cajonera Max siempre lleva 4 cajones, fijo.
   }
   (prefix==='d' ? dAdicionales : iAdicionales).push({tipo, cajones, color});
   renderAdicBox(prefix);
@@ -951,7 +958,7 @@ function renderDSelector(){
           <select onchange="dMueblesComp[${i}].value=this.value; renderDSelector();">
             ${MUEBLE_TIPO_OPCIONES.map(o=>`<option value="${o.value}" ${o.value===m.value?'selected':''}>Mueble ${i+1}: ${o.label}</option>`).join('')}
           </select>
-          ${(m.value==='cajonera_otra'||m.value==='cajonera_max')?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="dMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
+          ${m.value==='cajonera_otra'?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="dMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
       ${dFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
       ${dFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
@@ -980,7 +987,7 @@ function calcDespiece(){
   if(dModoComp){
     const maxOn = dFamiliaComp==='King' && document.getElementById('d-max-comp') ? document.getElementById('d-max-comp').checked : false;
     const especial3m = dFamiliaComp==='Doble Especial' && document.getElementById('d-especial3m-comp') ? document.getElementById('d-especial3m-comp').checked : false;
-    const incompletos = dMueblesComp.filter(m=>(m.value==='cajonera_otra'||m.value==='cajonera_max') && !m.cajones && m.value==='cajonera_otra');
+    const incompletos = dMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length) return alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".');
     const r = buildComposicion(dFamiliaComp, dMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
@@ -1101,7 +1108,7 @@ function renderISelector(){
           <select onchange="iMueblesComp[${i}].value=this.value; renderISelector();">
             ${MUEBLE_TIPO_OPCIONES.map(o=>`<option value="${o.value}" ${o.value===m.value?'selected':''}>Mueble ${i+1}: ${o.label}</option>`).join('')}
           </select>
-          ${(m.value==='cajonera_otra'||m.value==='cajonera_max')?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="iMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
+          ${m.value==='cajonera_otra'?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="iMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
       ${iFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
       ${iFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
@@ -1247,9 +1254,10 @@ function renderInstPuertas(){
   $('#inst-body').innerHTML = `
   <div class="card">
     <strong>Puertas · ${modulo()}</strong>
-    <p class="hint">Las puertas no cuentan como uno de los muebles del modelo (no aparecen en Inventario de muebles), pero su herrajería (riel, sistema, bastidor, jaladeras) sí se descuenta del inventario del módulo al registrar la instalación.</p>
+    <p class="hint">Las puertas no cuentan como uno de los muebles del modelo (no aparecen en Inventario de muebles), pero su material (melamina de 15mm) y su herrajería (riel, sistema, bastidor, jaladeras) sí se descuentan del inventario del módulo al registrar la instalación.</p>
     <div class="grid2" style="margin-top:8px">
       <select id="p-tipo" onchange="renderPuertaParedFalsaExtra()">${Object.keys(TIPOS_PUERTA).map(t=>`<option>${t}</option>`).join('')}</select>
+      <select id="p-color">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
       <input id="p-alto" type="number" placeholder="Alto total (cm)">
       <input id="p-ancho" type="number" placeholder="Ancho total (cm)">
       <select id="p-jaladera-tipo"><option value="normal">Jaladera normal</option><option value="plana">Jaladera plana</option></select>
@@ -1276,16 +1284,43 @@ function renderPuertaParedFalsaExtra(){
     : '';
 }
 
+// Confirmado por el usuario: puertas/marcos/fijos/pared falsa/extensión de fijo salen todos del
+// mismo color que elige el cliente, en melamina de 15mm — misma hoja estándar de 122×244 cm que
+// se usa para todo lo demás (no hay un artículo de catálogo aparte para el 15mm). Como la medida
+// de cada pieza depende de la puerta que se está cortando (no es una medida fija como el Frente),
+// en vez de un rendimiento fijo por hoja se calcula cuántas piezas de esa medida caben en una
+// hoja (probando las dos orientaciones) y de ahí cuántas hojas se necesitan.
+function piezasPorHoja(anchoPieza, altoPieza, anchoHoja, altoHoja){
+  anchoHoja = anchoHoja || 122; altoHoja = altoHoja || 244;
+  if(!(anchoPieza>0) || !(altoPieza>0)) return 0;
+  const op1 = Math.floor(anchoHoja/anchoPieza) * Math.floor(altoHoja/altoPieza);
+  const op2 = Math.floor(anchoHoja/altoPieza) * Math.floor(altoHoja/anchoPieza);
+  return Math.max(op1, op2);
+}
+// Suma las hojas necesarias para una lista de piezas [{ancho,alto,cantidad}]. Cada tipo de pieza
+// (puertas, marcos, fijos, etc.) se acomoda en su propia hoja; no se combinan sobrantes entre
+// tipos distintos de pieza (para no suponer un acomodo más eficiente del que se puede confirmar).
+function hojasParaCortes(cortes){
+  return cortes.reduce((total,c)=>{
+    if(!c.cantidad || c.cantidad<=0) return total;
+    const porHoja = piezasPorHoja(c.ancho, c.alto);
+    if(porHoja<=0) return total;
+    return total + c.cantidad/porHoja;
+  }, 0);
+}
+
 let puertaPreview = null;
 
 function calcPuerta(){
   const tipo = $('#p-tipo').value;
+  const color = $('#p-color').value;
   const alto = Number($('#p-alto').value);
   const ancho = Number($('#p-ancho').value);
   if(!alto || !ancho) return alert('Captura alto y ancho');
   const jaladeraTipo = $('#p-jaladera-tipo') ? $('#p-jaladera-tipo').value : 'normal';
   const piezas = [];
   const add=(n,v,nota)=>piezas.push({n,v,nota:nota||''});
+  const cortes = []; // [{ancho,alto,cantidad}] para calcular hojas de melamina
   let altoFijoParaExtra = null; // para la pared falsa aislada (ver TIPOS_CON_PARED_FALSA_EXTRA)
 
   add('Composición', TIPOS_PUERTA[tipo]);
@@ -1314,6 +1349,13 @@ function calcPuerta(){
     add('Ancho del fijo', anchoFijo.toFixed(1)+' cm', 'Ancho total + 2');
     add('Alto del fijo', altoFijo.toFixed(1)+' cm', 'Alto total − alto de marcos + 17');
     add('Extensión de fijo', altoFijo.toFixed(1)+'×60 cm', 'Mismo ancho que la pared falsa (60 cm) y mismo alto que el fijo ('+(tipo==='Con dos paredes falsas'?'lleva 2':'lleva 1')+')');
+    const numParedFalsa = tipo==='Con dos paredes falsas' ? 2 : 1;
+    const numMarcos1 = tipo==='Con dos paredes falsas' ? 1 : 2;
+    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
+    cortes.push({ancho:10, alto:altoMarcos, cantidad:numMarcos1});
+    cortes.push({ancho:anchoFijo, alto:altoFijo, cantidad:1});
+    cortes.push({ancho:60, alto:altoParedFalsa, cantidad:numParedFalsa});
+    cortes.push({ancho:60, alto:altoFijo, cantidad:numParedFalsa});
   } else if(tipo==='Normal'){
     // Confirmado por el usuario (ejemplo: ancho 180, alto 260 → par 93.5×236.5, marcos 244×10, fijo 33×182):
     // alto de marcos = alto total − 6, con tope de 244 cm (medida de la hoja: 122×244);
@@ -1331,6 +1373,9 @@ function calcPuerta(){
     add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario)');
     add('Ancho del fijo', anchoFijo.toFixed(1)+' cm', 'Ancho total + 2');
     add('Alto del fijo', altoFijo.toFixed(1)+' cm', 'Alto total − alto de marcos + 17');
+    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
+    cortes.push({ancho:10, alto:altoMarcos, cantidad:3});
+    cortes.push({ancho:anchoFijo, alto:altoFijo, cantidad:1});
   } else if(tipo==='Con cubos a los lados'){
     // Confirmado por el usuario (ejemplo: ancho 250, alto 240 → puertas 120×226.5, marcos
     // 234×10, y como el ancho es grande se necesitan 2 fijos de 126×23):
@@ -1355,6 +1400,10 @@ function calcPuerta(){
       add('Fijo', '1 de '+anchoFijoTotal.toFixed(1)+'×'+altoFijo.toFixed(1)+' cm', 'Ancho total + 2 (no pasa de 244, así que es 1 solo fijo)');
     }
     altoFijoParaExtra = altoFijo;
+    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
+    cortes.push({ancho:10, alto:altoMarcos, cantidad:9});
+    if(dosFijos) cortes.push({ancho:anchoFijoTotal/2, alto:altoFijo, cantidad:2});
+    else cortes.push({ancho:anchoFijoTotal, alto:altoFijo, cantidad:1});
   } else {
     // Con cubo al centro: confirmado por el usuario (ejemplo: ancho 300, alto 260 →
     // puertas 76.75×236.5 (4 piezas), marcos 244×10 (8 piezas), fijos 151×33 (2 piezas)):
@@ -1375,6 +1424,9 @@ function calcPuerta(){
     add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario), 8 piezas');
     add('Fijos (2 piezas)', anchoFijo.toFixed(1)+'×'+altoFijo.toFixed(1)+' cm', 'Ancho: (ancho total + 2) ÷ 2. Alto: alto total − alto de marcos + 17');
     altoFijoParaExtra = altoFijo;
+    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:4});
+    cortes.push({ancho:10, alto:altoMarcos, cantidad:8});
+    cortes.push({ancho:anchoFijo, alto:altoFijo, cantidad:2});
   }
 
   // Caso aislado (confirmado por el usuario): piden una pared falsa aparte en un modelo
@@ -1384,7 +1436,14 @@ function calcPuerta(){
   if(TIPOS_CON_PARED_FALSA_EXTRA.includes(tipo) && document.getElementById('p-pared-falsa-extra') && document.getElementById('p-pared-falsa-extra').checked){
     add('Pared falsa (aparte, poco común)', '244×60 cm', 'Medida fija, confirmada por el usuario');
     if(altoFijoParaExtra!=null) add('Extensión de fijo (aparte)', altoFijoParaExtra.toFixed(1)+'×60 cm', 'Mismo ancho que la pared falsa (60 cm) y el mismo alto del fijo de esta puerta');
+    cortes.push({ancho:60, alto:244, cantidad:1});
+    if(altoFijoParaExtra!=null) cortes.push({ancho:60, alto:altoFijoParaExtra, cantidad:1});
   }
+
+  // Melamina de 15mm (confirmado por el usuario: mismo color que elige el cliente, misma hoja
+  // estándar de 122×244 que el resto del inventario). Como cada puerta se corta a una medida
+  // distinta, se calcula cuántas piezas de esa medida caben en una hoja (no es un rendimiento fijo).
+  const hojasMelamina = Math.round(hojasParaCortes(cortes)*1000)/1000;
 
   // Herrajes (confirmado por el usuario): riel/sistema/bastidor/jaladera según el tipo de puerta.
   // La jaladera se sustituye por "Jaladera plana" si el usuario lo eligió arriba (nunca se suman las dos).
@@ -1396,6 +1455,7 @@ function calcPuerta(){
     {itemId: itemByName('Bastidores').id, cantidad: herrajesTipo.bastidor},
     {itemId: itemByName(nombreJaladera).id, cantidad: herrajesTipo.jaladera}
   ];
+  if(hojasMelamina>0) consumo.push({itemId: itemByName('Melamina '+color).id, cantidad: hojasMelamina});
 
   const faltantes = [];
   consumo.forEach(c=>{
@@ -1405,14 +1465,14 @@ function calcPuerta(){
     }
   });
   const bloqueado = faltantes.length>0;
-  puertaPreview = {tipo, alto, ancho, consumo, faltantes, bloqueado};
+  puertaPreview = {tipo, color, alto, ancho, consumo, faltantes, bloqueado};
 
-  let html = `<div class="card"><h3>${tipo}</h3>
+  let html = `<div class="card"><h3>${tipo} · ${color}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
     ${piezas.map(p=>`<tr><td>${p.n}</td><td>${p.v}</td><td class="hint">${p.nota}</td></tr>`).join('')}
     </table></div>
-    <div class="warn">El consumo de melamina/MDF por puerta no está documentado con un rendimiento por hoja confirmado, así que esta calculadora solo obtiene medidas de corte para la madera; no la descuenta automáticamente. Registra ese material como "Instalación" en Entradas/Salidas si es necesario.</div>
-    <div class="wrap-x" style="margin-top:8px"><table><tr><th>Herraje a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
+    <div class="hint">Melamina de 15mm: cada pieza se acomoda en una hoja estándar de 122×244 cm (misma hoja del color elegido) según cuántas caben de esa medida; total estimado: ${hojasMelamina} hoja(s).</div>
+    <div class="wrap-x" style="margin-top:8px"><table><tr><th>Material/herraje a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
     ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
       return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${f.final}</td></tr>`;
     }).join('')}
@@ -1420,26 +1480,27 @@ function calcPuerta(){
   </div>`;
 
   if(bloqueado){
-    html += `<div class="card"><div class="warn"><strong>Descuento de herrajes bloqueado — existencia insuficiente en ${modulo()}.</strong>
+    html += `<div class="card"><div class="warn"><strong>Descuento bloqueado — existencia insuficiente en ${modulo()}.</strong>
       <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${f.disponible}, se requieren ${f.requerido}</li>`).join('')}</ul>
       No se aplicó ningún descuento parcial.</div></div>`;
   } else {
     html += `<div class="card row" style="justify-content:space-between">
-      <span class="pos">Existencia suficiente de herrajes.</span>
-      <button class="btn" onclick="registrarPuerta('${tipo}',${alto},${ancho})">Registrar instalación y descontar herrajes</button>
+      <span class="pos">Existencia suficiente de material y herrajes.</span>
+      <button class="btn" onclick="registrarPuerta('${tipo}',${alto},${ancho})">Registrar instalación y descontar material</button>
     </div>`;
   }
   $('#p-result').innerHTML = html;
 }
 
 async function registrarPuerta(tipo, alto, ancho){
-  if(!puertaPreview || puertaPreview.bloqueado || puertaPreview.tipo!==tipo || puertaPreview.alto!==alto || puertaPreview.ancho!==ancho){
+  const colorSel = $('#p-color') ? $('#p-color').value : null;
+  if(!puertaPreview || puertaPreview.bloqueado || puertaPreview.tipo!==tipo || puertaPreview.alto!==alto || puertaPreview.ancho!==ancho || puertaPreview.color!==colorSel){
     alert('Vuelve a calcular las medidas antes de registrar (los datos cambiaron o no hay vista previa).');
     return;
   }
   const nota = ($('#p-nota').value||'').trim();
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
-  const desc = `Puerta ${tipo} · ${alto}×${ancho} cm`;
+  const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${alto}×${ancho} cm`;
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
     for(const c of puertaPreview.consumo){
@@ -1450,12 +1511,12 @@ async function registrarPuerta(tipo, alto, ancho){
       const item = CATALOGO.find(i=>i.id===c.itemId);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString()});
     }
-    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,alto,ancho,nota,fechaDia,fecha:new Date().toISOString()});
+    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,nota,fechaDia,fecha:new Date().toISOString()});
     await db.collection('instalacionesLog').doc(cryptoId()).set({
       modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia,
       consumo:puertaPreview.consumo, fecha:new Date().toISOString()
     });
-    alert('Instalación de puertas registrada. Se descontaron '+puertaPreview.consumo.length+' herraje(s) y quedó en el historial de '+fechaDia+'.');
+    alert('Instalación de puertas registrada. Se descontaron '+puertaPreview.consumo.length+' artículo(s) (material y herrajes) y quedó en el historial de '+fechaDia+'.');
     puertaPreview = null;
     renderInstPuertas();
   }catch(e){ alert('Error al registrar: '+e.message); }
