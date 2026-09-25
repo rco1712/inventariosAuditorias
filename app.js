@@ -240,7 +240,7 @@ function esHojaId(itemId){ return esHoja(CATALOGO.find(i=>i.id===itemId)); }
 // deuda (esas hojas ya salieron de completas, no se vuelven a descontar) y solo el resto pasa
 // de completas a cortado. Así el orden de captura no altera el resultado.
 function calcularFormula(itemId, inicial, inicialCortado, movsItem){
-  let entradas=0, salidas=0, instalaciones=0, mermas=0, cortes=0, ajustes=0, deuda=0, faltoCortado=0;
+  let entradas=0, salidas=0, instalaciones=0, garantias=0, mermas=0, cortes=0, ajustes=0, deuda=0, faltoCortado=0;
   const hoja = esHojaId(itemId);
   const iniCort = hoja ? Math.min(Math.max(0, inicialCortado||0), Math.max(0,inicial)) : 0;
   let cortado = iniCort;
@@ -268,8 +268,9 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
         if(m.limpiarDeuda) deuda = 0; // el conteo físico manda: ya no hay hojas "sin corte" pendientes
       } else completas += q;
     }
-    else if(m.tipo==='instalacion'){
-      instalaciones+=q;
+    else if(m.tipo==='instalacion' || m.tipo==='garantia'){
+      // Garantías consumen igual que una instalación (del material cortado), pero se cuentan aparte.
+      if(m.tipo==='garantia') garantias+=q; else instalaciones+=q;
       if(!hoja){ completas-=q; return; }
       if(cortado >= q-EPS){ cortado-=q; return; }
       const falta = q - Math.max(0,cortado);
@@ -280,8 +281,8 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
   });
   // autoCortes = hojas tomadas provisionalmente que TODAVÍA no cubre ningún corte registrado.
   const autoCortes = Math.abs(deuda)<EPS ? 0 : deuda;
-  const final = inicial+entradas-salidas-instalaciones-mermas+ajustes;
-  const r = {inicial,entradas,salidas,instalaciones,mermas,ajustes,final};
+  const final = inicial+entradas-salidas-instalaciones-garantias-mermas+ajustes;
+  const r = {inicial,entradas,salidas,instalaciones,garantias,mermas,ajustes,final};
   if(hoja){
     Object.assign(r, {esHoja:true, cortes, autoCortes, faltoCortado,
       completas: Math.abs(completas)<EPS?0:completas, cortado: Math.abs(cortado)<EPS?0:cortado,
@@ -378,6 +379,7 @@ function setView(v){
   current=v;
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   if(v==='home') renderHome();
+  if(v==='gar') renderGar();
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
@@ -440,9 +442,9 @@ function renderInv(){
       </div>`; }).join('')}</div>`;
   } else {
     html += `<div class="card">
-      <p class="hint" style="margin-top:0">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Mermas ± Ajustes = Final.${catHoja?' En hojas: Completas + Cortado = Final. "Sin corte" = hojas usadas antes de anotar el corte del día (se quita al registrar el corte).':''} ${puedeEscribir()?'Toca el número de "Inicial" para fijar la línea base.':''}</p>
+      <p class="hint" style="margin-top:0">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Garantías − Mermas ± Ajustes = Final.${catHoja?' En hojas: Completas + Cortado = Final. "Sin corte" = hojas usadas antes de anotar el corte del día (se quita al registrar el corte).':''} ${puedeEscribir()?'Toca el número de "Inicial" para fijar la línea base.':''}</p>
       <div class="wrap-x"><table>
-      <tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th>${catHoja?'<th>Corte</th>':''}<th>Instal.</th><th>Mermas</th><th>Ajuste</th>${catHoja?'<th>Compl.</th><th>Cortado</th>':''}<th>Final</th></tr>
+      <tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th>${catHoja?'<th>Corte</th>':''}<th>Instal.</th><th>Garant.</th><th>Mermas</th><th>Ajuste</th>${catHoja?'<th>Compl.</th><th>Cortado</th>':''}<th>Final</th></tr>
       ${rows.map(it=>{ const f=calcFormula(it.id);
         return `<tr>
           <td>${it.nombre}<div class="tag">${it.unidad}</div></td>
@@ -451,6 +453,7 @@ function renderInv(){
           <td class="neg">${fmtNum(f.salidas)}</td>
           ${catHoja?`<td>${fmtNum(f.cortes+f.autoCortes)}${f.autoCortes?`<div class="tag" style="color:#b3742c;border-color:#b3742c">${fmtNum(f.autoCortes)} sin corte</div>`:''}</td>`:''}
           <td class="neg">${fmtNum(f.instalaciones)}</td>
+          <td class="neg">${fmtNum(f.garantias)}</td>
           <td class="neg">${fmtNum(f.mermas)}</td>
           <td class="${f.ajustes>0?'pos':(f.ajustes<0?'neg':'')}">${f.ajustes>0?'+':''}${fmtNum(f.ajustes)}</td>
           ${catHoja?`<td>${fmtNum(f.completas)}</td><td style="color:var(--accent);font-weight:700">${fmtNum(f.cortado)}</td>`:''}
@@ -482,6 +485,7 @@ function renderHome(){
     t('🔧','Instalación','Registrar un clóset o puerta instalada',"irA('inst')",'#3E5CDE');
     t('🔄','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5');
     t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
+    t('🛡️','Garantía','Material que se da en garantía',"irA('gar')",'#b3742c');
   }
   t('📦','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'#2c46b8');
   if(esAdmin()){
@@ -532,7 +536,7 @@ function toast(msg, tipo){
 let movCat = null;
 // Tipo y lado elegidos en Entradas/Salidas (se conservan al cambiar de categoría).
 let movTipo='entrada', movLado='completas';
-const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría'};
+const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía'};
 function etiquetaTipoMov(m){ return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : ''); }
 function stockHojaTxt(f, unidad){
   if(!f.esHoja) return fmtNum(f.final)+' '+unidad;
@@ -738,16 +742,43 @@ function piezasAuditAHojas(){
   Object.keys(porColor).forEach(c=>{
     piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; });
   });
+  // Correderas: solo cuentan los JUEGOS COMPLETOS (hembra + macho)
+  balanceCorrederas(pool).forEach(b=>{
+    if(b.pares>0){ const it=itemByName(b.item); if(it) out[it.id]=(out[it.id]||0)+b.pares; }
+  });
   return out;
+}
+// Junta hembras (de cajoneras) y machos (de cajones) en parejas. Devuelve por tipo de corredera:
+// {item, etiqueta, hembras, machos, pares, hembrasSinPareja, machosSinPareja}
+function balanceCorrederas(pool){
+  if(!pool){ pool=[]; auditArmados.forEach(a=>piezasDeArmado(a).forEach(p=>pool.push(p))); }
+  return [['', 'Juego de corredera', 'Corredera normal'], [' (extensión)', 'Correderas de extensión', 'Corredera de extensión']].map(([suf,item,etiqueta])=>{
+    const h = pool.filter(p=>p.nombre==='Corredera hembra'+suf).reduce((s,p)=>s+(Number(p.cantidad)||0),0);
+    const m = pool.filter(p=>p.nombre==='Corredera macho'+suf).reduce((s,p)=>s+(Number(p.cantidad)||0),0);
+    const pares = Math.min(h,m);
+    const it = itemByName(item);
+    const juegosSueltos = it && auditCapturas[it.id]!==undefined ? Number(auditCapturas[it.id])||0 : 0; // juegos completos contados en Herrajes
+    return {item, etiqueta, hembras:h, machos:m, pares, juegosSueltos, totalJuegos: pares+juegosSueltos, hembrasSinPareja:h-pares, machosSinPareja:m-pares};
+  }).filter(b=>b.hembras||b.machos||b.juegosSueltos);
+}
+function avisoCorrederasHtml(){
+  const bs = balanceCorrederas();
+  if(!bs.length) return '';
+  return bs.map(b=>`<div class="${b.hembrasSinPareja||b.machosSinPareja?'warn':'hint'}" style="margin-top:8px">
+    <strong>${b.etiqueta}:</strong> ${fmtNum(b.hembras)} hembra(s) + ${fmtNum(b.machos)} macho(s) = <strong>${fmtNum(b.pares)} juego(s) armados</strong>${b.juegosSueltos?` + ${fmtNum(b.juegosSueltos)} juego(s) sueltos contados en Herrajes`:''} → <strong>total ${fmtNum(b.totalJuegos)} juego(s)</strong>
+    ${b.hembrasSinPareja?`<br>⚠️ ${fmtNum(b.hembrasSinPareja)} hembra(s) sin su macho (no cuentan como juego).`:''}
+    ${b.machosSinPareja?`<br>⚠️ ${fmtNum(b.machosSinPareja)} macho(s) sin su hembra (no cuentan como juego).`:''}
+  </div>`).join('');
 }
 function resumenPiezasHtml(){
   const eq = piezasAuditAHojas();
   const ids = Object.keys(eq);
-  if(!ids.length) return '<p class="hint">Todavía no has capturado piezas ni armados.</p>';
-  return `<table><tr><th>Artículo</th><th>Equivale a</th></tr>${ids.map(id=>{
+  const avisoCorr = avisoCorrederasHtml();
+  if(!ids.length && !avisoCorr) return '<p class="hint">Todavía no has capturado piezas ni armados.</p>';
+  return (ids.length?`<table><tr><th>Artículo</th><th>Equivale a</th></tr>${ids.map(id=>{
     const it = CATALOGO.find(i=>i.id===id);
     return `<tr><td>${it?it.nombre:id}</td><td><strong>${fmtNum(eq[id])}</strong> ${it&&it.unidad?it.unidad:''}</td></tr>`;
-  }).join('')}</table>`;
+  }).join('')}</table>`:'') + avisoCorr;
 }
 function resumenCardHtml(){
   return `<div class="card">
@@ -761,7 +792,8 @@ function resumenCardHtml(){
 function renderAudArmadosHtml(){
   const f = auditArmadoForm;
   const esCajonera = f.tipo==='cajonera';
-  const variantes = esCajonera ? ARMADO_CAJONERAS : {normal:'Normal', max:'Max'};
+  const esCorr = f.tipo==='corredera';
+  const variantes = esCajonera ? ARMADO_CAJONERAS : (esCorr ? ARMADO_CORREDERA : {normal:'Normal', max:'Max'});
   if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
   const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
   const labelColor = esCajonera ? 'Color de la cajonera' : (f.tipo==='cajon' ? 'Color del frente' : 'Color del cuadro');
@@ -771,16 +803,16 @@ function renderAudArmadosHtml(){
   const preview = Number(f.cantidad)>0 ? describirArmado(f) : '';
   return `<div class="card">
     <h3>📦 Armados</h3>
-    <p class="hint">Cajoneras armadas sin cajones (con sus herrajes), cajones completos (con sus herrajes) y cuadros de cajón con o sin fondo. Cada corredera se cuenta mitad y mitad: ½ juego en el hueco de la cajonera y ½ juego en el cajón.</p>
+    <p class="hint">Cajoneras armadas sin cajones, cajones completos, cuadros de cajón y correderas sueltas. Las cajoneras traen la corredera <strong>hembra</strong> y los cajones la <strong>macho</strong>: solo se cuenta un juego cuando hay pareja.</p>
     <label class="hint">¿Qué encontraste?</label>
     <select style="margin-top:4px" onchange="${set('tipo')}">${Object.keys(ARMADO_TIPOS).map(k=>`<option value="${k}" ${k===f.tipo?'selected':''}>${ARMADO_TIPOS[k]}</option>`).join('')}</select>
     <div class="grid2" style="margin-top:10px">
       <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>
-      <div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>
+      ${esCorr?'':`<div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>`}
       ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
       <div><label class="hint">Cantidad</label><input type="number" min="0" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="auditArmadoForm.cantidad=this.value"></div>
     </div>
-    ${usaCorredera?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="${set('ext')}"> Lleva corredera de extensión (si no, corredera normal)</label>`:''}
+    ${usaCorredera?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="${set('ext')}"> ${esCorr?'Es corredera de extensión':'Lleva corredera de extensión (si no, corredera normal)'}</label>`:''}
     ${f.variante==='max' && f.tipo!=='cuadro_fondo' && f.tipo!=='cuadro_sin'?`<p class="hint">Max: siempre lleva corredera de extensión${f.tipo==='cajon'?' y no lleva jaladera':''}.</p>`:''}
     ${puedePuertitas?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.puertitas?'checked':''} onchange="${set('puertitas')}"> Trae sus puertitas puestas (con bisagras y ${f.variante==='max'?'push':'jaladeras'})</label>`:''}
     ${esCajonera && !armadoTienePuertitas(f.variante)?`<p class="hint">La cajonera ${ARMADO_CAJONERAS[f.variante].toLowerCase()} todavía no tiene medida de puertita confirmada.</p>`:''}
@@ -882,6 +914,8 @@ async function saveAudit(){
     const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff};
     if(piezasContadas.length) doc.piezasContadas = piezasContadas;
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
+    const bc = balanceCorrederas();
+    if(bc.length) doc.correderas = bc;
     const audId = cryptoId();
     await db.collection('auditorias').doc(audId).set(doc);
     auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor='';
@@ -923,6 +957,7 @@ function renderHist(){
         <table><tr><th>Descripción</th><th>Cant.</th></tr>
         ${a.armadosContados.map(x=>`<tr><td>${x.descripcion}</td><td>${fmtNum(x.cantidad)}</td></tr>`).join('')}
         </table>`:''}
+        ${(a.correderas||[]).map(b=>`<p class="hint">${b.etiqueta}: total <strong>${fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares)} juego(s)</strong> (${fmtNum(b.hembras)} hembra(s) + ${fmtNum(b.machos)} macho(s)${b.juegosSueltos?` + ${fmtNum(b.juegosSueltos)} sueltos`:''})${b.hembrasSinPareja?` · <span class="neg">${fmtNum(b.hembrasSinPareja)} hembra(s) sin macho</span>`:''}${b.machosSinPareja?` · <span class="neg">${fmtNum(b.machosSinPareja)} macho(s) sin hembra</span>`:''}</p>`).join('')}
       </div>
     </div>`).join('');
 }
@@ -1365,27 +1400,33 @@ const AUD_GRUPO_MDF = 'MDF';
 // - Cajonera armada sin cajones: estructura + herrajes de cajonera (y puertitas, si las trae).
 // - Cajón completo: frente + cuadro + fondo + herrajes de cajón.
 // - Cuadro de cajón con fondo / sin fondo: solo piezas (sin herrajes).
-// Correderas: un juego = macho (cajón) + hembra (cajonera); se cuenta MITAD Y MITAD: cada hueco
-// de cajonera sin cajón = ½ juego, cada cajón completo = ½ juego.
+// Correderas (corregido por el usuario): un juego = hembra (va en la cajonera) + macho (va en el
+// cajón). Una cajonera sin cajones aporta hembras y un cajón completo aporta un macho; solo cuenta
+// como JUEGO cuando hay pareja (hembra + macho). Lo que quede sin pareja se reporta aparte y no
+// cuenta como juego. También se pueden contar correderas sueltas (hembra o macho).
 // Las recetas de cajonera se toman de buildAdicionalPiezas (mismo despiece que al instalar),
 // quitando lo que pertenece a los cajones.
 const ARMADO_TIPOS = {
   cajonera:     'Cajonera armada sin cajones',
   cajon:        'Cajón completo',
   cuadro_fondo: 'Cuadro de cajón con fondo',
-  cuadro_sin:   'Cuadro de cajón sin fondo'
+  cuadro_sin:   'Cuadro de cajón sin fondo',
+  corredera:    'Corredera suelta (hembra o macho)'
 };
+const ARMADO_CORREDERA = {hembra:'Hembra (la que va en la cajonera)', macho:'Macho (la que va en el cajón)'};
 const ARMADO_CAJONERAS = {'3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
 const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
 function armadoTienePuertitas(variante){ return ['3','5','emma','max'].includes(variante); }
-function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon') && a.variante!=='max'; }
+function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon' || a.tipo==='corredera') && a.variante!=='max'; }
 
 // Devuelve las piezas (formato del despiece) de un armado, ya multiplicadas por su cantidad.
 function piezasDeArmado(a){
   const n = Number(a.cantidad)||0;
   const piezas = [];
   const add = (nombre,cantidad,dim,colorDestino,estado)=>piezas.push({nombre, cantidad: typeof cantidad==='number'? cantidad*n : cantidad, dim, colorDestino, estado:estado||'ok'});
-  const corredera = (a.variante==='max' || a.ext) ? 'Correderas de extensión' : 'Juego de corredera';
+  // Medias correderas: 'Corredera hembra' / 'Corredera macho' (+ ' (extensión)'). No se descuentan
+  // solas: piezasAuditAHojas las junta en parejas para formar juegos completos.
+  const sufCorr = (a.variante==='max' || a.ext) ? ' (extensión)' : '';
   const esMax = a.variante==='max';
   if(a.tipo==='cajonera'){
     const tipoAdic = esMax ? 'cajonera_max' : (a.variante==='emma' ? 'cajonera_emma' : 'cajonera');
@@ -1394,7 +1435,9 @@ function piezasDeArmado(a){
     buildAdicionalPiezas(tipoAdic, cajones, a.color, !!a.ext, conPuerta)
       .filter(p=>p.estado==='ok' && !PIEZAS_DE_CAJON.includes(p.nombre))
       .forEach(p=>add(p.nombre, p.cantidad, p.dim, p.colorDestino));
-    add(corredera, cajones*0.5, '—', '—');
+    add('Corredera hembra'+sufCorr, cajones, '—', '—');
+  } else if(a.tipo==='corredera'){
+    add('Corredera '+(a.variante==='macho'?'macho':'hembra')+sufCorr, 1, '—', '—');
   } else if(a.tipo==='cajon'){
     if(esMax){
       add('Frente Max', 1, '60×20 cm', a.color);
@@ -1408,7 +1451,7 @@ function piezasDeArmado(a){
       add('Fondo de cajón (MDF 3mm)', 1, '49.4×33 cm', '—');
       add('Jaladera (por cajón)', 1, '—', a.color);
     }
-    add(corredera, 0.5, '—', '—');
+    add('Corredera macho'+sufCorr, 1, '—', '—');
   } else if(a.tipo==='cuadro_fondo' || a.tipo==='cuadro_sin'){
     add(esMax?'Pieza chica de cajón Max':'Pieza chica de cajón', 2, esMax?'15×38 cm':'33×16.5 cm', a.color);
     add(esMax?'Pieza grande de cajón Max':'Pieza grande de cajón', 2, esMax?'15×52.5 cm':'46.4×16.5 cm', a.color);
@@ -1421,7 +1464,8 @@ function piezasDeArmado(a){
 }
 function describirArmado(a){
   let d;
-  if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color;
+  if(a.tipo==='corredera') d = 'Corredera suelta · '+(a.variante==='macho'?'macho':'hembra');
+  else if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color;
   else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro;
   else d = ARMADO_TIPOS[a.tipo]+(a.variante==='max'?' Max':'')+' · '+a.color;
   if(armadoUsaCorredera(a)) d += a.ext ? ' · corredera de extensión' : ' · corredera normal';
@@ -1449,7 +1493,7 @@ function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
   }
 }
 
-function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta){
+function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, extra){
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
   const CAJONERA_ENTREPANOS = {3:5, 5:4, 6:10, 8:9, 10:8};
@@ -1520,7 +1564,11 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta){
       add('Jaladera (zapatera)',1,'—',color,'ok','Confirmado por el usuario');
     }
   } else if(tipo==='repisa'){
-    add('Repisa',1,'—','—','pendiente','Medida/composición de la repisa no confirmada todavía; no se inventa. Dile a Claude las medidas/materiales para agregarla.');
+    // Confirmado por el usuario: la repisa lleva su medida (largo × fondo) y pueden ser 1, 2 o 3.
+    // Se descuenta el PROPORCIONAL de la hoja (ver piezasAConsumo), no la hoja completa.
+    const largo = extra && Number(extra.largo), fondo = extra && Number(extra.fondo), cant = (extra && Number(extra.cantidad)) || 1;
+    if(largo>0 && fondo>0) add('Repisa', cant, `${fmtNum(largo)}×${fmtNum(fondo)} cm`, color, 'ok', `${cant} repisa(s) de ${fmtNum(largo)}×${fmtNum(fondo)} cm; se descuenta la parte proporcional de la hoja`);
+    else add('Repisa','Pendiente','—','—','pendiente','Falta capturar la medida de la repisa (largo × fondo).');
   }
   return piezas;
 }
@@ -1707,6 +1755,16 @@ function piezasAConsumo(piezas, color){
     if(r.costo>0) addConsumo('Melamina '+c, r.costo);
   });
 
+  // Repisas (adicional): se descuenta el proporcional de la hoja según cuántas repisas de esa
+  // medida salen de una hoja de 122×244 (p. ej. si salen 8, cada repisa = 1/8 de hoja).
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number' || p.nombre!=='Repisa') return;
+    const m = String(p.dim).match(/([\d.]+)\s*×\s*([\d.]+)/);
+    if(!m) return;
+    const porHoja = piezasPorHojaIndividual(Number(m[1]), Number(m[2]), 122, 244);
+    if(porHoja>0) addConsumo('Melamina '+p.colorDestino, p.cantidad/porHoja);
+  });
+
   // Fondos MDF: cajón normal (14/hoja MDF3mm), cajón Max (12/hoja MDF5mm), cajonera con espejo (4/hoja MDF3mm)
   const fondosCajon3 = piezas.filter(p=>p.nombre==='Fondo de cajón (MDF 3mm)' && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
   if(fondosCajon3>0) addConsumo('MDF 3mm', fondosCajon3/14);
@@ -1747,20 +1805,20 @@ function renderAdicBox(prefix){
   if(!box) return;
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
-      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}</td>
+      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}</td>
       <td>${a.color}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
   box.innerHTML = `<div class="card">
-    <strong>Adicionales</strong>
-    <p class="hint">Cajonera, entrepañera, cajonera de espejo, zapatera o repisa que se agregan aparte del modelo — no cuentan como uno de sus muebles fijos.</p>
-    ${list.length? `<div class="wrap-x"><table><tr><th>Adicional</th><th>Color</th><th></th></tr>${rows}</table></div>` : '<p class="hint">Sin adicionales.</p>'}
+    ${prefix==='d'?`<strong>Adicionales</strong>
+    <p class="hint">Cajonera, entrepañera, cajonera de espejo, zapatera o repisa que se agregan aparte del modelo — no cuentan como uno de sus muebles fijos.</p>`:''}
+    ${list.length? `<div class="wrap-x"><table><tr><th>Extra</th><th>Color</th><th></th></tr>${rows}</table></div>` : (prefix==='d'?'<p class="hint">Sin adicionales.</p>':'')}
     <div class="grid2" style="margin-top:8px">
-      <select id="${prefix}-adic-tipo" onchange="toggleAdicionalCajones('${prefix}')">${Object.keys(TIPOS_ADICIONAL).map(k=>`<option value="${k}">${TIPOS_ADICIONAL[k]}</option>`).join('')}</select>
-      <select id="${prefix}-adic-color">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
+      <div><label class="hint">¿Qué es?</label><select id="${prefix}-adic-tipo" style="margin-top:4px" onchange="toggleAdicionalCajones('${prefix}')">${Object.keys(TIPOS_ADICIONAL).map(k=>`<option value="${k}">${TIPOS_ADICIONAL[k]}</option>`).join('')}</select></div>
+      <div><label class="hint">Color</label><select id="${prefix}-adic-color" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
     </div>
     <div id="${prefix}-adic-cajones-wrap"></div>
-    <button class="btn small" style="margin-top:8px" onclick="agregarAdicional('${prefix}')">+ Agregar adicional</button>
+    <button class="btn small" style="margin-top:10px;width:100%" onclick="agregarAdicional('${prefix}')">+ Agregar este extra</button>
   </div>`;
   toggleAdicionalCajones(prefix);
 }
@@ -1771,6 +1829,15 @@ function toggleAdicionalCajones(prefix){
   let html = (sel.value==='cajonera')
     ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">`
     : (sel.value==='cajonera_max' ? `<p class="hint" style="margin-top:8px">La Cajonera Max siempre lleva 4 cajones (confirmado; no se captura cantidad).</p>` : '');
+  if(sel.value==='repisa'){
+    html = `<div class="grid2" style="margin-top:8px">
+        <div><label class="hint">Largo (cm)</label><input type="number" min="1" inputmode="decimal" id="${prefix}-adic-largo" placeholder="ej. 90" style="margin-top:4px"></div>
+        <div><label class="hint">Fondo (cm)</label><input type="number" min="1" inputmode="decimal" id="${prefix}-adic-fondo" placeholder="ej. 30" style="margin-top:4px"></div>
+      </div>
+      <label class="hint" style="display:block;margin-top:8px">¿Cuántas repisas?</label>
+      <div class="chips" style="margin-top:4px" id="${prefix}-adic-cant-wrap">${[1,2,3].map(n=>`<button type="button" class="chip ${n===1?'on':''}" data-n="${n}" onclick="this.parentNode.querySelectorAll('.chip').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${n}</button>`).join('')}</div>
+      <p class="hint">Se descuenta solo la parte de la hoja que usan las repisas, no la hoja completa.</p>`;
+  }
   const labelPuerta = ADIC_CON_PUERTA_LABEL[sel.value];
   if(labelPuerta){
     html += `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
@@ -1792,7 +1859,16 @@ function agregarAdicional(prefix){
   }
   const puertaEl = document.getElementById(prefix+'-adic-puerta');
   const conPuerta = !!(puertaEl && puertaEl.checked);
-  (prefix==='d' ? dAdicionales : iAdicionales).push({tipo, cajones, color, conPuerta});
+  const nuevo = {tipo, cajones, color, conPuerta};
+  if(tipo==='repisa'){
+    const largo = Number(document.getElementById(prefix+'-adic-largo').value);
+    const fondo = Number(document.getElementById(prefix+'-adic-fondo').value);
+    if(!largo || !fondo || largo<=0 || fondo<=0) return alert('Escribe el largo y el fondo de la repisa en centímetros.');
+    if(piezasPorHojaIndividual(largo, fondo, 122, 244)<1) return alert('Esa repisa no cabe en una hoja de 122×244 cm. Revisa la medida.');
+    const on = document.querySelector('#'+prefix+'-adic-cant-wrap .chip.on');
+    nuevo.largo = largo; nuevo.fondo = fondo; nuevo.cantidad = on ? Number(on.dataset.n) : 1;
+  }
+  (prefix==='d' ? dAdicionales : iAdicionales).push(nuevo);
   renderAdicBox(prefix);
 }
 function quitarAdicional(prefix, idx){
@@ -1885,7 +1961,7 @@ function calcDespiece(){
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modelo.nombre+(especial3m?' · a 3 metros':''); notaModelo = modelo.nota;
   }
-  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta));
+  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta, a));
   const piezas = piezasModelo.concat(piezasAdic);
   const consumo = piezasAConsumo(piezas, color);
 
@@ -1910,12 +1986,16 @@ function calcDespiece(){
 // ===== Capa 4: Instalaciones / Descuentos =====
 let instLog = [];
 function renderInst(){
+  const op = (k, ic, t, sub) => `<button class="tipobtn ${instSub===k?'on':''}" onclick="instSub='${k}';instPreview=null;renderInst()"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
   $('#main').innerHTML = `
-    <div class="card"><div class="subtabs">
-      <button class="${instSub==='mueble'?'active':''}" onclick="instSub='mueble';renderInst()">Instalación de mueble</button>
-      <button class="${instSub==='puertas'?'active':''}" onclick="instSub='puertas';renderInst()">Puertas</button>
-      <button class="${instSub==='historial'?'active':''}" onclick="instSub='historial';renderInst()">Historial por día</button>
-    </div></div>
+    <div class="card">
+      <div style="font-size:17px;font-weight:800;margin-bottom:10px">🔧 ¿Qué se instaló?</div>
+      <div class="tipos">
+        ${op('mueble','🗄️','Clóset','Un modelo o muebles')}
+        ${op('puertas','🚪','Puertas','Puertas corredizas')}
+      </div>
+      <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';renderInst()">📅 Ver instalaciones anteriores</button>
+    </div>
     <div id="inst-body"></div>`;
   if(instSub==='mueble') renderInstMueble();
   else if(instSub==='puertas') renderInstPuertas();
@@ -1946,33 +2026,37 @@ async function renderInstHistorial(){
     </div>`).join('');
 }
 
+let iFamSel = null; // familia elegida (para no mostrar todos los modelos juntos)
 function renderInstMueble(){
+  const hoy = new Date(); const hoyStr = new Date(hoy.getTime()-hoy.getTimezoneOffset()*60000).toISOString().slice(0,10);
   $('#inst-body').innerHTML = `
   <div class="card">
-    <strong>Instalación de mueble · ${modulo()}</strong>
-    <p class="hint">Elige el modelo exacto instalado, o arma tu propia combinación de muebles por familia. El sistema calcula el consumo real y valida existencias antes de descontar. Si la receta está incompleta, el descuento se bloquea (no se inventa material).</p>
-    <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <input type="checkbox" id="i-modo-comp" ${iModoComp?'checked':''} onchange="iModoComp=document.getElementById('i-modo-comp').checked; renderISelector();"> Armar por combinación de muebles (entrepañera / cajonera / Emma / espejo / Max)
-    </label>
-    <div id="i-selector-wrap" style="margin-top:8px"></div>
-    <div class="grid2" style="margin-top:8px">
-      <select id="i-color">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
-    </div>
-    <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <input type="checkbox" id="i-todocolor" style="width:auto"> Cliente pidió "todo de un solo color"
-    </label>
-    <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <input type="checkbox" id="i-corredera-ext" style="width:auto"> Usar corredera de extensión (sustituye la corredera normal en las cajoneras; no aplica a Cajonera Max, que siempre lleva extensión)
-    </label>
+    <div class="paso">1</div><strong>¿Qué modelo se instaló?</strong>
+    <div id="i-selector-wrap" style="margin-top:10px"></div>
     <div id="i-max-wrap"></div>
-    <div id="i-cajcolor-wrap"></div>
-    <div class="grid2" style="margin-top:8px">
-      <input id="i-fecha" type="date" value="${new Date().toISOString().slice(0,10)}">
-      <input id="i-nota" placeholder="Referencia / cliente (opcional)">
-    </div>
-    <button class="btn" style="margin-top:10px" onclick="previewInst()">Calcular y validar</button>
+    <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="iModoComp=!iModoComp;renderInstMueble()">${iModoComp?'← Elegir de la lista de modelos':'¿No está el modelo? Ármalo mueble por mueble'}</button>
   </div>
-  <div id="i-adic-box"></div>
+  <div class="card">
+    <div class="paso">2</div><strong>¿De qué color?</strong>
+    <label class="hint" style="display:block;margin-top:10px">Color de los frentes</label>
+    <select id="i-color" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
+    <div id="i-cajcolor-wrap"></div>
+    <label class="row" style="margin-top:12px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-todocolor" style="width:22px;min-height:22px;flex:0 0 22px"> El cliente pidió todo del mismo color (también el interior)</label>
+  </div>
+  <details class="card" ${iAdicionales.length?'open':''}>
+    <summary><span class="paso">3</span><strong>¿Lleva algo extra?</strong> <span class="hint" style="margin:0 0 0 6px">(opcional)</span></summary>
+    <p class="hint">Cajoneras, zapateras, repisas u otros muebles que se agregaron aparte del modelo.</p>
+    <div id="i-adic-box" class="subcard"></div>
+    <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> Las cajoneras llevan corredera de extensión</label>
+  </details>
+  <div class="card">
+    <div class="paso">4</div><strong>Datos de la instalación</strong>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Fecha</label><input id="i-fecha" type="date" value="${hoyStr}" style="margin-top:4px"></div>
+      <div><label class="hint">Cliente (opcional)</label><input id="i-nota" placeholder="Nombre o referencia" style="margin-top:4px"></div>
+    </div>
+    <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="previewInst()">Revisar material</button>
+  </div>
   <div id="i-result"></div>`;
   renderISelector();
   renderAdicBox('i');
@@ -2000,7 +2084,12 @@ function renderISelector(){
       <label class="hint" style="display:block;margin-top:8px">Color de la cajonera / cajonera de espejo (independiente del frente)</label><select id="i-color-cajonera-comp">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     `;
   } else {
-    wrap.innerHTML = `<select id="i-modelo" onchange="renderInstMaxToggle()">${modeloOptionsHtml()}</select>`;
+    const fams = [...new Set(MODELOS.map(m=>m.fam))];
+    if(!iFamSel || !fams.includes(iFamSel)) iFamSel = fams[0];
+    wrap.innerHTML = `<label class="hint">Familia</label>
+      <div class="chips" style="margin-top:4px">${fams.map(f=>`<button type="button" class="chip ${f===iFamSel?'on':''}" onclick="iFamSel='${f}';renderISelector()">${f}</button>`).join('')}</div>
+      <label class="hint" style="display:block;margin-top:10px">Modelo</label>
+      <select id="i-modelo" style="margin-top:4px" onchange="renderInstMaxToggle()">${MODELOS.filter(m=>m.fam===iFamSel).map(m=>`<option value="${m.nombre}">${m.nombre}</option>`).join('')}</select>`;
     renderInstMaxToggle();
   }
 }
@@ -2011,11 +2100,11 @@ function renderInstMaxToggle(){
   const wrapCaj = document.getElementById('i-cajcolor-wrap');
   if(!sel || !wrapMax || !wrapCaj) return;
   const m = MODELOS.find(x=>x.nombre===sel.value);
-  if(m.maxDisponible) wrapMax.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="i-max" style="width:auto"> Es variante Max (sustituye componentes, no los suma)</label>`;
-  else if(m.especial3mDisponible) wrapMax.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="i-especial3m" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`;
+  if(m.maxDisponible) wrapMax.innerHTML = `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-max" style="width:22px;min-height:22px;flex:0 0 22px"> Es versión <strong>Max</strong></label>`;
+  else if(m.especial3mDisponible) wrapMax.innerHTML = `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-especial3m" style="width:22px;min-height:22px;flex:0 0 22px"> Es de <strong>3 metros</strong> (lleva maletero chico extra)</label>`;
   else wrapMax.innerHTML = '';
   wrapCaj.innerHTML = (m.cajones>0 || m.espejos>0)
-    ? `<label class="hint" style="display:block;margin-top:8px">Color de la cajonera${m.espejos>0?' / cajonera de espejo':''} (independiente del frente)</label><select id="i-color-cajonera">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>`
+    ? `<label class="hint" style="display:block;margin-top:10px">Color de la cajonera${m.espejos>0?' y del mueble de espejo':''}</label><select id="i-color-cajonera" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>`
     : '';
 }
 
@@ -2043,7 +2132,7 @@ function previewInst(){
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modeloSel.nombre+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
   }
-  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta));
+  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta, a));
   const piezas = piezasModelo.concat(piezasAdic);
   const pendientes = piezas.filter(p=>p.estado==='pendiente');
   const consumo = piezasAConsumo(piezas, color);
@@ -2061,33 +2150,322 @@ function previewInst(){
   const bloqueadoPorStock = faltantes.length>0;
   instPreview = {modeloNombre:titulo,color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
 
-  let html = `<div class="card"><h3>Vista previa · ${titulo}${iAdicionales.length?' + '+iAdicionales.length+' adicional(es)':''}</h3>
+  let html = `<div class="card" id="i-preview-card">
+    <div style="font-size:16px;font-weight:800">📋 Esto se va a descontar</div>
+    <p class="hint" style="margin-top:4px"><strong>${titulo}</strong> · ${color}${colorCajonera?' · cajonera '+colorCajonera:''}${iAdicionales.length?' · + '+iAdicionales.length+' extra(s)':''}</p>
     ${notaModelo? `<div class="warn">${notaModelo}</div>`:''}
     ${maxNota? `<div class="warn">${maxNota}</div>`:''}
-    <div class="wrap-x"><table><tr><th>Artículo a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
-    ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
-      return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${fmtNum(f.final)}</td></tr>`;
-    }).join('')}
-    </table></div>
+    <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
+      return `<div class="movitem" style="${insuf?'border-color:var(--bad)':''}"><span style="min-width:0"><span class="invname">${CATALOGO.find(i=>i.id===c.itemId).nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.final)} ${item2unidad(c.itemId)}</span></span>
+        <strong class="${insuf?'neg':''}" style="font-size:17px;white-space:nowrap">${fmtNum(c.cantidad)} ${item2unidad(c.itemId)}</strong></div>`;
+    }).join('')}</div>
   </div>`;
 
   if(bloqueadoPorReceta){
-    html += `<div class="card"><div class="warn"><strong>Descuento bloqueado — receta incompleta.</strong>
-      Los siguientes componentes no tienen cantidad/medida confirmada, así que la app no puede calcular ni descontar material inventado:
+    html += `<div class="card aviso"><strong>⛔ No se puede registrar todavía</strong>
+      <p style="margin:6px 0">A este modelo le faltan datos que aún no están confirmados, y la app no inventa material:</p>
       <ul style="margin:6px 0 0 18px;padding:0">${pendientes.map(p=>`<li>${p.nombre}: ${p.nota}</li>`).join('')}</ul>
-      Confirma estos datos para poder registrar esta instalación.</div></div>`;
+      <p class="hint">Avísale a Dirección para que se agregue esa información.</p></div>`;
   } else if(bloqueadoPorStock){
-    html += `<div class="card"><div class="warn"><strong>Descuento bloqueado — existencia insuficiente en ${modulo()}.</strong>
-      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${fmtNum(f.disponible)}, se requieren ${fmtNum(f.requerido)}</li>`).join('')}</ul>
-      No se aplicó ningún descuento parcial.</div></div>`;
+    html += `<div class="card aviso"><strong>⛔ No alcanza el material en ${modulo()}</strong>
+      <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">${faltantes.map(f=>`<li>${f.nombre}: hay <strong>${fmtNum(f.disponible)}</strong> y se necesitan <strong>${fmtNum(f.requerido)}</strong></li>`).join('')}</ul>
+      <p class="hint">Revisa que el modelo y el color sean correctos, o que ya se hayan anotado las entradas de material. No se descontó nada.</p></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
-    html += `<div class="card row" style="justify-content:space-between">
-      <span class="pos">Receta completa y existencia suficiente.</span>
-      <button class="btn" onclick="confirmarInst()">Confirmar y descontar</button>
-    </div>`;
+    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarInst()">✅ Confirmar instalación</button></div>`;
   }
   $('#i-result').innerHTML = html;
+  const pc = document.getElementById('i-preview-card'); if(pc && pc.scrollIntoView) pc.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// ===== Garantías (confirmado por el usuario) =====
+// Material que se entrega en garantía y se descuenta del inventario. Puede ser cualquier cosa:
+// una pieza (pared, entrepaño, maletero…), una pieza a medida (1 puerta —una sola, no el par—,
+// marco, fijo, repisa…), un mueble armado (cajonera, cajón, cuadro) o cualquier artículo del
+// inventario (jaladera, espejo, juego de correderas…). Se descuenta igual que una instalación
+// (las hojas salen del material cortado; si no hay, se toman hojas provisionalmente).
+let garLineas = [], garTipo = 'pieza', garSub = 'nueva', garPreview = null;
+let garForm = {pieza:'pared', color:'Blanco', cantidad:'', medidaNombre:'Puerta', ancho:'', alto:'', armTipo:'cajon', armVar:'normal', colorCuadro:'Blanco', ext:false, itemId:null,
+  pTipo:'Normal', pAlto:'', pAncho:'', pModo:'completas', pHerrajes:true, pJaladera:'normal', pPiezas:{puerta:1, marco:0, fijo:0, paredFalsa:0, extFijo:0}};
+const GAR_TIPOS = {
+  puertas:{ic:'🚪', t:'Puertas', s:'Completas, 1 puerta, el fijo… (por medida del hueco)'},
+  pieza:  {ic:'🧩', t:'Pieza', s:'Pared, entrepaño, maletero, frente, pieza de cajón, fondo…'},
+  medida: {ic:'📐', t:'Pieza a medida', s:'Cualquier pieza con ancho y alto (marco, repisa…)'},
+  armado: {ic:'📦', t:'Mueble armado', s:'Cajonera, cajón completo, cuadro de cajón'},
+  item:   {ic:'🔩', t:'Herraje u otro', s:'Jaladera, espejo, correderas, bisagras…'}
+};
+const GAR_MEDIDA_NOMBRES = ['Puerta','Marco','Fijo','Pared falsa','Extensión de fijo','Repisa','Otra pieza'];
+
+function describirLineaGar(l){
+  if(l.tipo==='pieza'){ const p=PIEZAS_AUDIT.find(x=>x.key===l.pieza); return `${l.cantidad} × ${p?p.label:l.pieza}${p&&p.tipo==='mel'?' · '+l.color:''}`; }
+  if(l.tipo==='medida') return `${l.cantidad} × ${l.nombre} de ${fmtNum(l.ancho)}×${fmtNum(l.alto)} cm · ${l.color}`;
+  if(l.tipo==='armado') return `${l.cantidad} × ${describirArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:l.cantidad})}`;
+  if(l.tipo==='item'){ const it=CATALOGO.find(i=>i.id===l.itemId); return `${l.cantidad} ${it?it.unidad:''} de ${it?it.nombre:l.itemId}`; }
+  if(l.tipo==='puertas'){
+    const base = `puertas "${l.pTipo}" (hueco ${fmtNum(l.pAlto)} alto × ${fmtNum(l.pAncho)} ancho) · ${l.color}`;
+    if(l.pModo==='completas') return `${l.cantidad} × Juego completo de ${base} · ${l.pHerrajes?'con herrajes'+(l.pJaladera==='plana'?' (jaladera plana)':''):'sin herrajes'}`;
+    const partes = Object.keys(PUERTA_PIEZA_LBL).filter(k=>(l.pPiezas||{})[k]>0).map(k=>`${l.pPiezas[k]} ${PUERTA_PIEZA_LBL[k].toLowerCase()}`);
+    return `${partes.join(' + ')} de ${base}`;
+  }
+  return '';
+}
+const PUERTA_PIEZA_LBL = {puerta:'Puerta(s)', marco:'Marco(s)', fijo:'Fijo(s)', paredFalsa:'Pared(es) falsa(s)', extFijo:'Extensión(es) de fijo'};
+// Cuántas piezas de cada tipo lleva un juego de puertas de ese tipo, con su medida: {puerta:{n,ancho,alto}, ...}
+function piezasDisponiblesPuerta(tipo, alto, ancho){
+  const out = {};
+  calcularPuerta(tipo, alto, ancho, false).cortes.forEach(c=>{
+    out[c.pieza] = out[c.pieza] || {n:0, ancho:c.ancho, alto:c.alto};
+    out[c.pieza].n += c.cantidad;
+  });
+  return out;
+}
+// Convierte las líneas de la garantía a consumo de artículos del catálogo: [{itemId, cantidad}]
+function consumoGarantia(lineas){
+  const pool = [], medidas = {}, directo = {};
+  lineas.forEach(l=>{
+    const n = Number(l.cantidad)||0; if(!n) return;
+    if(l.tipo==='pieza'){
+      const p = PIEZAS_AUDIT.find(x=>x.key===l.pieza); if(!p) return;
+      pool.push({nombre:p.nombre, cantidad:n, dim:p.dim, colorDestino: p.tipo==='mel'? l.color : '—', estado:'ok'});
+    } else if(l.tipo==='medida'){
+      (medidas[l.color] = medidas[l.color]||[]).push({ancho:Number(l.ancho), alto:Number(l.alto), cantidad:n});
+    } else if(l.tipo==='armado'){
+      // Las medias correderas del armado se entregan como juegos completos (del inventario sale el juego).
+      piezasDeArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:n}).forEach(p=>{
+        if(/^Corredera (hembra|macho)/.test(p.nombre)){
+          const juego = itemByName(/extensión/.test(p.nombre) ? 'Correderas de extensión' : 'Juego de corredera');
+          if(juego) directo[juego.id] = (directo[juego.id]||0) + p.cantidad;
+        } else pool.push(p);
+      });
+    } else if(l.tipo==='item'){
+      directo[l.itemId] = (directo[l.itemId]||0) + n;
+    } else if(l.tipo==='puertas'){
+      // Mismas fórmulas que Instalación de puertas, a partir de la medida del hueco.
+      const r = calcularPuerta(l.pTipo, Number(l.pAlto), Number(l.pAncho), false);
+      const lista = (medidas[l.color] = medidas[l.color]||[]);
+      if(l.pModo==='completas'){
+        r.cortes.forEach(c=>lista.push({ancho:c.ancho, alto:c.alto, cantidad:c.cantidad*n}));
+        if(l.pHerrajes){
+          const h = TIPOS_PUERTA_HERRAJES[l.pTipo];
+          [['Rieles',h.riel],['Sistemas',h.sistema],['Bastidores',h.bastidor],[l.pJaladera==='plana'?'Jaladera plana':'Jaladeras',h.jaladera]].forEach(([nom,q])=>{
+            const it=itemByName(nom); if(it && q) directo[it.id]=(directo[it.id]||0)+q*n; });
+        }
+      } else {
+        const quiere = Object.assign({}, l.pPiezas||{});
+        r.cortes.forEach(c=>{
+          const toma = Math.min(quiere[c.pieza]||0, c.cantidad);
+          if(toma>0){ lista.push({ancho:c.ancho, alto:c.alto, cantidad:toma}); quiere[c.pieza]-=toma; }
+        });
+      }
+    }
+  });
+  const out = {};
+  const porColor = {};
+  pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
+  Object.keys(porColor).forEach(c=>piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; }));
+  Object.keys(medidas).forEach(c=>{
+    const r = hojasParaCortesCombinado(medidas[c], 122, 244);
+    const it = itemByName('Melamina '+c);
+    if(it && r.costo>0) out[it.id] = (out[it.id]||0) + r.costo;
+  });
+  Object.keys(directo).forEach(id=>{ if(id && id!=='undefined') out[id]=(out[id]||0)+directo[id]; });
+  return Object.keys(out).map(itemId=>({itemId, cantidad: Math.round(out[itemId]*1000)/1000}));
+}
+
+function renderGar(){
+  if(esSoloLectura()){ garSub='historial'; }
+  const hoy = new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const top = `<div class="card">
+      <div style="font-size:17px;font-weight:800">🛡️ Garantías · ${modulo()}</div>
+      <p class="hint">Material que se entrega en garantía. Se descuenta del inventario al confirmar.</p>
+      ${esSoloLectura()?'':`<div class="subtabs" style="margin:8px 0 0"><button class="${garSub==='nueva'?'active':''}" onclick="garSub='nueva';renderGar()">Nueva garantía</button><button class="${garSub==='historial'?'active':''}" onclick="garSub='historial';renderGar()">Garantías anteriores</button></div>`}
+    </div>`;
+  if(garSub==='historial'){ $('#main').innerHTML = top + '<div id="gar-hist"><div class="card hint">Cargando…</div></div>'; renderGarHistorial(); return; }
+  const f = garForm;
+  const colorOpts = sel => MEL_COLORES.map(c=>`<option ${c===sel?'selected':''}>${c}</option>`).join('');
+  const tipoBtns = Object.keys(GAR_TIPOS).map(k=>{ const x=GAR_TIPOS[k];
+    return `<button class="tipobtn ${k===garTipo?'on':''}" onclick="garTipo='${k}';renderGar()"><span class="tipo-ic">${x.ic}</span><span><strong>${x.t}</strong><br><small>${x.s}</small></span></button>`; }).join('');
+  let campos = '';
+  if(garTipo==='puertas'){
+    const al = Number(f.pAlto), an = Number(f.pAncho);
+    const disp = (al && an) ? piezasDisponiblesPuerta(f.pTipo, al, an) : null;
+    const medidasTxt = disp ? Object.keys(disp).map(k=>`${PUERTA_PIEZA_LBL[k]}: ${disp[k].n} de ${fmtNum(disp[k].ancho)}×${fmtNum(disp[k].alto)} cm`).join('<br>') : '';
+    campos = `<label class="hint">Tipo de puerta</label>
+      <select style="margin-top:4px" onchange="garForm.pTipo=this.value;renderGar()">${Object.keys(TIPOS_PUERTA).map(t=>`<option ${t===f.pTipo?'selected':''}>${t}</option>`).join('')}</select>
+      <div class="grid2" style="margin-top:10px">
+        <div><label class="hint">Alto del hueco (cm)</label><input type="number" inputmode="decimal" style="margin-top:4px" value="${f.pAlto}" onchange="garForm.pAlto=this.value;renderGar()" placeholder="ej. 240"></div>
+        <div><label class="hint">Ancho del hueco (cm)</label><input type="number" inputmode="decimal" style="margin-top:4px" value="${f.pAncho}" onchange="garForm.pAncho=this.value;renderGar()" placeholder="ej. 180"></div>
+      </div>
+      <label class="hint" style="display:block;margin-top:10px">Color</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select>
+      <label class="hint" style="display:block;margin-top:12px">¿Qué se va a dar?</label>
+      <div class="subtabs" style="margin-top:4px"><button class="${f.pModo==='completas'?'active':''}" onclick="garForm.pModo='completas';renderGar()">Puertas completas</button><button class="${f.pModo==='piezas'?'active':''}" onclick="garForm.pModo='piezas';renderGar()">Solo algunas piezas</button></div>
+      ${f.pModo==='completas' ? `
+        <label class="row" style="margin-top:10px;gap:10px;font-size:15px;flex-wrap:nowrap;font-weight:700"><input type="checkbox" style="width:24px;min-height:24px;flex:0 0 24px" ${f.pHerrajes?'checked':''} onchange="garForm.pHerrajes=this.checked;renderGar()"> ¿También lleva herrajes?</label>
+        ${f.pHerrajes ? `<p class="hint">Riel, sistema, bastidor y jaladeras, igual que en una instalación.</p>
+          <label class="hint">Jaladera</label><select style="margin-top:4px" onchange="garForm.pJaladera=this.value"><option value="normal" ${f.pJaladera!=='plana'?'selected':''}>Normal</option><option value="plana" ${f.pJaladera==='plana'?'selected':''}>Plana</option></select>` : '<p class="hint">Solo se descuenta la melamina de las puertas, marcos y fijo.</p>'}
+        <label class="hint" style="display:block;margin-top:10px">¿Cuántos juegos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1">`
+      : (disp ? `<p class="hint">Escribe cuántas de cada pieza (por ejemplo, 1 puerta y 1 fijo):</p>
+        <div class="movlist">${Object.keys(disp).map(k=>`<label class="movitem"><span style="min-width:0"><span class="invname">${PUERTA_PIEZA_LBL[k]}</span><span class="hint" style="display:block;margin:2px 0 0">${fmtNum(disp[k].ancho)}×${fmtNum(disp[k].alto)} cm · el juego lleva ${disp[k].n}</span></span>
+          <input type="number" min="0" max="${disp[k].n}" inputmode="numeric" value="${f.pPiezas[k]||''}" oninput="garForm.pPiezas['${k}']=Number(this.value)" placeholder="—"></label>`).join('')}</div>`
+        : '<p class="hint">Escribe primero el alto y el ancho del hueco para ver las piezas.</p>')}
+      ${disp && f.pModo==='completas' ? `<p class="hint" style="margin-top:10px"><strong>Medidas calculadas:</strong><br>${medidasTxt}</p>` : ''}`;
+  } else if(garTipo==='pieza'){
+    const p = PIEZAS_AUDIT.find(x=>x.key===f.pieza) || PIEZAS_AUDIT[0];
+    campos = `<label class="hint">¿Qué pieza?</label>
+      <select style="margin-top:4px" onchange="garForm.pieza=this.value;renderGar()">${PIEZAS_AUDIT.map(x=>`<option value="${x.key}" ${x.key===p.key?'selected':''}>${x.label} (${x.dim})</option>`).join('')}</select>
+      <div class="grid2" style="margin-top:10px">
+        ${p.tipo==='mel'?`<div><label class="hint">Color</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select></div>`:'<div class="hint" style="margin-top:22px">Es de MDF (sin color)</div>'}
+        <div><label class="hint">¿Cuántas?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1"></div>
+      </div>`;
+  } else if(garTipo==='medida'){
+    campos = `<label class="hint">¿Qué pieza?</label>
+      <div class="chips" style="margin-top:4px">${GAR_MEDIDA_NOMBRES.map(n=>`<button type="button" class="chip ${n===f.medidaNombre?'on':''}" onclick="garForm.medidaNombre='${n}';renderGar()">${n}</button>`).join('')}</div>
+      ${f.medidaNombre==='Puerta'?'<p class="hint">Una sola puerta (no el par). Si son las dos, pon cantidad 2.</p>':''}
+      <div class="grid2" style="margin-top:10px">
+        <div><label class="hint">Ancho (cm)</label><input type="number" min="1" inputmode="decimal" style="margin-top:4px" value="${f.ancho}" oninput="garForm.ancho=this.value" placeholder="ej. 104"></div>
+        <div><label class="hint">Alto (cm)</label><input type="number" min="1" inputmode="decimal" style="margin-top:4px" value="${f.alto}" oninput="garForm.alto=this.value" placeholder="ej. 232"></div>
+        <div><label class="hint">Color</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select></div>
+        <div><label class="hint">¿Cuántas?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1"></div>
+      </div>
+      <p class="hint">Se descuenta la parte de la hoja que usa; si la pieza ocupa la hoja entera (como una puerta), se descuenta 1 hoja.</p>`;
+  } else if(garTipo==='armado'){
+    const esCaj = f.armTipo==='cajonera';
+    const vars = esCaj ? ARMADO_CAJONERAS : {normal:'Normal', max:'Max'};
+    if(!vars[f.armVar]) f.armVar = Object.keys(vars)[0];
+    const tipos = {cajonera:'Cajonera (sin cajones)', cajon:'Cajón completo', cuadro_fondo:'Cuadro de cajón con fondo', cuadro_sin:'Cuadro de cajón sin fondo'};
+    campos = `<label class="hint">¿Qué mueble?</label>
+      <select style="margin-top:4px" onchange="garForm.armTipo=this.value;renderGar()">${Object.keys(tipos).map(k=>`<option value="${k}" ${k===f.armTipo?'selected':''}>${tipos[k]}</option>`).join('')}</select>
+      <div class="grid2" style="margin-top:10px">
+        <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="garForm.armVar=this.value;renderGar()">${Object.keys(vars).map(k=>`<option value="${k}" ${k===f.armVar?'selected':''}>${vars[k]}</option>`).join('')}</select></div>
+        <div><label class="hint">${esCaj?'Color de la cajonera':(f.armTipo==='cajon'?'Color del frente':'Color del cuadro')}</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select></div>
+        ${f.armTipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="garForm.colorCuadro=this.value">${colorOpts(f.colorCuadro)}</select></div>`:''}
+        <div><label class="hint">¿Cuántos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1"></div>
+      </div>
+      ${(f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" style="width:22px;min-height:22px;flex:0 0 22px" ${f.ext?'checked':''} onchange="garForm.ext=this.checked"> Lleva corredera de extensión</label>`:''}
+      ${(f.armTipo==='cajonera'||f.armTipo==='cajon')?'<p class="hint">Incluye sus correderas (se descuenta el juego completo por cada cajón o hueco).</p>':''}`;
+  } else {
+    if(!f.itemId) f.itemId = (itemByName('Jaladeras')||CATALOGO[0]).id;
+    const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+    campos = `<label class="hint">¿Qué artículo?</label>
+      <select style="margin-top:4px" onchange="garForm.itemId=this.value;renderGar()">${cats.map(c=>`<optgroup label="${c}">${CATALOGO.filter(i=>i.cat===c).map(i=>`<option value="${i.id}" ${i.id===f.itemId?'selected':''}>${i.nombre}</option>`).join('')}</optgroup>`).join('')}</select>
+      <label class="hint" style="display:block;margin-top:10px">¿Cuántos? (${item2unidad(f.itemId)})</label>
+      <input type="number" min="0" inputmode="decimal" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1">`;
+  }
+  const lista = garLineas.length ? `<div class="movlist">${garLineas.map((l,i)=>`<div class="movitem"><span style="min-width:0">${describirLineaGar(l)}</span><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;flex:0 0 auto" onclick="garLineas.splice(${i},1);garPreview=null;renderGar()">Quitar</button></div>`).join('')}</div>` : '<p class="hint">Todavía no agregas nada.</p>';
+  $('#main').innerHTML = top + `
+    <div class="card">
+      <div class="paso">1</div><strong>¿Qué se va a dar?</strong>
+      <div class="tipos" style="margin-top:10px">${tipoBtns}</div>
+      <div style="margin-top:12px">${campos}</div>
+      <button class="btn" style="margin-top:12px;width:100%" onclick="agregarLineaGar()">+ Agregar a la garantía</button>
+    </div>
+    <div class="card">
+      <div class="paso">2</div><strong>Lo que lleva esta garantía (${garLineas.length})</strong>
+      <div style="margin-top:10px">${lista}</div>
+    </div>
+    <div class="card">
+      <div class="paso">3</div><strong>Datos</strong>
+      <div class="grid2" style="margin-top:10px">
+        <div><label class="hint">Fecha</label><input id="g-fecha" type="date" value="${hoy}" style="margin-top:4px"></div>
+        <div><label class="hint">Cliente</label><input id="g-cliente" placeholder="Nombre o folio" style="margin-top:4px"></div>
+      </div>
+      <label class="hint" style="display:block;margin-top:10px">¿Por qué? (motivo)</label>
+      <input id="g-motivo" placeholder="ej. puerta rayada, cajón roto" style="margin-top:4px">
+      <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="previewGar()">Revisar material</button>
+    </div>
+    <div id="g-result"></div>`;
+}
+function agregarLineaGar(){
+  const f = garForm;
+  const n = Number(f.cantidad) || (garTipo==='item' ? 0 : 1);
+  if(!n || n<=0) return alert('Escribe la cantidad.');
+  let l;
+  if(garTipo==='pieza'){ const p = PIEZAS_AUDIT.find(x=>x.key===f.pieza)||PIEZAS_AUDIT[0]; l = {tipo:'pieza', pieza:p.key, color:f.color, cantidad:n}; }
+  else if(garTipo==='medida'){
+    const an = Number(f.ancho), al = Number(f.alto);
+    if(!an || !al) return alert('Escribe el ancho y el alto en centímetros.');
+    if(piezasPorHojaIndividual(an, al, 122, 244)<1) return alert('Esa pieza no cabe en una hoja de 122×244 cm. Revisa la medida.');
+    l = {tipo:'medida', nombre:f.medidaNombre, ancho:an, alto:al, color:f.color, cantidad:n};
+  }
+  else if(garTipo==='puertas'){
+    const al = Number(f.pAlto), an = Number(f.pAncho);
+    if(!al || !an) return alert('Escribe el alto y el ancho del hueco en centímetros.');
+    if(f.pModo==='piezas'){
+      const disp = piezasDisponiblesPuerta(f.pTipo, al, an);
+      const pp = {}; let total = 0;
+      Object.keys(disp).forEach(k=>{ const v=Math.min(Number(f.pPiezas[k])||0, disp[k].n); if(v>0){ pp[k]=v; total+=v; } });
+      if(!total) return alert('Elige cuántas piezas se van a dar (por ejemplo 1 puerta).');
+      l = {tipo:'puertas', pTipo:f.pTipo, pAlto:al, pAncho:an, color:f.color, pModo:'piezas', pPiezas:pp, cantidad:1};
+    } else {
+      l = {tipo:'puertas', pTipo:f.pTipo, pAlto:al, pAncho:an, color:f.color, pModo:'completas', pHerrajes:!!f.pHerrajes, pJaladera:f.pJaladera, cantidad:n};
+    }
+  }
+  else if(garTipo==='armado'){ l = {tipo:'armado', armTipo:f.armTipo, armVar:f.armVar, color:f.color, colorCuadro:f.colorCuadro, ext: (f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? !!f.ext : false, cantidad:n}; }
+  else { l = {tipo:'item', itemId:f.itemId, cantidad:n}; }
+  garLineas.push(l);
+  garForm.cantidad=''; garForm.ancho=''; garForm.alto='';
+  garPreview = null;
+  renderGar();
+  toast('Agregado: '+describirLineaGar(l));
+}
+function previewGar(){
+  if(!garLineas.length) return alert('Primero agrega lo que se va a dar en garantía (paso 1).');
+  const consumo = consumoGarantia(garLineas);
+  const faltantes = consumo.map(c=>({c, f:calcFormula(c.itemId)})).filter(x=>x.f.final - x.c.cantidad < -1e-9)
+    .map(x=>({nombre:CATALOGO.find(i=>i.id===x.c.itemId).nombre, disponible:x.f.final, requerido:x.c.cantidad}));
+  garPreview = {consumo, bloqueado: faltantes.length>0};
+  let html = `<div class="card" id="g-preview-card">
+    <div style="font-size:16px;font-weight:800">📋 Esto se va a descontar</div>
+    <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
+      return `<div class="movitem" style="${insuf?'border-color:var(--bad)':''}"><span style="min-width:0"><span class="invname">${CATALOGO.find(i=>i.id===c.itemId).nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.final)} ${item2unidad(c.itemId)}</span></span>
+        <strong class="${insuf?'neg':''}" style="font-size:17px;white-space:nowrap">${fmtNum(c.cantidad)} ${item2unidad(c.itemId)}</strong></div>`; }).join('')}</div>
+  </div>`;
+  if(faltantes.length){
+    html += `<div class="card aviso"><strong>⛔ No alcanza el material en ${modulo()}</strong>
+      <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">${faltantes.map(f=>`<li>${f.nombre}: hay <strong>${fmtNum(f.disponible)}</strong> y se necesitan <strong>${fmtNum(f.requerido)}</strong></li>`).join('')}</ul>
+      <p class="hint">No se descontó nada.</p></div>`;
+  } else {
+    html += avisoAutoCorteHtml(consumo);
+    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarGar()">✅ Confirmar garantía</button></div>`;
+  }
+  $('#g-result').innerHTML = html;
+  const pc = document.getElementById('g-preview-card'); if(pc && pc.scrollIntoView) pc.scrollIntoView({behavior:'smooth', block:'start'});
+}
+async function confirmarGar(){
+  if(!garPreview || garPreview.bloqueado) return;
+  const cliente = ($('#g-cliente').value||'').trim();
+  const motivo = ($('#g-motivo').value||'').trim();
+  const fechaDia = $('#g-fecha').value;
+  const mod = modulo();
+  for(const c of garPreview.consumo){ if(calcFormula(c.itemId).final - c.cantidad < -1e-9) return alert('El inventario cambió; vuelve a revisar el material.'); }
+  try{
+    const estado = estadoNuevoMovimiento();
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    const logId = cryptoId();
+    const nota = `Garantía${cliente?' · '+cliente:''}${motivo?' · '+motivo:''}`;
+    for(const c of garPreview.consumo){
+      const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:c.itemId,itemNombre:it.nombre,tipo:'garantia',cantidad:c.cantidad,nota,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
+    }
+    await db.collection('garantiasLog').doc(logId).set({modulo:mod, fechaDia, cliente, motivo, lineas:garLineas.map(describirLineaGar), consumo:garPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor});
+    toast(estado==='pendiente' ? '✅ Garantía guardada.<br><small>Dirección la tiene que aprobar para que se descuente.</small>' : '✅ Garantía registrada.');
+    garLineas=[]; garPreview=null;
+    renderGar(); window.scrollTo(0,0);
+  }catch(e){ alert('Error al registrar: '+e.message); }
+}
+async function renderGarHistorial(){
+  let logs=[];
+  try{ const snap = await db.collection('garantiasLog').get(); logs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }catch(e){}
+  const el = document.getElementById('gar-hist'); if(!el) return;
+  if(!logs.length){ el.innerHTML = '<div class="card">Aún no hay garantías registradas en '+modulo()+'.</div>'; return; }
+  // El estado real sale de sus movimientos (se aprueban/rechazan desde Aprobaciones).
+  const estadoDe = l => { const ms = movs.filter(m=>m.loteId===l.id); if(!ms.length) return l.estado; if(ms.some(m=>m.estado==='pendiente')) return 'pendiente'; if(ms.every(m=>m.estado==='rechazado')) return 'rechazado'; return 'aprobado'; };
+  el.innerHTML = logs.map(l=>`<div class="card">
+      <div class="row" style="justify-content:space-between"><strong>${new Date((l.fechaDia||l.fecha.slice(0,10))+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'})}</strong>${badgeEstado(estadoDe(l))}</div>
+      ${l.cliente||l.motivo?`<p class="hint" style="margin:4px 0">${l.cliente?'Cliente: '+l.cliente:''}${l.cliente&&l.motivo?' · ':''}${l.motivo?'Motivo: '+l.motivo:''}</p>`:''}
+      <ul style="margin:6px 0 6px 18px;padding:0;line-height:1.6">${(l.lineas||[]).map(x=>`<li>${x}</li>`).join('')}</ul>
+      <details><summary class="hint">Material descontado</summary><div class="hint">${(l.consumo||[]).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `${it?it.nombre:c.itemId}: ${fmtNum(c.cantidad)} ${it?it.unidad:''}`; }).join('<br>')}</div></details>
+    </div>`).join('');
 }
 
 // Aviso en la vista previa de una instalación: qué hojas no tienen suficiente material cortado
@@ -2098,12 +2476,12 @@ function avisoAutoCorteHtml(consumo){
     if(!ac.hojas) return '';
     const it = CATALOGO.find(i=>i.id===c.itemId);
     const f = calcFormula(c.itemId);
-    return `<li>${it?it.nombre:c.itemId}: se necesitan ${fmtNum(c.cantidad)}, hay ${fmtNum(f.cortado)} en cortado → se tomarán <strong>${ac.hojas} hoja(s) completa(s)</strong> provisionalmente.</li>`;
+    return `<li>${it?it.nombre:c.itemId}: ${ac.hojas} hoja(s)</li>`;
   }).filter(Boolean);
   if(!lineas.length) return '';
-  return `<div class="card"><div class="warn"><strong>✂️ Todavía no hay suficiente corte registrado</strong>
-    <ul style="margin:6px 0 0 18px;padding:0">${lineas.join('')}</ul>
-    Puedes continuar sin problema. Es normal si el corte del día se registra al final del turno: cuando se registre, estas hojas se cubren solas y no se descuentan dos veces. Si al final del día no se registró el corte, quedarán marcadas como "sin corte" en Inventario.</div></div>`;
+  return `<div class="card"><div class="warn"><strong>✂️ Aún no se anota el corte de hoy de:</strong>
+    <ul style="margin:6px 0 6px 18px;padding:0">${lineas.join('')}</ul>
+    No pasa nada, puedes continuar. Se ajusta solo cuando se registre el corte del día.</div></div>`;
 }
 
 async function confirmarInst(){
@@ -2130,12 +2508,13 @@ async function confirmarInst(){
       modulo:mod, categoria:'Mueble', descripcion:desc, nota, fechaDia,
       consumo:instPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
-    alert(estado==='pendiente'
-      ? 'Instalación capturada. Quedó PENDIENTE de aprobación de Dirección — el material no se descuenta del inventario oficial hasta que se apruebe.'
-      : 'Instalación registrada. Se descontaron '+instPreview.consumo.length+' artículo(s) y quedó en el historial de '+fechaDia+'.');
+    toast(estado==='pendiente'
+      ? '✅ Instalación guardada.<br><small>Dirección la tiene que aprobar para que se descuente.</small>'
+      : '✅ Instalación registrada.');
     instPreview=null;
     iAdicionales=[];
     renderInstMueble();
+    window.scrollTo(0,0);
   }catch(e){ alert('Error al registrar: '+e.message); }
 }
 
@@ -2160,19 +2539,31 @@ const TIPOS_PUERTA_HERRAJES = {
 function renderInstPuertas(){
   $('#inst-body').innerHTML = `
   <div class="card">
-    <strong>Puertas · ${modulo()}</strong>
-    <p class="hint">Las puertas no cuentan como uno de los muebles del modelo (no aparecen en Inventario de muebles), pero su material (melamina de 15mm) y su herrajería (riel, sistema, bastidor, jaladeras) sí se descuentan del inventario del módulo al registrar la instalación.</p>
-    <div class="grid2" style="margin-top:8px">
-      <select id="p-tipo" onchange="renderPuertaParedFalsaExtra()">${Object.keys(TIPOS_PUERTA).map(t=>`<option>${t}</option>`).join('')}</select>
-      <select id="p-color">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
-      <input id="p-alto" type="number" placeholder="Alto total (cm)">
-      <input id="p-ancho" type="number" placeholder="Ancho total (cm)">
-      <select id="p-jaladera-tipo"><option value="normal">Jaladera normal</option><option value="plana">Jaladera plana</option></select>
-      <input id="p-fecha" type="date" value="${new Date().toISOString().slice(0,10)}">
-      <input id="p-nota" placeholder="Cliente / referencia">
-    </div>
+    <div class="paso">1</div><strong>¿Qué tipo de puerta?</strong>
+    <select id="p-tipo" style="margin-top:10px" onchange="renderPuertaParedFalsaExtra()">${Object.keys(TIPOS_PUERTA).map(t=>`<option>${t}</option>`).join('')}</select>
     <div id="p-pared-falsa-extra-wrap" style="margin-top:8px"></div>
-    <button class="btn" style="margin-top:10px" onclick="calcPuerta()">Calcular medidas</button>
+  </div>
+  <div class="card">
+    <div class="paso">2</div><strong>Medidas del hueco</strong>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Alto total (cm)</label><input id="p-alto" type="number" inputmode="decimal" placeholder="ej. 240" style="margin-top:4px"></div>
+      <div><label class="hint">Ancho total (cm)</label><input id="p-ancho" type="number" inputmode="decimal" placeholder="ej. 180" style="margin-top:4px"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="paso">3</div><strong>Color y jaladera</strong>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Color</label><select id="p-color" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label class="hint">Jaladera</label><select id="p-jaladera-tipo" style="margin-top:4px"><option value="normal">Normal</option><option value="plana">Plana</option></select></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="paso">4</div><strong>Datos de la instalación</strong>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Fecha</label><input id="p-fecha" type="date" value="${new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)}" style="margin-top:4px"></div>
+      <div><label class="hint">Cliente (opcional)</label><input id="p-nota" placeholder="Nombre o referencia" style="margin-top:4px"></div>
+    </div>
+    <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="calcPuerta()">Revisar material</button>
   </div>
   <div id="p-result"></div>`;
   renderPuertaParedFalsaExtra();
@@ -2296,18 +2687,13 @@ function hojasParaCortesCombinado(cortes, anchoHoja, altoHoja){
 
 let puertaPreview = null;
 
-function calcPuerta(){
-  const tipo = $('#p-tipo').value;
-  const color = $('#p-color').value;
-  const alto = Number($('#p-alto').value);
-  const ancho = Number($('#p-ancho').value);
-  if(!alto || !ancho) return alert('Captura alto y ancho');
-  const jaladeraTipo = $('#p-jaladera-tipo') ? $('#p-jaladera-tipo').value : 'normal';
+// Fórmulas de puertas (compartidas por Instalación de puertas y Garantías). Devuelve las medidas
+// para mostrar (info) y los cortes de melamina etiquetados por pieza (puerta/marco/fijo/paredFalsa/extFijo).
+function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
   const piezas = [];
   const add=(n,v,nota)=>piezas.push({n,v,nota:nota||''});
-  const cortes = []; // [{ancho,alto,cantidad}] para calcular hojas de melamina
-  let altoFijoParaExtra = null; // para la pared falsa aislada (ver TIPOS_CON_PARED_FALSA_EXTRA)
-
+  const cortes = [];
+  let altoFijoParaExtra = null;
   add('Composición', TIPOS_PUERTA[tipo]);
 
   if(tipo==='Con pared falsa' || tipo==='Con dos paredes falsas'){
@@ -2336,11 +2722,11 @@ function calcPuerta(){
     add('Extensión de fijo', altoFijo.toFixed(1)+'×60 cm', 'Mismo ancho que la pared falsa (60 cm) y mismo alto que el fijo ('+(tipo==='Con dos paredes falsas'?'lleva 2':'lleva 1')+')');
     const numParedFalsa = tipo==='Con dos paredes falsas' ? 2 : 1;
     const numMarcos1 = tipo==='Con dos paredes falsas' ? 1 : 2;
-    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
-    cortes.push({ancho:10, alto:altoMarcos, cantidad:numMarcos1});
-    cortes.push({ancho:anchoFijo, alto:altoFijo, cantidad:1});
-    cortes.push({ancho:60, alto:altoParedFalsa, cantidad:numParedFalsa});
-    cortes.push({ancho:60, alto:altoFijo, cantidad:numParedFalsa});
+    cortes.push({pieza:'puerta', ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
+    cortes.push({pieza:'marco', ancho:10, alto:altoMarcos, cantidad:numMarcos1});
+    cortes.push({pieza:'fijo', ancho:anchoFijo, alto:altoFijo, cantidad:1});
+    cortes.push({pieza:'paredFalsa', ancho:60, alto:altoParedFalsa, cantidad:numParedFalsa});
+    cortes.push({pieza:'extFijo', ancho:60, alto:altoFijo, cantidad:numParedFalsa});
   } else if(tipo==='Normal'){
     // Confirmado por el usuario (ejemplo: ancho 180, alto 260 → par 93.5×236.5, marcos 244×10, fijo 33×182):
     // alto de marcos = alto total − 6, con tope de 244 cm (medida de la hoja: 122×244);
@@ -2358,9 +2744,9 @@ function calcPuerta(){
     add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario)');
     add('Ancho del fijo', anchoFijo.toFixed(1)+' cm', 'Ancho total + 2');
     add('Alto del fijo', altoFijo.toFixed(1)+' cm', 'Alto total − alto de marcos + 17');
-    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
-    cortes.push({ancho:10, alto:altoMarcos, cantidad:3});
-    cortes.push({ancho:anchoFijo, alto:altoFijo, cantidad:1});
+    cortes.push({pieza:'puerta', ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
+    cortes.push({pieza:'marco', ancho:10, alto:altoMarcos, cantidad:3});
+    cortes.push({pieza:'fijo', ancho:anchoFijo, alto:altoFijo, cantidad:1});
   } else if(tipo==='Con cubos a los lados'){
     // Confirmado por el usuario (ejemplo: ancho 250, alto 240 → puertas 120×226.5, marcos
     // 234×10, y como el ancho es grande se necesitan 2 fijos de 126×23):
@@ -2385,10 +2771,10 @@ function calcPuerta(){
       add('Fijo', '1 de '+anchoFijoTotal.toFixed(1)+'×'+altoFijo.toFixed(1)+' cm', 'Ancho total + 2 (no pasa de 244, así que es 1 solo fijo)');
     }
     altoFijoParaExtra = altoFijo;
-    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
-    cortes.push({ancho:10, alto:altoMarcos, cantidad:9});
-    if(dosFijos) cortes.push({ancho:anchoFijoTotal/2, alto:altoFijo, cantidad:2});
-    else cortes.push({ancho:anchoFijoTotal, alto:altoFijo, cantidad:1});
+    cortes.push({pieza:'puerta', ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
+    cortes.push({pieza:'marco', ancho:10, alto:altoMarcos, cantidad:9});
+    if(dosFijos) cortes.push({pieza:'fijo', ancho:anchoFijoTotal/2, alto:altoFijo, cantidad:2});
+    else cortes.push({pieza:'fijo', ancho:anchoFijoTotal, alto:altoFijo, cantidad:1});
   } else {
     // Con cubo al centro: confirmado por el usuario (ejemplo: ancho 300, alto 260 →
     // puertas 76.75×236.5 (4 piezas), marcos 244×10 (8 piezas), fijos 151×33 (2 piezas)):
@@ -2409,26 +2795,42 @@ function calcPuerta(){
     add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario), 8 piezas');
     add('Fijos (2 piezas)', anchoFijo.toFixed(1)+'×'+altoFijo.toFixed(1)+' cm', 'Ancho: (ancho total + 2) ÷ 2. Alto: alto total − alto de marcos + 17');
     altoFijoParaExtra = altoFijo;
-    cortes.push({ancho:anchoPuertas, alto:altoPuertas, cantidad:4});
-    cortes.push({ancho:10, alto:altoMarcos, cantidad:8});
-    cortes.push({ancho:anchoFijo, alto:altoFijo, cantidad:2});
+    cortes.push({pieza:'puerta', ancho:anchoPuertas, alto:altoPuertas, cantidad:4});
+    cortes.push({pieza:'marco', ancho:10, alto:altoMarcos, cantidad:8});
+    cortes.push({pieza:'fijo', ancho:anchoFijo, alto:altoFijo, cantidad:2});
   }
 
   // Caso aislado (confirmado por el usuario): piden una pared falsa aparte en un modelo
   // "Con cubos a los lados" o "Con cubo al centro" (no es parte fija de esos modelos). La
   // pared falsa siempre sale de 244×60 cm (tamaño fijo, no depende de la medida del hueco), y
   // su extensión de fijo mide lo mismo de ancho (60 cm) por el alto del fijo de esa puerta.
-  if(TIPOS_CON_PARED_FALSA_EXTRA.includes(tipo) && document.getElementById('p-pared-falsa-extra') && document.getElementById('p-pared-falsa-extra').checked){
+  if(TIPOS_CON_PARED_FALSA_EXTRA.includes(tipo) && paredFalsaExtra){
     add('Pared falsa (aparte, poco común)', '244×60 cm', 'Medida fija, confirmada por el usuario');
     if(altoFijoParaExtra!=null) add('Extensión de fijo (aparte)', altoFijoParaExtra.toFixed(1)+'×60 cm', 'Mismo ancho que la pared falsa (60 cm) y el mismo alto del fijo de esta puerta');
-    cortes.push({ancho:60, alto:244, cantidad:1});
-    if(altoFijoParaExtra!=null) cortes.push({ancho:60, alto:altoFijoParaExtra, cantidad:1});
+    cortes.push({pieza:'paredFalsa', ancho:60, alto:244, cantidad:1});
+    if(altoFijoParaExtra!=null) cortes.push({pieza:'extFijo', ancho:60, alto:altoFijoParaExtra, cantidad:1});
   }
 
   // Melamina de 15mm (confirmado por el usuario: mismo color que elige el cliente, misma hoja
   // estándar de 122×244 que el resto del inventario). Se acomodan todas las piezas de este corte
   // juntas (puertas, marcos, fijos, etc.) para aprovechar el sobrante entre ellas, y el resultado
   // es el número real de hojas completas que se van a cortar para esta instalación.
+  return {info:piezas, cortes};
+}
+
+function calcPuerta(){
+  const tipo = $('#p-tipo').value;
+  const color = $('#p-color').value;
+  const alto = Number($('#p-alto').value);
+  const ancho = Number($('#p-ancho').value);
+  if(!alto || !ancho) return alert('Captura alto y ancho');
+  const jaladeraTipo = $('#p-jaladera-tipo') ? $('#p-jaladera-tipo').value : 'normal';
+  const pfExtra = !!(document.getElementById('p-pared-falsa-extra') && document.getElementById('p-pared-falsa-extra').checked);
+  const calc = calcularPuerta(tipo, alto, ancho, pfExtra);
+  const piezas = calc.info;
+  const add=(n,v,nota)=>piezas.push({n,v,nota:nota||''});
+  const cortes = calc.cortes; // [{pieza,ancho,alto,cantidad}] para calcular hojas de melamina
+
   const empaque = hojasParaCortesCombinado(cortes);
   const hojasMelamina = empaque.costo;
   if(empaque.noCaben>0) add('Aviso de corte', empaque.noCaben+' pieza(s) no caben en una hoja completa (122×244) en ninguna orientación', 'Revisa las medidas capturadas; esas piezas no se incluyeron en el cálculo de melamina');
@@ -2468,15 +2870,12 @@ function calcPuerta(){
   </div>`;
 
   if(bloqueado){
-    html += `<div class="card"><div class="warn"><strong>Descuento bloqueado — existencia insuficiente en ${modulo()}.</strong>
-      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${fmtNum(f.disponible)}, se requieren ${fmtNum(f.requerido)}</li>`).join('')}</ul>
-      No se aplicó ningún descuento parcial.</div></div>`;
+    html += `<div class="card aviso"><strong>⛔ No alcanza el material en ${modulo()}</strong>
+      <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">${faltantes.map(f=>`<li>${f.nombre}: hay <strong>${fmtNum(f.disponible)}</strong> y se necesitan <strong>${fmtNum(f.requerido)}</strong></li>`).join('')}</ul>
+      <p class="hint">Revisa las medidas y el color, o que ya se hayan anotado las entradas de material. No se descontó nada.</p></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
-    html += `<div class="card row" style="justify-content:space-between">
-      <span class="pos">Existencia suficiente de material y herrajes.</span>
-      <button class="btn" onclick="registrarPuerta('${tipo}',${alto},${ancho})">Registrar instalación y descontar material</button>
-    </div>`;
+    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="registrarPuerta('${tipo}',${alto},${ancho})">✅ Confirmar instalación de puertas</button></div>`;
   }
   $('#p-result').innerHTML = html;
 }
@@ -2508,11 +2907,12 @@ async function registrarPuerta(tipo, alto, ancho){
       modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia,
       consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
-    alert(estado==='pendiente'
-      ? 'Instalación de puertas capturada. Quedó PENDIENTE de aprobación de Dirección — el material no se descuenta del inventario oficial hasta que se apruebe.'
-      : 'Instalación de puertas registrada. Se descontaron '+puertaPreview.consumo.length+' artículo(s) (material y herrajes) y quedó en el historial de '+fechaDia+'.');
+    toast(estado==='pendiente'
+      ? '✅ Puertas guardadas.<br><small>Dirección las tiene que aprobar para que se descuenten.</small>'
+      : '✅ Instalación de puertas registrada.');
     puertaPreview = null;
     renderInstPuertas();
+    window.scrollTo(0,0);
   }catch(e){ alert('Error al registrar: '+e.message); }
 }
 
@@ -2753,21 +3153,21 @@ function puedeCerrarInventarioDiario(){ return esAdmin() || (miPerfil && miPerfi
 
 function renderRep(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
-  const conMovimiento = CATALOGO.filter(it=>{ const f=calcFormula(it.id); return f.inicial||f.entradas||f.salidas||f.instalaciones||f.mermas||f.cortes||f.ajustes; });
+  const conMovimiento = CATALOGO.filter(it=>{ const f=calcFormula(it.id); return f.inicial||f.entradas||f.salidas||f.instalaciones||f.garantias||f.mermas||f.cortes||f.ajustes; });
   const ultimaAud = auditorias[0];
 
   let html = '';
 
   if(puedeCerrarInventarioDiario()){
     html += `<div class="card row" style="justify-content:space-between">
-      <div><strong>Inventario diario</strong><p class="hint" style="margin:2px 0 0">Genera un PDF con el inventario completo de ${modulo()} en este momento (todas las categorías, artículo por artículo).</p></div>
-      <button class="btn" onclick="cerrarInventarioDiarioUI()">Cerrar inventario diario</button>
+      <div><strong>Cierre de inventario diario</strong><p class="hint" style="margin:2px 0 0">Genera un solo PDF de ${modulo()} con dos partes: el inventario completo y, en una hoja aparte, la melamina sin cortar.</p></div>
+      <button class="btn" onclick="cerrarInventarioDiarioUI()">📄 Cerrar inventario diario</button>
     </div>`;
   }
 
   html += `<div class="card">
     <strong>Reporte · ${modulo()}</strong>
-    <p class="hint">Comprobación matemática: Inicial + Entradas − Salidas − Instalaciones − Mermas ± Ajustes de auditoría = Final, artículo por artículo. En hojas, además: Final = Completas + Cortado.</p>
+    <p class="hint">Comprobación matemática: Inicial + Entradas − Salidas − Instalaciones − Garantías − Mermas ± Ajustes de auditoría = Final, artículo por artículo. En hojas, además: Final = Completas + Cortado.</p>
   </div>`;
 
   html += `<div class="card row" style="justify-content:space-between">
@@ -2801,12 +3201,18 @@ function renderRep(){
   </div>`;
 
   html += `<div class="card"><h3>Inventario (solo artículos con movimiento)</h3>
-    <div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th><th>Instal.</th><th>Mermas</th><th>Ajuste</th><th>Final</th></tr>
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th><th>Instal.</th><th>Garant.</th><th>Mermas</th><th>Ajuste</th><th>Final</th></tr>
     ${conMovimiento.map(it=>{ const f=calcFormula(it.id);
-      return `<tr><td>${it.nombre}</td><td>${fmtNum(f.inicial)}</td><td class="pos">${fmtNum(f.entradas)}</td><td class="neg">${fmtNum(f.salidas)}</td><td class="neg">${fmtNum(f.instalaciones)}</td><td class="neg">${fmtNum(f.mermas)}</td><td>${f.ajustes>0?'+':''}${fmtNum(f.ajustes)}</td><td><strong>${fmtNum(f.final)}</strong></td></tr>`;
+      return `<tr><td>${it.nombre}</td><td>${fmtNum(f.inicial)}</td><td class="pos">${fmtNum(f.entradas)}</td><td class="neg">${fmtNum(f.salidas)}</td><td class="neg">${fmtNum(f.instalaciones)}</td><td class="neg">${fmtNum(f.garantias)}</td><td class="neg">${fmtNum(f.mermas)}</td><td>${f.ajustes>0?'+':''}${fmtNum(f.ajustes)}</td><td><strong>${fmtNum(f.final)}</strong></td></tr>`;
     }).join('')}
     </table></div>
     ${conMovimiento.length===0? '<p class="hint">Aún no hay movimientos registrados en este módulo.</p>':''}
+  </div>`;
+
+  html += `<div class="card"><h3>🛡️ Material entregado en garantía (acumulado)</h3>
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>Total en garantías</th></tr>
+    ${CATALOGO.filter(it=>calcFormula(it.id).garantias>0).map(it=>`<tr><td>${it.nombre}</td><td>${fmtNum(calcFormula(it.id).garantias)} ${it.unidad}</td></tr>`).join('') || '<tr><td colspan="2" class="hint">Sin garantías todavía.</td></tr>'}
+    </table></div>
   </div>`;
 
   html += `<div class="card"><h3>Consumo por instalaciones (acumulado)</h3>
@@ -2815,6 +3221,15 @@ function renderRep(){
       return `<tr><td>${it.nombre}</td><td>${fmtNum(f.instalaciones)} ${it.unidad}</td></tr>`;
     }).join('') || '<tr><td colspan="2" class="hint">Sin consumo por instalaciones todavía.</td></tr>'}
     </table></div>
+  </div>`;
+
+  // Correderas (de la última auditoría que las contó): juegos totales y medias sin pareja
+  const audCorr = auditorias.find(x=>x.correderas && x.correderas.length);
+  html += `<div class="card"><h3>🔩 Correderas (juegos y desfasadas)</h3>
+    ${audCorr ? `<p class="hint">Según la auditoría del ${new Date(audCorr.fecha).toLocaleDateString('es-MX')} (${audCorr.auditor||''}).</p>
+    <div class="wrap-x"><table><tr><th>Tipo</th><th>Juegos totales</th><th>Hembras sin macho</th><th>Machos sin hembra</th></tr>
+    ${audCorr.correderas.map(b=>`<tr><td>${b.etiqueta}</td><td><strong>${fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares)}</strong></td><td class="${b.hembrasSinPareja?'neg':''}">${fmtNum(b.hembrasSinPareja)}</td><td class="${b.machosSinPareja?'neg':''}">${fmtNum(b.machosSinPareja)}</td></tr>`).join('')}
+    </table></div>` : '<p class="hint">Todavía no hay una auditoría que haya contado cajoneras, cajones o correderas sueltas.</p>'}
   </div>`;
 
   html += `<div class="card"><h3>Última auditoría vs. teórico</h3>`;
@@ -3028,16 +3443,20 @@ async function exportarRespaldo(){
 }
 
 // ===== Cerrar inventario diario: genera un PDF con el inventario completo del módulo =====
-async function cerrarInventarioDiarioUI(){
+async function cerrarInventarioDiarioUI(modo){
   if(!(window.jspdf && window.jspdf.jsPDF)){
     alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet e intenta de nuevo.');
     return;
   }
-  try{ await generarReporteDiarioPDF(); }
+  try{ await generarReporteDiarioPDF(modo||'completo'); }
   catch(e){ alert('No se pudo generar el reporte: '+e.message); }
 }
 
-async function generarReporteDiarioPDF(){
+// modo 'completo' = inventario completo de siempre (en hojas: movimientos, completas, cortado y final).
+// modo 'sincortar' = reporte aparte, solo de Melamina: cuántas hojas quedan SIN CORTAR por color.
+async function generarReporteDiarioPDF(modo){
+  modo = modo || 'completo';
+  const soloSinCortar = modo==='sincortar';
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   const mod = modulo();
@@ -3049,39 +3468,45 @@ async function generarReporteDiarioPDF(){
   const pageH = doc.internal.pageSize.getHeight();
   // Columnas normales, y columnas extendidas para hojas (Melamina/MDF): Corte, Completas y Cortado.
   const COLS_NORMAL = [
-    {label:'Artículo', w:56}, {label:'Inicial', w:18}, {label:'Entr.', w:18}, {label:'Sal.', w:18},
-    {label:'Instal.', w:18}, {label:'Mermas', w:18}, {label:'Ajuste', w:18}, {label:'Final', w:18}
+    {label:'Artículo', w:54}, {label:'Inicial', w:16}, {label:'Entr.', w:16}, {label:'Sal.', w:16},
+    {label:'Instal.', w:16}, {label:'Garant.', w:16}, {label:'Mermas', w:16}, {label:'Ajuste', w:16}, {label:'Final', w:16}
   ];
-  const COLS_HOJA = [
-    {label:'Artículo', w:40}, {label:'Inicial', w:14.2}, {label:'Entr.', w:14.2}, {label:'Sal.', w:14.2},
-    {label:'Corte', w:14.2}, {label:'Instal.', w:14.2}, {label:'Mermas', w:14.2}, {label:'Ajuste', w:14.2},
-    {label:'Compl.', w:14.2}, {label:'Cortado', w:14.2}, {label:'Final', w:14.2}
-  ];
+  const COLS_HOJA = soloSinCortar
+    ? [ {label:'Artículo', w:120}, {label:'Hojas sin cortar', w:62} ]
+    : [
+      {label:'Artículo', w:38}, {label:'Inicial', w:13.1}, {label:'Entr.', w:13.1}, {label:'Sal.', w:13.1},
+      {label:'Corte', w:13.1}, {label:'Instal.', w:13.1}, {label:'Garant.', w:13.1}, {label:'Mermas', w:13.1}, {label:'Ajuste', w:13.1},
+      {label:'Compl.', w:13.1}, {label:'Cortado', w:13.1}, {label:'Final', w:13.1}
+    ];
   let cols = COLS_NORMAL;
   const tableW = () => cols.reduce((s,c)=>s+c.w,0);
   function colX(i){ let x=marginL; for(let k=0;k<i;k++) x+=cols[k].w; return x; }
 
   let y = 15;
   doc.setFontSize(14);
-  doc.text('Closets Vera · Inventario Diario', marginL, y); y+=7;
+  doc.text(soloSinCortar ? 'Closets Vera · Melamina sin cortar' : 'Closets Vera · Inventario Diario', marginL, y); y+=7;
   doc.setFontSize(10);
   doc.text(`Módulo: ${mod}`, marginL, y); y+=5;
   doc.text(`Cerrado: ${fechaStr}, ${horaStr}`, marginL, y); y+=5;
   const correo = (typeof getCurrentUserEmail==='function' ? getCurrentUserEmail() : '') || '';
   doc.text(`Por: ${correo}`, marginL, y); y+=8;
 
-  // Resumen de hojas: completas vs. cortado/armado
-  const resumenHojas = ['Melamina','MDF'].map(cat=>{
+  // Recuadro de resumen
+  const catsResumen = soloSinCortar ? ['Melamina'] : ['Melamina','MDF'];
+  const resumenHojas = catsResumen.map(cat=>{
     const t = CATALOGO.filter(i=>i.cat===cat).reduce((s,it)=>{ const f=calcFormula(it.id); s.c+=f.completas; s.k+=f.cortado; s.t+=f.final; s.a+=f.autoCortes; return s; },{c:0,k:0,t:0,a:0});
     return {cat, ...t};
   });
   doc.setFillColor(238,242,255);
   doc.rect(marginL, y, 182, 7+resumenHojas.length*5, 'F');
   doc.setFontSize(9); doc.setFont(undefined,'bold');
-  doc.text('Hojas completas vs. material cortado/armado', marginL+2, y+5);
+  doc.text(soloSinCortar ? 'Total de hojas sin cortar' : 'Hojas completas vs. material cortado/armado', marginL+2, y+5);
   doc.setFont(undefined,'normal');
   resumenHojas.forEach((r,i)=>{
-    doc.text(`${r.cat}: ${fmtNum(r.c)} completas · ${fmtNum(r.k)} cortado/armado · ${fmtNum(r.t)} total${r.a?`  (${fmtNum(r.a)} hoja(s) sin corte registrado)`:''}`, marginL+2, y+10+i*5);
+    const txt = soloSinCortar
+      ? `${r.cat}: ${fmtNum(r.c)} hojas sin cortar`
+      : `${r.cat}: ${fmtNum(r.c)} completas · ${fmtNum(r.k)} cortado/armado · ${fmtNum(r.t)} total${r.a?`  (${fmtNum(r.a)} hoja(s) sin corte registrado)`:''}`;
+    doc.text(txt, marginL+2, y+10+i*5);
   });
   y += 7+resumenHojas.length*5+6;
 
@@ -3097,7 +3522,7 @@ async function generarReporteDiarioPDF(){
     y += 6;
   }
 
-  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  const cats = soloSinCortar ? ['Melamina'] : [...new Set(CATALOGO.map(i=>i.cat))];
   cats.forEach(cat=>{
     const items = CATALOGO.filter(i=>i.cat===cat);
     const catHoja = items.length>0 && esHoja(items[0]);
@@ -3115,9 +3540,10 @@ async function generarReporteDiarioPDF(){
       if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tableW(), 5, 'F'); }
       const f = calcFormula(it.id);
       const vals = catHoja
-        ? [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.cortes+f.autoCortes), fmtNum(f.instalaciones), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.completas), fmtNum(f.cortado), fmtNum(f.final)]
-        : [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.instalaciones), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.final)];
-      const maxLen = catHoja ? 23 : 33;
+        ? (soloSinCortar ? [it.nombre, fmtNum(f.completas)]
+           : [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.cortes+f.autoCortes), fmtNum(f.instalaciones), fmtNum(f.garantias), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.completas), fmtNum(f.cortado), fmtNum(f.final)])
+        : [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.instalaciones), fmtNum(f.garantias), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.final)];
+      const maxLen = catHoja ? (soloSinCortar ? 60 : 22) : 32;
       vals.forEach((v,i)=>{
         let text = String(v);
         if(i===0 && text.length>maxLen) text = text.slice(0,maxLen-2)+'…';
@@ -3128,13 +3554,57 @@ async function generarReporteDiarioPDF(){
     y += 6;
   });
 
+  // Segunda parte del MISMO reporte (confirmado por el usuario): hoja aparte con la melamina sin cortar.
+  if(!soloSinCortar){
+    doc.addPage(); y = 15;
+    doc.setFontSize(14);
+    doc.text('Melamina sin cortar', marginL, y); y+=7;
+    doc.setFontSize(10);
+    doc.text(`Módulo: ${mod} · ${fechaStr}, ${horaStr}`, marginL, y); y+=8;
+    const itemsMel = CATALOGO.filter(i=>i.cat==='Melamina');
+    const totMel = itemsMel.reduce((s,it)=>s+calcFormula(it.id).completas,0);
+    doc.setFillColor(238,242,255); doc.rect(marginL, y, 182, 9, 'F');
+    doc.setFontSize(11); doc.setFont(undefined,'bold');
+    doc.text(`Total: ${fmtNum(totMel)} hojas de melamina sin cortar`, marginL+2, y+6);
+    doc.setFont(undefined,'normal');
+    y += 15;
+    cols = [ {label:'Color', w:120}, {label:'Hojas sin cortar', w:62} ];
+    drawHeaderRow();
+    doc.setFontSize(9);
+    itemsMel.forEach((it,idx)=>{
+      if(y > pageH-15){ doc.addPage(); y=15; drawHeaderRow(); doc.setFontSize(9); }
+      if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tableW(), 5.5, 'F'); }
+      doc.text(it.nombre, colX(0)+1.5, y+4);
+      doc.text(String(fmtNum(calcFormula(it.id).completas)), colX(1)+1.5, y+4);
+      y += 5.5;
+    });
+  }
+
+  // Correderas según la última auditoría que las contó (juegos totales y medias desfasadas)
+  const audCorrPdf = !soloSinCortar ? auditorias.find(x=>x.correderas && x.correderas.length) : null;
+  if(audCorrPdf){
+    if(y > pageH-50){ doc.addPage(); y=15; } else { y += 10; }
+    doc.setFontSize(12); doc.setFont(undefined,'bold');
+    doc.text('Correderas (según auditoría del '+new Date(audCorrPdf.fecha).toLocaleDateString('es-MX')+')', marginL, y); y+=6;
+    doc.setFont(undefined,'normal');
+    cols = [ {label:'Tipo', w:62}, {label:'Juegos totales', w:40}, {label:'Hembras sin macho', w:40}, {label:'Machos sin hembra', w:40} ];
+    drawHeaderRow(); doc.setFontSize(9);
+    audCorrPdf.correderas.forEach(bc=>{
+      doc.text(bc.etiqueta, colX(0)+1.5, y+4);
+      doc.text(String(fmtNum(bc.totalJuegos!==undefined?bc.totalJuegos:bc.pares)), colX(1)+1.5, y+4);
+      doc.text(String(fmtNum(bc.hembrasSinPareja)), colX(2)+1.5, y+4);
+      doc.text(String(fmtNum(bc.machosSinPareja)), colX(3)+1.5, y+4);
+      y += 5.5;
+    });
+  }
+
   const stamp = ahora.toISOString().slice(0,10);
-  const filename = `inventario-${mod.replace(/\s+/g,'_')}-${stamp}.pdf`;
+  const filename = `${soloSinCortar?'melamina-sin-cortar':'inventario'}-${mod.replace(/\s+/g,'_')}-${stamp}.pdf`;
   const blob = doc.output('blob');
 
   if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
     try{
-      await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'Inventario diario', text:`Inventario diario · ${mod} · ${fechaStr}` });
+      await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title: soloSinCortar?'Melamina sin cortar':'Inventario diario', text:`${soloSinCortar?'Melamina sin cortar':'Inventario diario'} · ${mod} · ${fechaStr}` });
       return;
     }catch(e){ /* si cancela o falla compartir, cae a la descarga normal */ }
   }

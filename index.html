@@ -122,6 +122,11 @@ details.card summary{cursor:pointer;min-height:32px;display:flex;align-items:cen
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #toast.err{background:var(--bad)}
 @media (max-width:360px){ .tiles,.tipos{gap:8px} .tile{min-height:116px;padding:14px 12px} .tile-ic{font-size:28px} }
+.subcard .card{box-shadow:none;border:none;padding:0;margin:0;background:transparent}
+details.card > summary{list-style:none}
+details.card > summary::-webkit-details-marker{display:none}
+details.card > summary::after{content:'▾';margin-left:auto;color:var(--sub);font-size:14px}
+details.card[open] > summary::after{content:'▴'}
 </style>
 </head>
 <body>
@@ -141,6 +146,7 @@ details.card summary{cursor:pointer;min-height:32px;display:flex;align-items:cen
   <button data-v="inv">📦 Inventario</button>
   <button data-v="mov">✍️ Anotar</button>
   <button data-v="inst">🔧 Instalación</button>
+  <button data-v="gar">🛡️ Garantías</button>
   <button data-v="trasp">🔄 Traspasos</button>
   <button data-v="rep">📊 Reportes</button>
   <button data-v="aud">📋 Auditoría</button>
