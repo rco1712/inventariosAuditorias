@@ -23,6 +23,9 @@ let miPerfil = null;
 const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente' };
 function puedeEscribir(){ return !miPerfil || miPerfil.rol==='admin' || miPerfil.rol==='coordinador'; }
 function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
+// Lo que capture un coordinador queda "pendiente" hasta que Dirección lo apruebe; lo de
+// Dirección (o traspasos, que siempre son inmediatos) se guarda ya "aprobado".
+function estadoNuevoMovimiento(){ return esAdmin() ? 'aprobado' : 'pendiente'; }
 let instSub = 'mueble';
 let instPreview = null; // {piezas, consumo:[{itemId,cantidad}], bloqueado, motivosBloqueo:[]}
 // Adicionales: muebles extra que se agregan a un modelo (cajonera, entrepañera, cajonera de
@@ -98,7 +101,7 @@ function renderModBar(){
 // Muestra/oculta pestañas de navegación y acciones según el rol de quien inició sesión.
 function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
-  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr'] : (miPerfil.rol==='coordinador' ? ['aud','trasp','usr'] : []);
+  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr'] : []);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
   });
@@ -208,7 +211,9 @@ function calcFormula(itemId){
   const resetFecha = resetMap[modulo()];
   const inicial = resetFecha ? 0 : (inicialMap[itemId] ?? 0);
   let entradas=0, salidas=0, instalaciones=0, mermas=0;
-  movs.filter(m=>m.itemId===itemId && (!resetFecha || m.fecha>resetFecha)).forEach(m=>{
+  // Solo cuenta lo "aprobado" (o sin estado = movimientos viejos, de antes de que existiera
+  // esta función) hacia el Final oficial. Lo "pendiente" o "rechazado" no descuenta/suma nada.
+  movs.filter(m=>m.itemId===itemId && (!resetFecha || m.fecha>resetFecha) && m.estado!=='pendiente' && m.estado!=='rechazado').forEach(m=>{
     if(m.tipo==='entrada') entradas+=m.cantidad;
     else if(m.tipo==='salida') salidas+=m.cantidad;
     else if(m.tipo==='instalacion') instalaciones+=m.cantidad;
@@ -264,7 +269,7 @@ function setView(v){
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
-  if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios();
+  if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
 }
 
 let invCat = null;
@@ -328,11 +333,18 @@ function renderMov(){
   </div>
   <div class="card">
     <strong>Movimientos recientes</strong>
-    <div class="wrap-x"><table><tr><th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
+    <div class="wrap-x"><table><tr><th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Estado</th></tr>
     ${movs.slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleString()}</td><td>${m.itemNombre}</td>
-      <td class="${m.tipo==='entrada'?'pos':'neg'}">${m.tipo}</td><td>${m.cantidad} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td></tr>`).join('')}
+      <td class="${m.tipo==='entrada'?'pos':'neg'}">${m.tipo}</td><td>${m.cantidad} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}
     </table></div>
   </div>`;
+}
+
+// Etiqueta visual para el estado de aprobación de un movimiento/instalación.
+function badgeEstado(estado){
+  if(estado==='pendiente') return '<span class="tag" style="color:#b3742c;border-color:#b3742c">Pendiente</span>';
+  if(estado==='rechazado') return '<span class="tag" style="color:var(--bad);border-color:var(--bad)">Rechazado</span>';
+  return '<span class="tag pos" style="border-color:var(--ok)">Aprobado</span>';
 }
 
 async function registrarMovLote(){
@@ -353,10 +365,15 @@ async function registrarMovLote(){
   }
   if(aplicar.length===0) return alert('No capturaste ninguna cantidad.');
   try{
+    const estado = estadoNuevoMovimiento();
+    const loteId = cryptoId();
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const a of aplicar){
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString()});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString(),estado,loteId,creadoPor});
     }
-    alert(aplicar.length+' movimiento(s) registrado(s) en '+movCat+'.');
+    alert(estado==='pendiente'
+      ? aplicar.length+' movimiento(s) capturado(s) en '+movCat+'. Quedaron PENDIENTES de aprobación de Dirección — el inventario oficial no cambia hasta que se aprueben.'
+      : aplicar.length+' movimiento(s) registrado(s) en '+movCat+'.');
     renderMov();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -1247,8 +1264,8 @@ async function renderInstHistorial(){
     <div class="card">
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
-      <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td>${x.descripcion}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td></tr>`).join('')}
+      <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td>${x.descripcion}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
     </div>`).join('');
 }
@@ -1408,16 +1425,21 @@ async function confirmarInst(){
       const f = calcFormula(c.itemId);
       if(f.final - c.cantidad < 0){ alert('Existencia cambió, ya no alcanza para: '+CATALOGO.find(i=>i.id===c.itemId).nombre); return; }
     }
+    const estado = estadoNuevoMovimiento();
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    const logId = cryptoId();
     for(const c of instPreview.consumo){
       const item = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString()});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
     }
     // Registro consolidado para el historial por día del módulo
-    await db.collection('instalacionesLog').doc(cryptoId()).set({
+    await db.collection('instalacionesLog').doc(logId).set({
       modulo:mod, categoria:'Mueble', descripcion:desc, nota, fechaDia,
-      consumo:instPreview.consumo, fecha:new Date().toISOString()
+      consumo:instPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
-    alert('Instalación registrada. Se descontaron '+instPreview.consumo.length+' artículo(s) y quedó en el historial de '+fechaDia+'.');
+    alert(estado==='pendiente'
+      ? 'Instalación capturada. Quedó PENDIENTE de aprobación de Dirección — el material no se descuenta del inventario oficial hasta que se apruebe.'
+      : 'Instalación registrada. Se descontaron '+instPreview.consumo.length+' artículo(s) y quedó en el historial de '+fechaDia+'.');
     instPreview=null;
     iAdicionales=[];
     renderInstMueble();
@@ -1780,16 +1802,21 @@ async function registrarPuerta(tipo, alto, ancho){
       const f = calcFormula(c.itemId);
       if(f.final - c.cantidad < 0){ alert('Existencia cambió, ya no alcanza para: '+CATALOGO.find(i=>i.id===c.itemId).nombre); return; }
     }
+    const estado = estadoNuevoMovimiento();
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    const logId = cryptoId();
     for(const c of puertaPreview.consumo){
       const item = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString()});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
     }
-    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,nota,fechaDia,fecha:new Date().toISOString()});
-    await db.collection('instalacionesLog').doc(cryptoId()).set({
+    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,nota,fechaDia,fecha:new Date().toISOString(),estado});
+    await db.collection('instalacionesLog').doc(logId).set({
       modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia,
-      consumo:puertaPreview.consumo, fecha:new Date().toISOString()
+      consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
-    alert('Instalación de puertas registrada. Se descontaron '+puertaPreview.consumo.length+' artículo(s) (material y herrajes) y quedó en el historial de '+fechaDia+'.');
+    alert(estado==='pendiente'
+      ? 'Instalación de puertas capturada. Quedó PENDIENTE de aprobación de Dirección — el material no se descuenta del inventario oficial hasta que se apruebe.'
+      : 'Instalación de puertas registrada. Se descontaron '+puertaPreview.consumo.length+' artículo(s) (material y herrajes) y quedó en el historial de '+fechaDia+'.');
     puertaPreview = null;
     renderInstPuertas();
   }catch(e){ alert('Error al registrar: '+e.message); }
@@ -1810,6 +1837,7 @@ async function calcFormulaForModulo(mod, itemId){
       const m = doc.data();
       if(m.modulo!==mod || m.itemId!==itemId) return;
       if(resetFecha && m.fecha<=resetFecha) return;
+      if(m.estado==='pendiente' || m.estado==='rechazado') return;
       if(m.tipo==='entrada') entradas+=m.cantidad;
       else if(m.tipo==='salida') salidas+=m.cantidad;
       else if(m.tipo==='instalacion') instalaciones+=m.cantidad;
@@ -1840,6 +1868,8 @@ async function cargarPrestamos(){
 }
 
 function renderTrasp(){
+  // Un coordinador solo puede traspasar DESDE su propio módulo (nunca desde otro).
+  if(miPerfil && miPerfil.rol==='coordinador') traspOrigen = modulo();
   if(!traspOrigen) traspOrigen = modulo();
   $('#main').innerHTML = `
     <div class="card"><div class="subtabs">
@@ -1866,7 +1896,9 @@ function renderTraspNuevo(){
     <strong>Nuevo traspaso</strong>
     <p class="hint">El material sale del inventario del módulo origen y entra al del destino de inmediato. Además queda un registro de préstamo para llevar la deuda entre módulos.</p>
     <div class="grid2" style="margin-top:8px">
-      <div><label class="hint">Módulo origen</label><select id="t-origen" onchange="traspOrigen=this.value;renderTraspNuevo()">${MODULOS.map(m=>`<option ${m.nombre===traspOrigen?'selected':''}>${m.nombre}</option>`).join('')}</select></div>
+      <div><label class="hint">Módulo origen</label>${(miPerfil && miPerfil.rol==='coordinador')
+        ? `<input value="${traspOrigen}" disabled>`
+        : `<select id="t-origen" onchange="traspOrigen=this.value;renderTraspNuevo()">${MODULOS.map(m=>`<option ${m.nombre===traspOrigen?'selected':''}>${m.nombre}</option>`).join('')}</select>`}</div>
       <div><label class="hint">Módulo destino</label><select id="t-destino" onchange="traspDestino=this.value">${MODULOS.filter(m=>m.nombre!==traspOrigen).map(m=>`<option ${m.nombre===traspDestino?'selected':''}>${m.nombre}</option>`).join('')}</select></div>
     </div>
     <div style="margin-top:8px">${catsHtml}</div>
@@ -1920,15 +1952,20 @@ async function confirmarTraspaso(){
   if(!traspPreview || traspPreview.bloqueado) return;
   const {origen, destino, elegidos, nota} = traspPreview;
   try{
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const e of elegidos){
       const notaTxt = `Traspaso ${origen} → ${destino}${nota?(' · '+nota):''}`;
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'salida',cantidad:e.cantidad,nota:notaTxt,fecha:new Date().toISOString()});
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:destino,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:e.cantidad,nota:notaTxt,fecha:new Date().toISOString()});
+      // Los traspasos SIEMPRE se aplican de inmediato (no piden aprobación de Dirección),
+      // aunque los registre un coordinador — así lo pidió el negocio. La deuda entre
+      // módulos (colección "prestamos") sí queda registrada para llevar el control de quién
+      // le debe a quién ("estado" aquí es pendiente/parcial/cerrado de la DEUDA, no de aprobación).
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'salida',cantidad:e.cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado',creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:destino,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:e.cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado',creadoPor});
       // Registro de préstamo: cada artículo lleva su propia deuda.
       await db.collection('prestamos').doc(cryptoId()).set({
         origen, destino, itemId:e.itemId, itemNombre:e.itemNombre, categoria:CATALOGO.find(i=>i.id===e.itemId).cat, unidad:e.unidad,
         esMelamina: esMelaminaId(e.itemId), cantidad:e.cantidad, devuelto:0, pendiente:e.cantidad, estado:'pendiente',
-        nota, fecha:new Date().toISOString(), devoluciones:[]
+        nota, fecha:new Date().toISOString(), devoluciones:[], creadoPor
       });
     }
     $('#t-result').innerHTML = `<div class="card pos">Traspaso registrado: ${elegidos.length} artículo(s) de ${origen} a ${destino}. Queda como préstamo pendiente hasta que ${destino} devuelva el material.</div>`;
@@ -1978,8 +2015,8 @@ async function registrarDevolucion(prestamoId){
   if(fDestino.final - cantidad < 0) return alert(p.destino+' no tiene suficiente "'+item.nombre+'" para devolver ('+fDestino.final+' disponibles).');
   try{
     const notaTxt = `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`;
-    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha:new Date().toISOString()});
-    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId,itemNombre:item.nombre,tipo:'entrada',cantidad,nota:notaTxt,fecha:new Date().toISOString()});
+    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado'});
+    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId,itemNombre:item.nombre,tipo:'entrada',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado'});
     const nuevoDevuelto = p.devuelto + cantidad;
     const nuevoPendiente = p.cantidad - nuevoDevuelto;
     const nuevoEstado = nuevoPendiente<=0 ? 'cerrado' : (nuevoDevuelto>0 ? 'parcial' : 'pendiente');
@@ -2080,6 +2117,105 @@ function renderRep(){
   html += `</div>`;
 
   $('#main').innerHTML = html;
+}
+
+// ===== Aprobaciones (solo admin) =====
+// Lo que captura un coordinador (entradas/salidas e instalaciones — los traspasos NO, esos
+// son siempre inmediatos) queda "pendiente" y no afecta el inventario oficial hasta que
+// Dirección lo aprueba o rechaza aquí. Se revisa de TODOS los módulos a la vez.
+async function renderAprobaciones(){
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Esta sección es solo para Dirección.</div>'; return; }
+  $('#main').innerHTML = '<div class="card">Cargando pendientes…</div>';
+  let todosMovs=[], todosLogs=[];
+  try{
+    const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
+    todosMovs = snapMov.docs.map(d=>({id:d.id,...d.data()}));
+    todosLogs = snapLog.docs.map(d=>({id:d.id,...d.data()}));
+  }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${e.message}</div>`; return; }
+
+  const logsPendientes = todosLogs.filter(l=>l.estado==='pendiente').sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  // Movimientos pendientes que NO son de una instalación (esos ya se muestran agrupados arriba
+  // por su instalacionesLog) — se agrupan por loteId (una sola captura de Entradas/Salidas).
+  const movsSueltosPendientes = todosMovs.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion');
+  const lotes = {};
+  movsSueltosPendientes.forEach(m=>{ const key=m.loteId||m.id; (lotes[key]=lotes[key]||[]).push(m); });
+  const loteIds = Object.keys(lotes).sort((a,b)=>(lotes[b][0].fecha||'').localeCompare(lotes[a][0].fecha||''));
+
+  if(logsPendientes.length===0 && loteIds.length===0){
+    $('#main').innerHTML = '<div class="card">No hay nada pendiente de aprobación. 🎉</div>';
+    return;
+  }
+
+  let html = `<div class="card"><strong>Aprobaciones</strong><p class="hint">Lo que capturan los coordinadores queda aquí hasta que lo apruebes o rechaces. Los traspasos entre módulos no requieren aprobación (se aplican de inmediato).</p></div>`;
+
+  if(loteIds.length>0){
+    html += `<div class="card"><h3>Entradas / Salidas pendientes (${loteIds.length})</h3></div>`;
+    html += loteIds.map(key=>{
+      const items = lotes[key];
+      const m0 = items[0];
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
+        </div>
+        <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
+        ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'?'pos':'neg'}">${m.tipo}</td><td>${m.cantidad}</td><td>${m.nota||''}</td></tr>`).join('')}
+        </table></div>
+        <div class="row" style="justify-content:flex-end;margin-top:8px">
+          <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarLote('${key}')">Rechazar</button>
+          <button class="btn small" onclick="aprobarLote('${key}')">Aprobar</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  if(logsPendientes.length>0){
+    html += `<div class="card"><h3>Instalaciones pendientes (${logsPendientes.length})</h3></div>`;
+    html += logsPendientes.map(l=>`<div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div><strong>${l.modulo}</strong><div class="tag">${l.categoria}</div><div class="tag">${l.fechaDia}</div>${l.creadoPor?`<div class="tag">${l.creadoPor}</div>`:''}</div>
+        </div>
+        <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>
+        <div class="wrap-x"><table><tr><th>Artículo</th><th>Cant.</th></tr>
+        ${(l.consumo||[]).map(c=>`<tr><td>${CATALOGO.find(i=>i.id===c.itemId)?.nombre||c.itemId}</td><td>${c.cantidad}</td></tr>`).join('')}
+        </table></div>
+        <div class="row" style="justify-content:flex-end;margin-top:8px">
+          <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarInstalacion('${l.id}')">Rechazar</button>
+          <button class="btn small" onclick="aprobarInstalacion('${l.id}')">Aprobar</button>
+        </div>
+      </div>`).join('');
+  }
+
+  $('#main').innerHTML = html;
+}
+
+async function cambiarEstadoLote(loteId, nuevoEstado){
+  const snap = await db.collection('movimientos').get();
+  const docs = snap.docs.filter(d=>{ const m=d.data(); return (m.loteId||d.id)===loteId && m.estado==='pendiente'; });
+  for(const d of docs){ await db.collection('movimientos').doc(d.id).update({estado:nuevoEstado}); }
+}
+async function aprobarLote(loteId){
+  try{ await cambiarEstadoLote(loteId,'aprobado'); renderAprobaciones(); }
+  catch(e){ alert('Error: '+e.message); }
+}
+async function rechazarLote(loteId){
+  if(!confirm('¿Rechazar este lote? El material NO se descontará/agregará al inventario.')) return;
+  try{ await cambiarEstadoLote(loteId,'rechazado'); renderAprobaciones(); }
+  catch(e){ alert('Error: '+e.message); }
+}
+async function aprobarInstalacion(logId){
+  try{
+    await db.collection('instalacionesLog').doc(logId).update({estado:'aprobado'});
+    await cambiarEstadoLote(logId,'aprobado');
+    renderAprobaciones();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function rechazarInstalacion(logId){
+  if(!confirm('¿Rechazar esta instalación? El material NO se descontará del inventario.')) return;
+  try{
+    await db.collection('instalacionesLog').doc(logId).update({estado:'rechazado'});
+    await cambiarEstadoLote(logId,'rechazado');
+    renderAprobaciones();
+  }catch(e){ alert('Error: '+e.message); }
 }
 
 // ===== Panel de usuarios (solo admin) =====
