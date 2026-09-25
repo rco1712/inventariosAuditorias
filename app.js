@@ -880,17 +880,21 @@ async function saveAudit(){
   const auditor = $('#aud-auditor').value.trim() || 'Sin nombre';
   const eq = piezasAuditAHojas();
   const resultados=[]; let totalDiff=0;
-  const ids = new Set([...Object.keys(auditCapturas).filter(k=>auditCapturas[k]!==undefined), ...Object.keys(eq)]);
-  ids.forEach(itemId=>{
-    const it = CATALOGO.find(i=>i.id===itemId);
-    if(!it) return;
+  const capturados = Object.keys(auditCapturas).filter(k=>auditCapturas[k]!==undefined);
+  if(!capturados.length && !Object.keys(eq).length) return alert('No has capturado ningún artículo, pieza ni armado todavía.');
+  // Confirmado por el usuario: el reporte de auditoría lleva TODOS los artículos, aunque estén en
+  // cero. Lo que no se capturó se toma como 0 físico; antes se avisa de los que sí tenían existencia.
+  const noContados = CATALOGO.filter(it=>auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
+  if(noContados.length && !confirm(`Hay ${noContados.length} artículo(s) que según el inventario SÍ hay, pero no los contaste:\n\n${noContados.slice(0,15).map(it=>'• '+it.nombre+' (debería haber '+fmtNum(calcFormula(it.id).final)+')').join('\n')}${noContados.length>15?'\n… y '+(noContados.length-15)+' más':''}\n\nSi guardas así, se toman como 0 (faltante). ¿Guardar de todos modos?\n\n(Cancelar = regresar a contarlos)`)) return;
+  CATALOGO.forEach(it=>{
+    const itemId = it.id;
     const f = calcFormula(itemId);
     const hojasCompletas = auditCapturas[itemId]!==undefined ? auditCapturas[itemId] : 0;
     const hojasEnPiezas = fmtNum(eq[itemId]||0);
     const fisico = fmtNum(hojasCompletas + hojasEnPiezas);
     const diff = fmtNum(fisico - f.final);
     if(diff!==0) totalDiff++;
-    const r = {itemId, nombre:it.nombre, teorico:fmtNum(f.final), fisico, diff};
+    const r = {itemId, nombre:it.nombre, cat:it.cat, unidad:it.unidad, teorico:fmtNum(f.final), fisico, diff, capturado: auditCapturas[itemId]!==undefined || !!eq[itemId]};
     if(hojasEnPiezas){ r.hojasCompletas = hojasCompletas; r.hojasEnPiezas = hojasEnPiezas; }
     if(f.esHoja){
       // Comparación por lado: hojas completas contadas vs. teóricas, y cortado/armado contado
@@ -901,7 +905,6 @@ async function saveAudit(){
     }
     resultados.push(r);
   });
-  if(resultados.length===0) return alert('No has capturado ningún artículo, pieza ni armado todavía.');
   // Detalle de piezas contadas, para consultarlo después en el Historial
   const piezasContadas = [];
   Object.keys(auditPiezas).forEach(grupo=>{
@@ -911,7 +914,7 @@ async function saveAudit(){
     });
   });
   try{
-    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff};
+    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:true};
     if(piezasContadas.length) doc.piezasContadas = piezasContadas;
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
     const bc = balanceCorrederas();
@@ -919,9 +922,12 @@ async function saveAudit(){
     const audId = cryptoId();
     await db.collection('auditorias').doc(audId).set(doc);
     auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor='';
-    alert('Auditoría guardada.');
+    toast('✅ Auditoría guardada.');
     histTab='aud';
     setView('hist');
+    if(confirm('¿Quieres descargar el REPORTE DE AUDITORÍA en PDF (teórico vs. físico de cada artículo)?')){
+      try{ await generarReporteAuditoriaPDF({...doc, id:audId}); }catch(e){ alert('No se pudo generar el PDF: '+e.message); }
+    }
     if(esAdmin() && confirm('¿Aplicar esta auditoría al inventario ahora?\n\nEl inventario quedará igual a lo contado y lo que haya faltado se guarda como DEUDA en Historial → Faltantes (deuda).\n\nTambién puedes aplicarla después desde el Historial.')){
       await aplicarAuditoria(audId, {...doc, id:audId});
     }
@@ -943,12 +949,18 @@ function renderHist(){
           ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ Aplicada al inventario</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">Sin aplicar</div>`}</div>
         <div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>
       </div>
-      ${!a.aplicada && esAdmin() ? `<div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button></div>` : ''}
+      <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
+        <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 Reporte PDF</button>
+        ${!a.aplicada && esAdmin() ? `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>` : ''}
+      </div>
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
-        <table><tr><th>Artículo</th><th>Teórico</th><th>Físico</th><th>Dif.</th></tr>
-        ${a.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}${r.hojasEnPiezas&&r.teoricoCompletas===undefined?`<div class="hint" style="margin-top:3px">${fmtNum(r.hojasCompletas)} sueltas/completas + ${fmtNum(r.hojasEnPiezas)} en piezas/armados</div>`:''}</td><td class="${r.diff?'neg':'pos'}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>${detalleLadosHtml(r)}`).join('')}
-        </table>
+        ${(()=>{ const fila = r=>`<tr><td>${r.nombre}${r.capturado===false&&Math.abs(Number(r.teorico))>0.005?' <span class="tag">no contado</span>':''}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}${r.hojasEnPiezas&&r.teoricoCompletas===undefined?`<div class="hint" style="margin-top:3px">${fmtNum(r.hojasCompletas)} sueltas/completas + ${fmtNum(r.hojasEnPiezas)} en piezas/armados</div>`:''}</td><td class="${r.diff<0?'neg':(r.diff>0?'pos':'')}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>${detalleLadosHtml(r)}`;
+          const dif = a.resultados.filter(r=>Math.abs(Number(r.diff)||0)>0.005), ok = a.resultados.filter(r=>!(Math.abs(Number(r.diff)||0)>0.005));
+          return `<h3>Con diferencia (${dif.length})</h3>
+          ${dif.length?`<table><tr><th>Artículo</th><th>Teórico</th><th>Físico</th><th>Dif.</th></tr>${dif.map(fila).join('')}</table>`:'<p class="hint">Todo cuadra. 🎉</p>'}
+          <details style="margin-top:10px"><summary class="hint">Ver los ${ok.length} artículo(s) que cuadran</summary>
+          <table><tr><th>Artículo</th><th>Teórico</th><th>Físico</th><th>Dif.</th></tr>${ok.map(fila).join('')}</table></details>`; })()}
         ${a.piezasContadas&&a.piezasContadas.length?`<h3 style="margin-top:12px">✂️ Piezas cortadas contadas</h3>
         <table><tr><th>Material</th><th>Pieza</th><th>Cant.</th></tr>
         ${a.piezasContadas.map(p=>`<tr><td>${p.grupo}</td><td>${p.pieza}<div class="tag">${p.dim}</div></td><td>${fmtNum(p.cantidad)}</td></tr>`).join('')}
@@ -960,6 +972,105 @@ function renderHist(){
         ${(a.correderas||[]).map(b=>`<p class="hint">${b.etiqueta}: total <strong>${fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares)} juego(s)</strong> (${fmtNum(b.hembras)} hembra(s) + ${fmtNum(b.machos)} macho(s)${b.juegosSueltos?` + ${fmtNum(b.juegosSueltos)} sueltos`:''})${b.hembrasSinPareja?` · <span class="neg">${fmtNum(b.hembrasSinPareja)} hembra(s) sin macho</span>`:''}${b.machosSinPareja?` · <span class="neg">${fmtNum(b.machosSinPareja)} macho(s) sin hembra</span>`:''}</p>`).join('')}
       </div>
     </div>`).join('');
+}
+
+// ===== Reporte de auditoría en PDF (confirmado por el usuario) =====
+// Todos los artículos (aunque estén en cero): lo que el inventario dice que hay (teórico, el stock
+// final del momento de la auditoría) contra lo que se contó (físico), y la diferencia (+ sobra, − falta).
+async function reporteAuditoriaUI(id){
+  const a = auditorias.find(x=>x.id===id);
+  if(!a) return;
+  try{ await generarReporteAuditoriaPDF(a); }catch(e){ alert('No se pudo generar el reporte: '+e.message); }
+}
+async function generarReporteAuditoriaPDF(a){
+  if(!(window.jspdf && window.jspdf.jsPDF)) throw new Error('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const marginL = 14, pageH = doc.internal.pageSize.getHeight(), W = 182;
+  const fecha = new Date(a.fecha);
+  const fechaStr = fecha.toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'})+', '+fecha.toLocaleTimeString('es-MX');
+  const res = (a.resultados||[]).map(r=>{ const it = CATALOGO.find(i=>i.id===r.itemId); return {...r, cat: r.cat || (it?it.cat:'Otros'), unidad: r.unidad || (it?it.unidad:'')}; });
+  const conDif = res.filter(r=>Math.abs(Number(r.diff)||0)>0.005);
+  const faltan = conDif.filter(r=>r.diff<0).length, sobran = conDif.filter(r=>r.diff>0).length;
+  let y = 15, cols = [];
+  const colX = i => { let x=marginL; for(let k=0;k<i;k++) x+=cols[k].w; return x; };
+  const tw = () => cols.reduce((s,c)=>s+c.w,0);
+  const sgn = v => (v>0?'+':'')+fmtNum(v);
+  function header(){
+    doc.setFillColor(62,92,222); doc.setTextColor(255,255,255); doc.rect(marginL, y, tw(), 6, 'F');
+    doc.setFontSize(8); doc.setFont(undefined,'bold');
+    cols.forEach((c,i)=>doc.text(c.label, colX(i)+1.5, y+4.2));
+    doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 6;
+  }
+  doc.setFontSize(14); doc.text('Closets Vera · Reporte de Auditoría', marginL, y); y+=7;
+  doc.setFontSize(10);
+  doc.text(`Módulo: ${a.modulo}`, marginL, y); y+=5;
+  doc.text(`Fecha de la auditoría: ${fechaStr}`, marginL, y); y+=5;
+  doc.text(`Auditor: ${a.auditor||'—'} · Tipo: ${a.tipo||'—'} · ${a.aplicada?'Aplicada al inventario':'Todavía NO aplicada al inventario'}`, marginL, y); y+=7;
+  // Resumen
+  doc.setFillColor(238,242,255); doc.rect(marginL, y, W, 17, 'F');
+  doc.setFontSize(10); doc.setFont(undefined,'bold');
+  doc.text(`${res.length} artículo(s) revisados · ${conDif.length} con diferencia`, marginL+2, y+6);
+  doc.setFont(undefined,'normal'); doc.setFontSize(9);
+  doc.text(`Faltan: ${faltan} artículo(s) · Sobran: ${sobran} artículo(s) · Cuadran: ${res.length-conDif.length}`, marginL+2, y+11.5);
+  doc.text('Teórico = lo que decía el inventario ese día. Diferencia = Físico − Teórico ( − falta, + sobra ).', marginL+2, y+15.5);
+  y += 23;
+
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))].filter(c=>res.some(r=>r.cat===c));
+  if(res.some(r=>!cats.includes(r.cat))) cats.push(...new Set(res.filter(r=>!cats.includes(r.cat)).map(r=>r.cat)));
+  cats.forEach(cat=>{
+    const filas = res.filter(r=>r.cat===cat);
+    const hoja = filas.some(r=>r.teoricoCompletas!==undefined);
+    cols = hoja
+      ? [{label:'Artículo',w:62},{label:'Teórico',w:20},{label:'Físico',w:20},{label:'Diferencia',w:24},{label:'Dif. completas',w:28},{label:'Dif. cortado',w:28}]
+      : [{label:'Artículo',w:92},{label:'Teórico',w:30},{label:'Físico',w:30},{label:'Diferencia',w:30}];
+    if(y > pageH-30){ doc.addPage(); y=15; }
+    doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text(cat, marginL, y+4); doc.setFont(undefined,'normal'); y+=7;
+    header(); doc.setFontSize(8);
+    filas.forEach((r,idx)=>{
+      if(y > pageH-15){ doc.addPage(); y=15; header(); doc.setFontSize(8); }
+      const d = Number(r.diff)||0;
+      if(Math.abs(d)>0.005){ doc.setFillColor(d<0?253:232, d<0?236:247, d<0?236:238); doc.rect(marginL, y, tw(), 5, 'F'); }
+      else if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tw(), 5, 'F'); }
+      let nom = r.nombre + (r.capturado===false && Math.abs(Number(r.teorico))>0.005 ? ' (no contado)' : '');
+      const maxLen = hoja ? 36 : 55; if(nom.length>maxLen) nom = nom.slice(0,maxLen-2)+'…';
+      const vals = [nom, fmtNum(r.teorico), fmtNum(r.fisico), sgn(d)];
+      if(hoja) vals.push(r.teoricoCompletas!==undefined ? sgn(Number(r.diffCompletas)||0) : '', r.teoricoCompletas!==undefined ? sgn(Number(r.diffCortado)||0) : '');
+      vals.forEach((v,i)=>{
+        const esDif = i>=3 && typeof v==='string' && v!=='' && v!=='0';
+        if(esDif) doc.setTextColor(v.startsWith('-')?200:31, v.startsWith('-')?40:130, v.startsWith('-')?40:70);
+        doc.text(String(v), colX(i)+1.5, y+3.6);
+        doc.setTextColor(0,0,0);
+      });
+      y += 5;
+    });
+    y += 6;
+  });
+
+  // Correderas (juegos y desfasadas)
+  if(a.correderas && a.correderas.length){
+    if(y > pageH-40){ doc.addPage(); y=15; }
+    doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text('Correderas', marginL, y+4); doc.setFont(undefined,'normal'); y+=7;
+    cols = [{label:'Tipo',w:62},{label:'Juegos totales',w:40},{label:'Hembras sin macho',w:40},{label:'Machos sin hembra',w:40}];
+    header(); doc.setFontSize(9);
+    a.correderas.forEach(b=>{ [b.etiqueta, fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares), fmtNum(b.hembrasSinPareja), fmtNum(b.machosSinPareja)].forEach((v,i)=>doc.text(String(v), colX(i)+1.5, y+4)); y+=5.5; });
+    y += 6;
+  }
+  // Detalle de lo que se contó en piezas y armados
+  const detalle = [...(a.piezasContadas||[]).map(p=>`${fmtNum(p.cantidad)} × ${p.pieza} (${p.grupo})`), ...(a.armadosContados||[]).map(x=>`${fmtNum(x.cantidad)} × ${x.descripcion}`)];
+  if(detalle.length){
+    if(y > pageH-30){ doc.addPage(); y=15; }
+    doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text('Piezas cortadas y armados contados', marginL, y+4); doc.setFont(undefined,'normal'); y+=8;
+    doc.setFontSize(9);
+    detalle.forEach(t=>{ if(y > pageH-12){ doc.addPage(); y=15; } doc.text('• '+(t.length>100?t.slice(0,98)+'…':t), marginL+2, y); y+=5; });
+  }
+
+  const filename = `auditoria-${String(a.modulo).replace(/\s+/g,'_')}-${a.fecha.slice(0,10)}.pdf`;
+  const blob = doc.output('blob');
+  if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
+    try{ await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'Reporte de auditoría', text:`Reporte de auditoría · ${a.modulo} · ${fechaStr}` }); return; }catch(e){}
+  }
+  doc.save(filename);
 }
 
 // ===== Aplicar auditoría al inventario (solo Dirección) =====
@@ -974,7 +1085,7 @@ function calcularAjustesAuditoria(a, ajustarCortado){
       const dC = Number(r.diffCompletas)||0;
       const dK = ajustarCortado ? (Number(r.diffCortado)||0) : 0;
       if(dC||dK) ajustes.push({it, completasDelta:dC, cortadoDelta:dK, total:fmtNum(dC+dK), limpiarDeuda:ajustarCortado});
-      else if(ajustarCortado) ajustes.push({it, completasDelta:0, cortadoDelta:0, total:0, limpiarDeuda:true});
+      else if(ajustarCortado && calcFormula(it.id).autoCortes>0) ajustes.push({it, completasDelta:0, cortadoDelta:0, total:0, limpiarDeuda:true}); // solo para quitar hojas "sin corte" pendientes
       if(dC<0) faltantes.push({it, lado:'completas', cantidad:fmtNum(-dC)});
       if(dK<0) faltantes.push({it, lado:'cortado', cantidad:fmtNum(-dK)});
     } else {
