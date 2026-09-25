@@ -1026,6 +1026,7 @@ function renderHist(){
       <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
         <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 Reporte PDF</button>
         ${!a.aplicada && esAdmin() ? `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>` : ''}
+        ${esAdmin() ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarAuditoria('${a.id}')">🗑️ Borrar</button>` : ''}
       </div>
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
@@ -1145,6 +1146,35 @@ async function generarReporteAuditoriaPDF(a){
     try{ await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'Reporte de auditoría', text:`Reporte de auditoría · ${a.modulo} · ${fechaStr}` }); return; }catch(e){}
   }
   doc.save(filename);
+}
+
+// ===== Borrar una auditoría (solo Dirección, pide el PIN de administrador) =====
+// Si la auditoría ya se aplicó al inventario, también se deshacen sus ajustes y se quitan los
+// faltantes (deuda) que generó, para que el inventario quede como si nunca se hubiera aplicado.
+async function borrarAuditoria(id){
+  if(!esAdmin()) return alert('Solo Dirección puede borrar una auditoría.');
+  const a = auditorias.find(x=>x.id===id); if(!a) return;
+  const fechaTxt = new Date(a.fecha).toLocaleString('es-MX');
+  const ajustes = movs.filter(m=>m.tipo==='ajuste' && m.auditoriaId===id);
+  const deudasDe = deudas.filter(d=>d.auditoriaId===id);
+  const extra = a.aplicada
+    ? `\n\n⚠️ Esta auditoría YA SE APLICÓ al inventario. Al borrarla también se deshacen sus ${ajustes.length} ajuste(s) y se quitan sus ${deudasDe.length} faltante(s) de la deuda.`
+    : '';
+  if(!confirm(`¿Borrar la auditoría del ${fechaTxt} (${a.auditor||'sin nombre'})?${extra}\n\nNo se puede deshacer.`)) return;
+  const pin = prompt('Escribe el PIN de administrador para confirmar:');
+  if(pin===null) return;
+  if(pin !== await getPinCero()) return alert('PIN incorrecto. No se borró nada.');
+  try{
+    for(const m of ajustes) await db.collection('movimientos').doc(m.id).delete();
+    for(const d of deudasDe) await db.collection('deudasAuditoria').doc(d.id).delete();
+    await db.collection('auditorias').doc(id).delete();
+    // Refresca la vista de inmediato (sin esperar a la sincronización)
+    auditorias = auditorias.filter(x=>x.id!==id);
+    deudas = deudas.filter(d=>d.auditoriaId!==id);
+    movs = movs.filter(m=>!(m.tipo==='ajuste' && m.auditoriaId===id));
+    toast('🗑️ Auditoría borrada.'+(ajustes.length?'<br><small>También se deshicieron sus ajustes al inventario.</small>':''));
+    renderHist();
+  }catch(e){ alert('Error al borrar: '+e.message); }
 }
 
 // ===== Aplicar auditoría al inventario (solo Dirección) =====
