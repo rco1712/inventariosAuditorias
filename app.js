@@ -223,6 +223,13 @@ function calcFormula(itemId){
   return {inicial,entradas,salidas,instalaciones,mermas,final};
 }
 
+// Redondea a máximo 2 decimales para mostrar en pantalla/reportes (evita cifras como
+// 6.9679999999999 por errores normales de redondeo con decimales en JavaScript).
+function fmtNum(n){
+  const x = Math.round((Number(n)||0)*100)/100;
+  return Object.is(x,-0) ? 0 : x;
+}
+
 // ===== PIN de administrador para "poner en cero" =====
 // Se guarda en la colección 'config' (no en el código) para que el admin lo pueda cambiar
 // él mismo desde la app, sin depender de que se suba un archivo nuevo. Si nunca se ha
@@ -292,12 +299,12 @@ function renderInv(){
       ${rows.map(it=>{ const f=calcFormula(it.id);
         return `<tr>
           <td>${it.nombre}<div class="tag">${it.unidad}</div></td>
-          <td>${puedeEscribir()?`<a href="#" onclick="editInicial('${it.id}');return false;">${f.inicial}</a>`:f.inicial}</td>
-          <td class="pos">${f.entradas}</td>
-          <td class="neg">${f.salidas}</td>
-          <td class="neg">${f.instalaciones}</td>
-          <td class="neg">${f.mermas}</td>
-          <td><strong>${f.final}</strong></td>
+          <td>${puedeEscribir()?`<a href="#" onclick="editInicial('${it.id}');return false;">${fmtNum(f.inicial)}</a>`:fmtNum(f.inicial)}</td>
+          <td class="pos">${fmtNum(f.entradas)}</td>
+          <td class="neg">${fmtNum(f.salidas)}</td>
+          <td class="neg">${fmtNum(f.instalaciones)}</td>
+          <td class="neg">${fmtNum(f.mermas)}</td>
+          <td><strong>${fmtNum(f.final)}</strong></td>
         </tr>`; }).join('')}
       </table></div></div>`;
   $('#main').innerHTML = html;
@@ -325,7 +332,7 @@ function renderMov(){
     <h3 style="margin-top:10px">${movCat}</h3>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Stock final</th><th>Cantidad</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id);
-        return `<tr><td>${it.nombre}</td><td>${f.final} ${it.unidad}</td><td><input type="number" min="0" id="mv-${it.id}" placeholder="0"></td></tr>`;
+        return `<tr><td>${it.nombre}</td><td>${fmtNum(f.final)} ${it.unidad}</td><td><input type="number" min="0" id="mv-${it.id}" placeholder="0"></td></tr>`;
       }).join('')}
     </table></div>
     <button class="btn" style="margin-top:10px" onclick="registrarMovLote()">Registrar movimientos de ${movCat}</button>
@@ -360,7 +367,7 @@ async function registrarMovLote(){
     if(!cantidad || cantidad<=0) continue;
     const f = calcFormula(it.id);
     const nuevoFinal = decrece ? f.final - cantidad : f.final + cantidad;
-    if(decrece && nuevoFinal<0){ alert('No hay stock suficiente para "'+it.nombre+'" (disponible: '+f.final+', pediste: '+cantidad+'). No se registró nada de este lote.'); return; }
+    if(decrece && nuevoFinal<0){ alert('No hay stock suficiente para "'+it.nombre+'" (disponible: '+fmtNum(f.final)+', pediste: '+cantidad+'). No se registró nada de este lote.'); return; }
     aplicar.push({itemId:it.id, itemNombre:it.nombre, cantidad});
   }
   if(aplicar.length===0) return alert('No capturaste ninguna cantidad.');
@@ -402,7 +409,7 @@ function renderAud(){
     <h3>${auditCat}</h3>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Teórico</th><th>Físico contado</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id);
-        return `<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td><td>${f.final}</td>
+        return `<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td><td>${fmtNum(f.final)}</td>
           <td><input type="number" value="${auditCapturas[it.id]??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value)"></td></tr>`;
       }).join('')}
     </table></div>
@@ -423,9 +430,9 @@ async function saveAudit(){
     const it = CATALOGO.find(i=>i.id===itemId);
     const f = calcFormula(itemId);
     const fisico = auditCapturas[itemId];
-    const diff = fisico - f.final;
+    const diff = fmtNum(fisico - f.final);
     if(diff!==0) totalDiff++;
-    resultados.push({itemId, nombre:it.nombre, teorico:f.final, fisico, diff});
+    resultados.push({itemId, nombre:it.nombre, teorico:fmtNum(f.final), fisico, diff});
   });
   if(resultados.length===0) return alert('No has capturado ningún artículo todavía.');
   try{
@@ -446,7 +453,7 @@ function renderHist(){
       </div>
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
         <table><tr><th>Artículo</th><th>Teórico</th><th>Físico</th><th>Dif.</th></tr>
-        ${a.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${r.teorico}</td><td>${r.fisico}</td><td class="${r.diff?'neg':'pos'}">${r.diff>0?'+':''}${r.diff}</td></tr>`).join('')}
+        ${a.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}</td><td class="${r.diff?'neg':'pos'}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>`).join('')}
         </table>
       </div>
     </div>`).join('');
@@ -1390,7 +1397,7 @@ function previewInst(){
     ${maxNota? `<div class="warn">${maxNota}</div>`:''}
     <div class="wrap-x"><table><tr><th>Artículo a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
     ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
-      return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${f.final}</td></tr>`;
+      return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${fmtNum(f.final)}</td></tr>`;
     }).join('')}
     </table></div>
   </div>`;
@@ -1402,7 +1409,7 @@ function previewInst(){
       Confirma estos datos para poder registrar esta instalación.</div></div>`;
   } else if(bloqueadoPorStock){
     html += `<div class="card"><div class="warn"><strong>Descuento bloqueado — existencia insuficiente en ${modulo()}.</strong>
-      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${f.disponible}, se requieren ${f.requerido}</li>`).join('')}</ul>
+      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${fmtNum(f.disponible)}, se requieren ${fmtNum(f.requerido)}</li>`).join('')}</ul>
       No se aplicó ningún descuento parcial.</div></div>`;
   } else {
     html += `<div class="card row" style="justify-content:space-between">
@@ -1769,14 +1776,14 @@ function calcPuerta(){
     <div class="hint">Melamina de 15mm (color ${color}): todas las piezas de este corte se acomodan juntas en hojas de 122×244 cm, aprovechando el sobrante entre puertas/marcos/fijos. Se van a cortar <strong>${empaque.hojas} hoja(s) física(s)</strong> del almacén, pero solo se descuenta <strong>${hojasMelamina}</strong> del inventario (lo que realmente ocupan las piezas; el resto queda como sobrante disponible para otro corte).</div>
     <div class="wrap-x" style="margin-top:8px"><table><tr><th>Material/herraje a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
     ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
-      return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${f.final}</td></tr>`;
+      return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${fmtNum(f.final)}</td></tr>`;
     }).join('')}
     </table></div>
   </div>`;
 
   if(bloqueado){
     html += `<div class="card"><div class="warn"><strong>Descuento bloqueado — existencia insuficiente en ${modulo()}.</strong>
-      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${f.disponible}, se requieren ${f.requerido}</li>`).join('')}</ul>
+      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${fmtNum(f.disponible)}, se requieren ${fmtNum(f.requerido)}</li>`).join('')}</ul>
       No se aplicó ningún descuento parcial.</div></div>`;
   } else {
     html += `<div class="card row" style="justify-content:space-between">
@@ -1912,7 +1919,7 @@ function renderTraspNuevo(){
   items.forEach(async it=>{
     const f = await calcFormulaForModulo(traspOrigen, it.id);
     const el = document.getElementById('t-stock-'+it.id);
-    if(el) el.textContent = f.final+' '+it.unidad;
+    if(el) el.textContent = fmtNum(f.final)+' '+it.unidad;
   });
 }
 
@@ -1940,7 +1947,7 @@ async function previewTraspaso(){
   </div>`;
   if(faltantes.length>0){
     html += `<div class="card"><div class="warn"><strong>Traspaso bloqueado — existencia insuficiente en ${traspOrigen}.</strong>
-      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.itemNombre}: disponible ${f.disponible}, se pidieron ${f.cantidad}</li>`).join('')}</ul>
+      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.itemNombre}: disponible ${fmtNum(f.disponible)}, se pidieron ${fmtNum(f.cantidad)}</li>`).join('')}</ul>
       No se movió nada.</div></div>`;
   } else {
     html += `<div class="card row" style="justify-content:flex-end"><button class="btn" onclick="confirmarTraspaso()">Confirmar traspaso</button></div>`;
@@ -1983,7 +1990,7 @@ async function renderTraspHistorial(){
         <div><strong>${p.origen} → ${p.destino}</strong><div class="tag">${new Date(p.fecha).toLocaleString()}</div></div>
         <div class="${p.estado==='cerrado'?'pos':(p.estado==='parcial'?'':'neg')}" style="font-weight:700">${p.estado.toUpperCase()}</div>
       </div>
-      <p class="hint" style="margin:6px 0">${p.itemNombre}${p.esMelamina?' (hoja de melamina — cualquier color cuenta igual para la deuda)':''} · Prestado: ${p.cantidad} ${p.unidad} · Devuelto: ${p.devuelto} · Pendiente: <strong>${p.pendiente} ${p.unidad}</strong></p>
+      <p class="hint" style="margin:6px 0">${p.itemNombre}${p.esMelamina?' (hoja de melamina — cualquier color cuenta igual para la deuda)':''} · Prestado: ${fmtNum(p.cantidad)} ${p.unidad} · Devuelto: ${fmtNum(p.devuelto)} · Pendiente: <strong>${fmtNum(p.pendiente)} ${p.unidad}</strong></p>
       ${p.pendiente>0? `<button class="btn small" onclick="mostrarFormDevolucion('${p.id}')">Registrar devolución</button><div id="dev-${p.id}"></div>` : ''}
     </div>`).join('');
 }
@@ -1997,7 +2004,7 @@ function mostrarFormDevolucion(prestamoId){
     <div class="warn" style="margin-top:8px">
       <div class="grid2">
         <select id="dev-item-${prestamoId}">${opciones}</select>
-        <input id="dev-cant-${prestamoId}" type="number" min="0" max="${p.pendiente}" placeholder="Cantidad a devolver (máx. ${p.pendiente})">
+        <input id="dev-cant-${prestamoId}" type="number" min="0" max="${p.pendiente}" placeholder="Cantidad a devolver (máx. ${fmtNum(p.pendiente)})">
       </div>
       <button class="btn small" style="margin-top:8px" onclick="registrarDevolucion('${prestamoId}')">Confirmar devolución</button>
     </div>`;
@@ -2008,11 +2015,11 @@ async function registrarDevolucion(prestamoId){
   const itemId = document.getElementById('dev-item-'+prestamoId).value;
   const cantidad = Number(document.getElementById('dev-cant-'+prestamoId).value);
   if(!cantidad || cantidad<=0) return alert('Cantidad inválida');
-  if(cantidad > p.pendiente) return alert('No puedes devolver más de lo pendiente ('+p.pendiente+' '+p.unidad+').');
+  if(cantidad > p.pendiente) return alert('No puedes devolver más de lo pendiente ('+fmtNum(p.pendiente)+' '+p.unidad+').');
   const item = CATALOGO.find(i=>i.id===itemId);
   // Quien devuelve es el destino original del préstamo; el material regresa al origen original.
   const fDestino = await calcFormulaForModulo(p.destino, itemId);
-  if(fDestino.final - cantidad < 0) return alert(p.destino+' no tiene suficiente "'+item.nombre+'" para devolver ('+fDestino.final+' disponibles).');
+  if(fDestino.final - cantidad < 0) return alert(p.destino+' no tiene suficiente "'+item.nombre+'" para devolver ('+fmtNum(fDestino.final)+' disponibles).');
   try{
     const notaTxt = `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`;
     await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado'});
@@ -2024,7 +2031,7 @@ async function registrarDevolucion(prestamoId){
       devuelto: nuevoDevuelto, pendiente: Math.max(0,nuevoPendiente), estado: nuevoEstado,
       devoluciones: [...(p.devoluciones||[]), {fecha:new Date().toISOString(), cantidad, itemId, itemNombre:item.nombre}]
     });
-    alert('Devolución registrada.'+(nuevoEstado==='cerrado'? ' Préstamo CERRADO.':' Pendiente: '+Math.max(0,nuevoPendiente)+' '+p.unidad+'.'));
+    alert('Devolución registrada.'+(nuevoEstado==='cerrado'? ' Préstamo CERRADO.':' Pendiente: '+fmtNum(Math.max(0,nuevoPendiente))+' '+p.unidad+'.'));
     renderTraspHistorial();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -2049,7 +2056,7 @@ async function renderTraspResumen(){
       const [deudor,acreedor] = key.split('||');
       const items = porDeudor[key];
       return `<div class="card"><strong>${deudor} debe a ${acreedor}</strong>
-        <ul style="margin:6px 0 0 18px;padding:0">${items.map(g=>`<li>${g.pendiente} ${g.unidad} de ${g.etiqueta}</li>`).join('')}</ul>
+        <ul style="margin:6px 0 0 18px;padding:0">${items.map(g=>`<li>${fmtNum(g.pendiente)} ${g.unidad} de ${g.etiqueta}</li>`).join('')}</ul>
       </div>`;
     }).join('');
 }
@@ -2091,7 +2098,7 @@ function renderRep(){
   html += `<div class="card"><h3>Inventario (solo artículos con movimiento)</h3>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th><th>Instal.</th><th>Mermas</th><th>Final</th></tr>
     ${conMovimiento.map(it=>{ const f=calcFormula(it.id);
-      return `<tr><td>${it.nombre}</td><td>${f.inicial}</td><td class="pos">${f.entradas}</td><td class="neg">${f.salidas}</td><td class="neg">${f.instalaciones}</td><td class="neg">${f.mermas}</td><td><strong>${f.final}</strong></td></tr>`;
+      return `<tr><td>${it.nombre}</td><td>${fmtNum(f.inicial)}</td><td class="pos">${fmtNum(f.entradas)}</td><td class="neg">${fmtNum(f.salidas)}</td><td class="neg">${fmtNum(f.instalaciones)}</td><td class="neg">${fmtNum(f.mermas)}</td><td><strong>${fmtNum(f.final)}</strong></td></tr>`;
     }).join('')}
     </table></div>
     ${conMovimiento.length===0? '<p class="hint">Aún no hay movimientos registrados en este módulo.</p>':''}
@@ -2100,7 +2107,7 @@ function renderRep(){
   html += `<div class="card"><h3>Consumo por instalaciones (acumulado)</h3>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Total consumido</th></tr>
     ${CATALOGO.filter(it=>calcFormula(it.id).instalaciones>0).map(it=>{ const f=calcFormula(it.id);
-      return `<tr><td>${it.nombre}</td><td>${f.instalaciones} ${it.unidad}</td></tr>`;
+      return `<tr><td>${it.nombre}</td><td>${fmtNum(f.instalaciones)} ${it.unidad}</td></tr>`;
     }).join('') || '<tr><td colspan="2" class="hint">Sin consumo por instalaciones todavía.</td></tr>'}
     </table></div>
   </div>`;
@@ -2378,7 +2385,7 @@ async function generarReporteDiarioPDF(){
       if(y > pageH-15){ doc.addPage(); y=15; drawHeaderRow(); doc.setFontSize(8); }
       if(idx%2===1){ doc.setFillColor(246,245,243); doc.rect(marginL, y, tableW, 5, 'F'); }
       const f = calcFormula(it.id);
-      const vals = [it.nombre, f.inicial, f.entradas, f.salidas, f.instalaciones, f.mermas, f.final];
+      const vals = [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.instalaciones), fmtNum(f.mermas), fmtNum(f.final)];
       vals.forEach((v,i)=>{
         let text = String(v);
         if(i===0 && text.length>38) text = text.slice(0,36)+'…';
