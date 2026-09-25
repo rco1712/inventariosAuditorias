@@ -94,7 +94,6 @@ export function onAuthChange(cb){
 }
 
 export function renderLogin(container, onDone){
-  let mode = 'signin';
   container.innerHTML = loginHtml();
   wire();
   function loginHtml(){
@@ -105,19 +104,18 @@ export function renderLogin(container, onDone){
         <div><div class="brandname" style="color:var(--ink)">CLOSETS VERA</div><div class="brandsub" style="color:var(--sub)">Auditoría de Módulos</div></div>
       </div>
       <div class="card">
-        <strong>${mode === 'signin' ? 'Iniciar sesión' : 'Crear cuenta'}</strong>
+        <strong>Iniciar sesión</strong>
         <div style="margin-top:10px"><input id="au-email" type="email" placeholder="correo"></div>
         <div style="margin-top:8px"><input id="au-pass" type="password" placeholder="contraseña"></div>
         <div id="au-error" class="hint" style="color:var(--bad)"></div>
-        <button class="btn" style="margin-top:10px;width:100%" id="au-submit">${mode === 'signin' ? 'Entrar' : 'Crear cuenta'}</button>
+        <button class="btn" style="margin-top:10px;width:100%" id="au-submit">Entrar</button>
         <p class="hint" style="text-align:center;margin-top:10px">
-          ${mode === 'signin' ? '¿No tienes cuenta? <a href="#" id="au-switch">Créala aquí</a>' : '¿Ya tienes cuenta? <a href="#" id="au-switch">Inicia sesión</a>'}
+          ¿No tienes cuenta? Pide acceso a la administración.
         </p>
       </div>
     </div>`;
   }
   function wire(){
-    container.querySelector('#au-switch').onclick = (e) => { e.preventDefault(); mode = mode === 'signin' ? 'signup' : 'signin'; container.innerHTML = loginHtml(); wire(); };
     container.querySelector('#au-submit').onclick = async () => {
       const email = container.querySelector('#au-email').value.trim();
       const pass = container.querySelector('#au-pass').value;
@@ -125,12 +123,17 @@ export function renderLogin(container, onDone){
       errEl.textContent = '';
       if (!email || !pass) { errEl.textContent = 'Captura correo y contraseña.'; return; }
       try {
-        if (mode === 'signin') await signIn(email, pass);
-        else await signUp(email, pass);
+        await signIn(email, pass);
         onDone();
       } catch (e) {
         errEl.textContent = e.message || 'Error al iniciar sesión.';
       }
     };
+    container.querySelector('#au-pass').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') container.querySelector('#au-submit').click();
+    });
+    container.querySelector('#au-email').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') container.querySelector('#au-pass').focus();
+    });
   }
 }
