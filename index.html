@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#5b3a29">
+<meta name="theme-color" content="#3E5CDE">
 <title>AuditoriaModulos · Clóset Vera</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
@@ -11,67 +11,77 @@
 <style>
 
 :root{
-  --bg:#f6f5f3;--card:#fff;--ink:#201c17;--sub:#6b6259;--line:#e6e1d8;
-  --brand:#5b3a29;--brand-ink:#fff;--ok:#2e7d4f;--bad:#b3452c;
+  --bg:#f4f6fb;--card:#fff;--ink:#1b2030;--sub:#6b7280;--line:#e6e9f2;
+  --brand:#3E5CDE;--brand-2:#2c46b8;--brand-ink:#fff;
+  --accent:#FF6B6A;--yellow:#FFD34D;
+  --ok:#1f9d55;--bad:#e0453f;
+  --shadow:0 1px 2px rgba(20,25,50,.04), 0 4px 14px rgba(20,25,50,.06);
+  --shadow-btn:0 2px 8px rgba(62,92,222,.28);
   box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#17140f;--card:#211c15;--ink:#f2ece2;--sub:#a89c8a;--line:#33291f;}}
-:root[data-theme="dark"]{--bg:#17140f;--card:#211c15;--ink:#f2ece2;--sub:#a89c8a;--line:#33291f;}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#11131b;--card:#1a1d29;--ink:#eef0f7;--sub:#9aa1b8;--line:#2a2e40;--shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.35);}}
+:root[data-theme="dark"]{--bg:#11131b;--card:#1a1d29;--ink:#eef0f7;--sub:#9aa1b8;--line:#2a2e40;--shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.35);}
 *{box-sizing:border-box}html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,Segoe UI,Roboto,sans-serif}
-header{position:sticky;top:0;padding:12px 14px calc(8px + env(safe-area-inset-top,0px));background:var(--brand);color:var(--brand-ink);z-index:6}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+header{position:sticky;top:0;padding:12px 14px calc(10px + env(safe-area-inset-top,0px));background:linear-gradient(135deg,var(--brand),var(--brand-2));color:var(--brand-ink);z-index:6;box-shadow:0 2px 10px rgba(20,30,80,.18)}
 header h1{margin:0;font-size:16px}
-select#moduloSel{width:100%;margin-top:6px;padding:8px;border-radius:8px;border:none;font-weight:700;background:rgba(255,255,255,.15);color:var(--brand-ink)}
+select#moduloSel{width:100%;margin-top:6px;padding:8px;border-radius:10px;border:none;font-weight:700;background:rgba(255,255,255,.16);color:var(--brand-ink)}
 select#moduloSel option{color:#000}
-nav{display:flex;gap:4px;overflow-x:auto;padding:8px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:122px;z-index:5}
-nav button{flex:0 0 auto;padding:8px 10px;border:none;border-radius:8px;background:transparent;color:var(--sub);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
-nav button.active{background:var(--brand);color:var(--brand-ink)}
+nav{display:flex;gap:6px;overflow-x:auto;padding:9px 10px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:122px;z-index:5;box-shadow:0 2px 6px rgba(20,25,50,.04)}
+nav::-webkit-scrollbar{display:none}
+nav button{flex:0 0 auto;padding:8px 13px;border:none;border-radius:999px;background:transparent;color:var(--sub);font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s ease,color .15s ease,transform .1s ease}
+nav button.active{background:var(--brand);color:var(--brand-ink);box-shadow:0 2px 8px rgba(62,92,222,.35)}
+nav button:active{transform:scale(.96)}
 nav button.soon{opacity:.45}
 main{max-width:760px;margin:0 auto;padding:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
-input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow)}
+input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font-size:14px;transition:border-color .15s ease,box-shadow .15s ease}
+input:focus,select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(62,92,222,.15)}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:6px 5px;border-bottom:1px solid var(--line)}
-th{color:var(--sub);font-size:11px}
-.tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:10.5px;color:var(--sub);margin-left:5px}
-button.btn{padding:9px 14px;border:none;border-radius:8px;background:var(--brand);color:var(--brand-ink);font-weight:600;cursor:pointer;font-size:14px}
-button.btn:disabled{opacity:.5;cursor:not-allowed}
-button.small{padding:6px 9px;font-size:12px}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+th{color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+tr:last-child td{border-bottom:none}
+.tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:2px 7px;font-size:10.5px;color:var(--sub);margin-left:5px;font-weight:600}
+button.btn{padding:10px 16px;border:none;border-radius:11px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:var(--brand-ink);font-weight:700;cursor:pointer;font-size:14px;box-shadow:var(--shadow-btn);transition:transform .1s ease,filter .15s ease}
+button.btn:active{transform:scale(.97);filter:brightness(.96)}
+button.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+button.small{padding:7px 11px;font-size:12px;border-radius:9px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.hint{color:var(--sub);font-size:12px;margin-top:4px}
+.hint{color:var(--sub);font-size:12px;margin-top:4px;line-height:1.4}
 .pos{color:var(--ok);font-weight:700}.neg{color:var(--bad);font-weight:700}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .wrap-x{overflow-x:auto}
-h3{margin:0 0 6px;font-size:14px}
-.warn{background:#fdf1e3;border:1px solid #e6c88a;color:#7a4f13;border-radius:8px;padding:8px;font-size:12.5px;margin-top:8px}
-:root[data-theme="dark"] .warn, @media (prefers-color-scheme: dark){.warn{background:#3a2c14;border-color:#6b4f1f;color:#e8c98a}}
-.subtabs{display:flex;gap:6px;margin-bottom:8px}
-.subtabs button{flex:1;padding:7px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);font-weight:600;font-size:12.5px;cursor:pointer}
-.subtabs button.active{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+h3{margin:0 0 8px;font-size:14px;font-weight:800;letter-spacing:.1px}
+.warn{background:#fdf1e3;border:1px solid #e6c88a;border-left:4px solid #d99a2b;color:#7a4f13;border-radius:10px;padding:9px 10px;font-size:12.5px;margin-top:8px}
+:root[data-theme="dark"] .warn, @media (prefers-color-scheme: dark){.warn{background:#332711;border-color:#6b4f1f;color:#e8c98a}}
+.subtabs{display:flex;gap:6px;margin-bottom:8px;background:var(--bg);padding:4px;border-radius:12px}
+.subtabs button{flex:1;padding:8px;border-radius:9px;border:none;background:transparent;color:var(--ink);font-weight:700;font-size:12.5px;cursor:pointer;transition:background .15s ease,color .15s ease}
+.subtabs button.active{background:var(--brand);color:var(--brand-ink);box-shadow:0 2px 6px rgba(62,92,222,.3)}
 .brand{display:flex;align-items:center;gap:10px}
-.logo{width:38px;height:38px;border-radius:50%;background:#fff;color:var(--brand);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex:0 0 auto}
-.brandname{font-weight:800;font-size:15px;letter-spacing:.5px;line-height:1.1}
+.logo{width:40px;height:40px;border-radius:12px;background:#fff;flex:0 0 auto;box-shadow:0 2px 6px rgba(0,0,0,.15);display:block}
+.brandname{font-weight:800;font-size:15px;letter-spacing:.6px;line-height:1.1}
 .brandsub{font-size:11px;opacity:.85}
 .modbar{margin-top:8px}
-.modpill{border:none;color:#fff;padding:8px 12px;border-radius:20px;font-weight:700;font-size:13px;cursor:pointer}
-.pickerTitle{font-size:19px;font-weight:800;margin:4px 2px 12px}
+.modpill{border:none;color:#fff;padding:8px 12px;border-radius:20px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.pickerTitle{font-size:20px;font-weight:800;margin:6px 2px 14px;letter-spacing:.1px}
 .pickergrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.modcard{border-radius:14px;padding:16px;color:#fff;cursor:pointer;min-height:120px;display:flex;flex-direction:column;justify-content:flex-end;border:none;text-align:left;font-family:inherit}
-.modbadge{width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,.28);display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:16px;margin-bottom:28px}
+.modcard{border-radius:18px;padding:16px;color:#fff;cursor:pointer;min-height:124px;display:flex;flex-direction:column;justify-content:flex-end;border:none;text-align:left;font-family:inherit;box-shadow:0 4px 16px rgba(20,25,50,.16);transition:transform .1s ease}
+.modcard:active{transform:scale(.97)}
+.modbadge{width:44px;height:44px;border-radius:11px;background:rgba(255,255,255,.28);display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:16px;margin-bottom:28px}
 .modbadge span{font-size:8.5px;font-weight:700;letter-spacing:.3px}
 .modname{font-weight:800;font-size:17px}
 .modregion{font-size:12px;opacity:.85}
 
 header .topbar{display:flex;justify-content:space-between;align-items:center;gap:8px}
-#whoami{font-size:11px;opacity:.85}
-#logoutBtn{background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:8px;padding:5px 9px;font-size:11px;cursor:pointer}
-#syncBadge{display:inline-block;margin-top:6px;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600}
+#whoami{font-size:11px;opacity:.9;font-weight:600}
+#logoutBtn{background:rgba(255,255,255,.16);border:none;color:#fff;border-radius:9px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer}
+#syncBadge{display:inline-block;margin-top:6px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700}
 </style>
 </head>
 <body>
 <header>
   <div class="topbar">
-    <div class="brand"><div class="logo">CV</div><div><div class="brandname">CLOSETS VERA</div><div class="brandsub">Auditoría de Módulos</div></div></div>
+    <div class="brand"><img class="logo" src="logo-badge.png" alt="Closets Vera"><div><div class="brandname">CLOSETS VERA</div><div class="brandsub">Auditoría de Módulos</div></div></div>
     <div style="text-align:right">
       <div id="whoami"></div>
       <button id="logoutBtn">Salir</button>
