@@ -2197,30 +2197,60 @@ async function generarReporteDiarioPDF(){
   const fechaStr = ahora.toLocaleDateString('es-MX', {year:'numeric', month:'long', day:'numeric'});
   const horaStr = ahora.toLocaleTimeString('es-MX');
 
+  const marginL = 14;
+  const pageH = doc.internal.pageSize.getHeight();
+  const cols = [
+    {label:'Artículo', w:64}, {label:'Inicial', w:19.6}, {label:'Entr.', w:19.6},
+    {label:'Sal.', w:19.6}, {label:'Instal.', w:19.6}, {label:'Mermas', w:19.6}, {label:'Final', w:19.6}
+  ];
+  const tableW = cols.reduce((s,c)=>s+c.w,0);
+  function colX(i){ let x=marginL; for(let k=0;k<i;k++) x+=cols[k].w; return x; }
+
+  let y = 15;
   doc.setFontSize(14);
-  doc.text('Closets Vera · Inventario Diario', 14, 15);
+  doc.text('Closets Vera · Inventario Diario', marginL, y); y+=7;
   doc.setFontSize(10);
-  doc.text(`Módulo: ${mod}`, 14, 22);
-  doc.text(`Cerrado: ${fechaStr}, ${horaStr}`, 14, 27);
-  doc.text(`Por: ${getCurrentUserEmail?getCurrentUserEmail():''}`, 14, 32);
+  doc.text(`Módulo: ${mod}`, marginL, y); y+=5;
+  doc.text(`Cerrado: ${fechaStr}, ${horaStr}`, marginL, y); y+=5;
+  const correo = (typeof getCurrentUserEmail==='function' ? getCurrentUserEmail() : '') || '';
+  doc.text(`Por: ${correo}`, marginL, y); y+=8;
+
+  function drawHeaderRow(){
+    doc.setFillColor(91,58,41);
+    doc.setTextColor(255,255,255);
+    doc.rect(marginL, y, tableW, 6, 'F');
+    doc.setFontSize(8);
+    doc.setFont(undefined,'bold');
+    cols.forEach((c,i)=> doc.text(c.label, colX(i)+1.5, y+4.2));
+    doc.setFont(undefined,'normal');
+    doc.setTextColor(0,0,0);
+    y += 6;
+  }
 
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
-  let y = 39;
   cats.forEach(cat=>{
-    const rows = CATALOGO.filter(i=>i.cat===cat).map(it=>{
+    const items = CATALOGO.filter(i=>i.cat===cat);
+    if(y > pageH-30){ doc.addPage(); y=15; }
+    doc.setFontSize(11);
+    doc.setFont(undefined,'bold');
+    doc.text(cat, marginL, y+4);
+    doc.setFont(undefined,'normal');
+    y += 7;
+    drawHeaderRow();
+    doc.setFontSize(8);
+    items.forEach((it,idx)=>{
+      if(y > pageH-15){ doc.addPage(); y=15; drawHeaderRow(); doc.setFontSize(8); }
+      if(idx%2===1){ doc.setFillColor(246,245,243); doc.rect(marginL, y, tableW, 5, 'F'); }
       const f = calcFormula(it.id);
-      return [it.nombre, String(f.inicial), String(f.entradas), String(f.salidas), String(f.instalaciones), String(f.mermas), String(f.final)];
+      const vals = [it.nombre, f.inicial, f.entradas, f.salidas, f.instalaciones, f.mermas, f.final];
+      vals.forEach((v,i)=>{
+        let text = String(v);
+        if(i===0 && text.length>38) text = text.slice(0,36)+'…';
+        doc.text(text, colX(i)+1.5, y+3.6);
+      });
+      y += 5;
     });
-    if(y>270){ doc.addPage(); y=15; }
-    doc.autoTable({
-      startY: y,
-      head: [[cat, 'Inicial','Entr.','Sal.','Instal.','Mermas','Final']],
-      body: rows,
-      styles: { fontSize:8, cellPadding:2 },
-      headStyles: { fillColor:[91,58,41] },
-      margin: { left:14, right:14 }
-    });
-    y = doc.lastAutoTable.finalY + 8;
+    y += 6;
   });
 
   const stamp = ahora.toISOString().slice(0,10);
