@@ -1,7 +1,7 @@
 // ===== Autenticación multiusuario (Supabase Auth) =====
 // Si Supabase todavía no está configurado (ver src/supabase.js), la app sigue funcionando
 // en modo "un solo usuario, solo local" para que puedas probarla mientras creas tu proyecto.
-import { getSupabase, supabaseReady } from './supabase.js';
+import { getSupabase, supabaseReady, SUPABASE_URL } from './supabase.js';
 
 export let currentUser = null; // {id, email}
 
@@ -58,6 +58,30 @@ export async function getMyProfile(){
     return cached ? JSON.parse(cached) : { rol: 'coordinador', modulo: null };
   }
 }
+
+// ===== Panel de usuarios (admin) — llama a la Edge Function 'admin-usuarios' =====
+// Esa función es la única que tiene la llave maestra de Supabase; aquí solo mandamos el
+// token de la sesión actual (nunca la llave) y ella decide si quien llama es admin.
+async function llamarAdminUsuarios(payload){
+  if (!supabaseReady) throw new Error('Supabase no está configurado.');
+  const sb = getSupabase();
+  const { data } = await sb.auth.getSession();
+  const session = data?.session;
+  if (!session) throw new Error('No hay sesión activa.');
+  const resp = await fetch(SUPABASE_URL + '/functions/v1/admin-usuarios', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const out = await resp.json().catch(() => ({}));
+  if (!resp.ok || out.error) throw new Error(out.error || ('Error ' + resp.status));
+  return out;
+}
+export function listarUsuarios(){ return llamarAdminUsuarios({ accion: 'listar' }); }
+export function crearUsuario(email, password, rol, modulo){ return llamarAdminUsuarios({ accion: 'crear', email, password, rol, modulo }); }
+export function actualizarPerfilUsuario(user_id, rol, modulo){ return llamarAdminUsuarios({ accion: 'actualizar_perfil', user_id, rol, modulo }); }
+export function cambiarPasswordUsuario(user_id, password){ return llamarAdminUsuarios({ accion: 'cambiar_password', user_id, password }); }
+export function eliminarUsuario(user_id){ return llamarAdminUsuarios({ accion: 'eliminar', user_id }); }
 
 export function onAuthChange(cb){
   if (!supabaseReady) return () => {};
