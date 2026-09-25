@@ -9,7 +9,7 @@
 
 
 const $=s=>document.querySelector(s);
-let inicialMap={}, inicialCortadoMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv';
+let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv';
 let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
@@ -187,8 +187,9 @@ function renderSyncBadge(state){
 async function loadStock(){
   try{
     db.collection('inicial').where('modulo','==',modulo()).onSnapshot(snap=>{
-      inicialMap={}; inicialCortadoMap={};
-      snap.docs.forEach(d=>{ const x=d.data(); inicialMap[x.itemId]=x.cantidad; if(x.cortado) inicialCortadoMap[x.itemId]=x.cortado; });
+      inicialMap={}; inicialCortadoMap={}; inicialFechaMap={};
+      snap.docs.forEach(d=>{ const x=d.data(); inicialMap[x.itemId]=x.cantidad; if(x.cortado) inicialCortadoMap[x.itemId]=x.cortado; if(x.fecha) inicialFechaMap[x.itemId]=x.fecha; });
+      if(current==='home') renderHome();
       if(current==='inv') renderInv();
     });
   }catch(e){}
@@ -295,14 +296,24 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
 
 // Calcula {inicial, entradas, salidas, instalaciones, mermas, final, (hojas: completas, cortado,
 // cortes, autoCortes)} para un artículo del módulo actual.
+// Línea base de un artículo (confirmado por el usuario: "stock inicial" = lo que hay HOY).
+// - Si se capturó un stock inicial con fecha (y es posterior a un "poner en cero"), ese es el punto
+//   de partida y solo cuentan los movimientos DESPUÉS de esa fecha.
+// - Si no, y el módulo se puso en cero, se parte de 0 desde la fecha del reset.
+// - Inicial viejo sin fecha (versiones anteriores): se suma a todos los movimientos, como antes.
+function lineaBase(resetFecha, doc){
+  if(doc && doc.fecha && (!resetFecha || doc.fecha > resetFecha)) return {inicial:Number(doc.cantidad)||0, inicialCortado:Number(doc.cortado)||0, desde:doc.fecha};
+  if(resetFecha) return {inicial:0, inicialCortado:0, desde:resetFecha};
+  return {inicial:(doc&&Number(doc.cantidad))||0, inicialCortado:(doc&&Number(doc.cortado))||0, desde:null};
+}
 function calcFormula(itemId){
   const resetFecha = resetMap[modulo()];
-  const inicial = resetFecha ? 0 : (inicialMap[itemId] ?? 0);
-  const inicialCortado = resetFecha ? 0 : (inicialCortadoMap[itemId] ?? 0);
+  const doc = inicialMap[itemId]!==undefined ? {cantidad:inicialMap[itemId], cortado:inicialCortadoMap[itemId], fecha:inicialFechaMap[itemId]} : null;
+  const b = lineaBase(resetFecha, doc);
   // Solo cuenta lo "aprobado" (o sin estado = movimientos viejos, de antes de que existiera
   // esta función) hacia el Final oficial. Lo "pendiente" o "rechazado" no descuenta/suma nada.
-  const lista = movs.filter(m=>m.itemId===itemId && (!resetFecha || m.fecha>resetFecha) && m.estado!=='pendiente' && m.estado!=='rechazado');
-  return calcularFormula(itemId, inicial, inicialCortado, lista);
+  const lista = movs.filter(m=>m.itemId===itemId && (!b.desde || m.fecha>b.desde) && m.estado!=='pendiente' && m.estado!=='rechazado');
+  return calcularFormula(itemId, b.inicial, b.inicialCortado, lista);
 }
 
 // Cuántas hojas completas tendría que tomar una instalación nueva que consume `cantidad`
@@ -365,13 +376,13 @@ async function editInicial(itemId){
     const vCort = prompt('Stock inicial en '+modulo()+'\n\n2 de 2 · Material CORTADO o armado (en hojas equivalentes, 0 si no hay):', fmtNum(cortActual));
     if(vCort===null || vCort.trim()==='' || isNaN(Number(vCort)) || Number(vCort)<0) return;
     const comp = Number(vComp), cort = Number(vCort);
-    try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:fmtNum(comp+cort),cortado:cort}); }
+    try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:fmtNum(comp+cort),cortado:cort,fecha:new Date().toISOString(),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); }
     catch(e){ alert('Error: '+e.message); }
     return;
   }
   const val = prompt('Stock inicial (línea base) para este artículo en '+modulo(), actual);
   if(val===null || isNaN(Number(val))) return;
-  try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:Number(val)}); }
+  try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:Number(val),fecha:new Date().toISOString(),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); }
   catch(e){ alert('Error: '+e.message); }
 }
 
@@ -380,6 +391,7 @@ function setView(v){
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   if(v==='home') renderHome();
   if(v==='gar') renderGar();
+  if(v==='ini') renderIni();
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
@@ -412,6 +424,7 @@ function renderInv(){
       <div style="font-size:17px;font-weight:800">📦 Inventario · ${modulo()}</div>
       ${esAdmin()?`<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="ceroModulo()">Poner en cero</button>`:''}
     </div>
+    ${puedeEscribir() && !esSoloLectura() ? `<button class="btn" style="margin-top:10px;width:100%" onclick="irA('ini')">✏️ Capturar stock inicial</button>` : ''}
     <p class="hint">Elige qué quieres ver:</p>
     <div class="chips">${catsHtml}</div>
   </div>`;
@@ -464,6 +477,66 @@ function renderInv(){
   $('#main').innerHTML = html;
 }
 
+// ===== Capturar stock inicial (pantalla sencilla, confirmado por el usuario) =====
+// "Stock inicial" = lo que hay HOY: la cantidad capturada queda como el stock de ese artículo a
+// partir de este momento; lo que se anote después se suma/resta desde aquí.
+let iniCat = null, iniVals = {};
+function renderIni(){
+  if(!puedeEscribir()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  if(!iniCat) iniCat = cats[0];
+  const items = CATALOGO.filter(i=>i.cat===iniCat);
+  const hoja = items.length>0 && esHoja(items[0]);
+  const v = id => iniVals[id] || {};
+  $('#main').innerHTML = `
+    <div class="card">
+      <div style="font-size:17px;font-weight:800">✏️ Capturar stock inicial · ${modulo()}</div>
+      <p class="hint">Escribe lo que hay <strong>hoy</strong> de cada artículo. Esa cantidad queda como su stock a partir de ahora, y lo que se anote después (entradas, instalaciones, etc.) se suma o resta desde aquí.<br>Deja vacío lo que no quieras cambiar.</p>
+      <div class="chips" style="margin-top:8px">${cats.map(c=>{ const n=CATALOGO.filter(i=>i.cat===c && iniVals[i.id] && (iniVals[i.id].c!==undefined||iniVals[i.id].k!==undefined)).length;
+        return `<button class="chip ${c===iniCat?'on':''}" onclick="iniCat='${c}';renderIni()">${ICONO_CAT[c]||''} ${c}${n?' ✓'+n:''}</button>`; }).join('')}</div>
+    </div>
+    <div class="card">
+      <strong>${ICONO_CAT[iniCat]||''} ${iniCat}</strong>
+      ${hoja?'<p class="hint">En hojas escribe por separado las <strong>completas</strong> (sin cortar) y las <strong>ya cortadas</strong> (en hojas; si no hay, déjalo vacío o en 0).</p>':''}
+      <div class="movlist">${items.map(it=>{ const f=calcFormula(it.id);
+        return hoja
+          ? `<div class="movitem" style="flex-wrap:wrap"><span style="min-width:0;flex:1 1 100%"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hoy dice: ${fmtNum(f.completas)} completas · ${fmtNum(f.cortado)} cortadas</span></span>
+              <label style="flex:1"><span class="hint" style="margin:0">Completas</span><input type="number" min="0" inputmode="decimal" style="width:100%;margin-top:2px" value="${v(it.id).c??''}" oninput="setIni('${it.id}','c',this.value)" placeholder="—"></label>
+              <label style="flex:1"><span class="hint" style="margin:0">Ya cortadas</span><input type="number" min="0" inputmode="decimal" style="width:100%;margin-top:2px" value="${v(it.id).k??''}" oninput="setIni('${it.id}','k',this.value)" placeholder="—"></label></div>`
+          : `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hoy dice: ${fmtNum(f.final)} ${it.unidad}</span></span>
+              <input type="number" min="0" inputmode="decimal" value="${v(it.id).c??''}" oninput="setIni('${it.id}','c',this.value)" placeholder="—"></label>`;
+      }).join('')}</div>
+      <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="guardarIni()">Guardar stock inicial</button>
+      <p class="hint" style="text-align:center">Se guarda lo que capturaste en todas las categorías.</p>
+    </div>`;
+}
+function setIni(id, lado, val){
+  iniVals[id] = iniVals[id] || {};
+  if(val===''||val===null) delete iniVals[id][lado]; else iniVals[id][lado] = Number(val);
+  if(!Object.keys(iniVals[id]).length) delete iniVals[id];
+}
+async function guardarIni(){
+  const ids = Object.keys(iniVals).filter(id=>iniVals[id] && (iniVals[id].c!==undefined || iniVals[id].k!==undefined));
+  if(!ids.length) return alert('No escribiste ninguna cantidad.');
+  const malos = ids.filter(id=>(iniVals[id].c||0)<0 || (iniVals[id].k||0)<0);
+  if(malos.length) return alert('Las cantidades no pueden ser negativas.');
+  const lineas = ids.map(id=>{ const it=CATALOGO.find(i=>i.id===id); const x=iniVals[id];
+    if(esHoja(it)){ const f=calcFormula(id); const c = x.c!==undefined?x.c:f.completas, k = x.k!==undefined?x.k:0; return {it, c, k, txt:`• ${it.nombre}: ${fmtNum(c)} completas${k?' + '+fmtNum(k)+' cortadas':''}`}; }
+    return {it, c:x.c, k:0, txt:`• ${it.nombre}: ${fmtNum(x.c)} ${it.unidad}`}; });
+  if(!confirm(`Vas a fijar el stock de HOY de ${ids.length} artículo(s) en ${modulo()}:\n\n${lineas.slice(0,20).map(l=>l.txt).join('\n')}${lineas.length>20?'\n… y '+(lineas.length-20)+' más':''}\n\n¿Todo bien?`)) return;
+  try{
+    const fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    for(const l of lineas){
+      const docIni = {modulo:modulo(), itemId:l.it.id, cantidad:fmtNum(l.c + l.k), fecha, creadoPor};
+      if(esHoja(l.it)) docIni.cortado = fmtNum(l.k);
+      await db.collection('inicial').doc(inicialKey(modulo(), l.it.id)).set(docIni);
+    }
+    iniVals = {};
+    toast('✅ Stock inicial guardado ('+lineas.length+' artículo(s)).');
+    setView('inv');
+  }catch(e){ alert('Error: '+e.message); }
+}
+
 // ===== Inicio: botones grandes según el rol =====
 const ICONO_CAT = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩'};
 function esSoloLectura(){ return miPerfil && (miPerfil.rol==='supervisor' || miPerfil.rol==='gerente'); }
@@ -489,6 +562,7 @@ function renderHome(){
   }
   t('📦','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'#2c46b8');
   if(esAdmin()){
+    t('✏️','Stock inicial','Capturar lo que hay hoy',"irA('ini')",'#2c46b8');
     t('✅','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#1f9d55');
     t('📋','Auditoría','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
   }
@@ -3030,19 +3104,21 @@ async function registrarPuerta(tipo, alto, ancho){
 // ===== Capa 5: Traspasos entre módulos =====
 // Calcula la fórmula para CUALQUIER módulo (no solo el activo), consultando Supabase/DB directamente.
 async function calcFormulaForModulo(mod, itemId){
-  let inicial=0, inicialCortado=0, resetFecha=null;
+  let resetFecha=null, docIni=null;
   const lista = [];
   try{ const r = await db.collection('resets').doc(mod).get(); if(r && r.data) resetFecha = r.data().fecha; }catch(e){}
   try{
     const d = await db.collection('inicial').doc(inicialKey(mod,itemId)).get();
-    if(d && d.data && !resetFecha){ inicial = d.data().cantidad||0; inicialCortado = d.data().cortado||0; }
+    if(d && d.data) docIni = d.data();
   }catch(e){}
+  const b = lineaBase(resetFecha, docIni);
+  const inicial = b.inicial, inicialCortado = b.inicialCortado;
   try{
     const snap = await db.collection('movimientos').get();
     snap.docs.forEach(doc=>{
       const m = doc.data();
       if(m.modulo!==mod || m.itemId!==itemId) return;
-      if(resetFecha && m.fecha<=resetFecha) return;
+      if(b.desde && m.fecha<=b.desde) return;
       if(m.estado==='pendiente' || m.estado==='rechazado') return;
       lista.push(m);
     });
