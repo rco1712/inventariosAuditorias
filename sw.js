@@ -1,6 +1,6 @@
 // Service worker: cachea el "app shell" para que la app abra y funcione sin internet.
 // Los datos van por src/db.js (IndexedDB + sync a Supabase), no por aquí.
-const CACHE = 'auditoriamodulos-v20';
+const CACHE = 'auditoriamodulos-v25';
 const APP_SHELL = [
   './',
   './index.html',

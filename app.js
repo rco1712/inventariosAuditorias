@@ -9,8 +9,12 @@
 
 
 const $=s=>document.querySelector(s);
-let inicialMap={}, movs=[], resetMap={}, auditorias=[], current='inv';
+let inicialMap={}, inicialCortadoMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv';
 let auditCat=null, auditCapturas={};
+// Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
+let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
+// Armados contados (cajoneras sin cajones, cajones completos, cuadros de cajón)
+let auditArmados=[], auditArmadoForm={tipo:'cajonera', variante:'3', color:'Blanco', colorCuadro:'Blanco', ext:false, puertitas:false, cantidad:''};
 let moduloActual = localStorage.getItem('am_modulo') || null;
 // Perfil del usuario (rol + módulo asignado). Lo llena boot() con getMyProfile() antes de
 // llamar a init(). rol guardado en la base (nunca cambia, lo usan los permisos/RLS): 'admin'
@@ -182,7 +186,8 @@ function renderSyncBadge(state){
 async function loadStock(){
   try{
     db.collection('inicial').where('modulo','==',modulo()).onSnapshot(snap=>{
-      inicialMap={}; snap.docs.forEach(d=>{ inicialMap[d.data().itemId]=d.data().cantidad; });
+      inicialMap={}; inicialCortadoMap={};
+      snap.docs.forEach(d=>{ const x=d.data(); inicialMap[x.itemId]=x.cantidad; if(x.cortado) inicialCortadoMap[x.itemId]=x.cortado; });
       if(current==='inv') renderInv();
     });
   }catch(e){}
@@ -204,23 +209,108 @@ async function loadStock(){
       if(current==='hist') renderHist();
     });
   }catch(e){}
+  try{
+    // Deuda por faltantes de auditoría (se conserva aparte aunque el inventario se ajuste)
+    db.collection('deudasAuditoria').onSnapshot(snap=>{
+      deudas = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fechaAuditoria||'').localeCompare(a.fechaAuditoria||''));
+      if(current==='hist') renderHist();
+      if(current==='rep') renderRep();
+    });
+  }catch(e){}
 }
 
-// Calcula {inicial, entradas, salidas, instalaciones, mermas, final} para un artículo
+// ===== Hojas completas vs. material cortado/armado (confirmado por el usuario) =====
+// Solo aplica a artículos que se miden en hojas (Melamina y MDF):
+//  - Entradas (y traspasos recibidos) llegan como hojas COMPLETAS.
+//  - "Corte" pasa hojas de completas a CORTADO (no importa en qué piezas se convirtieron).
+//  - Instalaciones descuentan del CORTADO. Si no alcanza, la app pasa HOJAS ENTERAS de
+//    completas a cortado (como un corte que no se registró), de ahí toma lo proporcional y el
+//    sobrante se queda en cortado. Eso se marca como "corte automático" para avisar.
+//  - Salidas (y traspasos enviados) salen siempre de completas.
+//  - Mermas: se elige si fueron de completas o de cortado (por defecto, completas).
+function esHoja(it){ return !!it && (it.cat==='Melamina' || it.cat==='MDF'); }
+function esHojaId(itemId){ return esHoja(CATALOGO.find(i=>i.id===itemId)); }
+
+// Motor único (lo usan calcFormula y calcFormulaForModulo). movsItem = movimientos YA filtrados
+// por módulo/artículo/estado aprobado/reset. Se procesan en orden de fecha.
+// Corte del día (confirmado por el usuario): el corte se registra al FINAL del turno, y las
+// instalaciones se capturan antes o después. Si una instalación llega antes del corte, la app
+// toma hojas completas "provisionalmente" (deuda). Cuando llega el corte, primero cubre esa
+// deuda (esas hojas ya salieron de completas, no se vuelven a descontar) y solo el resto pasa
+// de completas a cortado. Así el orden de captura no altera el resultado.
+function calcularFormula(itemId, inicial, inicialCortado, movsItem){
+  let entradas=0, salidas=0, instalaciones=0, mermas=0, cortes=0, ajustes=0, deuda=0, faltoCortado=0;
+  const hoja = esHojaId(itemId);
+  const iniCort = hoja ? Math.min(Math.max(0, inicialCortado||0), Math.max(0,inicial)) : 0;
+  let cortado = iniCort;
+  let completas = inicial - cortado;
+  const EPS = 1e-9;
+  [...movsItem].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).forEach(m=>{
+    const q = Number(m.cantidad)||0;
+    if(m.tipo==='entrada'){ entradas+=q; completas+=q; }
+    else if(m.tipo==='salida'){ salidas+=q; completas-=q; }
+    else if(m.tipo==='corte'){
+      if(!hoja) return;
+      cortes+=q;
+      const cubre = Math.min(q, deuda);   // hojas que ya se habían tomado provisionalmente
+      deuda -= cubre;
+      const resto = q - cubre;
+      completas-=resto; cortado+=resto;
+    }
+    else if(m.tipo==='merma'){ mermas+=q; if(hoja && m.lado==='cortado') cortado-=q; else completas-=q; }
+    else if(m.tipo==='ajuste'){
+      // Ajuste por auditoría aplicada: deja el inventario igual a lo contado (q puede ser negativo).
+      ajustes+=q;
+      if(hoja){
+        completas += Number(m.completasDelta)||0;
+        cortado += Number(m.cortadoDelta)||0;
+        if(m.limpiarDeuda) deuda = 0; // el conteo físico manda: ya no hay hojas "sin corte" pendientes
+      } else completas += q;
+    }
+    else if(m.tipo==='instalacion'){
+      instalaciones+=q;
+      if(!hoja){ completas-=q; return; }
+      if(cortado >= q-EPS){ cortado-=q; return; }
+      const falta = q - Math.max(0,cortado);
+      const hojas = Math.ceil(falta - EPS);
+      faltoCortado += falta; deuda += hojas;
+      completas -= hojas; cortado = Math.max(0,cortado) + hojas - q;
+    }
+  });
+  // autoCortes = hojas tomadas provisionalmente que TODAVÍA no cubre ningún corte registrado.
+  const autoCortes = Math.abs(deuda)<EPS ? 0 : deuda;
+  const final = inicial+entradas-salidas-instalaciones-mermas+ajustes;
+  const r = {inicial,entradas,salidas,instalaciones,mermas,ajustes,final};
+  if(hoja){
+    Object.assign(r, {esHoja:true, cortes, autoCortes, faltoCortado,
+      completas: Math.abs(completas)<EPS?0:completas, cortado: Math.abs(cortado)<EPS?0:cortado,
+      inicialCortado: iniCort});
+  } else {
+    r.completas = final; r.cortado = 0;
+  }
+  return r;
+}
+
+// Calcula {inicial, entradas, salidas, instalaciones, mermas, final, (hojas: completas, cortado,
+// cortes, autoCortes)} para un artículo del módulo actual.
 function calcFormula(itemId){
   const resetFecha = resetMap[modulo()];
   const inicial = resetFecha ? 0 : (inicialMap[itemId] ?? 0);
-  let entradas=0, salidas=0, instalaciones=0, mermas=0;
+  const inicialCortado = resetFecha ? 0 : (inicialCortadoMap[itemId] ?? 0);
   // Solo cuenta lo "aprobado" (o sin estado = movimientos viejos, de antes de que existiera
   // esta función) hacia el Final oficial. Lo "pendiente" o "rechazado" no descuenta/suma nada.
-  movs.filter(m=>m.itemId===itemId && (!resetFecha || m.fecha>resetFecha) && m.estado!=='pendiente' && m.estado!=='rechazado').forEach(m=>{
-    if(m.tipo==='entrada') entradas+=m.cantidad;
-    else if(m.tipo==='salida') salidas+=m.cantidad;
-    else if(m.tipo==='instalacion') instalaciones+=m.cantidad;
-    else if(m.tipo==='merma') mermas+=m.cantidad;
-  });
-  const final = inicial+entradas-salidas-instalaciones-mermas;
-  return {inicial,entradas,salidas,instalaciones,mermas,final};
+  const lista = movs.filter(m=>m.itemId===itemId && (!resetFecha || m.fecha>resetFecha) && m.estado!=='pendiente' && m.estado!=='rechazado');
+  return calcularFormula(itemId, inicial, inicialCortado, lista);
+}
+
+// Cuántas hojas completas tendría que tomar una instalación nueva que consume `cantidad`
+// (0 si el cortado alcanza). Sirve para avisar ANTES de guardar.
+function hojasAutoCorteSiInstala(itemId, cantidad){
+  if(!esHojaId(itemId)) return {hojas:0, falta:0};
+  const f = calcFormula(itemId);
+  if(f.cortado >= cantidad - 1e-9) return {hojas:0, falta:0};
+  const falta = cantidad - Math.max(0,f.cortado);
+  return {hojas: Math.ceil(falta - 1e-9), falta};
 }
 
 // Redondea a máximo 2 decimales para mostrar en pantalla/reportes (evita cifras como
@@ -265,6 +355,18 @@ async function ceroModulo(){
 async function editInicial(itemId){
   if(!puedeEscribir()) return alert('Tu cuenta es de solo lectura; no puedes cambiar el inicial.');
   const actual = inicialMap[itemId] ?? 0;
+  if(esHojaId(itemId)){
+    // Hojas: la línea base se captura separada en completas y cortado/armado.
+    const cortActual = inicialCortadoMap[itemId] ?? 0;
+    const vComp = prompt('Stock inicial en '+modulo()+'\n\n1 de 2 · Hojas COMPLETAS:', fmtNum(actual - cortActual));
+    if(vComp===null || vComp.trim()==='' || isNaN(Number(vComp)) || Number(vComp)<0) return;
+    const vCort = prompt('Stock inicial en '+modulo()+'\n\n2 de 2 · Material CORTADO o armado (en hojas equivalentes, 0 si no hay):', fmtNum(cortActual));
+    if(vCort===null || vCort.trim()==='' || isNaN(Number(vCort)) || Number(vCort)<0) return;
+    const comp = Number(vComp), cort = Number(vCort);
+    try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:fmtNum(comp+cort),cortado:cort}); }
+    catch(e){ alert('Error: '+e.message); }
+    return;
+  }
   const val = prompt('Stock inicial (línea base) para este artículo en '+modulo(), actual);
   if(val===null || isNaN(Number(val))) return;
   try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:Number(val)}); }
@@ -290,20 +392,36 @@ function renderInv(){
       <strong>Inventario · ${modulo()}</strong>
       ${esAdmin()?`<button class="btn" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="ceroModulo()">Poner en cero</button>`:''}
     </div>
-    <p class="hint">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Mermas = Final. Toca "Inicial" para fijar la línea base tras un conteo físico.</p>
+    <p class="hint">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Mermas ± Ajustes de auditoría = Final. Toca "Inicial" para fijar la línea base tras un conteo físico.</p>
     <div style="margin-top:6px">${catsHtml}</div>
   </div>`;
   const rows = CATALOGO.filter(i=>i.cat===invCat);
+  const catHoja = rows.length>0 && esHoja(rows[0]);
+  if(catHoja){
+    const tot = rows.reduce((s,it)=>{ const f=calcFormula(it.id); s.c+=f.completas; s.k+=f.cortado; s.t+=f.final; return s; },{c:0,k:0,t:0});
+    html += `<div class="card">
+      <h3>${invCat} · resumen</h3>
+      <div class="grid2" style="grid-template-columns:1fr 1fr 1fr;text-align:center">
+        <div><div class="hint" style="margin:0">Hojas completas</div><div style="font-size:20px;font-weight:800">${fmtNum(tot.c)}</div></div>
+        <div><div class="hint" style="margin:0">Cortado/armado</div><div style="font-size:20px;font-weight:800;color:var(--accent)">${fmtNum(tot.k)}</div></div>
+        <div><div class="hint" style="margin:0">Total</div><div style="font-size:20px;font-weight:800;color:var(--brand)">${fmtNum(tot.t)}</div></div>
+      </div>
+      <p class="hint">Completas + Cortado = Final. Entradas suman a completas, Corte pasa de completas a cortado, Instalaciones descuentan del cortado. "Sin corte" = hojas que se tomaron provisionalmente porque una instalación se capturó antes de registrar el corte; se quitan solas cuando se registra el corte del día.</p>
+    </div>`;
+  }
   html += `<div class="card"><h3>${invCat}</h3><div class="wrap-x"><table>
-      <tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th><th>Instal.</th><th>Mermas</th><th>Final</th></tr>
+      <tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th>${catHoja?'<th>Corte</th>':''}<th>Instal.</th><th>Mermas</th><th>Ajuste</th>${catHoja?'<th>Compl.</th><th>Cortado</th>':''}<th>Final</th></tr>
       ${rows.map(it=>{ const f=calcFormula(it.id);
         return `<tr>
           <td>${it.nombre}<div class="tag">${it.unidad}</div></td>
-          <td>${puedeEscribir()?`<a href="#" onclick="editInicial('${it.id}');return false;">${fmtNum(f.inicial)}</a>`:fmtNum(f.inicial)}</td>
+          <td>${puedeEscribir()?`<a href="#" onclick="editInicial('${it.id}');return false;">${fmtNum(f.inicial)}</a>`:fmtNum(f.inicial)}${catHoja&&f.inicialCortado?`<div class="hint" style="margin:2px 0 0">${fmtNum(f.inicialCortado)} cort.</div>`:''}</td>
           <td class="pos">${fmtNum(f.entradas)}</td>
           <td class="neg">${fmtNum(f.salidas)}</td>
+          ${catHoja?`<td>${fmtNum(f.cortes+f.autoCortes)}${f.autoCortes?`<div class="tag" style="color:#b3742c;border-color:#b3742c" title="Hojas tomadas antes de registrar el corte">${fmtNum(f.autoCortes)} sin corte</div>`:''}</td>`:''}
           <td class="neg">${fmtNum(f.instalaciones)}</td>
           <td class="neg">${fmtNum(f.mermas)}</td>
+          <td class="${f.ajustes>0?'pos':(f.ajustes<0?'neg':'')}">${f.ajustes>0?'+':''}${fmtNum(f.ajustes)}</td>
+          ${catHoja?`<td>${fmtNum(f.completas)}</td><td style="color:var(--accent);font-weight:700">${fmtNum(f.cortado)}</td>`:''}
           <td><strong>${fmtNum(f.final)}</strong></td>
         </tr>`; }).join('')}
       </table></div></div>`;
@@ -311,6 +429,14 @@ function renderInv(){
 }
 
 let movCat = null;
+// Tipo y lado elegidos en Entradas/Salidas (se conservan al cambiar de categoría).
+let movTipo='entrada', movLado='completas';
+const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría'};
+function etiquetaTipoMov(m){ return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : ''); }
+function stockHojaTxt(f, unidad){
+  if(!f.esHoja) return fmtNum(f.final)+' '+unidad;
+  return `${fmtNum(f.final)} ${unidad}<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} completas · ${fmtNum(f.cortado)} cortado</div>`;
+}
 function renderMov(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!movCat) movCat = cats[0];
@@ -318,6 +444,10 @@ function renderMov(){
     `<button class="btn small" style="background:${c===movCat?'var(--brand)':'transparent'};color:${c===movCat?'var(--brand-ink)':'var(--ink)'};border:1px solid var(--line);margin:2px" onclick="movCat='${c}';renderMov()">${c}</button>`
   ).join('');
   const items = CATALOGO.filter(i=>i.cat===movCat);
+  const catHoja = items.length>0 && esHoja(items[0]);
+  if(!catHoja && movTipo==='corte') movTipo='entrada';
+  const tipos = ['entrada','salida','instalacion','merma'].concat(catHoja?['corte']:[]);
+  const ayudaHoja = catHoja ? `<p class="hint"><strong>Hojas:</strong> las entradas llegan como hojas completas; <strong>Corte</strong> pasa hojas completas a material cortado (sin importar en qué piezas) — regístralo al final del turno con todas las hojas cortadas en el día; las instalaciones descuentan del cortado (si se capturan antes del corte, se ajustan solas); las salidas salen de hojas completas.</p>` : '';
   $('#main').innerHTML = `
   <div class="card">
     <strong>Entradas / Salidas · ${modulo()}</strong>
@@ -326,23 +456,26 @@ function renderMov(){
   </div>
   <div class="card">
     <div class="grid2">
-      <select id="mv-tipo"><option value="entrada">Entrada</option><option value="salida">Salida</option><option value="instalacion">Instalación</option><option value="merma">Merma</option></select>
+      <select id="mv-tipo" onchange="movTipo=this.value;renderMov()">${tipos.map(t=>`<option value="${t}" ${t===movTipo?'selected':''}>${TIPO_LABEL[t]}${t==='corte'?' (hojas completas → cortado)':''}</option>`).join('')}</select>
       <input id="mv-nota" placeholder="Nota (opcional, aplica a todos)">
     </div>
+    ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint">¿De dónde es la merma?</label>
+      <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value"><option value="completas" ${movLado==='completas'?'selected':''}>De hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>De material cortado/armado</option></select></div>` : ''}
+    ${ayudaHoja}
     <h3 style="margin-top:10px">${movCat}</h3>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Stock final</th><th>Cantidad</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id);
-        return `<tr><td>${it.nombre}</td><td>${fmtNum(f.final)} ${it.unidad}</td><td><input type="number" min="0" id="mv-${it.id}" placeholder="0"></td></tr>`;
+        return `<tr><td>${it.nombre}</td><td>${stockHojaTxt(f, it.unidad)}</td><td><input type="number" min="0" inputmode="decimal" id="mv-${it.id}" placeholder="0"></td></tr>`;
       }).join('')}
     </table></div>
     <button class="btn" style="margin-top:10px" onclick="registrarMovLote()">Registrar movimientos de ${movCat}</button>
-    <p class="hint">Las salidas, instalaciones y mermas no pueden dejar ningún artículo en negativo; se valida todo antes de guardar.</p>
+    <p class="hint">Las salidas, cortes, instalaciones y mermas no pueden dejar ningún artículo en negativo; se valida todo antes de guardar.</p>
   </div>
   <div class="card">
     <strong>Movimientos recientes</strong>
     <div class="wrap-x"><table><tr><th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Estado</th></tr>
     ${movs.slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleString()}</td><td>${m.itemNombre}</td>
-      <td class="${m.tipo==='entrada'?'pos':'neg'}">${m.tipo}</td><td>${m.cantidad} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}
+      <td class="${m.tipo==='entrada'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}
     </table></div>
   </div>`;
 }
@@ -357,26 +490,45 @@ function badgeEstado(estado){
 async function registrarMovLote(){
   const tipo = $('#mv-tipo').value;
   const nota = ($('#mv-nota').value||'').trim();
+  const ladoEl = document.getElementById('mv-lado');
+  const lado = ladoEl ? ladoEl.value : 'completas';
   const items = CATALOGO.filter(i=>i.cat===movCat);
   const decrece = tipo!=='entrada';
   const mod = modulo();
   const aplicar = [];
+  const avisosAuto = [];
   for(const it of items){
     const el = document.getElementById('mv-'+it.id);
     const cantidad = Number(el.value);
     if(!cantidad || cantidad<=0) continue;
     const f = calcFormula(it.id);
-    const nuevoFinal = decrece ? f.final - cantidad : f.final + cantidad;
-    if(decrece && nuevoFinal<0){ alert('No hay stock suficiente para "'+it.nombre+'" (disponible: '+fmtNum(f.final)+', pediste: '+cantidad+'). No se registró nada de este lote.'); return; }
-    aplicar.push({itemId:it.id, itemNombre:it.nombre, cantidad});
+    const sinStock = (disp, que)=>{ alert('No hay '+que+' suficiente de "'+it.nombre+'" (disponible: '+fmtNum(disp)+', pediste: '+cantidad+'). No se registró nada de este lote.'); };
+    if(f.esHoja && tipo==='corte'){
+      // El corte puede cubrir hojas que ya se tomaron provisionalmente (autoCortes) + las completas.
+      if(cantidad > f.completas + f.autoCortes + 1e-9){ sinStock(f.completas + f.autoCortes, 'hojas completas'); return; }
+    } else if(f.esHoja && (tipo==='salida' || (tipo==='merma' && lado==='completas'))){
+      if(cantidad > f.completas + 1e-9){ sinStock(f.completas, 'hojas completas'); return; }
+    } else if(f.esHoja && tipo==='merma' && lado==='cortado'){
+      if(cantidad > f.cortado + 1e-9){ sinStock(f.cortado, 'material cortado'); return; }
+    } else if(decrece && f.final - cantidad < -1e-9){ sinStock(f.final, 'stock'); return; }
+    if(f.esHoja && tipo==='instalacion'){
+      const ac = hojasAutoCorteSiInstala(it.id, cantidad);
+      if(ac.hojas>0) avisosAuto.push(`${it.nombre}: se tomarán ${ac.hojas} hoja(s) completa(s) provisionalmente`);
+    }
+    const mv = {itemId:it.id, itemNombre:it.nombre, cantidad};
+    if(f.esHoja && tipo==='merma') mv.lado = lado;
+    aplicar.push(mv);
   }
   if(aplicar.length===0) return alert('No capturaste ninguna cantidad.');
+  if(avisosAuto.length && !confirm('Todavía no hay suficiente corte registrado:\n\n'+avisosAuto.join('\n')+'\n\nEs normal si el corte del día se registra al final del turno: cuando se registre, se ajusta solo (no se descuenta dos veces). ¿Continuar?')) return;
   try{
     const estado = estadoNuevoMovimiento();
     const loteId = cryptoId();
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const a of aplicar){
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString(),estado,loteId,creadoPor});
+      const doc = {modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString(),estado,loteId,creadoPor};
+      if(a.lado) doc.lado = a.lado;
+      await db.collection('movimientos').doc(cryptoId()).set(doc);
     }
     alert(estado==='pendiente'
       ? aplicar.length+' movimiento(s) capturado(s) en '+movCat+'. Quedaron PENDIENTES de aprobación de Dirección — el inventario oficial no cambia hasta que se aprueben.'
@@ -389,74 +541,372 @@ function renderAud(){
   if(miPerfil && miPerfil.rol==='coordinador'){ $('#main').innerHTML = '<div class="card">Esta sección no está disponible para coordinadores.</div>'; return; }
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!auditCat) auditCat = cats[0];
-  const capturadas = Object.keys(auditCapturas).length;
   const catsHtml = cats.map(c=>{
     const capturadosEnCat = CATALOGO.filter(i=>i.cat===c && auditCapturas[i.id]!==undefined).length;
     return `<button class="btn small" style="background:${c===auditCat?'var(--brand)':'transparent'};color:${c===auditCat?'var(--brand-ink)':'var(--ink)'};border:1px solid var(--line);margin:2px" onclick="selectAuditCat('${c}')">${c} ${capturadosEnCat?('✓'+capturadosEnCat):''}</button>`;
-  }).join('');
-  const items = CATALOGO.filter(i=>i.cat===auditCat);
+  }).join('') + [['__piezas','✂️ Piezas cortadas',contarPiezasSueltas()],['__armados','📦 Armados',auditArmados.length]].map(([k,label,n])=>
+    `<button class="btn small" style="background:${auditCat===k?'var(--accent)':'transparent'};color:${auditCat===k?'#fff':'var(--ink)'};border:1px solid ${auditCat===k?'var(--accent)':'var(--line)'};margin:2px" onclick="selectAuditCat('${k}')">${label} ${n?('✓'+n):''}</button>`).join('');
+
+  let cuerpo;
+  if(auditCat==='__piezas'){
+    cuerpo = renderAudPiezasHtml();
+  } else if(auditCat==='__armados'){
+    cuerpo = renderAudArmadosHtml();
+  } else {
+    const items = CATALOGO.filter(i=>i.cat===auditCat);
+    const eq = piezasAuditAHojas();
+    const catHoja = items.length>0 && esHoja(items[0]);
+    cuerpo = `<div class="card">
+    <h3>${auditCat}</h3>
+    ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>Teórico</th><th>${catHoja?'Hojas completas contadas':'Físico contado'}</th></tr>
+      ${items.map(it=>{ const f=calcFormula(it.id);
+        const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
+        return `<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td><td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>
+          <td><input type="number" inputmode="decimal" value="${auditCapturas[it.id]??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value)">${extra}</td></tr>`;
+      }).join('')}
+    </table></div>
+  </div>`;
+  }
+
   $('#main').innerHTML = `
   <div class="card">
     <strong>Auditoría física · ${modulo()}</strong>
-    <p class="hint">Cuenta lo que existe físicamente ahora mismo. No desarmes mentalmente conjuntos armados: cuenta cada cosa tal como está.</p>
+    <p class="hint">Cuenta lo que existe físicamente ahora mismo, tal como está. Las hojas completas y herrajes sueltos se capturan en su categoría; las piezas ya cortadas en <strong>✂️ Piezas cortadas</strong>, y las cajoneras, cajones y cuadros armados en <strong>📦 Armados</strong>. La app convierte todo a hojas y herrajes.</p>
     <div class="grid2">
-      <select id="aud-tipo"><option value="inicial">Auditoría inicial</option><option value="seguimiento">Auditoría de seguimiento</option></select>
-      <input id="aud-auditor" placeholder="Nombre del auditor">
+      <select id="aud-tipo" onchange="audTipo=this.value"><option value="inicial" ${audTipo==='inicial'?'selected':''}>Auditoría inicial</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría de seguimiento</option></select>
+      <input id="aud-auditor" placeholder="Nombre del auditor" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
   </div>
   <div class="card"><div>${catsHtml}</div></div>
-  <div class="card">
-    <h3>${auditCat}</h3>
-    <div class="wrap-x"><table><tr><th>Artículo</th><th>Teórico</th><th>Físico contado</th></tr>
-      ${items.map(it=>{ const f=calcFormula(it.id);
-        return `<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td><td>${fmtNum(f.final)}</td>
-          <td><input type="number" value="${auditCapturas[it.id]??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value)"></td></tr>`;
-      }).join('')}
-    </table></div>
-  </div>
+  ${cuerpo}
   <div class="card row" style="justify-content:space-between">
-    <span class="hint">${capturadas} artículo(s) capturados en total.</span>
+    <span class="hint" id="aud-contador">${textoContadorAudit()}</span>
     <button class="btn" onclick="saveAudit()">Finalizar y guardar auditoría</button>
   </div>`;
 }
 function selectAuditCat(c){ auditCat=c; renderAud(); }
 
+// ----- Piezas cortadas (auditoría) -----
+function contarPiezasSueltas(){
+  return Object.values(auditPiezas).reduce((s,g)=>s+Object.values(g).filter(v=>v>0).length,0);
+}
+function textoContadorAudit(){
+  const art = Object.keys(auditCapturas).filter(k=>auditCapturas[k]!==undefined).length;
+  return `${art} artículo(s), ${contarPiezasSueltas()} tipo(s) de pieza y ${auditArmados.length} armado(s) capturados.`;
+}
+// Convierte piezas sueltas + armados a su equivalente en artículos del catálogo
+// (hojas de melamina/MDF y herrajes): {itemId: cantidad}. Todo se junta por color antes de
+// convertir, para que paredes y entrepaños se combinen igual que en el despiece (3+3 por hoja).
+function piezasAuditAHojas(){
+  const pool = [];
+  Object.keys(auditPiezas).forEach(grupo=>{
+    const counts = auditPiezas[grupo]||{};
+    PIEZAS_AUDIT.filter(p=>counts[p.key]>0)
+      .forEach(p=>pool.push({nombre:p.nombre, cantidad:counts[p.key], dim:p.dim, colorDestino:grupo, estado:'ok'}));
+  });
+  auditArmados.forEach(a=>piezasDeArmado(a).forEach(p=>pool.push(p)));
+  const porColor = {};
+  pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
+  const out = {};
+  Object.keys(porColor).forEach(c=>{
+    piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; });
+  });
+  return out;
+}
+function resumenPiezasHtml(){
+  const eq = piezasAuditAHojas();
+  const ids = Object.keys(eq);
+  if(!ids.length) return '<p class="hint">Todavía no has capturado piezas ni armados.</p>';
+  return `<table><tr><th>Artículo</th><th>Equivale a</th></tr>${ids.map(id=>{
+    const it = CATALOGO.find(i=>i.id===id);
+    return `<tr><td>${it?it.nombre:id}</td><td><strong>${fmtNum(eq[id])}</strong> ${it&&it.unidad?it.unidad:''}</td></tr>`;
+  }).join('')}</table>`;
+}
+function resumenCardHtml(){
+  return `<div class="card">
+    <h3>Equivalencia total (piezas cortadas + armados)</h3>
+    <div id="aud-piezas-resumen" class="wrap-x">${resumenPiezasHtml()}</div>
+    <p class="hint">Esto se suma a lo que captures en cada categoría (hojas completas, herrajes sueltos). Si no capturas nada en esa categoría, se toma como 0.</p>
+  </div>`;
+}
+
+// ----- Armados (auditoría) -----
+function renderAudArmadosHtml(){
+  const f = auditArmadoForm;
+  const esCajonera = f.tipo==='cajonera';
+  const variantes = esCajonera ? ARMADO_CAJONERAS : {normal:'Normal', max:'Max'};
+  if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
+  const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
+  const labelColor = esCajonera ? 'Color de la cajonera' : (f.tipo==='cajon' ? 'Color del frente' : 'Color del cuadro');
+  const usaCorredera = armadoUsaCorredera(f);
+  const puedePuertitas = esCajonera && armadoTienePuertitas(f.variante);
+  const set = (campo, rerender=true) => `auditArmadoForm.${campo}=this.${campo==='ext'||campo==='puertitas'?'checked':'value'};${rerender?'renderAud()':''}`;
+  const preview = Number(f.cantidad)>0 ? describirArmado(f) : '';
+  return `<div class="card">
+    <h3>📦 Armados</h3>
+    <p class="hint">Cajoneras armadas sin cajones (con sus herrajes), cajones completos (con sus herrajes) y cuadros de cajón con o sin fondo. Cada corredera se cuenta mitad y mitad: ½ juego en el hueco de la cajonera y ½ juego en el cajón.</p>
+    <label class="hint">¿Qué encontraste?</label>
+    <select style="margin-top:4px" onchange="${set('tipo')}">${Object.keys(ARMADO_TIPOS).map(k=>`<option value="${k}" ${k===f.tipo?'selected':''}>${ARMADO_TIPOS[k]}</option>`).join('')}</select>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>
+      <div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>
+      ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
+      <div><label class="hint">Cantidad</label><input type="number" min="0" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="auditArmadoForm.cantidad=this.value"></div>
+    </div>
+    ${usaCorredera?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="${set('ext')}"> Lleva corredera de extensión (si no, corredera normal)</label>`:''}
+    ${f.variante==='max' && f.tipo!=='cuadro_fondo' && f.tipo!=='cuadro_sin'?`<p class="hint">Max: siempre lleva corredera de extensión${f.tipo==='cajon'?' y no lleva jaladera':''}.</p>`:''}
+    ${puedePuertitas?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.puertitas?'checked':''} onchange="${set('puertitas')}"> Trae sus puertitas puestas (con bisagras y ${f.variante==='max'?'push':'jaladeras'})</label>`:''}
+    ${esCajonera && !armadoTienePuertitas(f.variante)?`<p class="hint">La cajonera ${ARMADO_CAJONERAS[f.variante].toLowerCase()} todavía no tiene medida de puertita confirmada.</p>`:''}
+    <button class="btn" style="margin-top:12px;width:100%" onclick="agregarArmado()">Agregar</button>
+  </div>
+  <div class="card">
+    <h3>Armados capturados (${auditArmados.length})</h3>
+    ${auditArmados.length? `<div class="wrap-x"><table><tr><th>Descripción</th><th>Cant.</th><th></th></tr>
+      ${auditArmados.map((a,i)=>`<tr><td>${describirArmado(a)}</td><td>${a.cantidad}</td><td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="quitarArmado(${i})">Quitar</button></td></tr>`).join('')}
+    </table></div>` : '<p class="hint">Todavía no has agregado armados.</p>'}
+  </div>
+  ${resumenCardHtml()}`;
+}
+function agregarArmado(){
+  const f = auditArmadoForm;
+  const n = Number(f.cantidad);
+  if(!n || n<=0) return alert('Captura la cantidad.');
+  const a = {tipo:f.tipo, variante:f.variante, color:f.color, cantidad:n};
+  if(f.tipo==='cajon') a.colorCuadro = f.colorCuadro;
+  if(armadoUsaCorredera(f)) a.ext = !!f.ext;
+  if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)) a.puertitas = !!f.puertitas;
+  auditArmados.push(a);
+  f.cantidad = '';
+  renderAud();
+}
+function quitarArmado(i){ auditArmados.splice(i,1); renderAud(); }
+function renderAudPiezasHtml(){
+  if(!auditPiezaGrupo) auditPiezaGrupo = MEL_COLORES[0];
+  const esMDF = auditPiezaGrupo===AUD_GRUPO_MDF;
+  const lista = PIEZAS_AUDIT.filter(p=>p.tipo===(esMDF?'mdf':'mel'));
+  const counts = auditPiezas[auditPiezaGrupo]||{};
+  const opciones = MEL_COLORES.map(c=>{
+    const n = Object.values(auditPiezas[c]||{}).filter(v=>v>0).length;
+    return `<option value="${c}" ${c===auditPiezaGrupo?'selected':''}>Melamina ${c}${n?' ✓'+n:''}</option>`;
+  }).join('') + (()=>{ const n=Object.values(auditPiezas[AUD_GRUPO_MDF]||{}).filter(v=>v>0).length;
+    return `<option value="${AUD_GRUPO_MDF}" ${esMDF?'selected':''}>MDF (fondos de cajón/cajonera)${n?' ✓'+n:''}</option>`; })();
+  return `<div class="card">
+    <h3>✂️ Piezas cortadas</h3>
+    <p class="hint">Cuenta las piezas que ya están cortadas y sueltas en el módulo. La app las convierte a hojas con los mismos rendimientos del despiece y las suma al conteo físico de esa hoja.</p>
+    <label class="hint">Color / material</label>
+    <select onchange="auditPiezaGrupo=this.value;renderAud()" style="margin-top:4px">${opciones}</select>
+    <div class="wrap-x" style="margin-top:10px"><table><tr><th>Pieza</th><th>Rinde</th><th>Cantidad</th></tr>
+      ${lista.map(p=>`<tr>
+        <td>${p.label}<div class="tag">${p.dim}</div></td>
+        <td class="hint" style="margin:0">${p.rinde}</td>
+        <td><input type="number" min="0" inputmode="numeric" style="min-width:80px" value="${counts[p.key]??''}" oninput="setAuditPieza('${auditPiezaGrupo}','${p.key}',this.value)"></td>
+      </tr>`).join('')}
+    </table></div>
+  </div>
+  ${resumenCardHtml()}`;
+}
+function setAuditPieza(grupo, key, val){
+  const n = val==='' ? 0 : Number(val);
+  auditPiezas[grupo] = auditPiezas[grupo]||{};
+  if(!n || n<0) delete auditPiezas[grupo][key]; else auditPiezas[grupo][key] = n;
+  if(!Object.keys(auditPiezas[grupo]).length) delete auditPiezas[grupo];
+  // Solo refresca el resumen (sin redibujar la tabla, para no perder el cursor al escribir)
+  const r = document.getElementById('aud-piezas-resumen'); if(r) r.innerHTML = resumenPiezasHtml();
+  const c = document.getElementById('aud-contador');
+  if(c) c.textContent = textoContadorAudit();
+}
+
 async function saveAudit(){
   const tipo = $('#aud-tipo').value;
   const auditor = $('#aud-auditor').value.trim() || 'Sin nombre';
+  const eq = piezasAuditAHojas();
   const resultados=[]; let totalDiff=0;
-  Object.keys(auditCapturas).forEach(itemId=>{
-    if(auditCapturas[itemId]===undefined) return;
+  const ids = new Set([...Object.keys(auditCapturas).filter(k=>auditCapturas[k]!==undefined), ...Object.keys(eq)]);
+  ids.forEach(itemId=>{
     const it = CATALOGO.find(i=>i.id===itemId);
+    if(!it) return;
     const f = calcFormula(itemId);
-    const fisico = auditCapturas[itemId];
+    const hojasCompletas = auditCapturas[itemId]!==undefined ? auditCapturas[itemId] : 0;
+    const hojasEnPiezas = fmtNum(eq[itemId]||0);
+    const fisico = fmtNum(hojasCompletas + hojasEnPiezas);
     const diff = fmtNum(fisico - f.final);
     if(diff!==0) totalDiff++;
-    resultados.push({itemId, nombre:it.nombre, teorico:fmtNum(f.final), fisico, diff});
+    const r = {itemId, nombre:it.nombre, teorico:fmtNum(f.final), fisico, diff};
+    if(hojasEnPiezas){ r.hojasCompletas = hojasCompletas; r.hojasEnPiezas = hojasEnPiezas; }
+    if(f.esHoja){
+      // Comparación por lado: hojas completas contadas vs. teóricas, y cortado/armado contado
+      // vs. teórico (la diferencia en cortado es desperdicio o piezas perdidas).
+      r.teoricoCompletas = fmtNum(f.completas); r.teoricoCortado = fmtNum(f.cortado);
+      r.fisicoCompletas = fmtNum(hojasCompletas); r.fisicoCortado = hojasEnPiezas;
+      r.diffCompletas = fmtNum(hojasCompletas - f.completas); r.diffCortado = fmtNum(hojasEnPiezas - f.cortado);
+    }
+    resultados.push(r);
   });
-  if(resultados.length===0) return alert('No has capturado ningún artículo todavía.');
+  if(resultados.length===0) return alert('No has capturado ningún artículo, pieza ni armado todavía.');
+  // Detalle de piezas contadas, para consultarlo después en el Historial
+  const piezasContadas = [];
+  Object.keys(auditPiezas).forEach(grupo=>{
+    Object.keys(auditPiezas[grupo]).forEach(key=>{
+      const p = PIEZAS_AUDIT.find(x=>x.key===key);
+      if(p) piezasContadas.push({grupo: grupo===AUD_GRUPO_MDF?'MDF':'Melamina '+grupo, pieza:p.label, dim:p.dim, cantidad:auditPiezas[grupo][key]});
+    });
+  });
   try{
-    await db.collection('auditorias').doc(cryptoId()).set({modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff});
-    auditCapturas={};
+    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff};
+    if(piezasContadas.length) doc.piezasContadas = piezasContadas;
+    if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
+    const audId = cryptoId();
+    await db.collection('auditorias').doc(audId).set(doc);
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor='';
     alert('Auditoría guardada.');
+    histTab='aud';
     setView('hist');
+    if(esAdmin() && confirm('¿Aplicar esta auditoría al inventario ahora?\n\nEl inventario quedará igual a lo contado y lo que haya faltado se guarda como DEUDA en Historial → Faltantes (deuda).\n\nTambién puedes aplicarla después desde el Historial.')){
+      await aplicarAuditoria(audId, {...doc, id:audId});
+    }
   }catch(e){ alert('Error: '+e.message); }
 }
 
 function renderHist(){
-  if(auditorias.length===0){ $('#main').innerHTML='<div class="card">Aún no hay auditorías registradas para '+modulo()+'.</div>'; return; }
-  $('#main').innerHTML = auditorias.map(a=>`
+  const pend = deudas.filter(d=>d.estado!=='saldada');
+  const tabs = `<div class="card" style="padding:10px"><div class="subtabs" style="margin:0">
+    <button class="${histTab==='aud'?'active':''}" onclick="histTab='aud';renderHist()">Auditorías (${auditorias.length})</button>
+    <button class="${histTab==='deuda'?'active':''}" onclick="histTab='deuda';renderHist()">Faltantes (deuda)${pend.length?' · '+pend.length:''}</button>
+  </div></div>`;
+  if(histTab==='deuda'){ $('#main').innerHTML = tabs + renderDeudasHtml(); return; }
+  if(auditorias.length===0){ $('#main').innerHTML = tabs + '<div class="card">Aún no hay auditorías registradas para '+modulo()+'.</div>'; return; }
+  $('#main').innerHTML = tabs + auditorias.map(a=>`
     <div class="card">
       <div class="row" style="justify-content:space-between;cursor:pointer" onclick="toggleAud('${a.id}')">
-        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag">${a.tipo}</div> <div class="tag">Auditor: ${a.auditor}</div></div>
+        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag">${a.tipo}</div> <div class="tag">Auditor: ${a.auditor}</div>
+          ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ Aplicada al inventario</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">Sin aplicar</div>`}</div>
         <div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>
       </div>
+      ${!a.aplicada && esAdmin() ? `<div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button></div>` : ''}
+      ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
         <table><tr><th>Artículo</th><th>Teórico</th><th>Físico</th><th>Dif.</th></tr>
-        ${a.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}</td><td class="${r.diff?'neg':'pos'}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>`).join('')}
+        ${a.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}${r.hojasEnPiezas&&r.teoricoCompletas===undefined?`<div class="hint" style="margin-top:3px">${fmtNum(r.hojasCompletas)} sueltas/completas + ${fmtNum(r.hojasEnPiezas)} en piezas/armados</div>`:''}</td><td class="${r.diff?'neg':'pos'}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>${detalleLadosHtml(r)}`).join('')}
         </table>
+        ${a.piezasContadas&&a.piezasContadas.length?`<h3 style="margin-top:12px">✂️ Piezas cortadas contadas</h3>
+        <table><tr><th>Material</th><th>Pieza</th><th>Cant.</th></tr>
+        ${a.piezasContadas.map(p=>`<tr><td>${p.grupo}</td><td>${p.pieza}<div class="tag">${p.dim}</div></td><td>${fmtNum(p.cantidad)}</td></tr>`).join('')}
+        </table>`:''}
+        ${a.armadosContados&&a.armadosContados.length?`<h3 style="margin-top:12px">📦 Armados contados</h3>
+        <table><tr><th>Descripción</th><th>Cant.</th></tr>
+        ${a.armadosContados.map(x=>`<tr><td>${x.descripcion}</td><td>${fmtNum(x.cantidad)}</td></tr>`).join('')}
+        </table>`:''}
       </div>
     </div>`).join('');
+}
+
+// ===== Aplicar auditoría al inventario (solo Dirección) =====
+// Deja el inventario igual a lo contado registrando movimientos "ajuste" (con rastro) y guarda
+// cada FALTANTE como deuda en 'deudasAuditoria', para no perderlo aunque el stock se corrija.
+// Los ajustes llevan la fecha de la auditoría, así lo que se movió después sigue contando.
+function calcularAjustesAuditoria(a, ajustarCortado){
+  const ajustes = [], faltantes = [];
+  (a.resultados||[]).forEach(r=>{
+    const it = CATALOGO.find(i=>i.id===r.itemId); if(!it) return;
+    if(esHoja(it) && r.teoricoCompletas!==undefined){
+      const dC = Number(r.diffCompletas)||0;
+      const dK = ajustarCortado ? (Number(r.diffCortado)||0) : 0;
+      if(dC||dK) ajustes.push({it, completasDelta:dC, cortadoDelta:dK, total:fmtNum(dC+dK), limpiarDeuda:ajustarCortado});
+      else if(ajustarCortado) ajustes.push({it, completasDelta:0, cortadoDelta:0, total:0, limpiarDeuda:true});
+      if(dC<0) faltantes.push({it, lado:'completas', cantidad:fmtNum(-dC)});
+      if(dK<0) faltantes.push({it, lado:'cortado', cantidad:fmtNum(-dK)});
+    } else {
+      const d = Number(r.diff)||0;
+      if(d) ajustes.push({it, completasDelta:d, cortadoDelta:0, total:fmtNum(d)});
+      if(d<0) faltantes.push({it, lado: esHoja(it)?'completas':null, cantidad:fmtNum(-d)});
+    }
+  });
+  return {ajustes, faltantes};
+}
+async function aplicarAuditoriaUI(id){
+  const a = auditorias.find(x=>x.id===id);
+  if(!a) return;
+  await aplicarAuditoria(id, a);
+}
+async function aplicarAuditoria(id, a){
+  if(!esAdmin()) return alert('Solo Dirección puede aplicar una auditoría al inventario.');
+  if(a.aplicada) return alert('Esta auditoría ya se aplicó.');
+  // Resguardo: si no se contó nada de material cortado, preguntar antes de dejar el cortado en lo "contado" (0).
+  const hayHojaConCortado = (a.resultados||[]).some(r=>r.teoricoCompletas!==undefined && Number(r.teoricoCortado)>0);
+  const contoCortado = (a.piezasContadas&&a.piezasContadas.length) || (a.armadosContados&&a.armadosContados.length);
+  let ajustarCortado = true;
+  if(hayHojaConCortado && !contoCortado){
+    ajustarCortado = confirm('Esta auditoría NO contó piezas cortadas ni armados, pero el inventario dice que sí hay material cortado.\n\nAceptar = ajustar también el cortado (quedará en 0 y lo que había se va a deuda).\nCancelar = ajustar SOLO las hojas completas y dejar el cortado como está.');
+  }
+  const {ajustes, faltantes} = calcularAjustesAuditoria(a, ajustarCortado);
+  const reales = ajustes.filter(x=>x.total || x.completasDelta || x.cortadoDelta);
+  const resumen = reales.slice(0,12).map(x=>`• ${x.it.nombre}: ${x.total>0?'+':''}${fmtNum(x.total)}${(x.completasDelta&&x.cortadoDelta)?` (compl. ${fmtNum(x.completasDelta)}, cort. ${fmtNum(x.cortadoDelta)})`:(x.cortadoDelta?' (cortado)':'')}`).join('\n') + (reales.length>12?`\n… y ${reales.length-12} más`:'');
+  if(!confirm(`Aplicar auditoría del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?`)) return;
+  const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+  const fechaAjuste = new Date(new Date(a.fecha).getTime()+1).toISOString();
+  const fechaStr = new Date(a.fecha).toLocaleDateString('es-MX');
+  try{
+    for(const x of ajustes){
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:a.modulo, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'ajuste',
+        cantidad:x.total, completasDelta:fmtNum(x.completasDelta), cortadoDelta:fmtNum(x.cortadoDelta), limpiarDeuda:!!x.limpiarDeuda,
+        nota:`Ajuste por auditoría del ${fechaStr} (${a.auditor})`, fecha:fechaAjuste, estado:'aprobado', auditoriaId:id, creadoPor});
+    }
+    for(const f of faltantes){
+      await db.collection('deudasAuditoria').doc(cryptoId()).set({modulo:a.modulo, auditoriaId:id, fechaAuditoria:a.fecha, auditor:a.auditor,
+        itemId:f.it.id, itemNombre:f.it.nombre, unidad:f.it.unidad, lado:f.lado, cantidad:f.cantidad, estado:'pendiente', creadoPor, creado:new Date().toISOString()});
+    }
+    await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor, deudasCreadas:faltantes.length, ajustoCortado:ajustarCortado});
+    alert(`Auditoría aplicada. ${reales.length} ajuste(s) al inventario${faltantes.length?` y ${faltantes.length} faltante(s) guardados como deuda`:''}.`);
+    renderHist();
+  }catch(e){ alert('Error al aplicar: '+e.message); }
+}
+
+// ===== Deuda por faltantes de auditoría =====
+function etiquetaLado(l){ return l==='cortado' ? 'Cortado/armado' : (l==='completas' ? 'Hojas completas' : '—'); }
+function renderDeudasHtml(){
+  const pend = deudas.filter(d=>d.estado!=='saldada');
+  const sald = deudas.filter(d=>d.estado==='saldada');
+  // Totales pendientes por artículo + lado
+  const tot = {};
+  pend.forEach(d=>{ const k=d.itemNombre+'||'+(d.lado||''); const it=CATALOGO.find(i=>i.id===d.itemId);
+    tot[k]=tot[k]||{nombre:d.itemNombre, lado:d.lado, unidad:d.unidad, cat:it?it.cat:'Otros', cantidad:0}; tot[k].cantidad+=Number(d.cantidad)||0; });
+  const secciones = [...new Set(CATALOGO.map(i=>i.cat).concat(['Otros']))].filter(c=>Object.values(tot).some(t=>t.cat===c));
+  const filas = (lista, conBoton) => lista.map(d=>`<tr>
+      <td>${d.itemNombre}<div class="tag">${etiquetaLado(d.lado)}</div></td>
+      <td class="neg"><strong>${fmtNum(d.cantidad)}</strong> ${d.unidad||''}</td>
+      <td>${new Date(d.fechaAuditoria).toLocaleDateString('es-MX')}<div class="hint" style="margin:2px 0 0">${d.auditor||''}</div></td>
+      <td>${conBoton && esAdmin() ? `<button class="btn small" onclick="saldarDeuda('${d.id}')">Saldar</button>` : (d.estado==='saldada' ? `<div class="hint" style="margin:0">${d.notaSaldo||'Saldada'}<br>${d.fechaSaldo?new Date(d.fechaSaldo).toLocaleDateString('es-MX'):''}</div>` : '')}</td>
+    </tr>`).join('');
+  return `<div class="card">
+      <strong>Faltantes de auditoría (deuda) · ${modulo()}</strong>
+      <p class="hint">Cuando una auditoría se aplica, el inventario queda igual a lo contado, pero lo que faltó se guarda aquí para darle seguimiento (a quién se cobra, si apareció, etc.). Saldar una deuda solo la cierra: si el material aparece, regístralo como Entrada.</p>
+    </div>
+    ${secciones.length ? secciones.map(cat=>`<div class="card"><h3>${cat} · pendiente</h3>
+      <div class="wrap-x"><table><tr><th>Artículo</th><th>Lado</th><th>Total pendiente</th></tr>
+        ${Object.values(tot).filter(t=>t.cat===cat).map(t=>`<tr><td>${t.nombre}</td><td>${etiquetaLado(t.lado)}</td><td class="neg"><strong>${fmtNum(t.cantidad)}</strong> ${t.unidad||''}</td></tr>`).join('')}
+      </table></div></div>`).join('') : '<div class="card"><p class="hint" style="margin:0">No hay deuda pendiente. 🎉</p></div>'}
+    ${pend.length?`<div class="card"><h3>Detalle pendiente (${pend.length})</h3><div class="wrap-x"><table><tr><th>Artículo</th><th>Faltó</th><th>Auditoría</th><th></th></tr>${filas(pend,true)}</table></div></div>`:''}
+    ${sald.length?`<div class="card"><h3>Saldadas (${sald.length})</h3><div class="wrap-x"><table><tr><th>Artículo</th><th>Faltó</th><th>Auditoría</th><th>Cierre</th></tr>${filas(sald,false)}</table></div></div>`:''}`;
+}
+async function saldarDeuda(id){
+  if(!esAdmin()) return alert('Solo Dirección puede saldar una deuda.');
+  const d = deudas.find(x=>x.id===id); if(!d) return;
+  const nota = prompt(`Saldar deuda: ${fmtNum(d.cantidad)} ${d.unidad||''} de ${d.itemNombre} (${etiquetaLado(d.lado)}).\n\n¿Cómo se saldó? (ej. "Se descontó al responsable", "Apareció el material", "Se autorizó como merma")`, '');
+  if(nota===null) return;
+  try{
+    await db.collection('deudasAuditoria').doc(id).update({estado:'saldada', notaSaldo:nota.trim()||'Saldada', fechaSaldo:new Date().toISOString(), saldadaPor:getCurrentUserEmail?getCurrentUserEmail():''});
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+// Fila extra en el historial de auditorías para hojas: completas y cortado por separado.
+function detalleLadosHtml(r){
+  if(r.teoricoCompletas===undefined) return '';
+  const d = v => `<span class="${v?'neg':'pos'}">${v>0?'+':''}${fmtNum(v)}</span>`;
+  return `<tr><td colspan="4" class="hint" style="padding-top:0">
+    Completas: teórico ${fmtNum(r.teoricoCompletas)} · contado ${fmtNum(r.fisicoCompletas)} · dif. ${d(r.diffCompletas)}<br>
+    Cortado/armado: teórico ${fmtNum(r.teoricoCortado)} · contado ${fmtNum(r.fisicoCortado)} · dif. ${d(r.diffCortado)}${r.diffCortado<0?' (desperdicio o piezas faltantes)':''}
+  </td></tr>`;
 }
 function toggleAud(id){ const el=document.getElementById('ad-'+id); el.style.display = el.style.display==='none'?'block':'none'; }
 
@@ -759,6 +1209,99 @@ const PUERTITA_CAJONERA = {
 // qué tipo de cajonera vino la puertita (piezasAConsumo solo ve nombre+dim, no el tipo).
 const PUERTITA_POR_HOJA_POR_DIM = {};
 Object.values(PUERTITA_CAJONERA).forEach(s=>{ PUERTITA_POR_HOJA_POR_DIM[s.dim] = s.porHoja; });
+
+// ===== Piezas cortadas para la Auditoría física =====
+// Piezas sueltas (ya cortadas) que se cuentan en la auditoría. Se convierten a hojas con
+// piezasAConsumo(), el MISMO motor que usa el despiece para descontar, así una hoja cortada
+// y contada en piezas vuelve a dar exactamente la hoja que se descontó.
+const PIEZAS_AUDIT = [
+  {key:'pared',       tipo:'mel', nombre:'Pared',                    dim:'191×40 cm',   label:'Pared (o maletero chico)', rinde:'3 por hoja (junto con 3 entrepaños)'},
+  {key:'entrepano',   tipo:'mel', nombre:'Entrepaño',                dim:'52×40 cm',    label:'Entrepaño',                rinde:'Van con las paredes (3+3); los que sobren, 14 por hoja'},
+  {key:'maletero',    tipo:'mel', nombre:'Maletero grande',          dim:'40×244 cm',   label:'Maletero (normal o grande)', rinde:'3 por hoja'},
+  {key:'frente',      tipo:'mel', nombre:'Frente',                   dim:'18×54 cm',    label:'Frente de cajón',          rinde:'24 por hoja'},
+  {key:'frentemax',   tipo:'mel', nombre:'Frente Max',               dim:'60×20 cm',    label:'Frente de cajón Max',      rinde:'24 por hoja'},
+  {key:'pchica',      tipo:'mel', nombre:'Pieza chica de cajón',     dim:'33×16.5 cm',  label:'Pieza chica de cajón',     rinde:'49 por hoja'},
+  {key:'pgrande',     tipo:'mel', nombre:'Pieza grande de cajón',    dim:'46.4×16.5 cm',label:'Pieza grande de cajón',    rinde:'35 por hoja'},
+  {key:'pchicamax',   tipo:'mel', nombre:'Pieza chica de cajón Max', dim:'15×38 cm',    label:'Pieza chica de cajón Max', rinde:'45 por hoja'},
+  {key:'pgrandemax',  tipo:'mel', nombre:'Pieza grande de cajón Max',dim:'15×52.5 cm',  label:'Pieza grande de cajón Max',rinde:'30 por hoja'},
+  {key:'entzap',      tipo:'mel', nombre:'Entrepaño zapatera',       dim:'27×40 cm',    label:'Entrepaño de zapatera (27 o 30×40)', rinde:'24 por hoja'},
+  {key:'puertita3',   tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['3'].dim,   label:'Puertita de cajonera de 3',        rinde:PUERTITA_CAJONERA['3'].porHoja+' por hoja'},
+  {key:'puertita5',   tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['5'].dim,   label:'Puertita de cajonera de 5 / Emma', rinde:PUERTITA_CAJONERA['5'].porHoja+' por hoja'},
+  {key:'puertitamax', tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['max'].dim, label:'Puertita de cajonera Max',         rinde:PUERTITA_CAJONERA['max'].porHoja+' por hoja'},
+  {key:'puertazap',   tipo:'mel', nombre:'Puerta de zapatera',       dim:'172×30 cm',   label:'Puerta de zapatera',       rinde:'Corte combinado (igual que en despiece)'},
+  {key:'fondocajon',  tipo:'mdf', nombre:'Fondo de cajón (MDF 3mm)',     dim:'49.4×33 cm',  label:'Fondo de cajón (MDF 3mm)',     rinde:'14 por hoja de MDF 3mm'},
+  {key:'fondocajonera',tipo:'mdf',nombre:'Fondo de cajonera (MDF 3mm)',  dim:'55×122 cm',   label:'Fondo de cajonera (MDF 3mm)',  rinde:'4 por hoja de MDF 3mm'},
+  {key:'fondomax',    tipo:'mdf', nombre:'Fondo de cajón (MDF 5mm, Max)',dim:'55.5×37.9 cm',label:'Fondo de cajón Max (MDF 5mm)', rinde:'12 por hoja de MDF 5mm'}
+];
+const AUD_GRUPO_MDF = 'MDF';
+
+// ===== Armados para la Auditoría física (confirmado por el usuario) =====
+// - Cajonera armada sin cajones: estructura + herrajes de cajonera (y puertitas, si las trae).
+// - Cajón completo: frente + cuadro + fondo + herrajes de cajón.
+// - Cuadro de cajón con fondo / sin fondo: solo piezas (sin herrajes).
+// Correderas: un juego = macho (cajón) + hembra (cajonera); se cuenta MITAD Y MITAD: cada hueco
+// de cajonera sin cajón = ½ juego, cada cajón completo = ½ juego.
+// Las recetas de cajonera se toman de buildAdicionalPiezas (mismo despiece que al instalar),
+// quitando lo que pertenece a los cajones.
+const ARMADO_TIPOS = {
+  cajonera:     'Cajonera armada sin cajones',
+  cajon:        'Cajón completo',
+  cuadro_fondo: 'Cuadro de cajón con fondo',
+  cuadro_sin:   'Cuadro de cajón sin fondo'
+};
+const ARMADO_CAJONERAS = {'3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
+const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
+function armadoTienePuertitas(variante){ return ['3','5','emma','max'].includes(variante); }
+function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon') && a.variante!=='max'; }
+
+// Devuelve las piezas (formato del despiece) de un armado, ya multiplicadas por su cantidad.
+function piezasDeArmado(a){
+  const n = Number(a.cantidad)||0;
+  const piezas = [];
+  const add = (nombre,cantidad,dim,colorDestino,estado)=>piezas.push({nombre, cantidad: typeof cantidad==='number'? cantidad*n : cantidad, dim, colorDestino, estado:estado||'ok'});
+  const corredera = (a.variante==='max' || a.ext) ? 'Correderas de extensión' : 'Juego de corredera';
+  const esMax = a.variante==='max';
+  if(a.tipo==='cajonera'){
+    const tipoAdic = esMax ? 'cajonera_max' : (a.variante==='emma' ? 'cajonera_emma' : 'cajonera');
+    const cajones = (esMax || a.variante==='emma') ? 4 : Number(a.variante);
+    const conPuerta = !!a.puertitas && armadoTienePuertitas(a.variante);
+    buildAdicionalPiezas(tipoAdic, cajones, a.color, !!a.ext, conPuerta)
+      .filter(p=>p.estado==='ok' && !PIEZAS_DE_CAJON.includes(p.nombre))
+      .forEach(p=>add(p.nombre, p.cantidad, p.dim, p.colorDestino));
+    add(corredera, cajones*0.5, '—', '—');
+  } else if(a.tipo==='cajon'){
+    if(esMax){
+      add('Frente Max', 1, '60×20 cm', a.color);
+      add('Pieza chica de cajón Max', 2, '15×38 cm', a.colorCuadro);
+      add('Pieza grande de cajón Max', 2, '15×52.5 cm', a.colorCuadro);
+      add('Fondo de cajón (MDF 5mm, Max)', 1, '55.5×37.9 cm', '—');
+    } else {
+      add('Frente', 1, '18×54 cm', a.color);
+      add('Pieza chica de cajón', 2, '33×16.5 cm', a.colorCuadro);
+      add('Pieza grande de cajón', 2, '46.4×16.5 cm', a.colorCuadro);
+      add('Fondo de cajón (MDF 3mm)', 1, '49.4×33 cm', '—');
+      add('Jaladera (por cajón)', 1, '—', a.color);
+    }
+    add(corredera, 0.5, '—', '—');
+  } else if(a.tipo==='cuadro_fondo' || a.tipo==='cuadro_sin'){
+    add(esMax?'Pieza chica de cajón Max':'Pieza chica de cajón', 2, esMax?'15×38 cm':'33×16.5 cm', a.color);
+    add(esMax?'Pieza grande de cajón Max':'Pieza grande de cajón', 2, esMax?'15×52.5 cm':'46.4×16.5 cm', a.color);
+    if(a.tipo==='cuadro_fondo'){
+      if(esMax) add('Fondo de cajón (MDF 5mm, Max)', 1, '55.5×37.9 cm', '—');
+      else add('Fondo de cajón (MDF 3mm)', 1, '49.4×33 cm', '—');
+    }
+  }
+  return piezas;
+}
+function describirArmado(a){
+  let d;
+  if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color;
+  else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro;
+  else d = ARMADO_TIPOS[a.tipo]+(a.variante==='max'?' Max':'')+' · '+a.color;
+  if(armadoUsaCorredera(a)) d += a.ext ? ' · corredera de extensión' : ' · corredera normal';
+  if(a.tipo==='cajonera' && a.puertitas && armadoTienePuertitas(a.variante)) d += ' · con puertitas';
+  return d;
+}
 function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
   const spec = PUERTITA_CAJONERA[claveMedida];
   if(!spec){
@@ -1412,12 +1955,29 @@ function previewInst(){
       <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${fmtNum(f.disponible)}, se requieren ${fmtNum(f.requerido)}</li>`).join('')}</ul>
       No se aplicó ningún descuento parcial.</div></div>`;
   } else {
+    html += avisoAutoCorteHtml(consumo);
     html += `<div class="card row" style="justify-content:space-between">
       <span class="pos">Receta completa y existencia suficiente.</span>
       <button class="btn" onclick="confirmarInst()">Confirmar y descontar</button>
     </div>`;
   }
   $('#i-result').innerHTML = html;
+}
+
+// Aviso en la vista previa de una instalación: qué hojas no tienen suficiente material cortado
+// registrado, y cuántas hojas completas va a pasar la app a cortado automáticamente.
+function avisoAutoCorteHtml(consumo){
+  const lineas = (consumo||[]).map(c=>{
+    const ac = hojasAutoCorteSiInstala(c.itemId, c.cantidad);
+    if(!ac.hojas) return '';
+    const it = CATALOGO.find(i=>i.id===c.itemId);
+    const f = calcFormula(c.itemId);
+    return `<li>${it?it.nombre:c.itemId}: se necesitan ${fmtNum(c.cantidad)}, hay ${fmtNum(f.cortado)} en cortado → se tomarán <strong>${ac.hojas} hoja(s) completa(s)</strong> provisionalmente.</li>`;
+  }).filter(Boolean);
+  if(!lineas.length) return '';
+  return `<div class="card"><div class="warn"><strong>✂️ Todavía no hay suficiente corte registrado</strong>
+    <ul style="margin:6px 0 0 18px;padding:0">${lineas.join('')}</ul>
+    Puedes continuar sin problema. Es normal si el corte del día se registra al final del turno: cuando se registre, estas hojas se cubren solas y no se descuentan dos veces. Si al final del día no se registró el corte, quedarán marcadas como "sin corte" en Inventario.</div></div>`;
 }
 
 async function confirmarInst(){
@@ -1786,6 +2346,7 @@ function calcPuerta(){
       <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${fmtNum(f.disponible)}, se requieren ${fmtNum(f.requerido)}</li>`).join('')}</ul>
       No se aplicó ningún descuento parcial.</div></div>`;
   } else {
+    html += avisoAutoCorteHtml(consumo);
     html += `<div class="card row" style="justify-content:space-between">
       <span class="pos">Existencia suficiente de material y herrajes.</span>
       <button class="btn" onclick="registrarPuerta('${tipo}',${alto},${ancho})">Registrar instalación y descontar material</button>
@@ -1832,11 +2393,12 @@ async function registrarPuerta(tipo, alto, ancho){
 // ===== Capa 5: Traspasos entre módulos =====
 // Calcula la fórmula para CUALQUIER módulo (no solo el activo), consultando Supabase/DB directamente.
 async function calcFormulaForModulo(mod, itemId){
-  let inicial=0, entradas=0, salidas=0, instalaciones=0, mermas=0, resetFecha=null;
+  let inicial=0, inicialCortado=0, resetFecha=null;
+  const lista = [];
   try{ const r = await db.collection('resets').doc(mod).get(); if(r && r.data) resetFecha = r.data().fecha; }catch(e){}
   try{
     const d = await db.collection('inicial').doc(inicialKey(mod,itemId)).get();
-    if(d && d.data) inicial = resetFecha? 0 : (d.data().cantidad||0);
+    if(d && d.data && !resetFecha){ inicial = d.data().cantidad||0; inicialCortado = d.data().cortado||0; }
   }catch(e){}
   try{
     const snap = await db.collection('movimientos').get();
@@ -1845,14 +2407,10 @@ async function calcFormulaForModulo(mod, itemId){
       if(m.modulo!==mod || m.itemId!==itemId) return;
       if(resetFecha && m.fecha<=resetFecha) return;
       if(m.estado==='pendiente' || m.estado==='rechazado') return;
-      if(m.tipo==='entrada') entradas+=m.cantidad;
-      else if(m.tipo==='salida') salidas+=m.cantidad;
-      else if(m.tipo==='instalacion') instalaciones+=m.cantidad;
-      else if(m.tipo==='merma') mermas+=m.cantidad;
+      lista.push(m);
     });
   }catch(e){}
-  const final = inicial+entradas-salidas-instalaciones-mermas;
-  return {inicial,entradas,salidas,instalaciones,mermas,final};
+  return calcularFormula(itemId, inicial, inicialCortado, lista);
 }
 
 // Un traspaso = movimiento de inventario (inmediato) + registro de préstamo (deuda entre módulos).
@@ -1919,7 +2477,7 @@ function renderTraspNuevo(){
   items.forEach(async it=>{
     const f = await calcFormulaForModulo(traspOrigen, it.id);
     const el = document.getElementById('t-stock-'+it.id);
-    if(el) el.textContent = fmtNum(f.final)+' '+it.unidad;
+    if(el) el.textContent = f.esHoja ? (fmtNum(f.completas)+' completas ('+fmtNum(f.cortado)+' cortado)') : (fmtNum(f.final)+' '+it.unidad);
   });
 }
 
@@ -1937,7 +2495,9 @@ async function previewTraspaso(){
   const faltantes = [];
   for(const e of elegidos){
     const f = await calcFormulaForModulo(traspOrigen, e.itemId);
-    if(f.final - e.cantidad < 0) faltantes.push({...e, disponible:f.final});
+    // Hojas: un traspaso sale de hojas COMPLETAS (igual que una salida).
+    const disp = f.esHoja ? f.completas : f.final;
+    if(disp - e.cantidad < -1e-9) faltantes.push({...e, disponible:disp});
   }
   traspPreview = {origen:traspOrigen, destino:traspDestino, elegidos, nota:($('#t-nota').value||'').trim(), bloqueado: faltantes.length>0, faltantes};
   let html = `<div class="card"><h3>${traspOrigen} → ${traspDestino}</h3>
@@ -2019,7 +2579,8 @@ async function registrarDevolucion(prestamoId){
   const item = CATALOGO.find(i=>i.id===itemId);
   // Quien devuelve es el destino original del préstamo; el material regresa al origen original.
   const fDestino = await calcFormulaForModulo(p.destino, itemId);
-  if(fDestino.final - cantidad < 0) return alert(p.destino+' no tiene suficiente "'+item.nombre+'" para devolver ('+fmtNum(fDestino.final)+' disponibles).');
+  const dispDev = fDestino.esHoja ? fDestino.completas : fDestino.final;
+  if(dispDev - cantidad < -1e-9) return alert(p.destino+' no tiene suficiente "'+item.nombre+'" para devolver ('+fmtNum(dispDev)+(fDestino.esHoja?' hojas completas':'')+' disponibles).');
   try{
     const notaTxt = `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`;
     await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado'});
@@ -2066,7 +2627,7 @@ function puedeCerrarInventarioDiario(){ return esAdmin() || (miPerfil && miPerfi
 
 function renderRep(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
-  const conMovimiento = CATALOGO.filter(it=>{ const f=calcFormula(it.id); return f.inicial||f.entradas||f.salidas||f.instalaciones||f.mermas; });
+  const conMovimiento = CATALOGO.filter(it=>{ const f=calcFormula(it.id); return f.inicial||f.entradas||f.salidas||f.instalaciones||f.mermas||f.cortes||f.ajustes; });
   const ultimaAud = auditorias[0];
 
   let html = '';
@@ -2080,7 +2641,7 @@ function renderRep(){
 
   html += `<div class="card">
     <strong>Reporte · ${modulo()}</strong>
-    <p class="hint">Comprobación matemática: Inicial + Entradas − Salidas − Instalaciones − Mermas = Final, artículo por artículo.</p>
+    <p class="hint">Comprobación matemática: Inicial + Entradas − Salidas − Instalaciones − Mermas ± Ajustes de auditoría = Final, artículo por artículo. En hojas, además: Final = Completas + Cortado.</p>
   </div>`;
 
   html += `<div class="card row" style="justify-content:space-between">
@@ -2095,10 +2656,28 @@ function renderRep(){
     </div>`;
   }
 
+  // Hojas completas vs. material cortado/armado (Melamina y MDF)
+  const hojasItems = CATALOGO.filter(it=>esHoja(it)).map(it=>({it, f:calcFormula(it.id)})).filter(x=>x.f.final||x.f.cortes||x.f.autoCortes||x.f.instalaciones);
+  const tH = hojasItems.reduce((s,x)=>{ s.c+=x.f.completas; s.k+=x.f.cortado; s.t+=x.f.final; s.cr+=x.f.cortes; s.a+=x.f.autoCortes; s.i+=x.f.instalaciones; return s; },{c:0,k:0,t:0,cr:0,a:0,i:0});
+  html += `<div class="card"><h3>Hojas completas y material cortado/armado</h3>
+    <p class="hint">Cuánto hay en hojas completas y cuánto ya está cortado o armado. "Cortes" = hojas que el taller registró como cortadas; "Sin corte" = hojas tomadas provisionalmente por instalaciones capturadas antes del corte (se cubren solas al registrar el corte del día; si siguen aquí al día siguiente, faltó registrarlo).</p>
+    <div class="wrap-x"><table><tr><th>Hoja</th><th>Completas</th><th>Cortado</th><th>Total</th><th>Cortes</th><th>Sin corte</th><th>Usado instal.</th></tr>
+    ${hojasItems.map(({it,f})=>`<tr><td>${it.nombre}</td><td>${fmtNum(f.completas)}</td><td style="color:var(--accent);font-weight:700">${fmtNum(f.cortado)}</td><td><strong>${fmtNum(f.final)}</strong></td><td>${fmtNum(f.cortes)}</td><td class="${f.autoCortes?'neg':''}">${fmtNum(f.autoCortes)}</td><td>${fmtNum(f.instalaciones)}</td></tr>`).join('')}
+    ${hojasItems.length?`<tr><td><strong>Total</strong></td><td><strong>${fmtNum(tH.c)}</strong></td><td><strong>${fmtNum(tH.k)}</strong></td><td><strong>${fmtNum(tH.t)}</strong></td><td><strong>${fmtNum(tH.cr)}</strong></td><td><strong>${fmtNum(tH.a)}</strong></td><td><strong>${fmtNum(tH.i)}</strong></td></tr>`:'<tr><td colspan="7" class="hint">Sin hojas en inventario todavía.</td></tr>'}
+    </table></div>
+  </div>`;
+
+  // Deuda por faltantes de auditoría (aparte del inventario)
+  const deudaPend = deudas.filter(d=>d.estado!=='saldada');
+  html += `<div class="card row" style="justify-content:space-between">
+    <div><strong>Deuda por faltantes de auditoría</strong><p class="hint" style="margin:2px 0 0">${deudaPend.length ? `${deudaPend.length} faltante(s) pendiente(s) en ${modulo()}: ${[...new Set(deudaPend.map(d=>d.itemNombre))].slice(0,4).join(', ')}${new Set(deudaPend.map(d=>d.itemNombre)).size>4?'…':''}` : 'Sin deuda pendiente en '+modulo()+'.'}</p></div>
+    <button class="btn small" onclick="histTab='deuda';setView('hist')">Ver deuda</button>
+  </div>`;
+
   html += `<div class="card"><h3>Inventario (solo artículos con movimiento)</h3>
-    <div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th><th>Instal.</th><th>Mermas</th><th>Final</th></tr>
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th><th>Instal.</th><th>Mermas</th><th>Ajuste</th><th>Final</th></tr>
     ${conMovimiento.map(it=>{ const f=calcFormula(it.id);
-      return `<tr><td>${it.nombre}</td><td>${fmtNum(f.inicial)}</td><td class="pos">${fmtNum(f.entradas)}</td><td class="neg">${fmtNum(f.salidas)}</td><td class="neg">${fmtNum(f.instalaciones)}</td><td class="neg">${fmtNum(f.mermas)}</td><td><strong>${fmtNum(f.final)}</strong></td></tr>`;
+      return `<tr><td>${it.nombre}</td><td>${fmtNum(f.inicial)}</td><td class="pos">${fmtNum(f.entradas)}</td><td class="neg">${fmtNum(f.salidas)}</td><td class="neg">${fmtNum(f.instalaciones)}</td><td class="neg">${fmtNum(f.mermas)}</td><td>${f.ajustes>0?'+':''}${fmtNum(f.ajustes)}</td><td><strong>${fmtNum(f.final)}</strong></td></tr>`;
     }).join('')}
     </table></div>
     ${conMovimiento.length===0? '<p class="hint">Aún no hay movimientos registrados en este módulo.</p>':''}
@@ -2118,7 +2697,7 @@ function renderRep(){
   } else {
     html += `<p class="hint">${new Date(ultimaAud.fecha).toLocaleString()} · ${ultimaAud.tipo} · Auditor: ${ultimaAud.auditor} · <strong class="${ultimaAud.totalDiff?'neg':'pos'}">${ultimaAud.totalDiff} discrepancia(s)</strong></p>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Teórico</th><th>Físico</th><th>Dif.</th></tr>
-    ${ultimaAud.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${r.teorico}</td><td>${r.fisico}</td><td class="${r.diff?'neg':'pos'}">${r.diff>0?'+':''}${r.diff}</td></tr>`).join('')}
+    ${ultimaAud.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}</td><td class="${r.diff?'neg':'pos'}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>${detalleLadosHtml(r)}`).join('')}
     </table></div>`;
   }
   html += `</div>`;
@@ -2165,7 +2744,7 @@ async function renderAprobaciones(){
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
-        ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'?'pos':'neg'}">${m.tipo}</td><td>${m.cantidad}</td><td>${m.nota||''}</td></tr>`).join('')}
+        ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
         <div class="row" style="justify-content:flex-end;margin-top:8px">
           <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarLote('${key}')">Rechazar</button>
@@ -2183,7 +2762,7 @@ async function renderAprobaciones(){
         </div>
         <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>
         <div class="wrap-x"><table><tr><th>Artículo</th><th>Cant.</th></tr>
-        ${(l.consumo||[]).map(c=>`<tr><td>${CATALOGO.find(i=>i.id===c.itemId)?.nombre||c.itemId}</td><td>${c.cantidad}</td></tr>`).join('')}
+        ${(l.consumo||[]).map(c=>`<tr><td>${CATALOGO.find(i=>i.id===c.itemId)?.nombre||c.itemId}</td><td>${fmtNum(c.cantidad)}</td></tr>`).join('')}
         </table></div>
         <div class="row" style="justify-content:flex-end;margin-top:8px">
           <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarInstalacion('${l.id}')">Rechazar</button>
@@ -2342,11 +2921,18 @@ async function generarReporteDiarioPDF(){
 
   const marginL = 14;
   const pageH = doc.internal.pageSize.getHeight();
-  const cols = [
-    {label:'Artículo', w:64}, {label:'Inicial', w:19.6}, {label:'Entr.', w:19.6},
-    {label:'Sal.', w:19.6}, {label:'Instal.', w:19.6}, {label:'Mermas', w:19.6}, {label:'Final', w:19.6}
+  // Columnas normales, y columnas extendidas para hojas (Melamina/MDF): Corte, Completas y Cortado.
+  const COLS_NORMAL = [
+    {label:'Artículo', w:56}, {label:'Inicial', w:18}, {label:'Entr.', w:18}, {label:'Sal.', w:18},
+    {label:'Instal.', w:18}, {label:'Mermas', w:18}, {label:'Ajuste', w:18}, {label:'Final', w:18}
   ];
-  const tableW = cols.reduce((s,c)=>s+c.w,0);
+  const COLS_HOJA = [
+    {label:'Artículo', w:40}, {label:'Inicial', w:14.2}, {label:'Entr.', w:14.2}, {label:'Sal.', w:14.2},
+    {label:'Corte', w:14.2}, {label:'Instal.', w:14.2}, {label:'Mermas', w:14.2}, {label:'Ajuste', w:14.2},
+    {label:'Compl.', w:14.2}, {label:'Cortado', w:14.2}, {label:'Final', w:14.2}
+  ];
+  let cols = COLS_NORMAL;
+  const tableW = () => cols.reduce((s,c)=>s+c.w,0);
   function colX(i){ let x=marginL; for(let k=0;k<i;k++) x+=cols[k].w; return x; }
 
   let y = 15;
@@ -2358,10 +2944,25 @@ async function generarReporteDiarioPDF(){
   const correo = (typeof getCurrentUserEmail==='function' ? getCurrentUserEmail() : '') || '';
   doc.text(`Por: ${correo}`, marginL, y); y+=8;
 
+  // Resumen de hojas: completas vs. cortado/armado
+  const resumenHojas = ['Melamina','MDF'].map(cat=>{
+    const t = CATALOGO.filter(i=>i.cat===cat).reduce((s,it)=>{ const f=calcFormula(it.id); s.c+=f.completas; s.k+=f.cortado; s.t+=f.final; s.a+=f.autoCortes; return s; },{c:0,k:0,t:0,a:0});
+    return {cat, ...t};
+  });
+  doc.setFillColor(238,242,255);
+  doc.rect(marginL, y, 182, 7+resumenHojas.length*5, 'F');
+  doc.setFontSize(9); doc.setFont(undefined,'bold');
+  doc.text('Hojas completas vs. material cortado/armado', marginL+2, y+5);
+  doc.setFont(undefined,'normal');
+  resumenHojas.forEach((r,i)=>{
+    doc.text(`${r.cat}: ${fmtNum(r.c)} completas · ${fmtNum(r.k)} cortado/armado · ${fmtNum(r.t)} total${r.a?`  (${fmtNum(r.a)} hoja(s) sin corte registrado)`:''}`, marginL+2, y+10+i*5);
+  });
+  y += 7+resumenHojas.length*5+6;
+
   function drawHeaderRow(){
-    doc.setFillColor(91,58,41);
+    doc.setFillColor(62,92,222);
     doc.setTextColor(255,255,255);
-    doc.rect(marginL, y, tableW, 6, 'F');
+    doc.rect(marginL, y, tableW(), 6, 'F');
     doc.setFontSize(8);
     doc.setFont(undefined,'bold');
     cols.forEach((c,i)=> doc.text(c.label, colX(i)+1.5, y+4.2));
@@ -2373,6 +2974,8 @@ async function generarReporteDiarioPDF(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   cats.forEach(cat=>{
     const items = CATALOGO.filter(i=>i.cat===cat);
+    const catHoja = items.length>0 && esHoja(items[0]);
+    cols = catHoja ? COLS_HOJA : COLS_NORMAL;
     if(y > pageH-30){ doc.addPage(); y=15; }
     doc.setFontSize(11);
     doc.setFont(undefined,'bold');
@@ -2383,12 +2986,15 @@ async function generarReporteDiarioPDF(){
     doc.setFontSize(8);
     items.forEach((it,idx)=>{
       if(y > pageH-15){ doc.addPage(); y=15; drawHeaderRow(); doc.setFontSize(8); }
-      if(idx%2===1){ doc.setFillColor(246,245,243); doc.rect(marginL, y, tableW, 5, 'F'); }
+      if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tableW(), 5, 'F'); }
       const f = calcFormula(it.id);
-      const vals = [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.instalaciones), fmtNum(f.mermas), fmtNum(f.final)];
+      const vals = catHoja
+        ? [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.cortes+f.autoCortes), fmtNum(f.instalaciones), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.completas), fmtNum(f.cortado), fmtNum(f.final)]
+        : [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.instalaciones), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.final)];
+      const maxLen = catHoja ? 23 : 33;
       vals.forEach((v,i)=>{
         let text = String(v);
-        if(i===0 && text.length>38) text = text.slice(0,36)+'…';
+        if(i===0 && text.length>maxLen) text = text.slice(0,maxLen-2)+'…';
         doc.text(text, colX(i)+1.5, y+3.6);
       });
       y += 5;
