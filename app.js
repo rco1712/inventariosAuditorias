@@ -484,10 +484,41 @@ function renderCat(){
 
 const MEL_COLORES = ['Blanco','Cenizo','Beige','Durango','Gris','Lino','Bco Mármol','Neg Mármol','Monarca','Negro','Nogal','Polar','Rioja','Roble','Roble Santana','Choco'];
 
+// ===== Cajonera Max / Entrepañera Max (confirmado por el usuario) =====
+// "La cajonera Max puede tener todas las variantes de los modelos al ser modelo Max, todo el
+// modelo se vuelve Max; no puede ser una cajonera Max y una entrepañera normal." Por eso, cuando
+// maxOn está activo, TODOS los muebles (cajonera y entrepañera) de ese modelo usan estas piezas
+// en vez de las normales. Cada unidad (1 cajonera Max o 1 entrepañera Max) sale de 1 hoja de
+// melamina de 15mm — artículo de inventario todavía sin definir (ver nota 'pendiente' abajo).
+function piezasCajoneraMax(add, colorCaj, unidades){
+  add('Pared Max', 2*unidades, '40×185 cm', colorCaj, 'ok', 'Cajonera Max (confirmado por el usuario)');
+  add('Entrepaño Max corto', 2*unidades, '27×58 cm', colorCaj, 'ok', 'Cajonera Max');
+  add('Entrepaño Max largo', 2*unidades, '40×58 cm', colorCaj, 'ok', 'Cajonera Max');
+  add('Respaldo Max', 1*unidades, '20×58 cm', colorCaj, 'ok', 'Cajonera Max');
+  add('Zócalo Max', 4*unidades, '12×58 cm', colorCaj, 'ok', 'Cajonera Max');
+  add('Fondo de cajonera (MDF 3mm)', unidades, '55×122 cm', '—', 'ok', '1 por cajonera Max (misma regla que cualquier cajonera)');
+  add('Melamina 15mm (cajonera Max)', 'Pendiente', '—', '—', 'pendiente', 'Cada cajonera Max sale de 1 hoja de melamina de 15mm ('+unidades+' hoja(s)), pero falta definir con qué nombre se registra ese artículo en el catálogo de inventario; no se inventa');
+}
+function piezasEntrepaneraMax(add, color, unidades){
+  add('Pared Max', 2*unidades, '40×185 cm', color, 'ok', 'Entrepañera Max (confirmado por el usuario)');
+  add('Entrepaño Max largo', 5*unidades, '40×58 cm', color, 'ok', 'Entrepañera Max');
+  add('Zócalo Max', 2*unidades, '12×58 cm', color, 'ok', 'Entrepañera Max');
+  add('Melamina 15mm (entrepañera Max)', 'Pendiente', '—', '—', 'pendiente', 'Cada entrepañera Max sale de 1 hoja de melamina de 15mm ('+unidades+' hoja(s)), pero falta definir con qué nombre se registra ese artículo en el catálogo de inventario; no se inventa');
+}
+// Piezas de los cajones de una Cajonera Max (confirmado por el usuario): distintas a las de un
+// cajón normal. Sin jaladera (los cajones Max no llevan) y siempre con corredera de extensión.
+function piezasCajonesMax(add, cajones, color, estructuraColor){
+  add('Frente Max', cajones, '60×20 cm', color, 'pendiente', 'Medida confirmada, pero el rendimiento (cuántos frentes Max caben por hoja) todavía no está confirmado; no se inventa');
+  add('Pieza chica de cajón Max', cajones*2, '15×38 cm', estructuraColor, 'ok', 'Rendimiento confirmado: 45 por hoja');
+  add('Pieza grande de cajón Max', cajones*2, '15×52.5 cm', estructuraColor, 'ok', 'Rendimiento confirmado: 30 por hoja');
+  add('Fondo de cajón (MDF 5mm, Max)', cajones, '55.5×37.9 cm', '—', 'ok', 'Rendimiento confirmado: 12 por hoja de MDF 5mm');
+  add('Correderas de extensión', cajones, '—', '—', 'ok', '1 por cajón. Confirmado: todas las cajoneras Max llevan corredera de extensión y no llevan jaladera');
+}
+
 // ===== Motor de despiece compartido por Despiece e Instalaciones =====
 // Devuelve { piezas:[{nombre,cantidad,dim,colorDestino,estado,nota}], maxNota }
 // Actualizado con el recetario confirmado por modelo (paredes/maleteros/cajonera/piezas de cajón/espejos/herrajes).
-function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera, especial3m){
+function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt){
   const estructuraColor = todoColor ? color : 'Blanco';
   // Color de la cajonera: independiente del frente y de "todo un color" (confirmado por el
   // usuario: "la cajonera puede ser de cualquier color y el frente también puede ser de
@@ -542,10 +573,14 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     const MUEBLES_CAJONERA = {3:1, 5:1, 6:2, 8:2, 10:2};
 
     if(cajones===0 && espejos===0){
-      const notaBase = fam==='Central'
-        ? 'Asumido igual que Lateral (1 mueble = 1 entrepañera); no confirmado explícitamente para Central'
-        : numMuebles+' mueble(s) = entrepañera(s) = '+(numMuebles*5)+' entrepaños (confirmado por el usuario)';
-      add('Entrepaño', numMuebles*5, '52×40 cm', estructuraColor, 'ok', notaBase);
+      if(maxOn){
+        piezasEntrepaneraMax(add, estructuraColor, numMuebles);
+      } else {
+        const notaBase = fam==='Central'
+          ? 'Asumido igual que Lateral (1 mueble = 1 entrepañera); no confirmado explícitamente para Central'
+          : numMuebles+' mueble(s) = entrepañera(s) = '+(numMuebles*5)+' entrepaños (confirmado por el usuario)';
+        add('Entrepaño', numMuebles*5, '52×40 cm', estructuraColor, 'ok', notaBase);
+      }
     } else if(cajones>0 && MUEBLES_CAJONERA[cajones]===undefined){
       add('Entrepaño','Pendiente','—','—','pendiente','La cantidad de entrepaños/muebles que ocupa la cajonera de '+cajones+' cajones no está confirmada; no se inventa');
     } else {
@@ -555,25 +590,35 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
       if(restantes < 0){
         add('Entrepaño','Pendiente','—','—','pendiente','La cajonera de '+cajones+' cajones + '+espejos+' espejo(s) ocupan más muebles ('+mueblesUsados+') de los que tiene '+fam+' ('+numMuebles+'); revisar el modelo, no se inventa');
       } else {
-        if(cajones>0) add('Entrepaño', CAJONERA_ENTREPANOS[cajones], '40×52 cm', colorCaj, 'ok', 'Cajonera de '+cajones+' cajones ('+mueblesCajonera+' mueble(s)). Color de cajonera independiente del frente.');
+        // Confirmado por el usuario: "todo el modelo se vuelve Max" — con maxOn, tanto la(s)
+        // cajonera(s) como la(s) entrepañera(s) restante(s) de este modelo usan piezas Max
+        // (no se puede mezclar cajonera Max con entrepañera normal en el mismo modelo).
+        if(cajones>0){
+          if(maxOn) piezasCajoneraMax(add, colorCaj, mueblesCajonera);
+          else add('Entrepaño', CAJONERA_ENTREPANOS[cajones], '40×52 cm', colorCaj, 'ok', 'Cajonera de '+cajones+' cajones ('+mueblesCajonera+' mueble(s)). Color de cajonera independiente del frente.');
+        }
         if(espejos>0) add('Entrepaño', espejos*5, '52×40 cm', colorCaj, 'ok', espejos+' espejo(s) = '+espejos+' mueble(s) tipo "cajonera de espejo" (5 entrepaños cada uno, confirmado por el usuario)');
-        if(restantes>0) add('Entrepaño', restantes*5, '52×40 cm', estructuraColor, 'ok', restantes+' mueble(s) restante(s) = entrepañera(s) (confirmado: los muebles no usados por cajonera/espejo son entrepañeras)');
+        if(restantes>0){
+          if(maxOn) piezasEntrepaneraMax(add, estructuraColor, restantes);
+          else add('Entrepaño', restantes*5, '52×40 cm', estructuraColor, 'ok', restantes+' mueble(s) restante(s) = entrepañera(s) (confirmado: los muebles no usados por cajonera/espejo son entrepañeras)');
+        }
       }
     }
   }
 
   // Piezas de cajón: confirmadas para cualquier cantidad de cajones (regla general del recetario)
   if(cajones>0){
-    add('Frente',cajones,'18×54 cm',color,'ok');
-    add('Pieza chica de cajón',cajones*2,'33×16.5 cm',estructuraColor,'ok','Medida tomada del despiece confirmado de Doble 5 Cajones (única con medida documentada; aplicada como regla general de pieza de cajón)');
-    add('Pieza grande de cajón',cajones*2,'46.4×16.5 cm',estructuraColor,'ok','Medida tomada del despiece confirmado de Doble 5 Cajones (única con medida documentada; aplicada como regla general de pieza de cajón)');
     if(maxOn){
-      add('Fondo de cajón (MDF 5mm, Max)',cajones,'49.4×33 cm','—','ok','Los cajones de cajoneras Max usan fondo de MDF 5mm (rendimiento: 12 por hoja) en vez de MDF 3mm');
+      piezasCajonesMax(add, cajones, color, estructuraColor);
     } else {
+      add('Frente',cajones,'18×54 cm',color,'ok');
+      add('Pieza chica de cajón',cajones*2,'33×16.5 cm',estructuraColor,'ok','Medida tomada del despiece confirmado de Doble 5 Cajones (única con medida documentada; aplicada como regla general de pieza de cajón)');
+      add('Pieza grande de cajón',cajones*2,'46.4×16.5 cm',estructuraColor,'ok','Medida tomada del despiece confirmado de Doble 5 Cajones (única con medida documentada; aplicada como regla general de pieza de cajón)');
       add('Fondo de cajón (MDF 3mm)',cajones,'49.4×33 cm','—','ok');
+      if(correderaExt) add('Correderas de extensión',cajones,'—','—','ok','1 por cajón (sustituye al juego de corredera normal; elegido por el usuario)');
+      else add('Juego de corredera',cajones,'—','—','ok','1 por cajón. Cada juego = 2 correderas macho (1 izq + 1 der, van en el cajón) + 2 correderas hembra (1 izq + 1 der, van en la cajonera). Se sigue descontando 1 "Juego de corredera" del catálogo; macho/hembra es informativo, no son artículos separados en inventario');
+      add('Jaladera (por cajón)',cajones,'—',color,'ok','1 por cajón');
     }
-    add('Juego de corredera',cajones,'—','—','ok','1 por cajón. Cada juego = 2 correderas macho (1 izq + 1 der, van en el cajón) + 2 correderas hembra (1 izq + 1 der, van en la cajonera). Se sigue descontando 1 "Juego de corredera" del catálogo; macho/hembra es informativo, no son artículos separados en inventario');
-    add('Jaladera (por cajón)',cajones,'—',color,'ok','1 por cajón');
   }
 
   // Zócalos: si el modelo lleva cajonera, sus zócalos dependen del color del FRENTE (confirmado
@@ -605,11 +650,14 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
   // (mueblesCajonera, ya contando que 6/8/10 cajones ocupan 2 muebles = 2 fondos) + 1 por cada
   // espejo (cada espejo ocupa 1 mueble). Medida y rendimiento confirmados: 55×122 cm, MDF 3mm,
   // 4 fondos por hoja.
-  const mueblesFondoCajonera = mueblesCajonera + espejos;
+  // Si maxOn, la(s) cajonera(s) Max ya trae(n) su propio fondo de cajonera (piezasCajoneraMax);
+  // aquí solo se cuenta lo que no sea Max: mueblesCajonera normal + espejos (el espejo no cambia con Max).
+  const mueblesCajoneraParaFondo = maxOn ? 0 : mueblesCajonera;
+  const mueblesFondoCajonera = mueblesCajoneraParaFondo + espejos;
   if(mueblesFondoCajonera>0){
     add('Fondo de cajonera (MDF 3mm)', mueblesFondoCajonera, '55×122 cm', '—', 'ok',
-      (mueblesCajonera>0 && espejos>0)
-        ? (mueblesCajonera+' mueble(s) de cajonera + '+espejos+' de espejo (confirmado por el usuario)')
+      (mueblesCajoneraParaFondo>0 && espejos>0)
+        ? (mueblesCajoneraParaFondo+' mueble(s) de cajonera + '+espejos+' de espejo (confirmado por el usuario)')
         : '1 fondo por mueble de cajonera/espejo (confirmado por el usuario), aparte del fondo de cada cajón');
   }
 
@@ -626,7 +674,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
 // ===== Adicionales: muebles extra que se agregan a un modelo (no cuentan como uno de los
 // muebles fijos del modelo, van aparte). Confirmado por el usuario: pueden ser cualquier
 // cajonera, entrepañera, zapatera, repisa o cajonera de espejo.
-function buildAdicionalPiezas(tipo, cajones, color){
+function buildAdicionalPiezas(tipo, cajones, color, correderaExt){
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
   const CAJONERA_ENTREPANOS = {3:5, 5:4, 6:10, 8:9, 10:8};
@@ -644,10 +692,16 @@ function buildAdicionalPiezas(tipo, cajones, color){
     add('Pieza chica de cajón',cajones*2,'33×16.5 cm',color,'ok');
     add('Pieza grande de cajón',cajones*2,'46.4×16.5 cm',color,'ok');
     add('Fondo de cajón (MDF 3mm)',cajones,'49.4×33 cm','—','ok');
-    add('Juego de corredera',cajones,'—','—','ok','1 por cajón');
+    if(correderaExt) add('Correderas de extensión',cajones,'—','—','ok','1 por cajón (sustituye al juego de corredera normal; elegido por el usuario)');
+    else add('Juego de corredera',cajones,'—','—','ok','1 por cajón');
     add('Jaladera (por cajón)',cajones,'—',color,'ok');
     if(MUEBLES_CAJONERA[cajones]) add('Fondo de cajonera (MDF 3mm)',MUEBLES_CAJONERA[cajones],'55×122 cm','—','ok','1 fondo de cajonera por mueble ocupado (confirmado por el usuario), aparte del fondo de cada cajón');
     else add('Fondo de cajonera (MDF 3mm)','Pendiente','—','—','pendiente','Cantidad de muebles que ocupa la cajonera de '+cajones+' cajones no confirmada; no se inventa');
+  } else if(tipo==='cajonera_max'){
+    // Confirmado por el usuario: receta completa de la Cajonera Max (ver piezasCajoneraMax /
+    // piezasCajonesMax). Como adicional cuenta como 1 sola unidad, con "cajones" cajones dentro.
+    piezasCajoneraMax(add, color, 1);
+    if(cajones>0) piezasCajonesMax(add, cajones, color, color);
   } else if(tipo==='cajonera_emma'){
     add('Pared',2,'191×40 cm',color,'ok','Cajonera Emma: 2 paredes + 4 entrepaños + 5 zócalos de 10×52 + 4 cajones (confirmado por el usuario)');
     add('Entrepaño',4,'52×40 cm',color,'ok');
@@ -668,8 +722,6 @@ function buildAdicionalPiezas(tipo, cajones, color){
     add('Espejo',1,'—','—','ok','1 "Espejos closet"');
     add('Jaladera (por espejo)',1,'—',color,'ok');
     add('Bisagra (por espejo)',1.5,'—','—','ok');
-  } else if(tipo==='cajonera_max'){
-    add('Cajonera Max',1,'—','—','pendiente','Composición de la cajonera Max no confirmada todavía; no se inventa. Dile a Claude su receta para agregarla.');
   } else if(tipo==='zapatera'){
     add('Zapatera',1,'—','—','pendiente','Composición de la zapatera no confirmada todavía; no se inventa. Dile a Claude las medidas/materiales para agregarla.');
   } else if(tipo==='repisa'){
@@ -679,10 +731,10 @@ function buildAdicionalPiezas(tipo, cajones, color){
 }
 
 // Traduce el valor del selector "por muebles" (MUEBLE_TIPO_OPCIONES) a buildAdicionalPiezas
-function buildMueblePiezasComp(value, cajonesManual, color){
-  if(value==='cajonera_3') return buildAdicionalPiezas('cajonera', 3, color);
-  if(value==='cajonera_5') return buildAdicionalPiezas('cajonera', 5, color);
-  if(value==='cajonera_otra') return buildAdicionalPiezas('cajonera', cajonesManual, color);
+function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
+  if(value==='cajonera_3') return buildAdicionalPiezas('cajonera', 3, color, correderaExt);
+  if(value==='cajonera_5') return buildAdicionalPiezas('cajonera', 5, color, correderaExt);
+  if(value==='cajonera_otra') return buildAdicionalPiezas('cajonera', cajonesManual, color, correderaExt);
   return buildAdicionalPiezas(value, cajonesManual, color); // entrepanera, cajonera_emma, cajonera_espejo, cajonera_max
 }
 
@@ -690,14 +742,14 @@ function buildMueblePiezasComp(value, cajonesManual, color){
 // (en vez de un modelo con nombre). Las paredes/maleteros/herrajes de la familia se toman de
 // buildDespiece con cajones=0/espejos=0 (son fijos, no cambian según qué ocupa cada mueble);
 // se descarta su entrepaño "base sencillo" porque aquí lo da la combinación elegida.
-function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, especial3m){
+function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt){
   const estructuraColor = todoColor ? color : 'Blanco';
   const colorCaj = colorCajonera || estructuraColor;
-  const base = buildDespiece(fam, 0, 0, color, todoColor, maxOn, colorCajonera, especial3m);
+  const base = buildDespiece(fam, 0, 0, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
   const piezasFijas = base.piezas.filter(p=>p.nombre!=='Entrepaño');
   const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
   if(hayCajonera) piezasFijas.forEach(p=>{ if(p.nombre==='Zócalo normal') p.colorDestino = color; });
-  const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, colorCaj));
+  const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, colorCaj, correderaExt));
   return {piezas: piezasFijas.concat(piezasMuebles), maxNota: base.maxNota};
 }
 
@@ -757,13 +809,18 @@ function piezasAConsumo(piezas, color){
 
   // Piezas de cajón: cortas 49/hoja, largas 35/hoja
   const cortasPorColor = {}, largasPorColor = {};
+  const cortasMaxPorColor = {}, largasMaxPorColor = {};
   piezas.forEach(p=>{
     if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
     if(p.nombre==='Pieza chica de cajón') cortasPorColor[p.colorDestino]=(cortasPorColor[p.colorDestino]||0)+p.cantidad;
     if(p.nombre==='Pieza grande de cajón') largasPorColor[p.colorDestino]=(largasPorColor[p.colorDestino]||0)+p.cantidad;
+    if(p.nombre==='Pieza chica de cajón Max') cortasMaxPorColor[p.colorDestino]=(cortasMaxPorColor[p.colorDestino]||0)+p.cantidad;
+    if(p.nombre==='Pieza grande de cajón Max') largasMaxPorColor[p.colorDestino]=(largasMaxPorColor[p.colorDestino]||0)+p.cantidad;
   });
   Object.keys(cortasPorColor).forEach(c=>addConsumo('Melamina '+c, cortasPorColor[c]/49));
   Object.keys(largasPorColor).forEach(c=>addConsumo('Melamina '+c, largasPorColor[c]/35));
+  Object.keys(cortasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, cortasMaxPorColor[c]/45));
+  Object.keys(largasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, largasMaxPorColor[c]/30));
 
   // Fondos MDF: cajón normal (14/hoja MDF3mm), cajón Max (12/hoja MDF5mm), cajonera con espejo (4/hoja MDF3mm)
   const fondosCajon3 = piezas.filter(p=>p.nombre==='Fondo de cajón (MDF 3mm)' && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
@@ -780,6 +837,7 @@ function piezasAConsumo(piezas, color){
     if(p.nombre==='Tubo') addConsumo('Tubos 1.5 m', p.cantidad);
     if(p.nombre==='Juego de bridas') addConsumo('Juegos de bridas', p.cantidad);
     if(p.nombre==='Juego de corredera') addConsumo('Juego de corredera', p.cantidad);
+    if(p.nombre.startsWith('Correderas de extensión')) addConsumo('Correderas de extensión', p.cantidad);
     if(p.nombre.startsWith('Jaladera')) addConsumo('Jaladeras', p.cantidad);
     if(p.nombre.startsWith('Bisagra')) addConsumo('Bisagras', p.cantidad);
     if(p.nombre==='Espejo') addConsumo('Espejos closet', p.cantidad);
@@ -815,8 +873,8 @@ function toggleAdicionalCajones(prefix){
   const sel = document.getElementById(prefix+'-adic-tipo');
   const wrap = document.getElementById(prefix+'-adic-cajones-wrap');
   if(!sel || !wrap) return;
-  wrap.innerHTML = sel.value==='cajonera'
-    ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">`
+  wrap.innerHTML = (sel.value==='cajonera'||sel.value==='cajonera_max')
+    ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones${sel.value==='cajonera_max'?' (opcional; 0 si es solo el mueble sin cajones)':''}</label><input type="number" min="${sel.value==='cajonera_max'?'0':'1'}" id="${prefix}-adic-cajones" placeholder="ej. 3">`
     : '';
 }
 function agregarAdicional(prefix){
@@ -827,6 +885,9 @@ function agregarAdicional(prefix){
     const el = document.getElementById(prefix+'-adic-cajones');
     cajones = Number(el && el.value);
     if(!cajones || cajones<=0) return alert('Captura la cantidad de cajones del adicional.');
+  } else if(tipo==='cajonera_max'){
+    const el = document.getElementById(prefix+'-adic-cajones');
+    cajones = Number(el && el.value) || 0;
   }
   (prefix==='d' ? dAdicionales : iAdicionales).push({tipo, cajones, color});
   renderAdicBox(prefix);
@@ -853,6 +914,9 @@ function renderDesp(){
     <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
       <input type="checkbox" id="d-todocolor" style="width:auto"> Cliente pidió "todo de un solo color"
     </label>
+    <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
+      <input type="checkbox" id="d-corredera-ext" style="width:auto"> Usar corredera de extensión (sustituye la corredera normal en las cajoneras; no aplica a Cajonera Max, que siempre lleva extensión)
+    </label>
     <button class="btn" style="margin-top:10px" onclick="calcDespiece()">Calcular despiece</button>
   </div>
   <div id="d-adic-box"></div>
@@ -876,7 +940,7 @@ function renderDSelector(){
           <select onchange="dMueblesComp[${i}].value=this.value; renderDSelector();">
             ${MUEBLE_TIPO_OPCIONES.map(o=>`<option value="${o.value}" ${o.value===m.value?'selected':''}>Mueble ${i+1}: ${o.label}</option>`).join('')}
           </select>
-          ${m.value==='cajonera_otra'?`<input type="number" min="1" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="dMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
+          ${(m.value==='cajonera_otra'||m.value==='cajonera_max')?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="dMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
       ${dFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
       ${dFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
@@ -900,24 +964,25 @@ function calcDespiece(){
   const color = $('#d-color').value;
   const todoColor = $('#d-todocolor').checked;
   const colorCajonera = $('#d-color-cajonera').value;
+  const correderaExt = document.getElementById('d-corredera-ext') ? document.getElementById('d-corredera-ext').checked : false;
   let piezasModelo, maxNota, titulo, notaModelo=null;
   if(dModoComp){
     const maxOn = dFamiliaComp==='King' && document.getElementById('d-max-comp') ? document.getElementById('d-max-comp').checked : false;
     const especial3m = dFamiliaComp==='Doble Especial' && document.getElementById('d-especial3m-comp') ? document.getElementById('d-especial3m-comp').checked : false;
-    const incompletos = dMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
+    const incompletos = dMueblesComp.filter(m=>(m.value==='cajonera_otra'||m.value==='cajonera_max') && !m.cajones && m.value==='cajonera_otra');
     if(incompletos.length) return alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".');
-    const r = buildComposicion(dFamiliaComp, dMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m);
+    const r = buildComposicion(dFamiliaComp, dMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = dFamiliaComp+' — combinación: '+dMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ')+(especial3m?' · a 3 metros':'');
   } else {
     const modelo = MODELOS.find(x=>x.nombre===$('#d-modelo').value);
     const maxOn = modelo.maxDisponible && document.getElementById('d-max') ? document.getElementById('d-max').checked : false;
     const especial3m = modelo.especial3mDisponible && document.getElementById('d-especial3m') ? document.getElementById('d-especial3m').checked : false;
-    const r = buildDespiece(modelo.fam, modelo.cajones, modelo.espejos, color, todoColor, maxOn, colorCajonera, especial3m);
+    const r = buildDespiece(modelo.fam, modelo.cajones, modelo.espejos, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modelo.nombre+(especial3m?' · a 3 metros':''); notaModelo = modelo.nota;
   }
-  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color));
+  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt));
   const piezas = piezasModelo.concat(piezasAdic);
   const consumo = piezasAConsumo(piezas, color);
 
@@ -993,6 +1058,9 @@ function renderInstMueble(){
     <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
       <input type="checkbox" id="i-todocolor" style="width:auto"> Cliente pidió "todo de un solo color"
     </label>
+    <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
+      <input type="checkbox" id="i-corredera-ext" style="width:auto"> Usar corredera de extensión (sustituye la corredera normal en las cajoneras; no aplica a Cajonera Max, que siempre lleva extensión)
+    </label>
     <div id="i-max-wrap"></div>
     <div id="i-cajcolor-wrap"></div>
     <div class="grid2" style="margin-top:8px">
@@ -1022,7 +1090,7 @@ function renderISelector(){
           <select onchange="iMueblesComp[${i}].value=this.value; renderISelector();">
             ${MUEBLE_TIPO_OPCIONES.map(o=>`<option value="${o.value}" ${o.value===m.value?'selected':''}>Mueble ${i+1}: ${o.label}</option>`).join('')}
           </select>
-          ${m.value==='cajonera_otra'?`<input type="number" min="1" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="iMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
+          ${(m.value==='cajonera_otra'||m.value==='cajonera_max')?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="iMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
       ${iFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
       ${iFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
@@ -1051,6 +1119,7 @@ function renderInstMaxToggle(){
 function previewInst(){
   const color = $('#i-color').value;
   const todoColor = $('#i-todocolor').checked;
+  const correderaExt = document.getElementById('i-corredera-ext') ? document.getElementById('i-corredera-ext').checked : false;
   let piezasModelo, maxNota, titulo, notaModelo=null, colorCajonera;
   if(iModoComp){
     const maxOn = iFamiliaComp==='King' && document.getElementById('i-max-comp') ? document.getElementById('i-max-comp').checked : false;
@@ -1058,7 +1127,7 @@ function previewInst(){
     const incompletos = iMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length){ alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".'); return; }
     colorCajonera = document.getElementById('i-color-cajonera-comp') ? document.getElementById('i-color-cajonera-comp').value : null;
-    const r = buildComposicion(iFamiliaComp, iMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m);
+    const r = buildComposicion(iFamiliaComp, iMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = iFamiliaComp+' — combinación: '+iMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ')+(especial3m?' · a 3 metros':'');
   } else {
@@ -1067,11 +1136,11 @@ function previewInst(){
     const maxOn = modeloSel.maxDisponible && document.getElementById('i-max') ? document.getElementById('i-max').checked : false;
     const especial3m = modeloSel.especial3mDisponible && document.getElementById('i-especial3m') ? document.getElementById('i-especial3m').checked : false;
     colorCajonera = (cajones>0 || espejos>0) && document.getElementById('i-color-cajonera') ? document.getElementById('i-color-cajonera').value : null;
-    const r = buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera, especial3m);
+    const r = buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modeloSel.nombre+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
   }
-  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color));
+  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt));
   const piezas = piezasModelo.concat(piezasAdic);
   const pendientes = piezas.filter(p=>p.estado==='pendiente');
   const consumo = piezasAConsumo(piezas, color);
@@ -1148,90 +1217,237 @@ async function confirmarInst(){
 // ---- Puertas (modelos de instalación, NO ferretería) ----
 const TIPOS_PUERTA = {
   'Normal': 'Composición: 1 par de puertas, 3 marcos, 1 fijo.',
-  'Con pared falsa': 'Composición: 1 par de puertas, 1 pared falsa, 2 marcos, 1 fijo.',
+  'Con pared falsa': 'Composición: 1 par de puertas, 1 pared falsa, 2 marcos, 1 fijo, 1 extensión de fijo.',
+  'Con dos paredes falsas': 'Composición: 1 par de puertas, 1 marco, 1 fijo, 2 paredes falsas, 2 extensiones de fijo.',
   'Con cubos a los lados': 'Composición: 1 par de puertas, 1 fijo o 2 fijos según medida, 9 marcos.',
   'Con cubo al centro': 'Composición: 2 pares de puertas, 2 fijos, 8 marcos.'
+};
+// Herrajes de puertas (confirmado por el usuario): riel/sistema/bastidor/jaladeras por tipo.
+// La jaladera puede sustituirse por "Jaladera plana" (elegido por el usuario); esto solo aplica
+// a las jaladeras de puertas, no a las de cajones/cajoneras.
+const TIPOS_PUERTA_HERRAJES = {
+  'Normal': {riel:1, sistema:1, bastidor:1, jaladera:2},
+  'Con pared falsa': {riel:1, sistema:1, bastidor:1, jaladera:2},
+  'Con dos paredes falsas': {riel:1, sistema:1, bastidor:1, jaladera:2},
+  'Con cubos a los lados': {riel:1, sistema:1, bastidor:1, jaladera:2},
+  'Con cubo al centro': {riel:2, sistema:2, bastidor:2, jaladera:4}
 };
 function renderInstPuertas(){
   $('#inst-body').innerHTML = `
   <div class="card">
     <strong>Puertas · ${modulo()}</strong>
-    <p class="hint">Las puertas son modelos de instalación, no productos de ferretería: no aparecen ni se descuentan en Inventario/Entradas-Salidas/Mermas.</p>
+    <p class="hint">Las puertas no cuentan como uno de los muebles del modelo (no aparecen en Inventario de muebles), pero su herrajería (riel, sistema, bastidor, jaladeras) sí se descuenta del inventario del módulo al registrar la instalación.</p>
     <div class="grid2" style="margin-top:8px">
-      <select id="p-tipo">${Object.keys(TIPOS_PUERTA).map(t=>`<option>${t}</option>`).join('')}</select>
+      <select id="p-tipo" onchange="renderPuertaParedFalsaExtra()">${Object.keys(TIPOS_PUERTA).map(t=>`<option>${t}</option>`).join('')}</select>
       <input id="p-alto" type="number" placeholder="Alto total (cm)">
       <input id="p-ancho" type="number" placeholder="Ancho total (cm)">
+      <select id="p-jaladera-tipo"><option value="normal">Jaladera normal</option><option value="plana">Jaladera plana</option></select>
       <input id="p-fecha" type="date" value="${new Date().toISOString().slice(0,10)}">
       <input id="p-nota" placeholder="Cliente / referencia">
     </div>
+    <div id="p-pared-falsa-extra-wrap" style="margin-top:8px"></div>
     <button class="btn" style="margin-top:10px" onclick="calcPuerta()">Calcular medidas</button>
   </div>
   <div id="p-result"></div>`;
+  renderPuertaParedFalsaExtra();
 }
+
+// Caso aislado confirmado por el usuario: en "Con cubos a los lados" y "Con cubo al centro"
+// a veces piden, aparte, una pared falsa (con su extensión de fijo). No es parte fija de esos
+// modelos, así que va como casilla opcional.
+const TIPOS_CON_PARED_FALSA_EXTRA = ['Con cubos a los lados','Con cubo al centro'];
+function renderPuertaParedFalsaExtra(){
+  const wrap = document.getElementById('p-pared-falsa-extra-wrap');
+  if(!wrap) return;
+  const tipo = document.getElementById('p-tipo').value;
+  wrap.innerHTML = TIPOS_CON_PARED_FALSA_EXTRA.includes(tipo)
+    ? `<label class="hint" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="p-pared-falsa-extra" style="width:auto"> Piden pared falsa aparte (poco común; agrega 1 pared falsa de 244×60 cm + su extensión de fijo)</label>`
+    : '';
+}
+
+let puertaPreview = null;
 
 function calcPuerta(){
   const tipo = $('#p-tipo').value;
   const alto = Number($('#p-alto').value);
   const ancho = Number($('#p-ancho').value);
   if(!alto || !ancho) return alert('Captura alto y ancho');
+  const jaladeraTipo = $('#p-jaladera-tipo') ? $('#p-jaladera-tipo').value : 'normal';
   const piezas = [];
   const add=(n,v,nota)=>piezas.push({n,v,nota:nota||''});
+  let altoFijoParaExtra = null; // para la pared falsa aislada (ver TIPOS_CON_PARED_FALSA_EXTRA)
 
   add('Composición', TIPOS_PUERTA[tipo]);
 
-  if(tipo==='Con pared falsa'){
-    const altoParedFalsa = alto-2;
-    const altoMarcos = alto-4;
+  if(tipo==='Con pared falsa' || tipo==='Con dos paredes falsas'){
+    // Confirmado por el usuario (ejemplo: ancho 200, alto 260 → pared falsa 244×60, marcos
+    // 240×10, puertas 104.25×232.5, fijo 202×37, extensión de fijo 60×37):
+    // alto de pared falsa = alto total − 2, con tope de 244 cm (medida de la hoja); ancho de
+    // pared falsa = siempre 60 cm. Alto de marcos = alto de pared falsa (ya con el tope
+    // aplicado) − 4. Alto de puertas = alto de marcos − 7.5. Ancho de puertas = (ancho total
+    // − 1.5) ÷ 2 + 5. Ancho del fijo = ancho total + 2; alto del fijo = alto total − alto de
+    // marcos + 17. La extensión de fijo mide lo mismo de ancho que la pared falsa (60 cm) y lo
+    // mismo de alto que el fijo. "Con dos paredes falsas" usa la misma fórmula, solo cambia la
+    // cantidad de piezas (2 paredes falsas y 2 extensiones de fijo en vez de 1).
+    const altoParedFalsa = Math.min(alto-2, 244);
+    const altoMarcos = altoParedFalsa-4;
     const altoPuertas = altoMarcos-7.5;
     const anchoPuertas = (ancho-1.5)/2+5;
     const anchoFijo = ancho+2;
     const altoFijo = alto-altoMarcos+17;
-    add('Alto pared falsa', altoParedFalsa.toFixed(1)+' cm', 'Alto total − 2');
+    add('Alto pared falsa', altoParedFalsa.toFixed(1)+' cm', (altoParedFalsa===244?'Tope de hoja: alto total − 2 pasa de 244, se deja en 244':'Alto total − 2')+(tipo==='Con dos paredes falsas'?' (aplica a cada una de las 2 paredes falsas)':''));
     add('Ancho pared falsa', '60 cm', 'Siempre 60 cm');
-    add('Alto de marcos', altoMarcos.toFixed(1)+' cm', 'Alto total − 4');
+    add('Alto de marcos', altoMarcos.toFixed(1)+' cm', 'Alto de pared falsa − 4');
     add('Alto de puertas', altoPuertas.toFixed(1)+' cm', 'Alto de marcos − 7.5');
     add('Ancho de puertas (c/u del par)', anchoPuertas.toFixed(1)+' cm', '(Ancho total − 1.5) ÷ 2 + 5');
     add('Ancho del fijo', anchoFijo.toFixed(1)+' cm', 'Ancho total + 2');
     add('Alto del fijo', altoFijo.toFixed(1)+' cm', 'Alto total − alto de marcos + 17');
-  } else {
-    // Reglas generales documentadas (normal / cubos): ancho de par y tope de 244
+    add('Extensión de fijo', altoFijo.toFixed(1)+'×60 cm', 'Mismo ancho que la pared falsa (60 cm) y mismo alto que el fijo ('+(tipo==='Con dos paredes falsas'?'lleva 2':'lleva 1')+')');
+  } else if(tipo==='Normal'){
+    // Confirmado por el usuario (ejemplo: ancho 180, alto 260 → par 93.5×236.5, marcos 244×10, fijo 33×182):
+    // alto de marcos = alto total − 6, con tope de 244 cm (medida de la hoja: 122×244);
+    // alto de puertas = alto de marcos − 7.5; ancho de puertas = (ancho total − 3) ÷ 2 + 5;
+    // ancho del fijo = ancho total + 2; alto del fijo = alto total − alto de marcos + 17;
+    // ancho de marco = 10 cm, fijo.
+    const altoMarcos = Math.min(alto-6, 244);
+    const altoPuertas = altoMarcos-7.5;
     const anchoPuertas = (ancho-3)/2+5;
+    const anchoFijo = ancho+2;
+    const altoFijo = alto-altoMarcos+17;
     add('Ancho de puertas (c/u del par)', anchoPuertas.toFixed(1)+' cm', '(Ancho total − 3) ÷ 2 + 5');
-    if(alto<250){
-      add('Alto de puertas/marcos', (alto-6).toFixed(1)+' cm', 'Menor a 250 cm: alto total − 6');
+    add('Alto de marcos', altoMarcos.toFixed(1)+' cm', altoMarcos===244 ? 'Tope de hoja: alto total − 6 pasa de 244, se deja en 244' : 'Alto total − 6');
+    add('Alto de puertas', altoPuertas.toFixed(1)+' cm', 'Alto de marcos − 7.5');
+    add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario)');
+    add('Ancho del fijo', anchoFijo.toFixed(1)+' cm', 'Ancho total + 2');
+    add('Alto del fijo', altoFijo.toFixed(1)+' cm', 'Alto total − alto de marcos + 17');
+  } else if(tipo==='Con cubos a los lados'){
+    // Confirmado por el usuario (ejemplo: ancho 250, alto 240 → puertas 120×226.5, marcos
+    // 234×10, y como el ancho es grande se necesitan 2 fijos de 126×23):
+    // ancho de puertas = (ancho total − 20 de los cubos de los lados) ÷ 2 + 5.
+    // alto de marcos = alto total − 6, con tope de 244 cm (medida de la hoja); alto de
+    // puertas = alto de marcos − 7.5 (igual que en Normal). Ancho del fijo = ancho total + 2;
+    // si esa medida pasa de 244 cm (tope de la hoja), se reparte entre 2 fijos iguales; si no,
+    // es 1 solo fijo. Alto del fijo = alto total − alto de marcos + 17 (igual que en Normal).
+    const altoMarcos = Math.min(alto-6, 244);
+    const altoPuertas = altoMarcos-7.5;
+    const anchoPuertas = (ancho-20)/2+5;
+    const altoFijo = alto-altoMarcos+17;
+    const anchoFijoTotal = ancho+2;
+    const dosFijos = anchoFijoTotal>244;
+    add('Ancho de puertas (c/u del par)', anchoPuertas.toFixed(1)+' cm', '(Ancho total − 20 de los cubos) ÷ 2 + 5');
+    add('Alto de marcos', altoMarcos.toFixed(1)+' cm', altoMarcos===244 ? 'Tope de hoja: alto total − 6 pasa de 244, se deja en 244' : 'Alto total − 6');
+    add('Alto de puertas', altoPuertas.toFixed(1)+' cm', 'Alto de marcos − 7.5');
+    add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario)');
+    if(dosFijos){
+      add('Fijos', '2 de '+(anchoFijoTotal/2).toFixed(1)+'×'+altoFijo.toFixed(1)+' cm', 'Ancho total + 2 = '+anchoFijoTotal.toFixed(1)+' cm; pasa de 244 (tope de hoja), se reparte en 2 fijos iguales');
     } else {
-      add('Alto de marcos', '244 cm', 'Tope de hoja: mayor a 250 cm, marcos van a 244 cm');
-      add('Alto del fijo', 'Pendiente', 'El fijo absorbe el incremento sobre 244, pero la fórmula exacta para este tipo no está documentada');
+      add('Fijo', '1 de '+anchoFijoTotal.toFixed(1)+'×'+altoFijo.toFixed(1)+' cm', 'Ancho total + 2 (no pasa de 244, así que es 1 solo fijo)');
     }
-    if(tipo==='Con cubos a los lados'){
-      add('Fijos', 'Pendiente (1 o 2 según medida)', 'Regla exacta de cuándo usar 1 o 2 fijos no está documentada');
-    }
+    altoFijoParaExtra = altoFijo;
+  } else {
+    // Con cubo al centro: confirmado por el usuario (ejemplo: ancho 300, alto 260 →
+    // puertas 76.75×236.5 (4 piezas), marcos 244×10 (8 piezas), fijos 151×33 (2 piezas)):
+    // ancho de cada puerta = (((ancho total − 10 del cubo) ÷ 2) − 1.5) ÷ 2 + 5 (son 4 puertas,
+    // 2 pares, uno a cada lado del cubo). Alto de marcos = alto total − 6, con tope de 244 cm
+    // (medida de la hoja); alto de puertas = alto de marcos − 7.5 (igual que en los demás
+    // tipos). Los 2 fijos miden (ancho total + 2) ÷ 2 de ancho cada uno; su alto se saca igual
+    // que en todos los tipos de puerta: alto total − alto de marcos + 17.
+    const altoMarcos = Math.min(alto-6, 244);
+    const altoPuertas = altoMarcos-7.5;
+    const anchoEfectivo = ancho-10;
+    const anchoPuertas = (anchoEfectivo/2-1.5)/2+5;
+    const anchoFijo = (ancho+2)/2;
+    const altoFijo = alto-altoMarcos+17;
+    add('Ancho de puertas (c/u, 4 piezas)', anchoPuertas.toFixed(2)+' cm', '(((Ancho total − 10 del cubo) ÷ 2) − 1.5) ÷ 2 + 5');
+    add('Alto de marcos', altoMarcos.toFixed(1)+' cm', altoMarcos===244 ? 'Tope de hoja: alto total − 6 pasa de 244, se deja en 244' : 'Alto total − 6');
+    add('Alto de puertas', altoPuertas.toFixed(1)+' cm', 'Alto de marcos − 7.5');
+    add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario), 8 piezas');
+    add('Fijos (2 piezas)', anchoFijo.toFixed(1)+'×'+altoFijo.toFixed(1)+' cm', 'Ancho: (ancho total + 2) ÷ 2. Alto: alto total − alto de marcos + 17');
+    altoFijoParaExtra = altoFijo;
   }
+
+  // Caso aislado (confirmado por el usuario): piden una pared falsa aparte en un modelo
+  // "Con cubos a los lados" o "Con cubo al centro" (no es parte fija de esos modelos). La
+  // pared falsa siempre sale de 244×60 cm (tamaño fijo, no depende de la medida del hueco), y
+  // su extensión de fijo mide lo mismo de ancho (60 cm) por el alto del fijo de esa puerta.
+  if(TIPOS_CON_PARED_FALSA_EXTRA.includes(tipo) && document.getElementById('p-pared-falsa-extra') && document.getElementById('p-pared-falsa-extra').checked){
+    add('Pared falsa (aparte, poco común)', '244×60 cm', 'Medida fija, confirmada por el usuario');
+    if(altoFijoParaExtra!=null) add('Extensión de fijo (aparte)', altoFijoParaExtra.toFixed(1)+'×60 cm', 'Mismo ancho que la pared falsa (60 cm) y el mismo alto del fijo de esta puerta');
+  }
+
+  // Herrajes (confirmado por el usuario): riel/sistema/bastidor/jaladera según el tipo de puerta.
+  // La jaladera se sustituye por "Jaladera plana" si el usuario lo eligió arriba (nunca se suman las dos).
+  const herrajesTipo = TIPOS_PUERTA_HERRAJES[tipo];
+  const nombreJaladera = jaladeraTipo==='plana' ? 'Jaladera plana' : 'Jaladeras';
+  const consumo = [
+    {itemId: itemByName('Rieles').id, cantidad: herrajesTipo.riel},
+    {itemId: itemByName('Sistemas').id, cantidad: herrajesTipo.sistema},
+    {itemId: itemByName('Bastidores').id, cantidad: herrajesTipo.bastidor},
+    {itemId: itemByName(nombreJaladera).id, cantidad: herrajesTipo.jaladera}
+  ];
+
+  const faltantes = [];
+  consumo.forEach(c=>{
+    const f = calcFormula(c.itemId);
+    if(f.final - c.cantidad < 0){
+      faltantes.push({nombre:CATALOGO.find(i=>i.id===c.itemId).nombre, disponible:f.final, requerido:c.cantidad});
+    }
+  });
+  const bloqueado = faltantes.length>0;
+  puertaPreview = {tipo, alto, ancho, consumo, faltantes, bloqueado};
 
   let html = `<div class="card"><h3>${tipo}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
     ${piezas.map(p=>`<tr><td>${p.n}</td><td>${p.v}</td><td class="hint">${p.nota}</td></tr>`).join('')}
     </table></div>
-    <div class="warn">El consumo de melamina/MDF por puerta no está documentado con un rendimiento por hoja confirmado, así que esta calculadora solo obtiene medidas de corte; no descuenta ferretería automáticamente. Registra el material real usado como "Instalación" en Entradas/Salidas si es necesario.</div>
-  </div>
-  <div class="card row" style="justify-content:space-between">
-    <span class="hint">Esta instalación de puertas quedará en el registro de instalaciones (no en inventario de ferretería).</span>
-    <button class="btn" onclick="registrarPuerta('${tipo}',${alto},${ancho})">Registrar instalación de puertas</button>
+    <div class="warn">El consumo de melamina/MDF por puerta no está documentado con un rendimiento por hoja confirmado, así que esta calculadora solo obtiene medidas de corte para la madera; no la descuenta automáticamente. Registra ese material como "Instalación" en Entradas/Salidas si es necesario.</div>
+    <div class="wrap-x" style="margin-top:8px"><table><tr><th>Herraje a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
+    ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
+      return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${f.final}</td></tr>`;
+    }).join('')}
+    </table></div>
   </div>`;
+
+  if(bloqueado){
+    html += `<div class="card"><div class="warn"><strong>Descuento de herrajes bloqueado — existencia insuficiente en ${modulo()}.</strong>
+      <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.nombre}: disponible ${f.disponible}, se requieren ${f.requerido}</li>`).join('')}</ul>
+      No se aplicó ningún descuento parcial.</div></div>`;
+  } else {
+    html += `<div class="card row" style="justify-content:space-between">
+      <span class="pos">Existencia suficiente de herrajes.</span>
+      <button class="btn" onclick="registrarPuerta('${tipo}',${alto},${ancho})">Registrar instalación y descontar herrajes</button>
+    </div>`;
+  }
   $('#p-result').innerHTML = html;
 }
 
 async function registrarPuerta(tipo, alto, ancho){
+  if(!puertaPreview || puertaPreview.bloqueado || puertaPreview.tipo!==tipo || puertaPreview.alto!==alto || puertaPreview.ancho!==ancho){
+    alert('Vuelve a calcular las medidas antes de registrar (los datos cambiaron o no hay vista previa).');
+    return;
+  }
   const nota = ($('#p-nota').value||'').trim();
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
+  const desc = `Puerta ${tipo} · ${alto}×${ancho} cm`;
   try{
+    // Re-valida en el último momento antes de escribir, y escribe todo o nada
+    for(const c of puertaPreview.consumo){
+      const f = calcFormula(c.itemId);
+      if(f.final - c.cantidad < 0){ alert('Existencia cambió, ya no alcanza para: '+CATALOGO.find(i=>i.id===c.itemId).nombre); return; }
+    }
+    for(const c of puertaPreview.consumo){
+      const item = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString()});
+    }
     await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,alto,ancho,nota,fechaDia,fecha:new Date().toISOString()});
     await db.collection('instalacionesLog').doc(cryptoId()).set({
-      modulo:modulo(), categoria:'Puerta', descripcion:`${tipo} · ${alto}×${ancho} cm`, nota, fechaDia,
-      consumo:[], fecha:new Date().toISOString()
+      modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia,
+      consumo:puertaPreview.consumo, fecha:new Date().toISOString()
     });
-    alert('Instalación de puertas registrada en el historial de '+fechaDia+' (no afecta el inventario de ferretería).');
-  }catch(e){ alert('Error: '+e.message); }
+    alert('Instalación de puertas registrada. Se descontaron '+puertaPreview.consumo.length+' herraje(s) y quedó en el historial de '+fechaDia+'.');
+    puertaPreview = null;
+    renderInstPuertas();
+  }catch(e){ alert('Error al registrar: '+e.message); }
 }
 
 // ===== Capa 5: Traspasos entre módulos =====
