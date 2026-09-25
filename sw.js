@@ -1,6 +1,6 @@
 // Service worker: cachea el "app shell" para que la app abra y funcione sin internet.
 // Los datos van por src/db.js (IndexedDB + sync a Supabase), no por aquí.
-const CACHE = 'auditoriamodulos-v14';
+const CACHE = 'auditoriamodulos-v15';
 const APP_SHELL = [
   './',
   './index.html',
@@ -13,7 +13,9 @@ const APP_SHELL = [
   './icon-192.png',
   './icon-512.png',
   'https://cdn.jsdelivr.net/npm/dexie@3.2.6/dist/dexie.min.js',
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js'
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js',
+  'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf-autotable.min.js'
 ];
 
 self.addEventListener('install', (event) => {

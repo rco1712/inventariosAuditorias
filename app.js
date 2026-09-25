@@ -98,7 +98,7 @@ function renderModBar(){
 // Muestra/oculta pestañas de navegación y acciones según el rol de quien inició sesión.
 function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
-  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr'] : (miPerfil.rol==='coordinador' ? ['trasp','usr'] : []);
+  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr'] : (miPerfil.rol==='coordinador' ? ['aud','trasp','usr'] : []);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
   });
@@ -362,6 +362,7 @@ async function registrarMovLote(){
 }
 
 function renderAud(){
+  if(miPerfil && miPerfil.rol==='coordinador'){ $('#main').innerHTML = '<div class="card">Esta sección no está disponible para coordinadores.</div>'; return; }
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!auditCat) auditCat = cats[0];
   const capturadas = Object.keys(auditCapturas).length;
@@ -2017,12 +2018,23 @@ async function renderTraspResumen(){
 }
 
 // ===== Capa 5: Reportes =====
+function puedeCerrarInventarioDiario(){ return esAdmin() || (miPerfil && miPerfil.rol==='coordinador'); }
+
 function renderRep(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   const conMovimiento = CATALOGO.filter(it=>{ const f=calcFormula(it.id); return f.inicial||f.entradas||f.salidas||f.instalaciones||f.mermas; });
   const ultimaAud = auditorias[0];
 
-  let html = `<div class="card">
+  let html = '';
+
+  if(puedeCerrarInventarioDiario()){
+    html += `<div class="card row" style="justify-content:space-between">
+      <div><strong>Inventario diario</strong><p class="hint" style="margin:2px 0 0">Genera un PDF con el inventario completo de ${modulo()} en este momento (todas las categorías, artículo por artículo).</p></div>
+      <button class="btn" onclick="cerrarInventarioDiarioUI()">Cerrar inventario diario</button>
+    </div>`;
+  }
+
+  html += `<div class="card">
     <strong>Reporte · ${modulo()}</strong>
     <p class="hint">Comprobación matemática: Inicial + Entradas − Salidas − Instalaciones − Mermas = Final, artículo por artículo.</p>
   </div>`;
@@ -2165,6 +2177,63 @@ async function exportarRespaldo(){
   a.href = url; a.download = `respaldo-auditoriamodulos-${stamp}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+}
+
+// ===== Cerrar inventario diario: genera un PDF con el inventario completo del módulo =====
+async function cerrarInventarioDiarioUI(){
+  if(!(window.jspdf && window.jspdf.jsPDF)){
+    alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet e intenta de nuevo.');
+    return;
+  }
+  try{ await generarReporteDiarioPDF(); }
+  catch(e){ alert('No se pudo generar el reporte: '+e.message); }
+}
+
+async function generarReporteDiarioPDF(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const mod = modulo();
+  const ahora = new Date();
+  const fechaStr = ahora.toLocaleDateString('es-MX', {year:'numeric', month:'long', day:'numeric'});
+  const horaStr = ahora.toLocaleTimeString('es-MX');
+
+  doc.setFontSize(14);
+  doc.text('Closets Vera · Inventario Diario', 14, 15);
+  doc.setFontSize(10);
+  doc.text(`Módulo: ${mod}`, 14, 22);
+  doc.text(`Cerrado: ${fechaStr}, ${horaStr}`, 14, 27);
+  doc.text(`Por: ${getCurrentUserEmail?getCurrentUserEmail():''}`, 14, 32);
+
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  let y = 39;
+  cats.forEach(cat=>{
+    const rows = CATALOGO.filter(i=>i.cat===cat).map(it=>{
+      const f = calcFormula(it.id);
+      return [it.nombre, String(f.inicial), String(f.entradas), String(f.salidas), String(f.instalaciones), String(f.mermas), String(f.final)];
+    });
+    if(y>270){ doc.addPage(); y=15; }
+    doc.autoTable({
+      startY: y,
+      head: [[cat, 'Inicial','Entr.','Sal.','Instal.','Mermas','Final']],
+      body: rows,
+      styles: { fontSize:8, cellPadding:2 },
+      headStyles: { fillColor:[91,58,41] },
+      margin: { left:14, right:14 }
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  });
+
+  const stamp = ahora.toISOString().slice(0,10);
+  const filename = `inventario-${mod.replace(/\s+/g,'_')}-${stamp}.pdf`;
+  const blob = doc.output('blob');
+
+  if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
+    try{
+      await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'Inventario diario', text:`Inventario diario · ${mod} · ${fechaStr}` });
+      return;
+    }catch(e){ /* si cancela o falla compartir, cae a la descarga normal */ }
+  }
+  doc.save(filename);
 }
 window.exportarRespaldo = exportarRespaldo;
 
