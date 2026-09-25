@@ -497,18 +497,18 @@ function piezasCajoneraMax(add, colorCaj, unidades){
   add('Respaldo Max', 1*unidades, '20×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Zócalo Max', 4*unidades, '12×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Fondo de cajonera (MDF 3mm)', unidades, '55×122 cm', '—', 'ok', '1 por cajonera Max (misma regla que cualquier cajonera)');
-  add('Melamina 15mm (cajonera Max)', 'Pendiente', '—', '—', 'pendiente', 'Cada cajonera Max sale de 1 hoja de melamina de 15mm ('+unidades+' hoja(s)), pero falta definir con qué nombre se registra ese artículo en el catálogo de inventario; no se inventa');
+  add('Melamina (cajonera Max)', unidades, '—', colorCaj, 'ok', 'Confirmado: 1 hoja de melamina por cajonera Max, misma melamina que el resto de los muebles (no es un artículo de catálogo aparte)');
 }
 function piezasEntrepaneraMax(add, color, unidades){
   add('Pared Max', 2*unidades, '40×185 cm', color, 'ok', 'Entrepañera Max (confirmado por el usuario)');
   add('Entrepaño Max largo', 5*unidades, '40×58 cm', color, 'ok', 'Entrepañera Max');
   add('Zócalo Max', 2*unidades, '12×58 cm', color, 'ok', 'Entrepañera Max');
-  add('Melamina 15mm (entrepañera Max)', 'Pendiente', '—', '—', 'pendiente', 'Cada entrepañera Max sale de 1 hoja de melamina de 15mm ('+unidades+' hoja(s)), pero falta definir con qué nombre se registra ese artículo en el catálogo de inventario; no se inventa');
+  add('Melamina (entrepañera Max)', unidades, '—', color, 'ok', 'Confirmado: 1 hoja de melamina por entrepañera Max, misma melamina que el resto de los muebles (no es un artículo de catálogo aparte)');
 }
 // Piezas de los cajones de una Cajonera Max (confirmado por el usuario): distintas a las de un
 // cajón normal. Sin jaladera (los cajones Max no llevan) y siempre con corredera de extensión.
 function piezasCajonesMax(add, cajones, color, estructuraColor){
-  add('Frente Max', cajones, '60×20 cm', color, 'pendiente', 'Medida confirmada, pero el rendimiento (cuántos frentes Max caben por hoja) todavía no está confirmado; no se inventa');
+  add('Frente Max', cajones, '60×20 cm', color, 'ok', 'Confirmado: 24 por hoja (mismo rendimiento que el Frente normal)');
   add('Pieza chica de cajón Max', cajones*2, '15×38 cm', estructuraColor, 'ok', 'Rendimiento confirmado: 45 por hoja');
   add('Pieza grande de cajón Max', cajones*2, '15×52.5 cm', estructuraColor, 'ok', 'Rendimiento confirmado: 30 por hoja');
   add('Fondo de cajón (MDF 5mm, Max)', cajones, '55.5×37.9 cm', '—', 'ok', 'Rendimiento confirmado: 12 por hoja de MDF 5mm');
@@ -803,9 +803,20 @@ function piezasAConsumo(piezas, color){
     .forEach(p=>{ maleterosPorColor[p.colorDestino]=(maleterosPorColor[p.colorDestino]||0)+p.cantidad; });
   Object.keys(maleterosPorColor).forEach(c=>addConsumo('Melamina '+c, maleterosPorColor[c]/3));
 
-  // Frentes: 24 por hoja, color solicitado por el cliente
-  const frentes = piezas.filter(p=>p.nombre==='Frente' && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
+  // Frentes: 24 por hoja, color solicitado por el cliente (Frente Max usa el mismo rendimiento)
+  const frentes = piezas.filter(p=>(p.nombre==='Frente'||p.nombre==='Frente Max') && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
   if(frentes>0) addConsumo('Melamina '+color, frentes/24);
+
+  // Melamina de Cajonera Max / Entrepañera Max: 1 hoja por unidad, ya expresada en hojas (no se divide),
+  // y es la misma melamina por color que usa el resto de los muebles (confirmado por el usuario).
+  const melaminaMaxPorColor = {};
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
+    if(p.nombre==='Melamina (cajonera Max)' || p.nombre==='Melamina (entrepañera Max)'){
+      melaminaMaxPorColor[p.colorDestino] = (melaminaMaxPorColor[p.colorDestino]||0) + p.cantidad;
+    }
+  });
+  Object.keys(melaminaMaxPorColor).forEach(c=>addConsumo('Melamina '+c, melaminaMaxPorColor[c]));
 
   // Piezas de cajón: cortas 49/hoja, largas 35/hoja
   const cortasPorColor = {}, largasPorColor = {};
