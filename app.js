@@ -13,10 +13,14 @@ let inicialMap={}, movs=[], resetMap={}, auditorias=[], current='inv';
 let auditCat=null, auditCapturas={};
 let moduloActual = localStorage.getItem('am_modulo') || null;
 // Perfil del usuario (rol + módulo asignado). Lo llena boot() con getMyProfile() antes de
-// llamar a init(). rol: 'admin' (ve/edita todo) | 'coordinador' (solo su módulo) |
-// 'supervisor' (ve todo, sin poder capturar nada). Sin Supabase configurado, queda null y
-// la app se comporta como antes (un solo usuario local, sin restricciones).
+// llamar a init(). rol guardado en la base (nunca cambia, lo usan los permisos/RLS): 'admin'
+// (ve/edita todo) | 'coordinador' (solo su módulo) | 'supervisor' (ve todo, sin capturar) |
+// 'gerente' (igual que supervisor: ve todo, sin capturar; es solo otra etiqueta). ROL_LABELS
+// es nada más el nombre que se muestra en pantalla (p.ej. 'admin' se ve como "Dirección"
+// para no decir "dueño"); el valor guardado en la base no cambia. Sin Supabase configurado,
+// miPerfil queda null y la app se comporta como antes (un solo usuario local, sin restricciones).
 let miPerfil = null;
+const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente' };
 function puedeEscribir(){ return !miPerfil || miPerfil.rol==='admin' || miPerfil.rol==='coordinador'; }
 function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 let instSub = 'mueble';
@@ -47,7 +51,8 @@ const MUEBLE_TIPO_OPCIONES = [
   {value:'cajonera_emma', label:'Cajonera Emma (4 cajones)'},
   {value:'cajonera_espejo', label:'Cajonera de espejo'},
   {value:'cajonera_max', label:'Cajonera Max (4 cajones)'},
-  {value:'cajonera_otra', label:'Cajonera (otra cantidad)'}
+  {value:'cajonera_otra', label:'Cajonera (otra cantidad)'},
+  {value:'zapatera', label:'Zapatera (en vez de entrepañera; solo Lateral y Central)'}
 ];
 let dModoComp=false, dFamiliaComp=null, dMueblesComp=[];
 let iModoComp=false, iFamiliaComp=null, iMueblesComp=[];
@@ -93,7 +98,7 @@ function renderModBar(){
 // Muestra/oculta pestañas de navegación y acciones según el rol de quien inició sesión.
 function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
-  const ocultarTabs = miPerfil.rol==='supervisor' ? ['mov','aud','inst','trasp'] : (miPerfil.rol==='coordinador' ? ['trasp'] : []);
+  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr'] : (miPerfil.rol==='coordinador' ? ['trasp','usr'] : []);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
   });
@@ -213,8 +218,33 @@ function calcFormula(itemId){
   return {inicial,entradas,salidas,instalaciones,mermas,final};
 }
 
+// ===== PIN de administrador para "poner en cero" =====
+// Se guarda en la colección 'config' (no en el código) para que el admin lo pueda cambiar
+// él mismo desde la app, sin depender de que se suba un archivo nuevo. Si nunca se ha
+// configurado, cae en un PIN por defecto (confirmado por el usuario: 1712).
+const PIN_CERO_DEFECTO = '1712';
+async function getPinCero(){
+  try{
+    const d = await db.collection('config').doc('pin_cero').get();
+    return (d && d.exists && d.data().pin) ? String(d.data().pin) : PIN_CERO_DEFECTO;
+  }catch(e){ return PIN_CERO_DEFECTO; }
+}
+async function cambiarPinCero(){
+  if(!esAdmin()) return alert('Solo el administrador puede cambiar el PIN.');
+  const actual = await getPinCero();
+  const nuevo = prompt('Nuevo PIN para "poner en cero" (numérico, 4 dígitos o más):', actual);
+  if(nuevo===null) return;
+  if(!/^\d{4,}$/.test(nuevo)) return alert('El PIN debe ser numérico, de al menos 4 dígitos.');
+  try{ await db.collection('config').doc('pin_cero').set({pin:nuevo}); alert('PIN actualizado.'); }
+  catch(e){ alert('Error: '+e.message); }
+}
+
 async function ceroModulo(){
-  if(!puedeEscribir()) return alert('Tu cuenta es de solo lectura; no puedes poner en cero el inventario.');
+  if(!esAdmin()) return alert('Solo el administrador puede poner el inventario en cero.');
+  const pin = prompt('Ingresa el PIN de administrador para confirmar:');
+  if(pin===null) return;
+  const pinGuardado = await getPinCero();
+  if(pin!==pinGuardado) return alert('PIN incorrecto. No se puso en cero el inventario.');
   if(!confirm('¿Poner en CERO el inventario de '+modulo()+'? Esto no borra el historial, pero el stock actual de este módulo partirá de 0. Los demás módulos no se afectan.')) return;
   try{ await db.collection('resets').doc(modulo()).set({fecha:new Date().toISOString()}); alert('Inventario de '+modulo()+' reiniciado a cero.'); }
   catch(e){ alert('Error: '+e.message); }
@@ -234,7 +264,7 @@ function setView(v){
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
-  if(v==='trasp') renderTrasp(); if(v==='rep') renderRep();
+  if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios();
 }
 
 let invCat = null;
@@ -246,7 +276,7 @@ function renderInv(){
   ).join('');
   let html = `<div class="card"><div class="row" style="justify-content:space-between">
       <strong>Inventario · ${modulo()}</strong>
-      ${puedeEscribir()?`<button class="btn" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="ceroModulo()">Poner en cero</button>`:''}
+      ${esAdmin()?`<button class="btn" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="ceroModulo()">Poner en cero</button>`:''}
     </div>
     <p class="hint">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Mermas = Final. Toca "Inicial" para fijar la línea base tras un conteo físico.</p>
     <div style="margin-top:6px">${catsHtml}</div>
@@ -691,7 +721,41 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
 // ===== Adicionales: muebles extra que se agregan a un modelo (no cuentan como uno de los
 // muebles fijos del modelo, van aparte). Confirmado por el usuario: pueden ser cualquier
 // cajonera, entrepañera, zapatera, repisa o cajonera de espejo.
-function buildAdicionalPiezas(tipo, cajones, color, correderaExt){
+// Puertitas de cajonera (confirmado por el usuario): cada cajonera lleva 1 "par" (2 puertitas
+// iguales) como puerta. La cajonera Emma usa la misma medida que la cajonera de 5 cajones.
+// Solo hay medida confirmada para cajonera de 3, de 5 (y Emma) y Max; cualquier otra cantidad
+// de cajones (6, 8, 10, "otra") todavía no tiene medida y se deja "Pendiente".
+const PUERTITA_CAJONERA = {
+  '3':   {dim:'70×27.3 cm', porHoja:12},
+  '5':   {dim:'80×27.3 cm', porHoja:12},
+  'max': {dim:'83×30.3 cm', porHoja:7}
+};
+// Mismo dato, indexado por medida (dim), para convertir piezas -> consumo sin importar de
+// qué tipo de cajonera vino la puertita (piezasAConsumo solo ve nombre+dim, no el tipo).
+const PUERTITA_POR_HOJA_POR_DIM = {};
+Object.values(PUERTITA_CAJONERA).forEach(s=>{ PUERTITA_POR_HOJA_POR_DIM[s.dim] = s.porHoja; });
+function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
+  const spec = PUERTITA_CAJONERA[claveMedida];
+  if(!spec){
+    add('Puertita de cajonera', 'Pendiente', '—', '—', 'pendiente',
+      'Medida de la puertita de '+tipoEtiqueta+' no confirmada todavía; no se inventa. Dile a Claude la medida (ancho×alto).');
+    return;
+  }
+  add('Puertita de cajonera', 2, spec.dim, color, 'ok',
+    'Confirmado por el usuario: 1 par (2 puertitas) por cajonera, '+spec.porHoja+' puertitas por hoja ('+tipoEtiqueta+').');
+  // Herrajes (confirmado por el usuario): cada puertita (cada una de las 2 del par) lleva su
+  // propio juego de bisagras, así que una cajonera con puertitas gasta 2. Las puertitas de
+  // 3/5/Emma llevan 1 jaladera cada una (2 por cajonera); las de Max no llevan jaladera, pero
+  // el par completo lleva 1 "Push" (no es por puerta, es 1 por par).
+  add('Bisagra de puertita de cajonera', 2, '—', '—', 'ok', '1 juego de bisagras por puerta, 2 por cajonera (confirmado por el usuario)');
+  if(claveMedida==='max'){
+    add('Push (puertita Max)', 1, '—', '—', 'ok', '1 push por par de puertitas Max; las de Max no llevan jaladera (confirmado por el usuario)');
+  } else {
+    add('Jaladera (puertita de cajonera)', 2, '—', color, 'ok', '1 jaladera por puerta, 2 por cajonera (confirmado por el usuario)');
+  }
+}
+
+function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta){
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
   const CAJONERA_ENTREPANOS = {3:5, 5:4, 6:10, 8:9, 10:8};
@@ -714,12 +778,14 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt){
     add('Jaladera (por cajón)',cajones,'—',color,'ok');
     if(MUEBLES_CAJONERA[cajones]) add('Fondo de cajonera (MDF 3mm)',MUEBLES_CAJONERA[cajones],'55×122 cm','—','ok','1 fondo de cajonera por mueble ocupado (confirmado por el usuario), aparte del fondo de cada cajón');
     else add('Fondo de cajonera (MDF 3mm)','Pendiente','—','—','pendiente','Cantidad de muebles que ocupa la cajonera de '+cajones+' cajones no confirmada; no se inventa');
+    if(conPuerta) piezasPuertitaCajonera(add, color, (cajones===3||cajones===5)?String(cajones):null, 'cajonera de '+cajones+' cajones');
   } else if(tipo==='cajonera_max'){
     // Confirmado por el usuario: receta completa de la Cajonera Max (ver piezasCajoneraMax /
     // piezasCajonesMax). Como adicional cuenta como 1 sola unidad. Confirmado: la Cajonera Max
     // SIEMPRE lleva 4 cajones (medida fija, no la elige el cliente ni varía por modelo).
     piezasCajoneraMax(add, color, 1);
     piezasCajonesMax(add, 4, color, color);
+    if(conPuerta) piezasPuertitaCajonera(add, color, 'max', 'cajonera Max');
   } else if(tipo==='cajonera_emma'){
     add('Pared',2,'191×40 cm',color,'ok','Cajonera Emma: 2 paredes + 4 entrepaños + 5 zócalos de 10×52 + 4 cajones (confirmado por el usuario)');
     add('Entrepaño',4,'52×40 cm',color,'ok');
@@ -731,6 +797,9 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt){
     add('Juego de corredera',4,'—','—','ok','1 por cajón');
     add('Jaladera (por cajón)',4,'—',color,'ok');
     add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Emma ocupa 1 mueble = 1 fondo de cajonera (confirmado por el usuario)');
+    // Confirmado por el usuario: la puertita de la cajonera Emma es la misma que la de la
+    // cajonera de 5 cajones (80×27.3 cm).
+    if(conPuerta) piezasPuertitaCajonera(add, color, '5', 'cajonera de 5 cajones (la misma que usa Emma)');
   } else if(tipo==='cajonera_espejo'){
     add('Pared',2,'191×40 cm',color,'ok','Adicional: cajonera de espejo');
     add('Entrepaño',5,'52×40 cm',color,'ok');
@@ -741,7 +810,21 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt){
     add('Jaladera (por espejo)',1,'—',color,'ok');
     add('Bisagra (por espejo)',1.5,'—','—','ok');
   } else if(tipo==='zapatera'){
-    add('Zapatera',1,'—','—','pendiente','Composición de la zapatera no confirmada todavía; no se inventa. Dile a Claude las medidas/materiales para agregarla.');
+    // Confirmado por el usuario: 2 paredes (191×40, iguales a las normales) + 8 entrepaños
+    // (7 de 27×40 + 1 de 30×40, 24 por hoja) + 2 zócalos de 27×10. Aplica solo como opción de
+    // mueble en Lateral y Central (en vez de entrepañera).
+    add('Pared',2,'191×40 cm',color,'ok','Adicional: zapatera (2 paredes + 8 entrepaños + 2 zócalos)');
+    add('Entrepaño zapatera',7,'27×40 cm',color,'ok','Confirmado: entrepaños de zapatera, 24 por hoja');
+    add('Entrepaño zapatera',1,'30×40 cm',color,'ok','Confirmado: mismo rendimiento que el de 27×40 (24 por hoja)');
+    add('Zócalo zapatera',2,'27×10 cm',color,'ok','Confirmado por el usuario');
+    if(conPuerta){
+      // Confirmado por el usuario: "zapatera con puerta" agrega 1 zócalo extra de 12×27 y la
+      // puerta en sí (172×30, 1.5 bisagras, 1 jaladera).
+      add('Zócalo zapatera',1,'12×27 cm',color,'ok','Zócalo extra cuando la zapatera lleva puerta (confirmado por el usuario)');
+      add('Puerta de zapatera',1,'172×30 cm',color,'ok','Confirmado por el usuario: 172×30 cm');
+      add('Bisagra (zapatera)',1.5,'—','—','ok','Confirmado por el usuario');
+      add('Jaladera (zapatera)',1,'—',color,'ok','Confirmado por el usuario');
+    }
   } else if(tipo==='repisa'){
     add('Repisa',1,'—','—','pendiente','Medida/composición de la repisa no confirmada todavía; no se inventa. Dile a Claude las medidas/materiales para agregarla.');
   }
@@ -892,6 +975,44 @@ function piezasAConsumo(piezas, color){
   Object.keys(cortasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, cortasMaxPorColor[c]/45));
   Object.keys(largasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, largasMaxPorColor[c]/30));
 
+  // Entrepaños de zapatera: 24 por hoja (confirmado por el usuario), sin importar si son de
+  // 27×40 o 30×40 — mismo rendimiento para ambos.
+  const entrepanosZapateraPorColor = {};
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
+    if(p.nombre==='Entrepaño zapatera') entrepanosZapateraPorColor[p.colorDestino]=(entrepanosZapateraPorColor[p.colorDestino]||0)+p.cantidad;
+  });
+  Object.keys(entrepanosZapateraPorColor).forEach(c=>addConsumo('Melamina '+c, entrepanosZapateraPorColor[c]/24));
+
+  // Puertitas de cajonera (3, 5/Emma y Max): rendimiento fijo por hoja, según su medida
+  // (confirmado por el usuario). Se agrupan por color+medida porque el mismo nombre de pieza
+  // ("Puertita de cajonera") se usa para las tres medidas.
+  const puertitaPorColorDim = {};
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
+    if(p.nombre==='Puertita de cajonera'){
+      const key = p.colorDestino+'|'+p.dim;
+      puertitaPorColorDim[key] = (puertitaPorColorDim[key]||0) + p.cantidad;
+    }
+  });
+  Object.keys(puertitaPorColorDim).forEach(key=>{
+    const [c, dim] = key.split('|');
+    const porHoja = PUERTITA_POR_HOJA_POR_DIM[dim];
+    if(porHoja) addConsumo('Melamina '+c, puertitaPorColorDim[key]/porHoja);
+  });
+
+  // Puerta de zapatera (172×30 cm): mismo motor de corte combinado que las puertas de clóset,
+  // para no sobrestimar cuando se piden varias puertas de zapatera del mismo color.
+  const puertaZapateraPorColor = {};
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
+    if(p.nombre==='Puerta de zapatera') puertaZapateraPorColor[p.colorDestino]=(puertaZapateraPorColor[p.colorDestino]||0)+p.cantidad;
+  });
+  Object.keys(puertaZapateraPorColor).forEach(c=>{
+    const r = hojasParaCortesCombinado([{ancho:172, alto:30, cantidad:puertaZapateraPorColor[c]}], 122, 244);
+    if(r.costo>0) addConsumo('Melamina '+c, r.costo);
+  });
+
   // Fondos MDF: cajón normal (14/hoja MDF3mm), cajón Max (12/hoja MDF5mm), cajonera con espejo (4/hoja MDF3mm)
   const fondosCajon3 = piezas.filter(p=>p.nombre==='Fondo de cajón (MDF 3mm)' && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
   if(fondosCajon3>0) addConsumo('MDF 3mm', fondosCajon3/14);
@@ -910,6 +1031,7 @@ function piezasAConsumo(piezas, color){
     if(p.nombre.startsWith('Correderas de extensión')) addConsumo('Correderas de extensión', p.cantidad);
     if(p.nombre.startsWith('Jaladera')) addConsumo('Jaladeras', p.cantidad);
     if(p.nombre.startsWith('Bisagra')) addConsumo('Bisagras', p.cantidad);
+    if(p.nombre.startsWith('Push')) addConsumo('Push', p.cantidad);
     if(p.nombre==='Espejo') addConsumo('Espejos closet', p.cantidad);
   });
 
@@ -917,12 +1039,21 @@ function piezasAConsumo(piezas, color){
 }
 
 // ===== Adicionales: UI compartida entre Despiece ('d') e Instalación de mueble ('i') =====
+// Tipos de adicional que pueden llevar puerta/puertitas opcionales, y cómo se llama esa
+// opción en la pantalla de cada uno (zapatera = puerta; cualquier cajonera = puertitas).
+const ADIC_CON_PUERTA_LABEL = {
+  zapatera: '¿Lleva puerta? (172×30 cm, 1.5 bisagras, 1 jaladera)',
+  cajonera: '¿Lleva puertitas de cajonera?',
+  cajonera_emma: '¿Lleva puertitas de cajonera? (usa la medida de la de 5 cajones)',
+  cajonera_max: '¿Lleva puertitas de cajonera Max?'
+};
+
 function renderAdicBox(prefix){
   const box = document.getElementById(prefix+'-adic-box');
   if(!box) return;
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
-      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}</td>
+      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}</td>
       <td>${a.color}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
@@ -943,9 +1074,16 @@ function toggleAdicionalCajones(prefix){
   const sel = document.getElementById(prefix+'-adic-tipo');
   const wrap = document.getElementById(prefix+'-adic-cajones-wrap');
   if(!sel || !wrap) return;
-  wrap.innerHTML = (sel.value==='cajonera')
+  let html = (sel.value==='cajonera')
     ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">`
     : (sel.value==='cajonera_max' ? `<p class="hint" style="margin-top:8px">La Cajonera Max siempre lleva 4 cajones (confirmado; no se captura cantidad).</p>` : '');
+  const labelPuerta = ADIC_CON_PUERTA_LABEL[sel.value];
+  if(labelPuerta){
+    html += `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
+      <input type="checkbox" id="${prefix}-adic-puerta" style="width:auto"> ${labelPuerta}
+    </label>`;
+  }
+  wrap.innerHTML = html;
 }
 function agregarAdicional(prefix){
   const tipo = document.getElementById(prefix+'-adic-tipo').value;
@@ -958,7 +1096,9 @@ function agregarAdicional(prefix){
   } else if(tipo==='cajonera_max'){
     cajones = 4; // Confirmado por el usuario: la Cajonera Max siempre lleva 4 cajones, fijo.
   }
-  (prefix==='d' ? dAdicionales : iAdicionales).push({tipo, cajones, color});
+  const puertaEl = document.getElementById(prefix+'-adic-puerta');
+  const conPuerta = !!(puertaEl && puertaEl.checked);
+  (prefix==='d' ? dAdicionales : iAdicionales).push({tipo, cajones, color, conPuerta});
   renderAdicBox(prefix);
 }
 function quitarAdicional(prefix, idx){
@@ -1051,7 +1191,7 @@ function calcDespiece(){
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modelo.nombre+(especial3m?' · a 3 metros':''); notaModelo = modelo.nota;
   }
-  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt));
+  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta));
   const piezas = piezasModelo.concat(piezasAdic);
   const consumo = piezasAConsumo(piezas, color);
 
@@ -1209,7 +1349,7 @@ function previewInst(){
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modeloSel.nombre+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
   }
-  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt));
+  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta));
   const piezas = piezasModelo.concat(piezasAdic);
   const pendientes = piezas.filter(p=>p.estado==='pendiente');
   const consumo = piezasAConsumo(piezas, color);
@@ -1892,6 +2032,13 @@ function renderRep(){
     <button class="btn small" onclick="exportarRespaldo()">Descargar respaldo</button>
   </div>`;
 
+  if(esAdmin()){
+    html += `<div class="card row" style="justify-content:space-between">
+      <div><strong>PIN de administrador</strong><p class="hint" style="margin:2px 0 0">Se pide para "poner en cero" el inventario de cualquier módulo. Solo tú (admin) puedes cambiarlo.</p></div>
+      <button class="btn small" onclick="cambiarPinCero()">Cambiar PIN</button>
+    </div>`;
+  }
+
   html += `<div class="card"><h3>Inventario (solo artículos con movimiento)</h3>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th><th>Instal.</th><th>Mermas</th><th>Final</th></tr>
     ${conMovimiento.map(it=>{ const f=calcFormula(it.id);
@@ -1923,9 +2070,89 @@ function renderRep(){
   $('#main').innerHTML = html;
 }
 
+// ===== Panel de usuarios (solo admin) =====
+// Usa la Edge Function 'admin-usuarios' (ver auth.js / supabase/functions/admin-usuarios) para
+// crear cuentas, cambiar rol/módulo/contraseña, o eliminar usuarios. La app nunca ve ni guarda
+// la llave maestra de Supabase; solo manda el token de la sesión de quien ya inició sesión aquí.
+let usuariosCache = [];
+async function renderUsuarios(){
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Esta sección es solo para el administrador.</div>'; return; }
+  $('#main').innerHTML = '<div class="card">Cargando usuarios…</div>';
+  try{ usuariosCache = (await listarUsuarios()).perfiles || []; }
+  catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar la lista de usuarios: ${e.message}<p class="hint">Si el error dice "Failed to fetch" o "404", probablemente la función 'admin-usuarios' todavía no está pegada en tu proyecto de Supabase — dile a Claude que te pase esa parte del README.</p></div>`; return; }
+
+  const rolOpts = (sel)=>['admin','coordinador','supervisor','gerente'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
+  const moduloOpts = (sel)=>`<option value="">(sin módulo)</option>`+MODULOS.map(m=>`<option value="${m.nombre}" ${m.nombre===sel?'selected':''}>${m.nombre}</option>`).join('');
+
+  let html = `<div class="card">
+    <strong>Crear usuario</strong>
+    <p class="hint">Crea la cuenta completa (correo + contraseña) y le asigna rol y módulo de una vez. La persona ya puede entrar con esos datos.</p>
+    <div class="grid2" style="margin-top:8px">
+      <input id="uu-email" type="email" placeholder="correo">
+      <input id="uu-pass" type="password" placeholder="contraseña temporal (mín. 6)">
+    </div>
+    <div class="grid2" style="margin-top:8px">
+      <select id="uu-rol" onchange="toggleUuModulo()">${rolOpts('coordinador')}</select>
+      <select id="uu-modulo">${moduloOpts('')}</select>
+    </div>
+    <button class="btn" style="margin-top:10px" onclick="crearUsuarioUI()">Crear usuario</button>
+  </div>`;
+
+  html += `<div class="card"><h3>Usuarios (${usuariosCache.length})</h3>
+    <div class="wrap-x"><table><tr><th>Correo</th><th>Rol</th><th>Módulo</th><th></th></tr>
+    ${usuariosCache.map(u=>`<tr>
+      <td>${u.email||'(sin correo)'}</td>
+      <td><select id="uu-rol-${u.user_id}">${rolOpts(u.rol)}</select></td>
+      <td><select id="uu-mod-${u.user_id}">${moduloOpts(u.modulo)}</select></td>
+      <td style="white-space:nowrap">
+        <button class="btn small" onclick="guardarPerfilUsuario('${u.user_id}')">Guardar</button>
+        <button class="btn small" style="background:transparent;border:1px solid var(--line)" onclick="cambiarPasswordUsuarioUI('${u.user_id}')">Contraseña</button>
+        <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="eliminarUsuarioUI('${u.user_id}','${(u.email||'').replace(/'/g,"")}')">Eliminar</button>
+      </td>
+    </tr>`).join('')}
+    </table></div>
+    <p class="hint">"Guardar" aplica el rol y módulo elegidos en esa fila. "Eliminar" borra la cuenta por completo (no se puede deshacer).</p>
+  </div>`;
+
+  $('#main').innerHTML = html;
+}
+function toggleUuModulo(){ /* placeholder por si luego se quiere ocultar el módulo cuando el rol no es coordinador */ }
+
+async function crearUsuarioUI(){
+  const email = $('#uu-email').value.trim();
+  const pass = $('#uu-pass').value;
+  const rol = $('#uu-rol').value;
+  const modulo = $('#uu-modulo').value || null;
+  if(!email || !pass) return alert('Captura correo y contraseña.');
+  if(pass.length<6) return alert('La contraseña debe tener al menos 6 caracteres.');
+  try{
+    await crearUsuario(email, pass, rol, modulo);
+    alert('Usuario creado. Ya puede iniciar sesión con ese correo y contraseña.');
+    renderUsuarios();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function guardarPerfilUsuario(userId){
+  const rol = document.getElementById('uu-rol-'+userId).value;
+  const modulo = document.getElementById('uu-mod-'+userId).value || null;
+  try{ await actualizarPerfilUsuario(userId, rol, modulo); alert('Perfil actualizado.'); renderUsuarios(); }
+  catch(e){ alert('Error: '+e.message); }
+}
+async function cambiarPasswordUsuarioUI(userId){
+  const pass = prompt('Nueva contraseña para este usuario (mín. 6 caracteres):');
+  if(pass===null) return;
+  if(pass.length<6) return alert('La contraseña debe tener al menos 6 caracteres.');
+  try{ await cambiarPasswordUsuario(userId, pass); alert('Contraseña actualizada.'); }
+  catch(e){ alert('Error: '+e.message); }
+}
+async function eliminarUsuarioUI(userId, email){
+  if(!confirm('¿Eliminar la cuenta de '+(email||userId)+'? No se puede deshacer.')) return;
+  try{ await eliminarUsuario(userId); alert('Usuario eliminado.'); renderUsuarios(); }
+  catch(e){ alert('Error: '+e.message); }
+}
+
 // ===== Respaldo manual: exporta toda la base local a un archivo JSON descargable =====
 async function exportarRespaldo(){
-  const COLLECTIONS = ['inicial','movimientos','resets','auditorias','instalacionesLog','instalacionesPuertas','prestamos'];
+  const COLLECTIONS = ['inicial','movimientos','resets','auditorias','instalacionesLog','instalacionesPuertas','prestamos','config'];
   const data = {};
   for(const c of COLLECTIONS){
     const snap = await db.collection(c).get();
@@ -1951,7 +2178,7 @@ window.exportarRespaldo = exportarRespaldo;
       return;
     }
     miPerfil = await getMyProfile();
-    const rolLabel = miPerfil ? ({admin:'admin', coordinador:'coordinador', supervisor:'supervisor'}[miPerfil.rol] || miPerfil.rol) : '';
+    const rolLabel = miPerfil ? (ROL_LABELS[miPerfil.rol] || miPerfil.rol) : '';
     document.getElementById('whoami').textContent = user.email + (rolLabel? ' · '+rolLabel : '');
   } else {
     document.getElementById('whoami').textContent = 'modo local';
