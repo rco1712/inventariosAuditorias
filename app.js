@@ -1288,25 +1288,103 @@ function renderPuertaParedFalsaExtra(){
 // mismo color que elige el cliente, en melamina de 15mm — misma hoja estándar de 122×244 cm que
 // se usa para todo lo demás (no hay un artículo de catálogo aparte para el 15mm). Como la medida
 // de cada pieza depende de la puerta que se está cortando (no es una medida fija como el Frente),
-// en vez de un rendimiento fijo por hoja se calcula cuántas piezas de esa medida caben en una
-// hoja (probando las dos orientaciones) y de ahí cuántas hojas se necesitan.
-function piezasPorHoja(anchoPieza, altoPieza, anchoHoja, altoHoja){
+// se acomodan TODAS las piezas juntas (puertas, marcos, fijos, etc.) en el menor número de hojas
+// posible — permitiendo que las piezas chicas entren en el sobrante que dejan las grandes, tal
+// como se cortaría en el taller — en vez de calcular cada tipo de pieza por separado.
+// Algoritmo tipo "MaxRects" (acomodo de rectángulos, mismo principio que se usa para aprovechar
+// materiales en la industria): por cada pieza busca, entre el espacio libre de las hojas ya
+// abiertas, el hueco donde quepa dejando menos sobrante (probando las dos orientaciones); si no
+// cabe en ninguna hoja abierta, abre una hoja nueva. No es una optimización perfecta (acomodar
+// rectángulos de forma óptima no tiene una solución exacta rápida), pero es mucho más realista
+// que sumar hojas por tipo de pieza por separado.
+function _mejorEspacioParaPieza(libres, w, h){
+  let mejor = null;
+  libres.forEach((r, idx)=>{
+    [[w,h],[h,w]].forEach(([pw,ph])=>{
+      if(pw<=r.w+0.001 && ph<=r.h+0.001){
+        const sobra = r.w*r.h - pw*ph;
+        if(!mejor || sobra<mejor.sobra) mejor = {idx, pw, ph, sobra};
+      }
+    });
+  });
+  return mejor;
+}
+function _colocarPiezaEnLibres(libres, idx, pw, ph){
+  const r = libres[idx];
+  libres.splice(idx,1);
+  // Método guillotina: divide el rectángulo libre usado en el sobrante a la derecha y arriba de
+  // la pieza colocada.
+  const derecha = {x:r.x+pw, y:r.y, w:r.w-pw, h:ph};
+  const arriba = {x:r.x, y:r.y+ph, w:r.w, h:r.h-ph};
+  if(derecha.w>0.01 && derecha.h>0.01) libres.push(derecha);
+  if(arriba.w>0.01 && arriba.h>0.01) libres.push(arriba);
+}
+// Cuántas piezas de anchoPieza×altoPieza caben, ELLAS SOLAS, en una hoja vacía (probando las dos
+// orientaciones). Se usa para saber si una pieza por sí sola ya exige una hoja completa (cuando
+// da 1) o es una pieza chica que normalmente comparte hoja con otras del mismo tipo.
+function piezasPorHojaIndividual(anchoPieza, altoPieza, anchoHoja, altoHoja){
   anchoHoja = anchoHoja || 122; altoHoja = altoHoja || 244;
   if(!(anchoPieza>0) || !(altoPieza>0)) return 0;
   const op1 = Math.floor(anchoHoja/anchoPieza) * Math.floor(altoHoja/altoPieza);
   const op2 = Math.floor(anchoHoja/altoPieza) * Math.floor(altoHoja/anchoPieza);
   return Math.max(op1, op2);
 }
-// Suma las hojas necesarias para una lista de piezas [{ancho,alto,cantidad}]. Cada tipo de pieza
-// (puertas, marcos, fijos, etc.) se acomoda en su propia hoja; no se combinan sobrantes entre
-// tipos distintos de pieza (para no suponer un acomodo más eficiente del que se puede confirmar).
-function hojasParaCortes(cortes){
-  return cortes.reduce((total,c)=>{
-    if(!c.cantidad || c.cantidad<=0) return total;
-    const porHoja = piezasPorHoja(c.ancho, c.alto);
-    if(porHoja<=0) return total;
-    return total + c.cantidad/porHoja;
-  }, 0);
+// Acomoda una lista de piezas [{ancho,alto,cantidad}] en el menor número de hojas de
+// anchoHoja×altoHoja (122×244 por default), y calcula cuánto material se debe descontar.
+// Devuelve {hojas, costo, noCaben}:
+//   - hojas: cuántas hojas físicas hay que cortar (para saber cuántas hojas sacar del almacén).
+//   - costo: cuánto se descuenta del inventario (puede ser fraccionario). Una hoja que lleva
+//     alguna pieza que por sí sola ya ocupa una hoja completa (como una puerta) cuesta 1 hoja
+//     entera —lo demás que comparte esa hoja "viene gratis", porque de todas formas se iba a
+//     cortar esa hoja completa—. Una hoja que solo lleva piezas chicas (sobrantes que no obligan
+//     a abrir hoja nueva por sí solas, como un marco suelto) cuesta la proporción de hoja que
+//     cada pieza ocuparía si se cortara sola (p.ej. si de una hoja salen 12 marcos, 1 marco = 1/12
+//     de hoja), asumiendo que el resto de esa hoja queda como sobrante para otro corte futuro.
+//   - noCaben: piezas que no caben en una hoja completa en ninguna orientación (medida inválida).
+function hojasParaCortesCombinado(cortes, anchoHoja, altoHoja){
+  anchoHoja = anchoHoja || 122; altoHoja = altoHoja || 244;
+  let items = [];
+  cortes.forEach(c=>{ for(let i=0;i<(c.cantidad||0);i++) items.push({ancho:c.ancho, alto:c.alto}); });
+  // Piezas más grandes primero: da mejores resultados con este tipo de acomodo "greedy".
+  items.sort((a,b)=> Math.max(b.ancho,b.alto)-Math.max(a.ancho,a.alto));
+
+  const hojas = []; // cada hoja = {libres:[...], items:[...]}
+  let noCaben = 0;
+
+  items.forEach(item=>{
+    if(!(item.ancho>0) || !(item.alto>0)) return;
+    const cabeEnHojaVacia = (item.ancho<=anchoHoja && item.alto<=altoHoja) || (item.alto<=anchoHoja && item.ancho<=altoHoja);
+    if(!cabeEnHojaVacia){ noCaben++; return; }
+    let mejorGlobal = null;
+    hojas.forEach((hoja,hIdx)=>{
+      const cand = _mejorEspacioParaPieza(hoja.libres, item.ancho, item.alto);
+      if(cand && (!mejorGlobal || cand.sobra<mejorGlobal.sobra)) mejorGlobal = Object.assign({hIdx}, cand);
+    });
+    if(mejorGlobal){
+      _colocarPiezaEnLibres(hojas[mejorGlobal.hIdx].libres, mejorGlobal.idx, mejorGlobal.pw, mejorGlobal.ph);
+      hojas[mejorGlobal.hIdx].items.push(item);
+    } else {
+      const libres = [{x:0,y:0,w:anchoHoja,h:altoHoja}];
+      const cand = _mejorEspacioParaPieza(libres, item.ancho, item.alto);
+      _colocarPiezaEnLibres(libres, cand.idx, cand.pw, cand.ph);
+      hojas.push({libres, items:[item]});
+    }
+  });
+
+  let costo = 0;
+  hojas.forEach(hoja=>{
+    const obligaHojaCompleta = hoja.items.some(it=>piezasPorHojaIndividual(it.ancho,it.alto,anchoHoja,altoHoja)<=1);
+    if(obligaHojaCompleta){
+      costo += 1;
+    } else {
+      hoja.items.forEach(it=>{
+        const porHoja = piezasPorHojaIndividual(it.ancho,it.alto,anchoHoja,altoHoja);
+        costo += porHoja>0 ? 1/porHoja : 1;
+      });
+    }
+  });
+
+  return {hojas: hojas.length, costo: Math.round(costo*1000)/1000, noCaben};
 }
 
 let puertaPreview = null;
@@ -1441,9 +1519,12 @@ function calcPuerta(){
   }
 
   // Melamina de 15mm (confirmado por el usuario: mismo color que elige el cliente, misma hoja
-  // estándar de 122×244 que el resto del inventario). Como cada puerta se corta a una medida
-  // distinta, se calcula cuántas piezas de esa medida caben en una hoja (no es un rendimiento fijo).
-  const hojasMelamina = Math.round(hojasParaCortes(cortes)*1000)/1000;
+  // estándar de 122×244 que el resto del inventario). Se acomodan todas las piezas de este corte
+  // juntas (puertas, marcos, fijos, etc.) para aprovechar el sobrante entre ellas, y el resultado
+  // es el número real de hojas completas que se van a cortar para esta instalación.
+  const empaque = hojasParaCortesCombinado(cortes);
+  const hojasMelamina = empaque.costo;
+  if(empaque.noCaben>0) add('Aviso de corte', empaque.noCaben+' pieza(s) no caben en una hoja completa (122×244) en ninguna orientación', 'Revisa las medidas capturadas; esas piezas no se incluyeron en el cálculo de melamina');
 
   // Herrajes (confirmado por el usuario): riel/sistema/bastidor/jaladera según el tipo de puerta.
   // La jaladera se sustituye por "Jaladera plana" si el usuario lo eligió arriba (nunca se suman las dos).
@@ -1471,7 +1552,7 @@ function calcPuerta(){
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
     ${piezas.map(p=>`<tr><td>${p.n}</td><td>${p.v}</td><td class="hint">${p.nota}</td></tr>`).join('')}
     </table></div>
-    <div class="hint">Melamina de 15mm: cada pieza se acomoda en una hoja estándar de 122×244 cm (misma hoja del color elegido) según cuántas caben de esa medida; total estimado: ${hojasMelamina} hoja(s).</div>
+    <div class="hint">Melamina de 15mm (color ${color}): todas las piezas de este corte se acomodan juntas en hojas de 122×244 cm, aprovechando el sobrante entre puertas/marcos/fijos. Se van a cortar <strong>${empaque.hojas} hoja(s) física(s)</strong> del almacén, pero solo se descuenta <strong>${hojasMelamina}</strong> del inventario (lo que realmente ocupan las piezas; el resto queda como sobrante disponible para otro corte).</div>
     <div class="wrap-x" style="margin-top:8px"><table><tr><th>Material/herraje a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
     ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
       return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${f.final}</td></tr>`;
