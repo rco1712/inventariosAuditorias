@@ -84,6 +84,44 @@ header .topbar{display:flex;justify-content:space-between;align-items:center;gap
 #whoami{font-size:11px;opacity:.9;font-weight:600}
 #logoutBtn{background:rgba(255,255,255,.16);border:none;color:#fff;border-radius:9px;padding:8px 12px;font-size:11.5px;font-weight:700;cursor:pointer;min-height:32px;-webkit-tap-highlight-color:transparent}
 #syncBadge{display:inline-block;margin-top:6px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700}
+
+/* ===== Diseño sencillo para uso en el día (Inicio, inventario, anotar) ===== */
+.hello{font-size:22px;font-weight:800;margin:4px 2px 14px}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tile{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;border:none;border-radius:18px;padding:16px 14px;min-height:128px;background:var(--card);color:var(--ink);box-shadow:var(--shadow);border-top:5px solid var(--tc);font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .1s ease}
+.tile:active{transform:scale(.97)}
+.tile-ic{font-size:32px;line-height:1}
+.tile-t{font-size:16px;font-weight:800;margin-top:6px}
+.tile-s{font-size:12.5px;color:var(--sub);line-height:1.35}
+.pend{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 2px;font-size:14px;line-height:1.45}
+.pend + .pend{border-top:1px solid var(--line)}
+.pend .btn{flex:0 0 auto}
+.aviso{border:2px solid var(--accent);background:linear-gradient(0deg,rgba(255,107,106,.06),rgba(255,107,106,.06)),var(--card)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:10px 14px;min-height:42px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent}
+.chip.on{background:var(--brand);color:#fff;border-color:var(--brand);box-shadow:var(--shadow-btn)}
+.bignum{font-size:24px;font-weight:800;margin-top:2px}
+.invlist{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.invitem{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow)}
+.invitem.vacio{opacity:.55}
+.invname{font-weight:700;font-size:15px;display:block;overflow:hidden;text-overflow:ellipsis}
+.invqty{font-size:22px;font-weight:800;color:var(--brand);text-align:right;white-space:nowrap}
+.invqty span{display:block;font-size:11px;font-weight:600;color:var(--sub)}
+.paso{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;font-weight:800;font-size:13px;margin-right:8px}
+.tipos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tipobtn{display:flex;align-items:center;gap:10px;text-align:left;border:2px solid var(--line);background:var(--bg);color:var(--ink);border-radius:14px;padding:12px;min-height:64px;font-family:inherit;font-size:14px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.tipobtn small{color:var(--sub);font-size:11.5px;line-height:1.3}
+.tipobtn.on{border-color:var(--brand);background:rgba(62,92,222,.1)}
+.tipobtn.menor{grid-column:1 / -1;min-height:52px;opacity:.85}
+.tipo-ic{font-size:24px}
+.movlist{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.movitem{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg)}
+.movitem input{width:96px;flex:0 0 96px;text-align:center;font-size:18px;font-weight:700;background:var(--card)}
+details.card summary{cursor:pointer;min-height:32px;display:flex;align-items:center}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,40px);opacity:0;pointer-events:none;background:#1f9d55;color:#fff;padding:14px 18px;border-radius:14px;font-weight:700;font-size:15px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:50;max-width:calc(100% - 32px);text-align:center;transition:all .25s ease}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.err{background:var(--bad)}
+@media (max-width:360px){ .tiles,.tipos{gap:8px} .tile{min-height:116px;padding:14px 12px} .tile-ic{font-size:28px} }
 </style>
 </head>
 <body>
@@ -99,17 +137,18 @@ header .topbar{display:flex;justify-content:space-between;align-items:center;gap
   <div id="syncBadge"></div>
 </header>
 <nav id="nav">
-  <button data-v="inv" class="active">Inventario</button>
-  <button data-v="mov">Entradas/Salidas</button>
-  <button data-v="aud">Auditoría física</button>
-  <button data-v="hist">Historial</button>
-  <button data-v="cat">Catálogo</button>
-  <button data-v="desp">Despiece</button>
-  <button data-v="inst">Instalaciones</button>
-  <button data-v="trasp">Traspasos</button>
-  <button data-v="rep">Reportes</button>
-  <button data-v="apr">Aprobaciones</button>
-  <button data-v="usr">Usuarios</button>
+  <button data-v="home" class="active">🏠 Inicio</button>
+  <button data-v="inv">📦 Inventario</button>
+  <button data-v="mov">✍️ Anotar</button>
+  <button data-v="inst">🔧 Instalación</button>
+  <button data-v="trasp">🔄 Traspasos</button>
+  <button data-v="rep">📊 Reportes</button>
+  <button data-v="aud">📋 Auditoría</button>
+  <button data-v="hist">🗂️ Historial</button>
+  <button data-v="apr">✅ Aprobaciones</button>
+  <button data-v="desp">📐 Despiece</button>
+  <button data-v="cat">📚 Catálogo</button>
+  <button data-v="usr">👥 Usuarios</button>
 </nav>
 <main id="main"></main>
 

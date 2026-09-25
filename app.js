@@ -105,7 +105,8 @@ function renderModBar(){
 // Muestra/oculta pestañas de navegación y acciones según el rol de quien inició sesión.
 function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
-  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr'] : []);
+  // Coordinadores: solo lo que usan en el día (se ocultan Catálogo e Historial, que son de consulta avanzada).
+  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist'] : []);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
   });
@@ -128,7 +129,7 @@ async function chooseModulo(nombre){
   document.getElementById('nav').style.display='flex';
   renderModBar();
   await loadStock();
-  setView('inv');
+  setView('home');
 }
 
 async function init(){
@@ -150,7 +151,7 @@ async function init(){
   renderModBar();
   if(!moduloActual){ showPicker(); return; }
   await loadStock();
-  setView('inv');
+  setView('home');
 }
 
 async function doLogout(){
@@ -194,7 +195,7 @@ async function loadStock(){
   try{
     db.collection('movimientos').onSnapshot(snap=>{
       movs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
-      if(current==='inv') renderInv(); if(current==='mov') renderMov();
+      if(current==='inv') renderInv(); if(current==='mov') renderMov(); if(current==='home') renderHome();
     });
   }catch(e){}
   try{
@@ -376,40 +377,71 @@ async function editInicial(itemId){
 function setView(v){
   current=v;
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
+  if(v==='home') renderHome();
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
 }
 
-let invCat = null;
+let invCat = null, invDetalle = false;
+// Hojas que todavía no tienen un corte registrado (se tomaron provisionalmente), de todo el catálogo.
+function cortesPendientes(){
+  return CATALOGO.filter(it=>esHoja(it)).map(it=>({it, f:calcFormula(it.id)})).filter(x=>x.f.autoCortes>0);
+}
+function avisoCortePendienteHtml(lista){
+  if(!lista.length || !puedeEscribir() || (miPerfil && (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente'))) return '';
+  return `<div class="card aviso">
+    <div style="font-size:15px;font-weight:800">✂️ Falta registrar el corte de hoy</div>
+    <p style="margin:6px 0 10px;line-height:1.5">Se usaron hojas en instalaciones, pero todavía no se anotó el corte de:</p>
+    <ul style="margin:0 0 10px 18px;padding:0;line-height:1.7">${lista.map(x=>`<li><strong>${fmtNum(x.f.autoCortes)} hoja(s)</strong> de ${x.it.nombre}</li>`).join('')}</ul>
+    <button class="btn" style="width:100%" onclick="irA('mov',{tipo:'corte',cat:'${lista[0].it.cat}'})">Registrar corte ahora</button>
+  </div>`;
+}
 function renderInv(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!invCat) invCat = cats[0];
   const catsHtml = cats.map(c=>
-    `<button class="btn small" style="background:${c===invCat?'var(--brand)':'transparent'};color:${c===invCat?'var(--brand-ink)':'var(--ink)'};border:1px solid var(--line);margin:2px" onclick="invCat='${c}';renderInv()">${c}</button>`
+    `<button class="chip ${c===invCat?'on':''}" onclick="invCat='${c}';renderInv()">${ICONO_CAT[c]||''} ${c}</button>`
   ).join('');
-  let html = `<div class="card"><div class="row" style="justify-content:space-between">
-      <strong>Inventario · ${modulo()}</strong>
-      ${esAdmin()?`<button class="btn" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="ceroModulo()">Poner en cero</button>`:''}
-    </div>
-    <p class="hint">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Mermas ± Ajustes de auditoría = Final. Toca "Inicial" para fijar la línea base tras un conteo físico.</p>
-    <div style="margin-top:6px">${catsHtml}</div>
-  </div>`;
   const rows = CATALOGO.filter(i=>i.cat===invCat);
   const catHoja = rows.length>0 && esHoja(rows[0]);
+  let html = `<div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div style="font-size:17px;font-weight:800">📦 Inventario · ${modulo()}</div>
+      ${esAdmin()?`<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="ceroModulo()">Poner en cero</button>`:''}
+    </div>
+    <p class="hint">Elige qué quieres ver:</p>
+    <div class="chips">${catsHtml}</div>
+  </div>`;
+  html += avisoCortePendienteHtml(cortesPendientes().filter(x=>x.it.cat===invCat));
   if(catHoja){
     const tot = rows.reduce((s,it)=>{ const f=calcFormula(it.id); s.c+=f.completas; s.k+=f.cortado; s.t+=f.final; return s; },{c:0,k:0,t:0});
     html += `<div class="card">
-      <h3>${invCat} · resumen</h3>
       <div class="grid2" style="grid-template-columns:1fr 1fr 1fr;text-align:center">
-        <div><div class="hint" style="margin:0">Hojas completas</div><div style="font-size:20px;font-weight:800">${fmtNum(tot.c)}</div></div>
-        <div><div class="hint" style="margin:0">Cortado/armado</div><div style="font-size:20px;font-weight:800;color:var(--accent)">${fmtNum(tot.k)}</div></div>
-        <div><div class="hint" style="margin:0">Total</div><div style="font-size:20px;font-weight:800;color:var(--brand)">${fmtNum(tot.t)}</div></div>
+        <div><div class="hint" style="margin:0">Hojas completas</div><div class="bignum">${fmtNum(tot.c)}</div></div>
+        <div><div class="hint" style="margin:0">Ya cortadas</div><div class="bignum" style="color:var(--accent)">${fmtNum(tot.k)}</div></div>
+        <div><div class="hint" style="margin:0">Total</div><div class="bignum" style="color:var(--brand)">${fmtNum(tot.t)}</div></div>
       </div>
-      <p class="hint">Completas + Cortado = Final. Entradas suman a completas, Corte pasa de completas a cortado, Instalaciones descuentan del cortado. "Sin corte" = hojas que se tomaron provisionalmente porque una instalación se capturó antes de registrar el corte; se quitan solas cuando se registra el corte del día.</p>
     </div>`;
   }
-  html += `<div class="card"><h3>${invCat}</h3><div class="wrap-x"><table>
+  html += `<div class="row" style="justify-content:space-between;margin:4px 2px 10px">
+      <strong>${ICONO_CAT[invCat]||''} ${invCat}</strong>
+      <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="invDetalle=!invDetalle;renderInv()">${invDetalle?'Ver sencillo':'Ver tabla detallada'}</button>
+    </div>`;
+  if(!invDetalle){
+    // Lo que sí hay primero; lo que está en cero, al final (para no buscar entre ceros).
+    const orden = rows.map(it=>({it, f:calcFormula(it.id)})).sort((a,b)=>(Math.abs(a.f.final)<0.005)-(Math.abs(b.f.final)<0.005));
+    html += `<div class="invlist">${orden.map(({it,f})=>{
+      const vacio = Math.abs(f.final)<0.005;
+      return `<div class="invitem ${vacio?'vacio':''}">
+        <div style="min-width:0"><div class="invname">${it.nombre}</div>
+          ${catHoja && !vacio ? `<div class="hint" style="margin:2px 0 0">${fmtNum(f.completas)} completas · ${fmtNum(f.cortado)} ya cortadas</div>` : ''}</div>
+        <div class="invqty ${f.final<0?'neg':''}">${fmtNum(f.final)}<span>${it.unidad}</span></div>
+      </div>`; }).join('')}</div>`;
+  } else {
+    html += `<div class="card">
+      <p class="hint" style="margin-top:0">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Mermas ± Ajustes = Final.${catHoja?' En hojas: Completas + Cortado = Final. "Sin corte" = hojas usadas antes de anotar el corte del día (se quita al registrar el corte).':''} ${puedeEscribir()?'Toca el número de "Inicial" para fijar la línea base.':''}</p>
+      <div class="wrap-x"><table>
       <tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th>${catHoja?'<th>Corte</th>':''}<th>Instal.</th><th>Mermas</th><th>Ajuste</th>${catHoja?'<th>Compl.</th><th>Cortado</th>':''}<th>Final</th></tr>
       ${rows.map(it=>{ const f=calcFormula(it.id);
         return `<tr>
@@ -417,7 +449,7 @@ function renderInv(){
           <td>${puedeEscribir()?`<a href="#" onclick="editInicial('${it.id}');return false;">${fmtNum(f.inicial)}</a>`:fmtNum(f.inicial)}${catHoja&&f.inicialCortado?`<div class="hint" style="margin:2px 0 0">${fmtNum(f.inicialCortado)} cort.</div>`:''}</td>
           <td class="pos">${fmtNum(f.entradas)}</td>
           <td class="neg">${fmtNum(f.salidas)}</td>
-          ${catHoja?`<td>${fmtNum(f.cortes+f.autoCortes)}${f.autoCortes?`<div class="tag" style="color:#b3742c;border-color:#b3742c" title="Hojas tomadas antes de registrar el corte">${fmtNum(f.autoCortes)} sin corte</div>`:''}</td>`:''}
+          ${catHoja?`<td>${fmtNum(f.cortes+f.autoCortes)}${f.autoCortes?`<div class="tag" style="color:#b3742c;border-color:#b3742c">${fmtNum(f.autoCortes)} sin corte</div>`:''}</td>`:''}
           <td class="neg">${fmtNum(f.instalaciones)}</td>
           <td class="neg">${fmtNum(f.mermas)}</td>
           <td class="${f.ajustes>0?'pos':(f.ajustes<0?'neg':'')}">${f.ajustes>0?'+':''}${fmtNum(f.ajustes)}</td>
@@ -425,7 +457,76 @@ function renderInv(){
           <td><strong>${fmtNum(f.final)}</strong></td>
         </tr>`; }).join('')}
       </table></div></div>`;
+  }
   $('#main').innerHTML = html;
+}
+
+// ===== Inicio: botones grandes según el rol =====
+const ICONO_CAT = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩'};
+function esSoloLectura(){ return miPerfil && (miPerfil.rol==='supervisor' || miPerfil.rol==='gerente'); }
+function esCoordinador(){ return miPerfil && miPerfil.rol==='coordinador'; }
+// Abre una pantalla con opciones ya elegidas (p. ej. Entradas/Salidas en "Corte" de Melamina).
+function irA(v, opts){
+  opts = opts||{};
+  if(v==='mov'){ if(opts.tipo) movTipo=opts.tipo; if(opts.cat) movCat=opts.cat; else if(opts.tipo==='corte' && !esHoja(CATALOGO.find(i=>i.cat===movCat))) movCat='Melamina'; }
+  if(v==='hist' && opts.tab) histTab=opts.tab;
+  setView(v);
+  window.scrollTo(0,0);
+}
+function renderHome(){
+  const tiles = [];
+  const t = (icon, titulo, sub, js, color) => tiles.push(`<button class="tile" style="--tc:${color||'var(--brand)'}" onclick="${js}"><span class="tile-ic">${icon}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`);
+  if(!esSoloLectura()){
+    t('📥','Llegó material','Anotar hojas, herrajes, etc. que entraron',"irA('mov',{tipo:'entrada'})",'#1f9d55');
+    t('✂️','Corte del día','Hojas que se cortaron hoy',"irA('mov',{tipo:'corte',cat:'Melamina'})",'#FF6B6A');
+    t('🔧','Instalación','Registrar un clóset o puerta instalada',"irA('inst')",'#3E5CDE');
+    t('🔄','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5');
+    t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
+  }
+  t('📦','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'#2c46b8');
+  if(esAdmin()){
+    t('✅','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#1f9d55');
+    t('📋','Auditoría','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
+  }
+  if(esAdmin() || esSoloLectura()) t('🗂️','Historial','Auditorías y faltantes',"irA('hist')",'#6b7280');
+  t('📊','Reportes','Reporte del día en PDF',"irA('rep')",'#3E5CDE');
+  if(esAdmin()) t('👥','Usuarios','Dar de alta al personal',"irA('usr')",'#6b7280');
+
+  const pend = [];
+  const cp = cortesPendientes();
+  if(cp.length && !esSoloLectura()) pend.push(`<div class="pend"><div>✂️ <strong>Falta registrar el corte</strong> de ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}.</div><button class="btn small" onclick="irA('mov',{tipo:'corte',cat:'${cp[0].it.cat}'})">Registrar</button></div>`);
+  const misPend = movs.filter(m=>m.estado==='pendiente').length;
+  if(misPend && esCoordinador()) pend.push(`<div class="pend"><div>⏳ Tienes <strong>${misPend}</strong> movimiento(s) esperando que Dirección los apruebe.</div></div>`);
+  const deudaPend = deudas.filter(d=>d.estado!=='saldada').length;
+  if(deudaPend && (esAdmin()||esSoloLectura())) pend.push(`<div class="pend"><div>📉 Hay <strong>${deudaPend}</strong> faltante(s) de auditoría sin saldar.</div><button class="btn small" onclick="irA('hist',{tab:'deuda'})">Ver</button></div>`);
+
+  const nombre = (getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0];
+  $('#main').innerHTML = `
+    <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
+    ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
+    <div id="home-apr"></div>
+    <div class="tiles">${tiles.join('')}</div>`;
+  if(esAdmin()) contarAprobacionesPendientes();
+}
+async function contarAprobacionesPendientes(){
+  try{
+    const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
+    const lotes = new Set(snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').map(m=>m.loteId||Math.random()));
+    const inst = snapLog.docs.map(d=>d.data()).filter(l=>l.estado==='pendiente').length;
+    const n = lotes.size + inst;
+    const el = document.getElementById('home-apr');
+    if(el && current==='home' && n) el.innerHTML = `<div class="card" style="padding:12px"><div class="pend"><div>✅ Hay <strong>${n}</strong> captura(s) esperando tu aprobación (todos los módulos).</div><button class="btn small" onclick="irA('apr')">Revisar</button></div></div>`;
+  }catch(e){}
+}
+
+// Aviso breve que desaparece solo (más amable que una ventana de alerta).
+function toast(msg, tipo){
+  let el = document.getElementById('toast');
+  if(!el){ el = document.createElement('div'); el.id='toast'; document.body.appendChild(el); }
+  el.className = 'show '+(tipo||'ok');
+  el.innerHTML = msg;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>{ el.className = ''; }, 3800);
 }
 
 let movCat = null;
@@ -437,47 +538,69 @@ function stockHojaTxt(f, unidad){
   if(!f.esHoja) return fmtNum(f.final)+' '+unidad;
   return `${fmtNum(f.final)} ${unidad}<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} completas · ${fmtNum(f.cortado)} cortado</div>`;
 }
+// Explicación sencilla de cada tipo de movimiento (pantalla Entradas/Salidas).
+const TIPO_INFO = {
+  entrada:     {ic:'📥', t:'Entrada',      s:'Llegó material al módulo', verbo:'Entrada de'},
+  corte:       {ic:'✂️', t:'Corte del día', s:'Hojas que se cortaron hoy', verbo:'Corte de'},
+  salida:      {ic:'📤', t:'Salida',       s:'Salió material (no es instalación)', verbo:'Salida de'},
+  merma:       {ic:'⚠️', t:'Merma',        s:'Material dañado o perdido', verbo:'Merma de'},
+  instalacion: {ic:'🔧', t:'Instalación manual', s:'Solo si no usaste la pantalla de Instalación', verbo:'Instalación de'}
+};
 function renderMov(){
-  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
-  if(!movCat) movCat = cats[0];
-  const catsHtml = cats.map(c=>
-    `<button class="btn small" style="background:${c===movCat?'var(--brand)':'transparent'};color:${c===movCat?'var(--brand-ink)':'var(--ink)'};border:1px solid var(--line);margin:2px" onclick="movCat='${c}';renderMov()">${c}</button>`
-  ).join('');
+  if(!TIPO_INFO[movTipo]) movTipo='entrada';
+  const todasCats = [...new Set(CATALOGO.map(i=>i.cat))];
+  // "Corte" solo aplica a hojas (Melamina y MDF)
+  const cats = movTipo==='corte' ? todasCats.filter(c=>esHoja(CATALOGO.find(i=>i.cat===c))) : todasCats;
+  if(!movCat || !cats.includes(movCat)) movCat = cats[0];
   const items = CATALOGO.filter(i=>i.cat===movCat);
   const catHoja = items.length>0 && esHoja(items[0]);
-  if(!catHoja && movTipo==='corte') movTipo='entrada';
-  const tipos = ['entrada','salida','instalacion','merma'].concat(catHoja?['corte']:[]);
-  const ayudaHoja = catHoja ? `<p class="hint"><strong>Hojas:</strong> las entradas llegan como hojas completas; <strong>Corte</strong> pasa hojas completas a material cortado (sin importar en qué piezas) — regístralo al final del turno con todas las hojas cortadas en el día; las instalaciones descuentan del cortado (si se capturan antes del corte, se ajustan solas); las salidas salen de hojas completas.</p>` : '';
+  const info = TIPO_INFO[movTipo];
+  const tiposBtns = Object.keys(TIPO_INFO).map(k=>{ const x=TIPO_INFO[k];
+    return `<button class="tipobtn ${k===movTipo?'on':''} ${k==='instalacion'?'menor':''}" onclick="movTipo='${k}';renderMov()"><span class="tipo-ic">${x.ic}</span><span><strong>${x.t}</strong><br><small>${x.s}</small></span></button>`; }).join('');
+  const catsHtml = cats.map(c=>`<button class="chip ${c===movCat?'on':''}" onclick="movCat='${c}';renderMov()">${ICONO_CAT[c]||''} ${c}</button>`).join('');
+  const pregunta = {
+    entrada:'¿Cuánto llegó de cada cosa?', corte:'¿Cuántas hojas se cortaron hoy de cada color?',
+    salida:'¿Cuánto salió de cada cosa?', merma:'¿Cuánto se dañó o se perdió?', instalacion:'¿Cuánto se usó en la instalación?'
+  }[movTipo];
+  const ayuda = {
+    entrada: catHoja ? 'Las hojas que llegan cuentan como hojas completas.' : '',
+    corte: 'Anota al final del turno todas las hojas que se cortaron. No importa en qué piezas se convirtieron. Si ya se registraron instalaciones hoy, se ajustan solas.',
+    salida: catHoja ? 'Las salidas siempre son de hojas completas.' : '',
+    merma: '',
+    instalacion: 'Lo normal es usar la pantalla 🔧 Instalación, que calcula todo sola. Usa esto solo para casos especiales.'
+  }[movTipo];
   $('#main').innerHTML = `
   <div class="card">
-    <strong>Entradas / Salidas · ${modulo()}</strong>
-    <p class="hint">Elige la categoría; se despliegan todos sus artículos para capturar varias cantidades a la vez, sin ir uno por uno.</p>
-    <div style="margin-top:6px">${catsHtml}</div>
+    <div class="paso">1</div><strong>¿Qué quieres anotar?</strong>
+    <div class="tipos" style="margin-top:10px">${tiposBtns}</div>
   </div>
   <div class="card">
-    <div class="grid2">
-      <select id="mv-tipo" onchange="movTipo=this.value;renderMov()">${tipos.map(t=>`<option value="${t}" ${t===movTipo?'selected':''}>${TIPO_LABEL[t]}${t==='corte'?' (hojas completas → cortado)':''}</option>`).join('')}</select>
-      <input id="mv-nota" placeholder="Nota (opcional, aplica a todos)">
-    </div>
-    ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint">¿De dónde es la merma?</label>
-      <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value"><option value="completas" ${movLado==='completas'?'selected':''}>De hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>De material cortado/armado</option></select></div>` : ''}
-    ${ayudaHoja}
-    <h3 style="margin-top:10px">${movCat}</h3>
-    <div class="wrap-x"><table><tr><th>Artículo</th><th>Stock final</th><th>Cantidad</th></tr>
+    <div class="paso">2</div><strong>¿De qué material?</strong>
+    <div class="chips" style="margin-top:10px">${catsHtml}</div>
+  </div>
+  <div class="card">
+    <div class="paso">3</div><strong>${info.ic} ${pregunta}</strong>
+    ${ayuda?`<p class="hint">${ayuda}</p>`:''}
+    ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint">¿Qué se dañó?</label>
+      <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value;renderMov()"><option value="completas" ${movLado==='completas'?'selected':''}>Hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>Material ya cortado o armado</option></select></div>` : ''}
+    <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca.</p>
+    <div class="movlist">
       ${items.map(it=>{ const f=calcFormula(it.id);
-        return `<tr><td>${it.nombre}</td><td>${stockHojaTxt(f, it.unidad)}</td><td><input type="number" min="0" inputmode="decimal" id="mv-${it.id}" placeholder="0"></td></tr>`;
+        const hay = f.esHoja ? (movTipo==='corte'||movTipo==='salida'||(movTipo==='merma'&&movLado!=='cortado') ? `${fmtNum(f.completas)} completas` : (movTipo==='merma' ? `${fmtNum(f.cortado)} ya cortadas` : `${fmtNum(f.final)} ${it.unidad}`)) : `${fmtNum(f.final)} ${it.unidad}`;
+        return `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay: ${hay}</span></span>
+          <input type="number" min="0" inputmode="decimal" id="mv-${it.id}" placeholder="—"></label>`;
       }).join('')}
-    </table></div>
-    <button class="btn" style="margin-top:10px" onclick="registrarMovLote()">Registrar movimientos de ${movCat}</button>
-    <p class="hint">Las salidas, cortes, instalaciones y mermas no pueden dejar ningún artículo en negativo; se valida todo antes de guardar.</p>
+    </div>
+    <input id="mv-nota" placeholder="Nota (opcional)" style="margin-top:12px">
+    <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="registrarMovLote()">Revisar y guardar</button>
   </div>
-  <div class="card">
-    <strong>Movimientos recientes</strong>
-    <div class="wrap-x"><table><tr><th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Estado</th></tr>
+  <details class="card">
+    <summary><strong>Ver lo último que se anotó</strong></summary>
+    <div class="wrap-x" style="margin-top:8px"><table><tr><th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Estado</th></tr>
     ${movs.slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleString()}</td><td>${m.itemNombre}</td>
       <td class="${m.tipo==='entrada'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}
     </table></div>
-  </div>`;
+  </details>`;
 }
 
 // Etiqueta visual para el estado de aprobación de un movimiento/instalación.
@@ -488,7 +611,7 @@ function badgeEstado(estado){
 }
 
 async function registrarMovLote(){
-  const tipo = $('#mv-tipo').value;
+  const tipo = movTipo;
   const nota = ($('#mv-nota').value||'').trim();
   const ladoEl = document.getElementById('mv-lado');
   const lado = ladoEl ? ladoEl.value : 'completas';
@@ -502,7 +625,7 @@ async function registrarMovLote(){
     const cantidad = Number(el.value);
     if(!cantidad || cantidad<=0) continue;
     const f = calcFormula(it.id);
-    const sinStock = (disp, que)=>{ alert('No hay '+que+' suficiente de "'+it.nombre+'" (disponible: '+fmtNum(disp)+', pediste: '+cantidad+'). No se registró nada de este lote.'); };
+    const sinStock = (disp, que)=>{ alert('No alcanza: de "'+it.nombre+'" solo hay '+fmtNum(disp)+' ('+que+') y escribiste '+cantidad+'.\n\nRevisa la cantidad. No se guardó nada.'); };
     if(f.esHoja && tipo==='corte'){
       // El corte puede cubrir hojas que ya se tomaron provisionalmente (autoCortes) + las completas.
       if(cantidad > f.completas + f.autoCortes + 1e-9){ sinStock(f.completas + f.autoCortes, 'hojas completas'); return; }
@@ -519,8 +642,11 @@ async function registrarMovLote(){
     if(f.esHoja && tipo==='merma') mv.lado = lado;
     aplicar.push(mv);
   }
-  if(aplicar.length===0) return alert('No capturaste ninguna cantidad.');
-  if(avisosAuto.length && !confirm('Todavía no hay suficiente corte registrado:\n\n'+avisosAuto.join('\n')+'\n\nEs normal si el corte del día se registra al final del turno: cuando se registre, se ajusta solo (no se descuenta dos veces). ¿Continuar?')) return;
+  if(aplicar.length===0) return alert('No escribiste ninguna cantidad. Escribe cuánto en el artículo que quieras anotar.');
+  const verbo = (TIPO_INFO[tipo]||{}).verbo || tipo;
+  const resumen = aplicar.map(a=>`• ${fmtNum(a.cantidad)} ${item2unidad(a.itemId)} de ${a.itemNombre}`).join('\n');
+  if(!confirm(`¿Todo está bien?\n\n${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
+  if(avisosAuto.length && !confirm('Todavía no se anota el corte de hoy:\n\n'+avisosAuto.join('\n')+'\n\nNo pasa nada: cuando se registre el corte del día se ajusta solo. ¿Continuar?')) return;
   try{
     const estado = estadoNuevoMovimiento();
     const loteId = cryptoId();
@@ -530,9 +656,9 @@ async function registrarMovLote(){
       if(a.lado) doc.lado = a.lado;
       await db.collection('movimientos').doc(cryptoId()).set(doc);
     }
-    alert(estado==='pendiente'
-      ? aplicar.length+' movimiento(s) capturado(s) en '+movCat+'. Quedaron PENDIENTES de aprobación de Dirección — el inventario oficial no cambia hasta que se aprueben.'
-      : aplicar.length+' movimiento(s) registrado(s) en '+movCat+'.');
+    toast(estado==='pendiente'
+      ? '✅ Guardado. <br><small>Dirección lo tiene que aprobar para que cuente en el inventario.</small>'
+      : '✅ Guardado: '+aplicar.length+' artículo(s).');
     renderMov();
   }catch(e){ alert('Error: '+e.message); }
 }
