@@ -536,24 +536,34 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     // paredes); NUNCA cambian según qué ocupa cada mueble.
     // Confirmado por el usuario: "Lateral Sencillo = 1 maletero chico (que es una pared) +
     // 2 paredes + 5 entrepaños + 2 zócalos" = 3 paredes en total, con o sin cajones.
-    if(fam==='Lateral') add('Pared',3,'191×40 cm',estructuraColor,'ok','Incluye la pared del "maletero chico" + las 2 paredes de la entrepañera base (3 en total, fijo)');
-    if(fam==='Central'){ add('Pared',2,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
-    if(fam==='Doble'){ add('Pared',4,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
+    // Nota general (confirmado por el usuario): cuando un modelo es Max, sus paredes ya no
+    // salen de aquí — cada cajonera/entrepañera Max aporta sus propias "Pared Max" (ver
+    // piezasCajoneraMax/piezasEntrepaneraMax), y sumar también la "Pared" plana de la familia
+    // duplicaría el material. Por eso cada bloque de familia condiciona su "Pared" a `!maxOn`.
+    if(fam==='Lateral'){
+      if(!maxOn) add('Pared',2,'191×40 cm',estructuraColor,'ok','2 paredes de la entrepañera/cajonera base');
+      add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Maletero chico (mide igual que una Pared, 191×40 cm) — con o sin cajones');
+    }
+    if(fam==='Central'){ if(!maxOn) add('Pared',2,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
+    if(fam==='Doble'){ if(!maxOn) add('Pared',4,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
     if(fam==='Doble Especial'){
-      add('Pared',4,'191×40 cm',estructuraColor,'ok','Confirmado: Doble Especial tiene la misma estructura que Doble; solo cambia en herrajes (4 tubos/4 bridas en vez de 2/2)');
+      if(!maxOn) add('Pared',4,'191×40 cm',estructuraColor,'ok','Confirmado: Doble Especial tiene la misma estructura que Doble; solo cambia en herrajes (4 tubos/4 bridas en vez de 2/2)');
       add('Maletero normal',1,'40×244 cm',estructuraColor,'ok');
       if(especial3m) add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Variante a 3 metros: se agrega 1 maletero chico extra (una pared), confirmado por el usuario');
     }
-    if(fam==='Triple'){ add('Pared',6,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',2,'40×244 cm',estructuraColor,'ok'); }
+    if(fam==='Triple'){ if(!maxOn) add('Pared',6,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',2,'40×244 cm',estructuraColor,'ok'); }
     if(fam==='King'){
-      add('Pared',4,'191×40 cm',estructuraColor,'ok');
+      if(!maxOn) add('Pared',4,'191×40 cm',estructuraColor,'ok');
       if(maxOn){
         // Confirmado por el usuario: en Max el maletero chico (191×40) se sustituye por uno
         // normal (244×40); el maletero grande que ya tenía el modelo se queda igual (toda
-        // variante Max lleva maleteros grandes). No se duplica ninguno.
+        // variante Max lleva maleteros grandes). No se duplica ninguno. Las 4 "Pared" del King
+        // tampoco se suman aquí: las aportan las 2 unidades de cajonera/entrepañera Max
+        // (2 "Pared Max" por unidad = 4 en total), así que sumarlas de las dos formas
+        // duplicaría el material — mismo principio que en las combinaciones "por muebles".
         add('Maletero normal (Max)',1,'40×244 cm',estructuraColor,'ok','Max sustituye el maletero chico (191×40) por uno normal (244×40)');
         add('Maletero grande',1,'40×244 cm',estructuraColor,'ok','El maletero grande del King se queda igual en la variante Max (no se sustituye)');
-        maxNota = 'King Max: el maletero chico (191×40) se sustituyó por uno normal (244×40); el maletero grande se queda igual. No se suman ambos.';
+        maxNota = 'King Max: las 4 "Pared" las aportan las 2 unidades de cajonera/entrepañera Max (no se suman aparte). El maletero chico se sustituyó por uno normal (244×40); el maletero grande se queda igual.';
       } else {
         add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Confirmado: la medida del maletero chico es la misma que una Pared (191×40 cm); se agrupa con las paredes para el cálculo de hojas');
         add('Maletero grande',1,'40×244 cm',estructuraColor,'ok','Confirmado: mismo tamaño que el maletero normal (rendimiento: 3 por hoja)');
@@ -746,18 +756,59 @@ function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
   return buildAdicionalPiezas(value, cajonesManual, color); // entrepanera, cajonera_emma, cajonera_espejo, cajonera_max
 }
 
+// ===== Composición "por muebles" (combinaciones) =====
+// Principio confirmado por el usuario y aplicado de forma general a TODOS los modelos/variantes:
+// cada "mueble" de una familia (entrepañera, cajonera normal, Cajonera Max, Cajonera Emma o
+// cajonera de espejo) trae sus PROPIAS paredes y zócalos — ver buildAdicionalPiezas: cada tipo
+// ya suma sus 2 paredes (o las que le tocan) y sus zócalos, sean "Zócalo normal", "Zócalo Max"
+// o "Zócalo especial". Por eso, al armar una combinación, el mueble SUSTITUYE su parte del
+// total de la familia — no se le agrega aparte lo que ya trae. En la práctica esto significa
+// que las piezas "Pared" y "Zócalo normal" del total plano de la familia (el que usa
+// buildDespiece para los modelos con nombre) nunca se cuentan en una combinación: siempre
+// vienen, completas, de la suma de los muebles elegidos. Esta regla es la misma sin importar
+// si el mueble es normal, Emma, Max o espejo, así que no hace falta un caso especial por tipo.
+
+// Deja solo las piezas de la familia que NO pertenecen a ningún mueble en particular: maleteros
+// extra y herrajes (tubos/bridas). "Pared" y "Zócalo normal" se descartan porque cada mueble ya
+// aporta los suyos (ver nota arriba); "Entrepaño" se descarta porque lo define la combinación.
+function piezasFijasDeFamilia(base){
+  return base.piezas.filter(p => p.nombre!=='Entrepaño' && p.nombre!=='Pared' && p.nombre!=='Zócalo normal');
+}
+
+// Confirmado por el usuario: toda variante Max lleva maleteros grandes; el maletero chico
+// (191×40, mide igual que una Pared) se sustituye por uno normal (244×40). Si la familia ya
+// tenía su propio maletero normal aparte (p.ej. Doble Especial a 3 metros), el chico sube a
+// "grande" en vez de duplicar el normal.
+function sustituirMaleteroPorMax(piezasFijas){
+  const yaTeniaNormal = piezasFijas.some(p=>p.nombre==='Maletero normal');
+  return piezasFijas.map(p=>{
+    if(p.nombre!=='Maletero chico') return p;
+    return yaTeniaNormal
+      ? Object.assign({}, p, {nombre:'Maletero grande', dim:'40×244 cm', nota:'Ya había un maletero normal en la familia; el chico se sube a grande en vez de duplicar el normal (confirmado por el usuario)'})
+      : Object.assign({}, p, {nombre:'Maletero normal (Max)', dim:'40×244 cm', nota:'Max sustituye el maletero chico (191×40) por uno normal (244×40)'});
+  });
+}
+
 // Arma la composición completa de una familia eligiendo qué es cada uno de sus muebles fijos
-// (en vez de un modelo con nombre). Las paredes/maleteros/herrajes de la familia se toman de
+// (en vez de un modelo con nombre). Los maleteros extra y herrajes de la familia se toman de
 // buildDespiece con cajones=0/espejos=0 (son fijos, no cambian según qué ocupa cada mueble);
-// se descarta su entrepaño "base sencillo" porque aquí lo da la combinación elegida.
+// las paredes/zócalos/entrepaños los aporta cada mueble elegido (ver piezasFijasDeFamilia).
 function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt){
   const estructuraColor = todoColor ? color : 'Blanco';
   const colorCaj = colorCajonera || estructuraColor;
   const base = buildDespiece(fam, 0, 0, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
-  const piezasFijas = base.piezas.filter(p=>p.nombre!=='Entrepaño');
-  const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
-  if(hayCajonera) piezasFijas.forEach(p=>{ if(p.nombre==='Zócalo normal') p.colorDestino = color; });
+  let piezasFijas = piezasFijasDeFamilia(base);
+
+  const numMueblesMax = muebles.filter(m=>m.value==='cajonera_max').length;
+  if(numMueblesMax>0) piezasFijas = sustituirMaleteroPorMax(piezasFijas);
+
   const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, colorCaj, correderaExt));
+  // Confirmado por el usuario: los zócalos de una cajonera dependen del color del FRENTE, no
+  // del color de la cajonera. Se corrige aquí (una sola vez, sobre lo que aportó cada mueble)
+  // en vez de duplicar esta regla dentro de cada tipo de mueble en buildAdicionalPiezas.
+  const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
+  if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zócalo normal') p.colorDestino = color; });
+
   return {piezas: piezasFijas.concat(piezasMuebles), maxNota: base.maxNota};
 }
 
