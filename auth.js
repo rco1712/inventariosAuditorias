@@ -101,14 +101,14 @@ export function renderLogin(container, onDone){
     return `
     <div style="max-width:360px;margin:14vh auto 0;padding:0 16px">
       <div class="brand" style="justify-content:center;margin-bottom:18px">
-        <div class="logo" style="background:#5b3a29;color:#fff">CV</div>
-        <div><div class="brandname" style="color:#201c17">CLOSETS VERA</div><div class="brandsub" style="color:#6b6259">Auditoría de Módulos</div></div>
+        <img class="logo" src="logo-badge.png" alt="Closets Vera">
+        <div><div class="brandname" style="color:var(--ink)">CLOSETS VERA</div><div class="brandsub" style="color:var(--sub)">Auditoría de Módulos</div></div>
       </div>
       <div class="card">
         <strong>${mode === 'signin' ? 'Iniciar sesión' : 'Crear cuenta'}</strong>
         <div style="margin-top:10px"><input id="au-email" type="email" placeholder="correo"></div>
         <div style="margin-top:8px"><input id="au-pass" type="password" placeholder="contraseña"></div>
-        <div id="au-error" class="hint" style="color:#b3452c"></div>
+        <div id="au-error" class="hint" style="color:var(--bad)"></div>
         <button class="btn" style="margin-top:10px;width:100%" id="au-submit">${mode === 'signin' ? 'Entrar' : 'Crear cuenta'}</button>
         <p class="hint" style="text-align:center;margin-top:10px">
           ${mode === 'signin' ? '¿No tienes cuenta? <a href="#" id="au-switch">Créala aquí</a>' : '¿Ya tienes cuenta? <a href="#" id="au-switch">Inicia sesión</a>'}
