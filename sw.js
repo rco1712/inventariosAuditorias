@@ -1,6 +1,6 @@
 // Service worker: cachea el "app shell" para que la app abra y funcione sin internet.
 // Los datos van por src/db.js (IndexedDB + sync a Supabase), no por aquí.
-const CACHE = 'auditoriamodulos-v36';
+const CACHE = 'auditoriamodulos-v37';
 const APP_SHELL = [
   './',
   './index.html',
@@ -20,8 +20,13 @@ const APP_SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
+  // Los archivos de la app se guardan todos; las librerías del CDN, una por una y sin que un
+  // fallo (p. ej. mala señal) cancele la actualización completa.
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE).then((cache) => Promise.all([
+      cache.addAll(APP_SHELL.filter((u) => !u.startsWith('http'))),
+      ...APP_SHELL.filter((u) => u.startsWith('http')).map((u) => cache.add(u).catch(() => {}))
+    ])).then(() => self.skipWaiting())
   );
 });
 
@@ -32,28 +37,33 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Cache-first para el app shell y las librerías de CDN; network-first (con fallback a cache)
-// para todo lo demás, así siempre hay algo que mostrar sin internet.
+// Actualización automática (confirmado por el usuario: que nadie tenga que borrar caché):
+// - Archivos de la app (mismo sitio): primero se piden a internet SIN usar la caché del navegador,
+//   así siempre llega la versión más nueva; si no hay internet, se usa la copia guardada.
+// - Librerías de CDN (no cambian): se usan de la copia guardada.
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  const mismoSitio = url.origin === self.location.origin;
 
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) {
-        // Refresca en segundo plano si hay conexión, sin bloquear la respuesta.
-        fetch(req).then((res) => {
-          if (res && res.ok) caches.open(CACHE).then((c) => c.put(req, res.clone()));
-        }).catch(() => {});
-        return cached;
-      }
-      return fetch(req).then((res) => {
-        if (res && res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-        }
+  if (mismoSitio) {
+    event.respondWith(
+      fetch(req, { cache: 'no-cache' }).then((res) => {
+        if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
         return res;
-      }).catch(() => caches.match('./index.html'));
-    })
+      }).catch(() => caches.match(req).then((c) => c || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // Solo las librerías del CDN se sirven de la copia guardada. Todo lo demás de otros sitios
+  // (la base de datos en línea, Supabase) va siempre directo a internet, nunca de caché.
+  if (url.hostname !== 'cdn.jsdelivr.net') return;
+  event.respondWith(
+    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+      if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return res;
+    }))
   );
 });

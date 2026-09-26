@@ -127,6 +127,8 @@ details.card > summary{list-style:none}
 details.card > summary::-webkit-details-marker{display:none}
 details.card > summary::after{content:'▾';margin-left:auto;color:var(--sub);font-size:14px}
 details.card[open] > summary::after{content:'▴'}
+#upd-banner{position:fixed;left:12px;right:12px;bottom:calc(16px + env(safe-area-inset-bottom,0px));background:#1b2030;color:#fff;border-radius:14px;padding:12px 14px;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;z-index:60;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+#upd-banner button{border:none;background:var(--brand);color:#fff;border-radius:10px;padding:10px 14px;font-weight:800;font-size:14px}
 </style>
 </head>
 <body>
@@ -163,8 +165,37 @@ details.card[open] > summary::after{content:'▴'}
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script type="module" src="bootstrap.js"></script>
 <script>
+// Actualización automática: busca versión nueva al abrir, al volver a la app y cada 30 min.
+// Cuando llega una versión nueva, recarga sola si no estás capturando nada; si estás a media
+// captura, muestra un aviso con botón "Actualizar" para no perder lo que escribiste.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+  const habiaVersion = !!navigator.serviceWorker.controller;
+  let recargando = false;
+  function hayCapturaEnCurso(){
+    const vista = (typeof current !== 'undefined') ? current : '';
+    if(['mov','inst','gar','aud','ini','trasp','usr'].includes(vista)){
+      return [...document.querySelectorAll('#main input')].some(i => (i.type==='checkbox' ? false : String(i.value||'').trim()!=='' && i.type!=='date'));
+    }
+    return false;
+  }
+  function recargar(){ if(recargando) return; recargando = true; location.reload(); }
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(!habiaVersion) return; // primera instalación: no hace falta recargar
+    if(document.visibilityState === 'hidden' || !hayCapturaEnCurso()) return recargar();
+    let b = document.getElementById('upd-banner');
+    if(!b){
+      b = document.createElement('div'); b.id = 'upd-banner';
+      b.innerHTML = '🔄 Hay una versión nueva de la app. <button onclick="location.reload()">Actualizar</button>';
+      document.body.appendChild(b);
+    }
+  });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+      reg.update();
+      setInterval(() => reg.update(), 30*60*1000);
+      document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') reg.update(); });
+    });
+  });
 }
 </script>
 </body>
