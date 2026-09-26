@@ -7,13 +7,14 @@
 // cambios (propios y de otros usuarios/módulos) se sincronizan en segundo plano.
 import { getSupabase, supabaseReady } from './supabase.js';
 
-const COLLECTIONS = ['inicial','movimientos','resets','auditorias','instalacionesLog','instalacionesPuertas','prestamos'];
+const COLLECTIONS_V1 = ['inicial','movimientos','resets','auditorias','instalacionesLog','instalacionesPuertas','prestamos','config'];
+// v2: tablas nuevas (faltantes/deuda, garantías, conteo del almacén, historial del stock inicial).
+const COLLECTIONS = [...COLLECTIONS_V1, 'deudasAuditoria','garantiasLog','conteoAbierto','inicialHist'];
 
 const ddb = new Dexie('auditoriamodulos');
-const stores = {};
-COLLECTIONS.forEach(c => { stores[c] = 'id, modulo, _dirty, _updatedAt'; });
-stores['_meta'] = 'key';
-ddb.version(1).stores(stores);
+const storesDe = list => { const st = {}; list.forEach(c => { st[c] = 'id, modulo, _dirty, _updatedAt'; }); st['_meta'] = 'key'; return st; };
+ddb.version(1).stores(storesDe(COLLECTIONS_V1));
+ddb.version(2).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 

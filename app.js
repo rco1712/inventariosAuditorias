@@ -9,7 +9,7 @@
 
 
 const $=s=>document.querySelector(s);
-let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv';
+let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={};
 let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
@@ -72,6 +72,13 @@ const MODULOS = [
   {nombre:'Guadalajara', region:'Jalisco', color:'#b3452c', code:'G'},
   {nombre:'Tlaquepaque', region:'Jalisco', color:'#7a4fb5', code:'T'},
 ];
+// Fecha de hoy en hora local (AAAA-MM-DD).
+function fechaHoyLocal(){ return new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10); }
+// ¿Dirección abrió el conteo del almacén HOY para este módulo? (se cierra solo al cambiar el día)
+function conteoAbiertoHoy(mod){ const c = conteoMap[mod||modulo()]; return !!(c && c.abierto && c.fechaDia===fechaHoyLocal()); }
+// Modo conteo del coordinador: puede capturar la auditoría, pero a ciegas (sin ver el teórico).
+function modoConteoCoord(){ return esCoordinador() && conteoAbiertoHoy(); }
+
 
 const CATALOGO = [];
 (function build(){
@@ -217,6 +224,14 @@ async function loadStock(){
     db.collection('resets').onSnapshot(snap=>{
       resetMap={}; snap.docs.forEach(d=>{ resetMap[d.id]=d.data().fecha; });
       if(current==='inv') renderInv();
+    });
+  }catch(e){}
+  try{
+    // Conteo del almacén abierto por Dirección para los coordinadores (solo el día indicado).
+    db.collection('conteoAbierto').onSnapshot(snap=>{
+      conteoMap={}; snap.docs.forEach(d=>{ conteoMap[d.id]=d.data(); });
+      if(current==='home') renderHome();
+      if(current==='aud') renderAud();
     });
   }catch(e){}
   try{
@@ -383,8 +398,25 @@ async function ceroModulo(){
   catch(e){ alert('Error: '+e.message); }
 }
 
+// Historial de cambios al stock inicial: antes → después, quién y cuándo.
+async function registrarCambioInicial(it, docNuevo, origen){
+  try{
+    const f = calcFormula(it.id);
+    await db.collection('inicialHist').doc(cryptoId()).set({modulo:docNuevo.modulo, itemId:it.id, itemNombre:it.nombre,
+      antesInicial: fmtNum(Number(inicialMap[it.id]??0)), stockAntes: fmtNum(f.final), nuevo: fmtNum(Number(docNuevo.cantidad)||0), cortado: docNuevo.cortado!==undefined?docNuevo.cortado:null,
+      origen, fecha:new Date().toISOString(), creadoPor: getCurrentUserEmail?getCurrentUserEmail():''});
+  }catch(e){}
+}
+async function pedirPinAdmin(que){
+  const pin = prompt('🔒 El stock inicial está bloqueado.\n\nEscribe el PIN de Dirección para '+que+':');
+  if(pin===null) return false;
+  if(pin!==(await getPinCero())){ alert('PIN incorrecto. No se cambió nada.'); return false; }
+  return true;
+}
 async function editInicial(itemId){
-  if(!puedeEscribir()) return alert('Tu cuenta es de solo lectura; no puedes cambiar el inicial.');
+  if(!esAdmin()) return alert('Solo Dirección puede cambiar el stock inicial.');
+  if(!(await pedirPinAdmin('cambiar el stock inicial'))) return;
+  const itE = CATALOGO.find(i=>i.id===itemId);
   const actual = inicialMap[itemId] ?? 0;
   if(esHojaId(itemId)){
     // Hojas: la línea base se captura separada en completas y cortado/armado.
@@ -394,13 +426,13 @@ async function editInicial(itemId){
     const vCort = prompt('Stock inicial en '+modulo()+'\n\n2 de 2 · Material CORTADO o armado (en hojas equivalentes, 0 si no hay):', fmtNum(cortActual));
     if(vCort===null || vCort.trim()==='' || isNaN(Number(vCort)) || Number(vCort)<0) return;
     const comp = Number(vComp), cort = Number(vCort);
-    try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:fmtNum(comp+cort),cortado:cort,fecha:new Date().toISOString(),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); }
+    try{ const d={modulo:modulo(),itemId,cantidad:fmtNum(comp+cort),cortado:cort,fecha:new Date().toISOString(),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}; await registrarCambioInicial(itE, d, 'Cambio manual'); await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set(d); }
     catch(e){ alert('Error: '+e.message); }
     return;
   }
   const val = prompt('Stock inicial (línea base) para este artículo en '+modulo(), actual);
   if(val===null || isNaN(Number(val))) return;
-  try{ await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set({modulo:modulo(),itemId,cantidad:Number(val),fecha:new Date().toISOString(),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); }
+  try{ const d={modulo:modulo(),itemId,cantidad:Number(val),fecha:new Date().toISOString(),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}; await registrarCambioInicial(itE, d, 'Cambio manual'); await db.collection('inicial').doc(inicialKey(modulo(),itemId)).set(d); }
   catch(e){ alert('Error: '+e.message); }
 }
 
@@ -410,6 +442,7 @@ function setView(v){
   if(v==='home') renderHome();
   if(v==='gar') renderGar();
   if(v==='ini') renderIni();
+  if(v==='movhist') renderMovHist();
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
@@ -442,7 +475,8 @@ function renderInv(){
       <div style="font-size:17px;font-weight:800">📦 Inventario · ${modulo()}</div>
       ${esAdmin()?`<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="ceroModulo()">Poner en cero</button>`:''}
     </div>
-    ${puedeEscribir() && !esSoloLectura() ? `<button class="btn" style="margin-top:10px;width:100%" onclick="irA('ini')">✏️ Capturar stock inicial</button>` : ''}
+    ${esAdmin() ? `<button class="btn" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('ini')">🔒 Stock inicial (solo Dirección, con PIN)</button>` : ''}
+    <button class="btn" style="margin-top:8px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('movhist')">📜 Historial de entradas y salidas</button>
     <p class="hint">Elige qué quieres ver:</p>
     <div class="chips">${catsHtml}</div>
   </div>`;
@@ -474,13 +508,13 @@ function renderInv(){
       </div>`; }).join('')}</div>`;
   } else {
     html += `<div class="card">
-      <p class="hint" style="margin-top:0">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Garantías − Mermas ± Ajustes = Final.${catHoja?' En hojas: Completas + Cortado = Final. "Sin corte" = hojas usadas antes de anotar el corte del día (se quita al registrar el corte).':''} ${puedeEscribir()?'Toca el número de "Inicial" para fijar la línea base.':''}</p>
+      <p class="hint" style="margin-top:0">Fórmula: Inicial + Entradas − Salidas − Instalaciones − Garantías − Mermas ± Ajustes = Final.${catHoja?' En hojas: Completas + Cortado = Final. "Sin corte" = hojas usadas antes de anotar el corte del día (se quita al registrar el corte).':''} ${esAdmin()?'El stock inicial está bloqueado: solo Dirección lo puede cambiar, con PIN.':''}</p>
       <div class="wrap-x"><table>
       <tr><th>Artículo</th><th>Inicial</th><th>Entr.</th><th>Sal.</th>${catHoja?'<th>Corte</th>':''}<th>Instal.</th><th>Garant.</th><th>Mermas</th><th>Ajuste</th>${catHoja?'<th>Compl.</th><th>Cortado</th>':''}<th>Final</th></tr>
       ${rows.map(it=>{ const f=calcFormula(it.id);
         return `<tr>
           <td>${it.nombre}<div class="tag">${it.unidad}</div></td>
-          <td>${puedeEscribir()?`<a href="#" onclick="editInicial('${it.id}');return false;">${fmtNum(f.inicial)}</a>`:fmtNum(f.inicial)}${catHoja&&f.inicialCortado?`<div class="hint" style="margin:2px 0 0">${fmtNum(f.inicialCortado)} cort.</div>`:''}</td>
+          <td>${esAdmin()?`<a href="#" onclick="editInicial('${it.id}');return false;">${fmtNum(f.inicial)}</a>`:fmtNum(f.inicial)}${catHoja&&f.inicialCortado?`<div class="hint" style="margin:2px 0 0">${fmtNum(f.inicialCortado)} cort.</div>`:''}</td>
           <td class="pos">${fmtNum(f.entradas)}</td>
           <td class="neg">${fmtNum(f.salidas)}</td>
           ${catHoja?`<td>${fmtNum(f.cortes+f.autoCortes)}${f.autoCortes?`<div class="tag" style="color:#b3742c;border-color:#b3742c">${fmtNum(f.autoCortes)} sin corte</div>`:''}</td>`:''}
@@ -543,7 +577,7 @@ async function armarJuegosCorredera(juegoNombre){
 // partir de este momento; lo que se anote después se suma/resta desde aquí.
 let iniCat = null, iniVals = {};
 function renderIni(){
-  if(!puedeEscribir()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  if(!esAdmin()){ $('#main').innerHTML='<div class="card">🔒 El stock inicial solo lo puede cambiar Dirección.</div>'; return; }
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!iniCat) iniCat = cats[0];
   const items = CATALOGO.filter(i=>i.cat===iniCat);
@@ -584,12 +618,15 @@ async function guardarIni(){
   const lineas = ids.map(id=>{ const it=CATALOGO.find(i=>i.id===id); const x=iniVals[id];
     if(esHoja(it)){ const f=calcFormula(id); const c = x.c!==undefined?x.c:f.completas, k = x.k!==undefined?x.k:0; return {it, c, k, txt:`• ${it.nombre}: ${fmtNum(c)} completas${k?' + '+fmtNum(k)+' cortadas':''}`}; }
     return {it, c:x.c, k:0, txt:`• ${it.nombre}: ${fmtNum(x.c)} ${it.unidad}`}; });
+  if(!esAdmin()) return alert('Solo Dirección puede cambiar el stock inicial.');
+  if(!(await pedirPinAdmin('cambiar el stock inicial'))) return;
   if(!confirm(`Vas a fijar el stock de HOY de ${ids.length} artículo(s) en ${modulo()}:\n\n${lineas.slice(0,20).map(l=>l.txt).join('\n')}${lineas.length>20?'\n… y '+(lineas.length-20)+' más':''}\n\n¿Todo bien?`)) return;
   try{
     const fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const l of lineas){
       const docIni = {modulo:modulo(), itemId:l.it.id, cantidad:fmtNum(l.c + l.k), fecha, creadoPor};
       if(esHoja(l.it)) docIni.cortado = fmtNum(l.k);
+      await registrarCambioInicial(l.it, docIni, 'Captura manual');
       await db.collection('inicial').doc(inicialKey(modulo(), l.it.id)).set(docIni);
     }
     iniVals = {};
@@ -621,11 +658,11 @@ function renderHome(){
     t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
     t('🛡️','Garantía','Material que se da en garantía',"irA('gar')",'#b3742c');
   }
+  if(modoConteoCoord()) tiles.unshift(`<button class="tile" style="--tc:#E0453F;grid-column:1/-1" onclick="irA('aud')"><span class="tile-ic">📋</span><span class="tile-t">Conteo del almacén</span><span class="tile-s">Dirección abrió el conteo de hoy. Cuenta todo lo que hay.</span></button>`);
   t('📦','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'#2c46b8');
   if(esAdmin()){
-    t('✏️','Stock inicial','Capturar lo que hay hoy',"irA('ini')",'#2c46b8');
     t('✅','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#1f9d55');
-    t('📋','Auditoría','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
+    t('📋','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
   }
   if(esAdmin() || esSoloLectura()) t('🗂️','Historial','Auditorías y faltantes',"irA('hist')",'#6b7280');
   t('📊','Reportes','Reporte del día en PDF',"irA('rep')",'#3E5CDE');
@@ -810,7 +847,11 @@ async function registrarMovLote(){
 }
 
 function renderAud(){
-  if(miPerfil && miPerfil.rol==='coordinador'){ $('#main').innerHTML = '<div class="card">Esta sección no está disponible para coordinadores.</div>'; return; }
+  const ciego = modoConteoCoord();
+  if(esCoordinador() && !ciego){ $('#main').innerHTML = '<div class="card">📋 El conteo del almacén solo se abre cuando Dirección lo activa, y solo ese día.</div>'; return; }
+  if(esSoloLectura()){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  recuperarBorradorAud();
+  if(ciego){ audTipo='conteo'; if(!audAuditor) audAuditor=(getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0]; }
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!auditCat) auditCat = cats[0];
   const catsHtml = cats.map(c=>{
@@ -832,10 +873,10 @@ function renderAud(){
     <h3>${auditCat}</h3>
     ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
     ${auditCat==='Herrajes'?'<p class="hint">Aquí van los <strong>juegos de corredera completos</strong> (hembra + macho juntos). Las hembras o machos <strong>sueltos</strong> se cuentan en 📦 Armados → Corredera suelta; la app arma los juegos y lo que sobra lo guarda como "sin pareja".</p>':''}
-    <div class="wrap-x"><table><tr><th>Artículo</th><th>Teórico</th><th>${catHoja?'Hojas completas contadas':'Físico contado'}</th></tr>
+    <div class="wrap-x"><table><tr><th>Artículo</th>${ciego?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas contadas':'Físico contado'}</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id);
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
-        return `<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td><td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>
+        return `<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${ciego?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
           <td><input type="number" inputmode="decimal" value="${auditCapturas[it.id]??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value)">${extra}</td></tr>`;
       }).join('')}
     </table></div>
@@ -843,11 +884,14 @@ function renderAud(){
   }
 
   $('#main').innerHTML = `
+  ${esAdmin() ? conteoAdminCardHtml() : ''}
+  ${ciego ? `<div class="card" style="border:2px solid var(--bad)"><div style="font-size:17px;font-weight:800">📋 Conteo del almacén · ${modulo()}</div>
+    <p class="hint">Cuenta <strong>todo</strong> lo que hay en el módulo, también lo que está guardado en el taller, en cajas o en esquinas. Escribe solo lo que cuentas. Al terminar toca <strong>Enviar conteo a Dirección</strong>.</p></div>` : ''}
   <div class="card">
-    <strong>Auditoría física · ${modulo()}</strong>
+    <strong>${ciego?'Cómo contar':'Auditoría física · '+modulo()}</strong>
     <p class="hint">Cuenta lo que existe físicamente ahora mismo, tal como está. Las hojas completas y herrajes sueltos se capturan en su categoría; las piezas ya cortadas en <strong>✂️ Piezas cortadas</strong>, y las cajoneras, cajones y cuadros armados en <strong>📦 Armados</strong>. La app convierte todo a hojas y herrajes.</p>
     <div class="grid2">
-      <select id="aud-tipo" onchange="audTipo=this.value"><option value="inicial" ${audTipo==='inicial'?'selected':''}>Auditoría inicial</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría de seguimiento</option></select>
+      <select id="aud-tipo" onchange="audTipo=this.value" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="inicial" ${audTipo==='inicial'?'selected':''}>Auditoría inicial</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría de seguimiento</option></select>
       <input id="aud-auditor" placeholder="Nombre del auditor" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
   </div>
@@ -855,10 +899,31 @@ function renderAud(){
   ${cuerpo}
   <div class="card row" style="justify-content:space-between">
     <span class="hint" id="aud-contador">${textoContadorAudit()}</span>
-    <button class="btn" onclick="saveAudit()">Finalizar y guardar auditoría</button>
+    <button class="btn" onclick="saveAudit()">${ciego?'📤 Enviar conteo a Dirección':'Finalizar y guardar auditoría'}</button>
   </div>`;
 }
 function selectAuditCat(c){ auditCat=c; renderAud(); }
+// Borrador del conteo/auditoría: se guarda en el teléfono cada pocos segundos, para no perder lo
+// contado si se cierra la app, se acaba la pila o llega una actualización.
+function claveBorradorAud(){ return 'borradorAud_'+modulo(); }
+function guardarBorradorAud(){
+  try{
+    const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
+    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditPiezas, auditArmados, audAuditor, fecha:new Date().toISOString()}));
+  }catch(e){}
+}
+function borrarBorradorAud(){ try{ localStorage.removeItem(claveBorradorAud()); }catch(e){} }
+function recuperarBorradorAud(){
+  try{
+    const raw = localStorage.getItem(claveBorradorAud()); if(!raw) return;
+    const hayAhora = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
+    if(hayAhora) return;
+    const b = JSON.parse(raw);
+    auditCapturas = b.auditCapturas||{}; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
+    toast('↩️ Se recuperó lo que ya habías contado.');
+  }catch(e){}
+}
+setInterval(()=>{ if(current==='aud') guardarBorradorAud(); }, 4000);
 
 // ----- Piezas cortadas (auditoría) -----
 function contarPiezasSueltas(){
@@ -1031,7 +1096,9 @@ async function saveAudit(){
   if(!capturados.length && !Object.keys(eq).length) return alert('No has capturado ningún artículo, pieza ni armado todavía.');
   // Confirmado por el usuario: el reporte de auditoría lleva TODOS los artículos, aunque estén en
   // cero. Lo que no se capturó se toma como 0 físico; antes se avisa de los que sí tenían existencia.
-  const noContados = CATALOGO.filter(it=>auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
+  const ciego = modoConteoCoord();
+  if(ciego && !confirm('¿Ya contaste TODO el almacén?\n\nLo que no escribiste se toma como 0.\n\nAl enviar, el conteo le llega a Dirección y esta opción se cierra.')) return;
+  const noContados = ciego ? [] : CATALOGO.filter(it=>auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
   if(noContados.length && !confirm(`Hay ${noContados.length} artículo(s) que según el inventario SÍ hay, pero no los contaste:\n\n${noContados.slice(0,15).map(it=>'• '+it.nombre+' (debería haber '+fmtNum(calcFormula(it.id).final)+')').join('\n')}${noContados.length>15?'\n… y '+(noContados.length-15)+' más':''}\n\nSi guardas así, se toman como 0 (faltante). ¿Guardar de todos modos?\n\n(Cancelar = regresar a contarlos)`)) return;
   CATALOGO.forEach(it=>{
     const itemId = it.id;
@@ -1061,7 +1128,8 @@ async function saveAudit(){
     });
   });
   try{
-    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:true};
+    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:true,creadoPor:getCurrentUserEmail?getCurrentUserEmail():''};
+    if(tipo==='conteo') doc.conteoInicial = true;
     if(piezasContadas.length) doc.piezasContadas = piezasContadas;
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
     const bc = balanceCorrederas();
@@ -1069,16 +1137,157 @@ async function saveAudit(){
     const audId = cryptoId();
     await db.collection('auditorias').doc(audId).set(doc);
     auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor='';
+    borrarBorradorAud();
+    if(ciego){
+      try{ await db.collection('conteoAbierto').doc(modulo()).set({...(conteoMap[modulo()]||{}), abierto:false, cerrado:new Date().toISOString(), cerradoPor:doc.creadoPor, auditoriaId:audId}); }catch(e){}
+      toast('✅ Conteo enviado a Dirección. ¡Gracias!');
+      setView('home'); return;
+    }
     toast('✅ Auditoría guardada.');
     histTab='aud';
     setView('hist');
     if(confirm('¿Quieres descargar el REPORTE DE AUDITORÍA en PDF (teórico vs. físico de cada artículo)?')){
       try{ await generarReporteAuditoriaPDF({...doc, id:audId}); }catch(e){ alert('No se pudo generar el PDF: '+e.message); }
     }
-    if(esAdmin() && confirm('¿Aplicar esta auditoría al inventario ahora?\n\nEl inventario quedará igual a lo contado y lo que haya faltado se guarda como DEUDA en Historial → Faltantes (deuda).\n\nTambién puedes aplicarla después desde el Historial.')){
+    if(esAdmin() && tipo==='conteo'){
+      if(confirm('¿Usar este conteo como el STOCK INICIAL de '+doc.modulo+' ahora?\n\nTambién lo puedes hacer después desde el Historial.')) await usarConteoComoInicial(audId, {...doc, id:audId});
+    } else if(esAdmin() && confirm('¿Aplicar esta auditoría al inventario ahora?\n\nEl inventario quedará igual a lo contado y lo que haya faltado se guarda como DEUDA en Historial → Faltantes (deuda).\n\nTambién puedes aplicarla después desde el Historial.')){
       await aplicarAuditoria(audId, {...doc, id:audId});
     }
   }catch(e){ alert('Error: '+e.message); }
+}
+
+// ===== Conteo del almacén (arranque desde cero, confirmado por el usuario) =====
+// Dirección abre el conteo de un módulo (o de los 5) SOLO para hoy. El coordinador lo ve en su Inicio,
+// cuenta a ciegas (sin ver el teórico) y lo envía; al enviar, o al cambiar el día, la opción desaparece.
+// Dirección lo revisa y lo usa como STOCK INICIAL: todo el módulo parte de ese conteo (lo anterior deja
+// de contar) y, desde ahí, solo se mueven entradas, salidas, instalaciones, etc.
+function conteoAdminCardHtml(){
+  const hoy = fechaHoyLocal();
+  const filas = MODULOS.map(m=>{
+    const c = conteoMap[m.nombre]; const abierto = conteoAbiertoHoy(m.nombre);
+    const estado = abierto ? '<span class="tag" style="color:var(--bad);border-color:var(--bad)">🟢 Abierto hoy</span>'
+      : (c && c.auditoriaId && c.fechaDia===hoy ? '<span class="tag pos" style="border-color:var(--ok)">✓ Conteo recibido</span>' : '<span class="tag">Cerrado</span>');
+    return `<div class="movitem"><span style="min-width:0"><span class="invname">${m.nombre}</span><span style="display:block;margin-top:2px">${estado}</span></span>
+      ${abierto ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="abrirConteo(['${m.nombre}'],false)">Cerrar</button>` : `<button class="btn small" onclick="abrirConteo(['${m.nombre}'],true)">Abrir hoy</button>`}</div>`;
+  }).join('');
+  return `<details class="card" ${Object.keys(conteoMap).some(k=>conteoAbiertoHoy(k))?'open':''}>
+    <summary><strong>📋 Conteo del almacén para coordinadores</strong></summary>
+    <p class="hint">Abre el conteo y el coordinador verá <strong>"Conteo del almacén"</strong> en su Inicio <strong>solo hoy</strong>. Cuenta a ciegas y, al enviarlo, se cierra. Te llega al Historial para que lo uses como stock inicial.</p>
+    <button class="btn" style="width:100%;margin-bottom:8px" onclick="abrirConteo(MODULOS.map(m=>m.nombre),true)">Abrir hoy en los 5 módulos</button>
+    <div class="movlist">${filas}</div>
+  </details>`;
+}
+async function abrirConteo(mods, abrir){
+  if(!esAdmin()) return;
+  if(abrir && !confirm(`¿Abrir el conteo del almacén HOY para: ${mods.join(', ')}?\n\nLos coordinadores lo verán en su Inicio solo el día de hoy.`)) return;
+  try{
+    const quien = getCurrentUserEmail?getCurrentUserEmail():'';
+    for(const m of mods){
+      await db.collection('conteoAbierto').doc(m).set(abrir ? {abierto:true, fechaDia:fechaHoyLocal(), abiertoPor:quien, fecha:new Date().toISOString()}
+        : {...(conteoMap[m]||{}), abierto:false, cerrado:new Date().toISOString(), cerradoPor:quien});
+    }
+    toast(abrir ? '✅ Conteo abierto para hoy.' : 'Conteo cerrado.');
+    renderAud();
+  }catch(e){ alert('Error: '+e.message); }
+}
+// Resumen de hojas del conteo: completas + cortado = total, por color.
+function resumenHojasConteoHtml(a){
+  const hojas = (a.resultados||[]).filter(r=>r.teoricoCompletas!==undefined && (Number(r.fisicoCompletas)||Number(r.fisicoCortado)));
+  if(!hojas.length) return '';
+  const t = hojas.reduce((s,r)=>{ s.c+=Number(r.fisicoCompletas)||0; s.k+=Number(r.fisicoCortado)||0; return s; },{c:0,k:0});
+  return `<details style="margin-top:8px"><summary class="hint"><strong>🪵 Hojas contadas: ${fmtNum(t.c)} completas + ${fmtNum(t.k)} cortadas = ${fmtNum(t.c+t.k)}</strong></summary>
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>Completas</th><th>Cortado</th><th>Total</th></tr>
+    ${hojas.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.fisicoCompletas)}</td><td>${fmtNum(r.fisicoCortado)}</td><td><strong>${fmtNum(r.fisico)}</strong></td></tr>`).join('')}
+    </table></div></details>`;
+}
+async function usarConteoComoInicialUI(id){ const a = auditorias.find(x=>x.id===id); if(a) await usarConteoComoInicial(id, a); }
+async function usarConteoComoInicial(id, a){
+  if(!esAdmin()) return alert('Solo Dirección puede usar un conteo como stock inicial.');
+  if(a.aplicada) return alert('Este conteo ya se usó.');
+  const res = a.resultados||[];
+  const hojas = res.filter(r=>r.teoricoCompletas!==undefined);
+  const tc = hojas.reduce((s,r)=>s+(Number(r.fisicoCompletas)||0),0), tk = hojas.reduce((s,r)=>s+(Number(r.fisicoCortado)||0),0);
+  const conAlgo = res.filter(r=>Math.abs(Number(r.fisico)||0)>0.005).length;
+  if(!confirm(`Usar el conteo del ${new Date(a.fecha).toLocaleString('es-MX')} como STOCK INICIAL de ${a.modulo}.\n\n• Todo el inventario de ${a.modulo} parte de este conteo (lo que no se contó queda en 0).\n• Lo anotado ANTES del conteo deja de contar; lo anotado DESPUÉS sí cuenta.\n• Hojas: ${fmtNum(tc)} completas + ${fmtNum(tk)} cortadas = ${fmtNum(tc+tk)}.\n• ${conAlgo} artículo(s) con existencia.\n\n¿Continuar?`)) return;
+  if(!(await pedirPinAdmin('fijar el stock inicial con este conteo'))) return;
+  try{
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    // Punto de partida = momento del conteo: el "cero" justo en ese momento y el conteo 1 ms después,
+    // así lo que se anote después del conteo (aunque se apruebe más tarde) sí cuenta.
+    const t0 = new Date(a.fecha).getTime();
+    await db.collection('resets').doc(a.modulo).set({fecha:new Date(t0).toISOString(), porConteo:id});
+    const fechaIni = new Date(t0+1).toISOString();
+    for(const it of CATALOGO){
+      const r = res.find(x=>x.itemId===it.id) || {fisico:0};
+      const d = {modulo:a.modulo, itemId:it.id, cantidad:fmtNum(Number(r.fisico)||0), fecha:fechaIni, creadoPor, origen:'conteo', auditoriaId:id};
+      if(esHoja(it)) d.cortado = fmtNum(Number(r.fisicoCortado)||0);
+      await db.collection('inicial').doc(inicialKey(a.modulo, it.id)).set(d);
+    }
+    await db.collection('inicialHist').doc(cryptoId()).set({modulo:a.modulo, origen:'Conteo inicial', auditoriaId:id, fecha:new Date().toISOString(), creadoPor, articulos:conAlgo, hojasCompletas:fmtNum(tc), hojasCortadas:fmtNum(tk)});
+    await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor, usadoComoInicial:true});
+    alert(`✅ Listo. ${a.modulo} ya arranca con este conteo como stock inicial.`);
+    if(current==='hist') renderHist();
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+// ===== Historial de entradas y salidas (por fecha) =====
+let mhDesde = null, mhHasta = null, mhTipo = 'todos', mhCat = 'todas', mhItem = 'todos';
+const MH_TIPOS = {todos:'Todo', entrada:'📥 Entradas', salida:'📤 Salidas', instalacion:'🔧 Instalaciones', garantia:'🛡️ Garantías', devolucion:'↩️ Regresó de garantía', merma:'⚠️ Mermas', corte:'✂️ Cortes', ajuste:'⚖️ Ajustes'};
+function fechaInicioModulo(){
+  // Fecha del stock inicial vigente (el conteo): la más reciente de los iniciales capturados.
+  const fs = Object.values(inicialFechaMap).filter(Boolean).sort();
+  return fs.length ? fs[fs.length-1] : (resetMap[modulo()]||null);
+}
+function renderMovHist(){
+  const ini = fechaInicioModulo();
+  const aLocal = iso => new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  if(!mhDesde) mhDesde = ini ? aLocal(ini) : fechaHoyLocal().slice(0,8)+'01';
+  if(!mhHasta) mhHasta = fechaHoyLocal();
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  const desdeISO = new Date(mhDesde+'T00:00:00').toISOString(), hastaISO = new Date(mhHasta+'T23:59:59.999').toISOString();
+  const lista = movs.filter(m=>m.fecha>=desdeISO && m.fecha<=hastaISO && m.estado!=='rechazado'
+    && (mhTipo==='todos' || m.tipo===mhTipo)
+    && (mhItem==='todos' ? (mhCat==='todas' || (CATALOGO.find(i=>i.id===m.itemId)||{}).cat===mhCat) : m.itemId===mhItem));
+  const aprob = lista.filter(m=>m.estado!=='pendiente');
+  // Totales por artículo
+  const tot = {};
+  aprob.forEach(m=>{ const t = tot[m.itemId] = tot[m.itemId] || {entrada:0, salida:0, instalacion:0, garantia:0, merma:0, otros:0};
+    const q = Number(m.cantidad)||0;
+    if(m.tipo==='entrada'||m.tipo==='devolucion') t.entrada+=q; else if(m.tipo==='salida') t.salida+=q; else if(m.tipo==='instalacion') t.instalacion+=q;
+    else if(m.tipo==='garantia') t.garantia+=q; else if(m.tipo==='merma') t.merma+=q; else if(m.tipo==='ajuste') t.otros+=q; });
+  const ids = Object.keys(tot).sort((a,b)=>(CATALOGO.findIndex(i=>i.id===a))-(CATALOGO.findIndex(i=>i.id===b)));
+  const nom = id => (CATALOGO.find(i=>i.id===id)||{nombre:id}).nombre;
+  const uni = id => item2unidad(id);
+  const porDia = {};
+  lista.forEach(m=>{ const d=aLocal(m.fecha); (porDia[d]=porDia[d]||[]).push(m); });
+  const dias = Object.keys(porDia).sort().reverse();
+  $('#main').innerHTML = `
+  <div class="card">
+    <div style="font-size:17px;font-weight:800">📜 Historial de entradas y salidas · ${modulo()}</div>
+    <p class="hint">Todo lo que se anotó, día por día.${ini?` El stock inicial (conteo) es del <strong>${new Date(ini).toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'})}</strong>.`:''}</p>
+    <div class="grid2" style="margin-top:8px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+      <div><label class="hint">Desde</label><input type="date" value="${mhDesde}" style="margin-top:4px;min-width:0;width:100%;max-width:100%" onchange="mhDesde=this.value;renderMovHist()"></div>
+      <div><label class="hint">Hasta</label><input type="date" value="${mhHasta}" style="margin-top:4px;min-width:0;width:100%;max-width:100%" onchange="mhHasta=this.value;renderMovHist()"></div>
+      <div><label class="hint">Material</label><select style="margin-top:4px;min-width:0;width:100%" onchange="mhCat=this.value;mhItem='todos';renderMovHist()"><option value="todas">Todo</option>${cats.map(c=>`<option ${c===mhCat?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div><label class="hint">Artículo</label><select style="margin-top:4px;min-width:0;width:100%" onchange="mhItem=this.value;renderMovHist()"><option value="todos">Todos</option>${CATALOGO.filter(i=>mhCat==='todas'||i.cat===mhCat).map(i=>`<option value="${i.id}" ${i.id===mhItem?'selected':''}>${i.nombre}</option>`).join('')}</select></div>
+    </div>
+    ${ini?`<button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="mhDesde='${aLocal(ini)}';mhHasta=fechaHoyLocal();renderMovHist()">Desde el conteo hasta hoy</button>`:''}
+    <div class="chips" style="margin-top:10px">${Object.keys(MH_TIPOS).map(k=>`<button class="chip ${k===mhTipo?'on':''}" onclick="mhTipo='${k}';renderMovHist()">${MH_TIPOS[k]}</button>`).join('')}</div>
+  </div>
+  <div class="card">
+    <h3>Totales del periodo</h3>
+    ${ids.length?`<div class="wrap-x"><table><tr><th>Artículo</th><th>Entradas</th><th>Salidas</th><th>Instal.</th><th>Garant.</th><th>Mermas</th></tr>
+    ${ids.map(id=>{ const t=tot[id]; return `<tr><td>${nom(id)}<div class="tag">${uni(id)}</div></td><td class="pos">${t.entrada?'+'+fmtNum(t.entrada):'—'}</td><td class="neg">${t.salida?fmtNum(t.salida):'—'}</td><td class="neg">${t.instalacion?fmtNum(t.instalacion):'—'}</td><td class="neg">${t.garantia?fmtNum(t.garantia):'—'}</td><td class="neg">${t.merma?fmtNum(t.merma):'—'}</td></tr>`; }).join('')}
+    </table></div><p class="hint">Solo cuenta lo aprobado. Las entradas incluyen lo que regresó de garantías.</p>`:'<p class="hint">No hay movimientos en estas fechas.</p>'}
+  </div>
+  ${dias.map(d=>`<div class="card">
+    <strong>${new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</strong>
+    <div class="wrap-x" style="margin-top:6px"><table><tr><th>Hora</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Quién</th></tr>
+    ${porDia[d].map(m=>`<tr><td>${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemNombre||nom(m.itemId)}</td>
+      <td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}${m.estado==='pendiente'?' '+badgeEstado('pendiente'):''}</td>
+      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}</td></tr>`).join('')}
+    </table></div></div>`).join('')}`;
 }
 
 function renderHist(){
@@ -1092,15 +1301,16 @@ function renderHist(){
   $('#main').innerHTML = tabs + auditorias.map(a=>`
     <div class="card">
       <div class="row" style="justify-content:space-between;cursor:pointer" onclick="toggleAud('${a.id}')">
-        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag">${a.tipo}</div> <div class="tag">Auditor: ${a.auditor}</div>
-          ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ Aplicada al inventario</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">Sin aplicar</div>`}</div>
-        <div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>
+        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag" ${a.conteoInicial?'style="color:var(--bad);border-color:var(--bad)"':''}>${a.conteoInicial?'📋 Conteo inicial':a.tipo}</div> <div class="tag">Auditor: ${a.auditor}</div>
+          ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ ${a.conteoInicial?'Es el stock inicial':'Aplicada al inventario'}</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">${a.conteoInicial?'Esperando tu aprobación':'Sin aplicar'}</div>`}</div>
+        ${a.conteoInicial ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).filter(r=>Math.abs(Number(r.fisico)||0)>0.005).length} artículo(s) con existencia</div>` : `<div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>`}
       </div>
       <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
         <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 Reporte PDF</button>
-        ${!a.aplicada && esAdmin() ? `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>` : ''}
+        ${!a.aplicada && esAdmin() ? (a.conteoInicial ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="usarConteoComoInicialUI('${a.id}')">✅ Usar como stock inicial</button>` : `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>`) : ''}
         ${esAdmin() ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarAuditoria('${a.id}')">🗑️ Borrar</button>` : ''}
       </div>
+      ${a.conteoInicial ? resumenHojasConteoHtml(a) : ''}
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
         ${(()=>{ const fila = r=>`<tr><td>${r.nombre}${r.capturado===false&&Math.abs(Number(r.teorico))>0.005?' <span class="tag">no contado</span>':''}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}${r.hojasEnPiezas&&r.teoricoCompletas===undefined?`<div class="hint" style="margin-top:3px">${fmtNum(r.hojasCompletas)} sueltas/completas + ${fmtNum(r.hojasEnPiezas)} en piezas/armados</div>`:''}</td><td class="${r.diff<0?'neg':(r.diff>0?'pos':'')}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>${detalleLadosHtml(r)}`;
@@ -3670,6 +3880,10 @@ function renderRep(){
     </div>`;
   }
 
+  html += `<div class="card row" style="justify-content:space-between">
+      <div><strong>📜 Historial de entradas y salidas</strong><p class="hint" style="margin:2px 0 0">Cuándo llegó material, cuándo salió y quién lo anotó, con totales por fechas.</p></div>
+      <button class="btn small" onclick="irA('movhist')">Ver historial</button>
+    </div>`;
   html += `<div class="card">
     <strong>Reporte · ${modulo()}</strong>
     <p class="hint">Comprobación matemática: Inicial + Entradas − Salidas − Instalaciones − Garantías − Mermas ± Ajustes de auditoría = Final, artículo por artículo. En hojas, además: Final = Completas + Cortado.</p>
