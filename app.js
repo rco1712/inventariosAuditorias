@@ -1861,8 +1861,9 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
       if(espejos===1) add('Entrepaña normal',1,'—','—','ok','King con 1 espejo = 1 entrepaña normal + 1 entrepaña con espejo');
     }
     add('Espejo',espejos,'—','—','ok','1 "Espejos closet" por espejo (confirmado por el usuario, incluido King: "el espejo es espejo de clóset... aplica para todas las variantes de los modelos")');
-    add('Zóclo especial',espejos,'18×52 cm',colorZoclo,'ok','1 por espejo (confirmado por el usuario)'+(cajones>0?'; color del frente (zóclos de cajonera dependen del color de frente, confirmado por el usuario)':''));
-    add('Zóclo especial',espejos,'16×52 cm',colorZoclo,'ok','1 por espejo (confirmado por el usuario)');
+    // Frente del espejo (confirmado por el usuario): 1 zóclo 16×52 + 1 zóclo 18×52 + 2 marcos
+    // 10×160 + 2 marcos 10×35, todo del COLOR DEL FRENTE; se descuenta de esa melamina.
+    piezasFrenteEspejo(add, espejos, color);
   } else {
     add('Zóclo normal',2,'10×52 cm',colorZoclo,'ok', cajones>0?'Color del frente (zóclos de cajonera dependen del color de frente, confirmado por el usuario)':'');
   }
@@ -2033,6 +2034,13 @@ function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
   }
 }
 
+// Frente de un espejo (confirmado por el usuario): 2 zóclos y 4 marcos, del color del frente.
+function piezasFrenteEspejo(add, n, colorFrente){
+  add('Zóclo especial',n,'16×52 cm',colorFrente,'ok','Frente de espejo: 1 por espejo, color del frente');
+  add('Zóclo especial',n,'18×52 cm',colorFrente,'ok','Frente de espejo: 1 por espejo, color del frente');
+  add('Marco de espejo',2*n,'10×160 cm',colorFrente,'ok','Frente de espejo: 2 por espejo, color del frente');
+  add('Marco de espejo',2*n,'10×35 cm',colorFrente,'ok','Frente de espejo: 2 por espejo, color del frente');
+}
 function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, extra){
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
@@ -2082,8 +2090,7 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     add('Pared',2,'191×40 cm',color,'ok','Adicional: cajonera de espejo');
     add('Entrepaño',5,'52×40 cm',color,'ok');
     add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Rendimiento confirmado: 4 fondos de cajonera por hoja de MDF 3mm');
-    add('Zóclo especial',1,'18×52 cm',color,'ok');
-    add('Zóclo especial',1,'16×52 cm',color,'ok');
+    piezasFrenteEspejo(add, 1, color);
     add('Espejo',1,'—','—','ok','1 "Espejos closet"');
     add('Jaladera (por espejo)',1,'—',color,'ok');
     add('Bisagra (por espejo)',1.5,'—','—','ok');
@@ -2176,6 +2183,8 @@ function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, 
   // en vez de duplicar esta regla dentro de cada tipo de mueble en buildAdicionalPiezas.
   const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
   if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal') p.colorDestino = color; });
+  // El frente del espejo (zóclos especiales y marcos) va del color del FRENTE, no de la cajonera.
+  piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo especial' || p.nombre==='Marco de espejo') p.colorDestino = color; });
 
   return {piezas: piezasFijas.concat(piezasMuebles), maxNota: base.maxNota};
 }
@@ -2296,6 +2305,16 @@ function piezasAConsumo(piezas, color){
   Object.keys(puertaZapateraPorColor).forEach(c=>{
     const r = hojasParaCortesCombinado([{ancho:172, alto:30, cantidad:puertaZapateraPorColor[c]}], 122, 244);
     if(r.costo>0) addConsumo('Melamina '+c, r.costo);
+  });
+
+  // Frente de espejo (zóclos especiales y marcos): proporcional según cuántas piezas de esa medida
+  // salen de una hoja de 122×244, en la melamina del color del frente.
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number' || (p.nombre!=='Zóclo especial' && p.nombre!=='Marco de espejo')) return;
+    const m = String(p.dim).match(/([\d.]+)\s*×\s*([\d.]+)/);
+    if(!m || !p.colorDestino || p.colorDestino==='—') return;
+    const porHoja = piezasPorHojaIndividual(Number(m[1]), Number(m[2]), 122, 244);
+    if(porHoja>0) addConsumo('Melamina '+p.colorDestino, p.cantidad/porHoja);
   });
 
   // Repisas (adicional): se descuenta el proporcional de la hoja según cuántas repisas de esa
