@@ -86,12 +86,25 @@ const CATALOGO = [];
   ['Aros colgadores','Bastidores','Bisagras','Clavo 25','Clavo 30','Emplaye','Escuadras','Espejos closet','Espejos 60x160','Jaladeras','Juego de corredera','Lambrín por caja','Pijas 1','Pijas 2','Pijas 3/4','Pijas 5/8','Pintura blanca','Pintura choco','Pintura de colores','Pintura negra','Resbalones','Rieles','Sistemas','Taquetes','Tarugos','Tornillos recortables','Tubos 1.5 m','Correderas de extensión','Jaladera plana','Push']
     .forEach(n=>CATALOGO.push({cat:'Herrajes',nombre:n,unidad:'pza'}));
   CATALOGO.push({cat:'Herrajes',nombre:'Juegos de bridas',unidad:'juego'});
+  // Medias correderas sin su pareja (confirmado por el usuario): cada una va justo después de su juego.
+  [['Juego de corredera',['Corredera hembra (sin pareja)','Corredera macho (sin pareja)']],
+   ['Correderas de extensión',['Corredera ext. hembra (sin pareja)','Corredera ext. macho (sin pareja)']]].forEach(([juego,sueltas])=>{
+    const i = CATALOGO.findIndex(x=>x.nombre===juego);
+    CATALOGO.splice(i+1, 0, ...sueltas.map(n=>({cat:'Herrajes',nombre:n,unidad:'pza'})));
+  });
   CATALOGO.forEach(it=>it.id = slug(it.nombre));
 })();
 function slug(s){return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_');}
 function cryptoId(){return 'm'+Math.random().toString(36).slice(2,10);}
 function item2unidad(itemId){ const it=CATALOGO.find(i=>i.id===itemId); return it? it.unidad:''; }
 function itemByName(nombre){ return CATALOGO.find(i=>i.nombre===nombre); }
+// Media corredera (nombre de pieza) -> artículo de inventario "sin pareja", y su juego.
+const CORR_SUELTA_ITEM = {'Corredera hembra':'Corredera hembra (sin pareja)', 'Corredera macho':'Corredera macho (sin pareja)',
+  'Corredera hembra (extensión)':'Corredera ext. hembra (sin pareja)', 'Corredera macho (extensión)':'Corredera ext. macho (sin pareja)'};
+const CORR_TIPOS = [
+  {suf:'', juego:'Juego de corredera', hembra:'Corredera hembra (sin pareja)', macho:'Corredera macho (sin pareja)', etiqueta:'Corredera normal'},
+  {suf:' (extensión)', juego:'Correderas de extensión', hembra:'Corredera ext. hembra (sin pareja)', macho:'Corredera ext. macho (sin pareja)', etiqueta:'Corredera de extensión'}];
+function esCorrSuelta(it){ return !!it && /\(sin pareja\)$/.test(it.nombre); }
 function modulo(){return moduloActual;}
 function inicialKey(mod,itemId){return mod+'__'+itemId;}
 
@@ -251,6 +264,10 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
   [...movsItem].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).forEach(m=>{
     const q = Number(m.cantidad)||0;
     if(m.tipo==='entrada'){ entradas+=q; completas+=q; }
+    else if(m.tipo==='devolucion'){
+      // Material que regresó de una garantía y sí sirve: suma. En hojas regresa como material cortado.
+      entradas+=q; if(hoja) cortado+=q; else completas+=q;
+    }
     else if(m.tipo==='salida'){ salidas+=q; completas-=q; }
     else if(m.tipo==='corte'){
       if(!hoja) return;
@@ -440,6 +457,7 @@ function renderInv(){
       </div>
     </div>`;
   }
+  if(invCat==='Herrajes') html += correderasSueltasCardHtml();
   html += `<div class="row" style="justify-content:space-between;margin:4px 2px 10px">
       <strong>${ICONO_CAT[invCat]||''} ${invCat}</strong>
       <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="invDetalle=!invDetalle;renderInv()">${invDetalle?'Ver sencillo':'Ver tabla detallada'}</button>
@@ -476,6 +494,48 @@ function renderInv(){
       </table></div></div>`;
   }
   $('#main').innerHTML = html;
+}
+
+// ===== Correderas sin pareja: tarjeta en Inventario → Herrajes + botón "Armar juegos" =====
+// Si hay hembras y machos sueltos del mismo tipo, se pueden juntar en juegos completos:
+// −n hembra, −n macho, +n juego (un solo lote, con aprobación igual que cualquier movimiento).
+function correderasSueltasCardHtml(){
+  const filas = CORR_TIPOS.map(t=>{
+    const h = calcFormula(slug(t.hembra)).final, m = calcFormula(slug(t.macho)).final, j = calcFormula(slug(t.juego)).final;
+    if(Math.abs(h)<0.005 && Math.abs(m)<0.005) return '';
+    const n = Math.floor(Math.min(h, m));
+    return `<div class="movitem" style="flex-wrap:wrap;gap:8px"><span style="min-width:0"><span class="invname">${t.etiqueta}</span>
+        <span class="hint" style="display:block;margin:2px 0 0">${fmtNum(j)} juego(s) completos · <strong>${fmtNum(h)}</strong> hembra(s) y <strong>${fmtNum(m)}</strong> macho(s) sin pareja</span></span>
+        ${n>0 && puedeEscribir() && !esSoloLectura() ? `<button class="btn small" onclick="armarJuegosCorredera('${t.juego}')">🔗 Armar ${n} juego(s)</button>` : ''}</div>`;
+  }).join('');
+  if(!filas) return '';
+  return `<div class="card"><strong>🔩 Correderas sin pareja</strong>
+    <p class="hint" style="margin-top:4px">Una corredera completa es hembra + macho. Si juntas una hembra y un macho sueltos, toca "Armar juegos" y pasan a juegos completos.</p>
+    <div class="movlist">${filas}</div></div>`;
+}
+async function armarJuegosCorredera(juegoNombre){
+  const t = CORR_TIPOS.find(x=>x.juego===juegoNombre); if(!t) return;
+  const h = calcFormula(slug(t.hembra)).final, m = calcFormula(slug(t.macho)).final;
+  const max = Math.floor(Math.min(h, m));
+  if(max<=0) return alert('Se necesita al menos 1 hembra y 1 macho sueltos del mismo tipo.');
+  const r = prompt(`${t.etiqueta}: hay ${fmtNum(h)} hembra(s) y ${fmtNum(m)} macho(s) sin pareja.\n\n¿Cuántos juegos quieres armar? (máximo ${max})`, String(max));
+  if(r===null) return;
+  const n = Math.floor(Number(r));
+  if(!n || n<=0 || n>max) return alert('Escribe un número entre 1 y '+max+'.');
+  try{
+    const estado = estadoNuevoMovimiento();
+    const loteId = cryptoId();
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    const fecha = new Date().toISOString();
+    const nota = `Se armaron ${n} juego(s) con hembras y machos sueltos`;
+    for(const [nombre, q] of [[t.hembra,-n],[t.macho,-n],[t.juego,n]]){
+      const it = itemByName(nombre);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'ajuste', motivo:'armarJuegos',
+        cantidad:q, completasDelta:q, cortadoDelta:0, nota, fecha, estado, loteId, creadoPor});
+    }
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar.</small>' : `✅ ${n} juego(s) armados.`);
+    renderInv();
+  }catch(e){ alert('Error: '+e.message); }
 }
 
 // ===== Capturar stock inicial (pantalla sencilla, confirmado por el usuario) =====
@@ -611,8 +671,12 @@ function toast(msg, tipo){
 let movCat = null;
 // Tipo y lado elegidos en Entradas/Salidas (se conservan al cambiar de categoría).
 let movTipo='entrada', movLado='completas';
-const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía'};
-function etiquetaTipoMov(m){ return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : ''); }
+const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía', devolucion:'Regresó de garantía'};
+function etiquetaTipoMov(m){
+  if(m.motivo==='armarJuegos') return 'Armado de juegos';
+  if(m.motivo==='sobranteGarantia') return 'Sobrante de garantía';
+  return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
+}
 function stockHojaTxt(f, unidad){
   if(!f.esHoja) return fmtNum(f.final)+' '+unidad;
   return `${fmtNum(f.final)} ${unidad}<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} completas · ${fmtNum(f.cortado)} cortado</div>`;
@@ -660,6 +724,7 @@ function renderMov(){
   <div class="card">
     <div class="paso">3</div><strong>${info.ic} ${pregunta}</strong>
     ${ayuda?`<p class="hint">${ayuda}</p>`:''}
+    ${movCat==='Herrajes'?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint">¿Qué se dañó?</label>
       <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value;renderMov()"><option value="completas" ${movLado==='completas'?'selected':''}>Hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>Material ya cortado o armado</option></select></div>` : ''}
     <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca.</p>
@@ -677,7 +742,7 @@ function renderMov(){
     <summary><strong>Ver lo último que se anotó</strong></summary>
     <div class="wrap-x" style="margin-top:8px"><table><tr><th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Estado</th></tr>
     ${movs.slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleString()}</td><td>${m.itemNombre}</td>
-      <td class="${m.tipo==='entrada'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}
+      <td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}
     </table></div>
   </details>`;
 }
@@ -760,12 +825,13 @@ function renderAud(){
   } else if(auditCat==='__armados'){
     cuerpo = renderAudArmadosHtml();
   } else {
-    const items = CATALOGO.filter(i=>i.cat===auditCat);
+    const items = CATALOGO.filter(i=>i.cat===auditCat && !esCorrSuelta(i));
     const eq = piezasAuditAHojas();
     const catHoja = items.length>0 && esHoja(items[0]);
     cuerpo = `<div class="card">
     <h3>${auditCat}</h3>
     ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
+    ${auditCat==='Herrajes'?'<p class="hint">Aquí van los <strong>juegos de corredera completos</strong> (hembra + macho juntos). Las hembras o machos <strong>sueltos</strong> se cuentan en 📦 Armados → Corredera suelta; la app arma los juegos y lo que sobra lo guarda como "sin pareja".</p>':''}
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Teórico</th><th>${catHoja?'Hojas completas contadas':'Físico contado'}</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id);
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
@@ -822,6 +888,10 @@ function piezasAuditAHojas(){
   // Correderas: solo cuentan los JUEGOS COMPLETOS (hembra + macho)
   balanceCorrederas(pool).forEach(b=>{
     if(b.pares>0){ const it=itemByName(b.item); if(it) out[it.id]=(out[it.id]||0)+b.pares; }
+    // Las medias que no tienen pareja se guardan en su propio artículo "(sin pareja)"
+    const t = CORR_TIPOS.find(x=>x.juego===b.item);
+    if(t && b.hembrasSinPareja>0){ const it=itemByName(t.hembra); out[it.id]=(out[it.id]||0)+b.hembrasSinPareja; }
+    if(t && b.machosSinPareja>0){ const it=itemByName(t.macho); out[it.id]=(out[it.id]||0)+b.machosSinPareja; }
   });
   return out;
 }
@@ -843,8 +913,8 @@ function avisoCorrederasHtml(){
   if(!bs.length) return '';
   return bs.map(b=>`<div class="${b.hembrasSinPareja||b.machosSinPareja?'warn':'hint'}" style="margin-top:8px">
     <strong>${b.etiqueta}:</strong> ${fmtNum(b.hembras)} hembra(s) + ${fmtNum(b.machos)} macho(s) = <strong>${fmtNum(b.pares)} juego(s) armados</strong>${b.juegosSueltos?` + ${fmtNum(b.juegosSueltos)} juego(s) sueltos contados en Herrajes`:''} → <strong>total ${fmtNum(b.totalJuegos)} juego(s)</strong>
-    ${b.hembrasSinPareja?`<br>⚠️ ${fmtNum(b.hembrasSinPareja)} hembra(s) sin su macho (no cuentan como juego).`:''}
-    ${b.machosSinPareja?`<br>⚠️ ${fmtNum(b.machosSinPareja)} macho(s) sin su hembra (no cuentan como juego).`:''}
+    ${b.hembrasSinPareja?`<br>⚠️ ${fmtNum(b.hembrasSinPareja)} hembra(s) sin su macho → se guardan como "hembra sin pareja".`:''}
+    ${b.machosSinPareja?`<br>⚠️ ${fmtNum(b.machosSinPareja)} macho(s) sin su hembra → se guardan como "macho sin pareja".`:''}
   </div>`).join('');
 }
 function resumenPiezasHtml(){
@@ -2405,7 +2475,7 @@ function previewInst(){
 // marco, fijo, repisa…), un mueble armado (cajonera, cajón, cuadro) o cualquier artículo del
 // inventario (jaladera, espejo, juego de correderas…). Se descuenta igual que una instalación
 // (las hojas salen del material cortado; si no hay, se toman hojas provisionalmente).
-let garLineas = [], garTipo = 'pieza', garSub = 'nueva', garPreview = null;
+let garLineas = [], garTipo = 'pieza', garSub = 'nueva', garPreview = null, garRet = null, garHistLogs = [];
 let garForm = {pieza:'pared', color:'Blanco', cantidad:'', medidaNombre:'Puerta', ancho:'', alto:'', armTipo:'cajon', armVar:'normal', colorCuadro:'Blanco', ext:false, itemId:null,
   pTipo:'Normal', pAlto:'', pAncho:'', pModo:'completas', pHerrajes:true, pJaladera:'normal', pPiezas:{puerta:1, marco:0, fijo:0, paredFalsa:0, extFijo:0}};
 const GAR_TIPOS = {
@@ -2441,8 +2511,12 @@ function piezasDisponiblesPuerta(tipo, alto, ancho){
   return out;
 }
 // Convierte las líneas de la garantía a consumo de artículos del catálogo: [{itemId, cantidad}]
-function consumoGarantia(lineas){
-  const pool = [], medidas = {}, directo = {};
+function consumoGarantia(lineas){ return consumoGarantiaDetalle(lineas).consumo; }
+// {consumo:[{itemId,cantidad}], sobrantes:[{itemId,cantidad}]}. Las medias correderas de un mueble
+// (hembra en cajonera, macho en cajón) salen primero de las "sin pareja"; si no hay, se abre un
+// juego completo y la otra mitad regresa al inventario como "sin pareja" (sobrante).
+function consumoGarantiaDetalle(lineas){
+  const pool = [], medidas = {}, directo = {}, medias = {};
   lineas.forEach(l=>{
     const n = Number(l.cantidad)||0; if(!n) return;
     if(l.tipo==='pieza'){
@@ -2451,12 +2525,9 @@ function consumoGarantia(lineas){
     } else if(l.tipo==='medida'){
       (medidas[l.color] = medidas[l.color]||[]).push({ancho:Number(l.ancho), alto:Number(l.alto), cantidad:n});
     } else if(l.tipo==='armado'){
-      // Las medias correderas del armado se entregan como juegos completos (del inventario sale el juego).
       piezasDeArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:n}).forEach(p=>{
-        if(/^Corredera (hembra|macho)/.test(p.nombre)){
-          const juego = itemByName(/extensión/.test(p.nombre) ? 'Correderas de extensión' : 'Juego de corredera');
-          if(juego) directo[juego.id] = (directo[juego.id]||0) + p.cantidad;
-        } else pool.push(p);
+        if(CORR_SUELTA_ITEM[p.nombre]) medias[p.nombre] = (medias[p.nombre]||0) + p.cantidad;
+        else pool.push(p);
       });
     } else if(l.tipo==='item'){
       directo[l.itemId] = (directo[l.itemId]||0) + n;
@@ -2489,19 +2560,44 @@ function consumoGarantia(lineas){
     const it = itemByName('Melamina '+c);
     if(it && r.costo>0) out[it.id] = (out[it.id]||0) + r.costo;
   });
+  const sobr = {};
+  CORR_TIPOS.forEach(t=>{
+    const needH = medias['Corredera hembra'+t.suf]||0, needM = medias['Corredera macho'+t.suf]||0;
+    if(!needH && !needM) return;
+    const hId = slug(t.hembra), mId = slug(t.macho), jId = slug(t.juego);
+    const disp = id => Math.max(0, Math.floor(calcFormula(id).final - (directo[id]||0) + 1e-9));
+    const useH = Math.min(needH, disp(hId)), useM = Math.min(needM, disp(mId));
+    const remH = needH-useH, remM = needM-useM;
+    const juegos = Math.max(remH, remM);
+    if(useH) directo[hId] = (directo[hId]||0) + useH;
+    if(useM) directo[mId] = (directo[mId]||0) + useM;
+    if(juegos){
+      directo[jId] = (directo[jId]||0) + juegos;
+      if(juegos-remH>0) sobr[hId] = (sobr[hId]||0) + juegos-remH;
+      if(juegos-remM>0) sobr[mId] = (sobr[mId]||0) + juegos-remM;
+    }
+  });
   Object.keys(directo).forEach(id=>{ if(id && id!=='undefined') out[id]=(out[id]||0)+directo[id]; });
-  return Object.keys(out).map(itemId=>({itemId, cantidad: Math.round(out[itemId]*1000)/1000}));
+  return {consumo: Object.keys(out).map(itemId=>({itemId, cantidad: Math.round(out[itemId]*1000)/1000})),
+    sobrantes: Object.keys(sobr).map(itemId=>({itemId, cantidad:sobr[itemId]}))};
 }
 
 function renderGar(){
   if(esSoloLectura()){ garSub='historial'; }
+  if(garSub==='retorno' && !garRet) garSub='historial';
   const hoy = new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
   const top = `<div class="card">
       <div style="font-size:17px;font-weight:800">🛡️ Garantías · ${modulo()}</div>
       <p class="hint">Material que se entrega en garantía. Se descuenta del inventario al confirmar.</p>
-      ${esSoloLectura()?'':`<div class="subtabs" style="margin:8px 0 0"><button class="${garSub==='nueva'?'active':''}" onclick="garSub='nueva';renderGar()">Nueva garantía</button><button class="${garSub==='historial'?'active':''}" onclick="garSub='historial';renderGar()">Garantías anteriores</button></div>`}
+      ${esSoloLectura()?'':`<div class="subtabs" style="margin:8px 0 0"><button class="${garSub==='nueva'?'active':''}" onclick="salirRetornoGar();garSub='nueva';renderGar()">Nueva garantía</button><button class="${garSub!=='nueva'?'active':''}" onclick="salirRetornoGar();garSub='historial';renderGar()">Garantías anteriores</button></div>`}
     </div>`;
   if(garSub==='historial'){ $('#main').innerHTML = top + '<div id="gar-hist"><div class="card hint">Cargando…</div></div>'; renderGarHistorial(); return; }
+  const esRet = garSub==='retorno' && garRet;
+  const topRet = esRet ? `<div class="card" style="border:2px solid var(--accent)">
+      <div style="font-size:17px;font-weight:800">↩️ Lo que regresó el cliente</div>
+      <p class="hint">Garantía del ${fechaGarTxt(garRet.log)}${garRet.log.cliente?' · '+garRet.log.cliente:''}${garRet.log.motivo?' · '+garRet.log.motivo:''}.<br>La lista ya trae lo que se entregó; quita o agrega si regresó algo distinto.</p>
+      <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="cancelarRetornoGar()">Cancelar</button>
+    </div>` : '';
   const f = garForm;
   const colorOpts = sel => MEL_COLORES.map(c=>`<option ${c===sel?'selected':''}>${c}</option>`).join('');
   const tipoBtns = Object.keys(GAR_TIPOS).map(k=>{ const x=GAR_TIPOS[k];
@@ -2563,7 +2659,7 @@ function renderGar(){
         <div><label class="hint">¿Cuántos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1"></div>
       </div>
       ${(f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" style="width:22px;min-height:22px;flex:0 0 22px" ${f.ext?'checked':''} onchange="garForm.ext=this.checked"> Lleva corredera de extensión</label>`:''}
-      ${(f.armTipo==='cajonera'||f.armTipo==='cajon')?'<p class="hint">Incluye sus correderas (se descuenta el juego completo por cada cajón o hueco).</p>':''}`;
+      ${(f.armTipo==='cajonera'||f.armTipo==='cajon')?(garSub==='retorno'?'<p class="hint">Incluye sus correderas (la cajonera trae las hembras y el cajón el macho).</p>':'<p class="hint">Incluye sus correderas: primero se usan las hembras/machos <strong>sin pareja</strong>; si no hay, se abre un juego y la otra mitad queda como "sin pareja".</p>'):''}`;
   } else {
     if(!f.itemId) f.itemId = (itemByName('Jaladeras')||CATALOGO[0]).id;
     const cats = [...new Set(CATALOGO.map(i=>i.cat))];
@@ -2572,7 +2668,27 @@ function renderGar(){
       <label class="hint" style="display:block;margin-top:10px">¿Cuántos? (${item2unidad(f.itemId)})</label>
       <input type="number" min="0" inputmode="decimal" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1">`;
   }
-  const lista = garLineas.length ? `<div class="movlist">${garLineas.map((l,i)=>`<div class="movitem"><span style="min-width:0">${describirLineaGar(l)}</span><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;flex:0 0 auto" onclick="garLineas.splice(${i},1);garPreview=null;renderGar()">Quitar</button></div>`).join('')}</div>` : '<p class="hint">Todavía no agregas nada.</p>';
+  const lista = garLineas.length ? `<div class="movlist">${garLineas.map((l,i)=>`<div class="movitem"><span style="min-width:0">${describirLineaGar(l)}</span><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;flex:0 0 auto" onclick="garLineas.splice(${i},1);garPreview=null;if(garRet)garRet.comps=null;renderGar()">Quitar</button></div>`).join('')}</div>` : '<p class="hint">Todavía no agregas nada.</p>';
+  if(esRet){
+    $('#main').innerHTML = topRet + `
+    <div class="card">
+      <div class="paso">1</div><strong>Lo que regresó (${garLineas.length})</strong>
+      <div style="margin-top:10px">${lista}</div>
+      <details style="margin-top:10px"><summary class="hint"><strong>+ Agregar algo más que regresó</strong></summary>
+        <div class="tipos" style="margin-top:10px">${tipoBtns}</div>
+        <div style="margin-top:12px">${campos}</div>
+        <button class="btn" style="margin-top:12px;width:100%" onclick="agregarLineaGar()">+ Agregar</button>
+      </details>
+    </div>
+    <div class="card">
+      <div class="paso">2</div><strong>¿Qué sirve y qué es merma?</strong>
+      <p class="hint">La app separa lo que regresó en sus piezas y herrajes. Marca cada uno: <strong>✅ Sirve</strong> regresa al inventario; <strong>🗑️ Merma</strong> solo queda anotado.</p>
+      <button class="btn" style="width:100%;min-height:50px" onclick="separarRetornoGar()">Separar en piezas</button>
+    </div>
+    <div id="g-result"></div>`;
+    if(garRet.comps) renderRetornoComps();
+    return;
+  }
   $('#main').innerHTML = top + `
     <div class="card">
       <div class="paso">1</div><strong>¿Qué se va a dar?</strong>
@@ -2626,20 +2742,23 @@ function agregarLineaGar(){
   garLineas.push(l);
   garForm.cantidad=''; garForm.ancho=''; garForm.alto='';
   garPreview = null;
+  if(garRet) garRet.comps = null;
   renderGar();
   toast('Agregado: '+describirLineaGar(l));
 }
 function previewGar(){
   if(!garLineas.length) return alert('Primero agrega lo que se va a dar en garantía (paso 1).');
-  const consumo = consumoGarantia(garLineas);
+  const det = consumoGarantiaDetalle(garLineas);
+  const consumo = det.consumo;
   const faltantes = consumo.map(c=>({c, f:calcFormula(c.itemId)})).filter(x=>x.f.final - x.c.cantidad < -1e-9)
     .map(x=>({nombre:CATALOGO.find(i=>i.id===x.c.itemId).nombre, disponible:x.f.final, requerido:x.c.cantidad}));
-  garPreview = {consumo, bloqueado: faltantes.length>0};
+  garPreview = {consumo, sobrantes: det.sobrantes, bloqueado: faltantes.length>0};
   let html = `<div class="card" id="g-preview-card">
     <div style="font-size:16px;font-weight:800">📋 Esto se va a descontar</div>
     <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
       return `<div class="movitem" style="${insuf?'border-color:var(--bad)':''}"><span style="min-width:0"><span class="invname">${CATALOGO.find(i=>i.id===c.itemId).nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.final)} ${item2unidad(c.itemId)}</span></span>
         <strong class="${insuf?'neg':''}" style="font-size:17px;white-space:nowrap">${fmtNum(c.cantidad)} ${item2unidad(c.itemId)}</strong></div>`; }).join('')}</div>
+    ${det.sobrantes.length?`<div class="hint" style="margin-top:10px">🔩 Se abre un juego de corredera y sobra la otra mitad; regresa al inventario:<br>${det.sobrantes.map(x=>`+ ${fmtNum(x.cantidad)} ${CATALOGO.find(i=>i.id===x.itemId).nombre}`).join('<br>')}</div>`:''}
   </div>`;
   if(faltantes.length){
     html += `<div class="card aviso"><strong>⛔ No alcanza el material en ${modulo()}</strong>
@@ -2668,25 +2787,188 @@ async function confirmarGar(){
       const it = CATALOGO.find(i=>i.id===c.itemId);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:c.itemId,itemNombre:it.nombre,tipo:'garantia',cantidad:c.cantidad,nota,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
     }
-    await db.collection('garantiasLog').doc(logId).set({modulo:mod, fechaDia, cliente, motivo, lineas:garLineas.map(describirLineaGar), consumo:garPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor});
+    for(const x of (garPreview.sobrantes||[])){
+      const it = CATALOGO.find(i=>i.id===x.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:x.itemId,itemNombre:it.nombre,tipo:'entrada',motivo:'sobranteGarantia',cantidad:x.cantidad,nota:nota+' · mitad sobrante de un juego abierto',fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
+    }
+    const logDoc = {modulo:mod, fechaDia, cliente, motivo, lineas:garLineas.map(describirLineaGar), lineasData:JSON.parse(JSON.stringify(garLineas)), consumo:garPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor};
+    if(garPreview.sobrantes && garPreview.sobrantes.length) logDoc.sobrantes = garPreview.sobrantes;
+    await db.collection('garantiasLog').doc(logId).set(logDoc);
     toast(estado==='pendiente' ? '✅ Garantía guardada.<br><small>Dirección la tiene que aprobar para que se descuente.</small>' : '✅ Garantía registrada.');
     garLineas=[]; garPreview=null;
+    if(confirm('¿El cliente ya regresó lo dañado?\n\nAceptar = anotar ahora qué regresó y qué sirve.\nCancelar = después (desde "Garantías anteriores").')){
+      iniciarRetornoGar({id:logId, ...logDoc}); return;
+    }
     renderGar(); window.scrollTo(0,0);
   }catch(e){ alert('Error al registrar: '+e.message); }
 }
+function fechaGarTxt(l){ return new Date((l.fechaDia||(l.fecha||'').slice(0,10))+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'}); }
 async function renderGarHistorial(){
   let logs=[];
   try{ const snap = await db.collection('garantiasLog').get(); logs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }catch(e){}
+  garHistLogs = logs;
   const el = document.getElementById('gar-hist'); if(!el) return;
   if(!logs.length){ el.innerHTML = '<div class="card">Aún no hay garantías registradas en '+modulo()+'.</div>'; return; }
   // El estado real sale de sus movimientos (se aprueban/rechazan desde Aprobaciones).
-  const estadoDe = l => { const ms = movs.filter(m=>m.loteId===l.id); if(!ms.length) return l.estado; if(ms.some(m=>m.estado==='pendiente')) return 'pendiente'; if(ms.every(m=>m.estado==='rechazado')) return 'rechazado'; return 'aprobado'; };
-  el.innerHTML = logs.map(l=>`<div class="card">
-      <div class="row" style="justify-content:space-between"><strong>${new Date((l.fechaDia||l.fecha.slice(0,10))+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'})}</strong>${badgeEstado(estadoDe(l))}</div>
+  const estadoLote = (loteId, def) => { const ms = movs.filter(m=>m.loteId===loteId); if(!ms.length) return def; if(ms.some(m=>m.estado==='pendiente')) return 'pendiente'; if(ms.every(m=>m.estado==='rechazado')) return 'rechazado'; return 'aprobado'; };
+  const puede = puedeEscribir() && !esSoloLectura();
+  el.innerHTML = logs.map(l=>{
+    const r = l.retorno;
+    const retHtml = r ? `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <div class="row" style="justify-content:space-between"><strong>↩️ Regresó el ${new Date(r.fecha).toLocaleDateString('es-MX')}</strong>${r.loteId && (r.devuelto||[]).length?badgeEstado(estadoLote(r.loteId, r.estado)):''}</div>
+        ${(r.sirve||[]).length?`<div class="hint" style="margin:4px 0 0"><strong>✅ Sirvió (regresó al inventario):</strong><br>${r.sirve.join('<br>')}</div>`:''}
+        ${(r.merma||[]).length?`<div class="hint" style="margin:4px 0 0"><strong>🗑️ Merma:</strong><br>${r.merma.join('<br>')}</div>`:''}
+        ${(r.devuelto||[]).length?`<details><summary class="hint">Lo que se sumó al inventario</summary><div class="hint">${r.devuelto.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `${it?it.nombre:c.itemId}: +${fmtNum(c.cantidad)} ${it?it.unidad:''}${it&&esHoja(it)?' (cortado)':''}`; }).join('<br>')}</div></details>`:''}
+      </div>` : (puede ? `<button class="btn" style="margin-top:10px;width:100%;background:linear-gradient(135deg,#e0791a,#c2650f)" onclick="iniciarRetornoGarId('${l.id}')">↩️ Registrar lo que regresó</button>` : '<p class="hint" style="margin-top:8px">Todavía no se registra lo que regresó.</p>');
+    return `<div class="card">
+      <div class="row" style="justify-content:space-between"><strong>${fechaGarTxt(l)}</strong>${badgeEstado(estadoLote(l.id, l.estado))}</div>
       ${l.cliente||l.motivo?`<p class="hint" style="margin:4px 0">${l.cliente?'Cliente: '+l.cliente:''}${l.cliente&&l.motivo?' · ':''}${l.motivo?'Motivo: '+l.motivo:''}</p>`:''}
       <ul style="margin:6px 0 6px 18px;padding:0;line-height:1.6">${(l.lineas||[]).map(x=>`<li>${x}</li>`).join('')}</ul>
-      <details><summary class="hint">Material descontado</summary><div class="hint">${(l.consumo||[]).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `${it?it.nombre:c.itemId}: ${fmtNum(c.cantidad)} ${it?it.unidad:''}`; }).join('<br>')}</div></details>
-    </div>`).join('');
+      <details><summary class="hint">Material descontado</summary><div class="hint">${(l.consumo||[]).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `${it?it.nombre:c.itemId}: ${fmtNum(c.cantidad)} ${it?it.unidad:''}`; }).join('<br>')}${(l.sobrantes||[]).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<br>Sobró: +${fmtNum(c.cantidad)} ${it?it.nombre:c.itemId}`; }).join('')}</div></details>
+      ${retHtml}
+    </div>`;
+  }).join('');
+}
+
+// ===== Lo que regresa el cliente en una garantía (confirmado por el usuario) =====
+// Se separa en piezas/herrajes; cada uno se marca ✅ Sirve (regresa al inventario como
+// "Regresó de garantía"; las hojas regresan como material cortado) o 🗑️ Merma (solo se anota).
+// Por defecto la melamina/MDF es merma y los herrajes sirven.
+let garLineasGuardadas = null;
+function iniciarRetornoGarId(id){ const l = garHistLogs.find(x=>x.id===id); if(l) iniciarRetornoGar(l); }
+function iniciarRetornoGar(log){
+  if(garSub!=='retorno') garLineasGuardadas = garLineas;
+  garRet = {log, comps:null};
+  garLineas = JSON.parse(JSON.stringify(log.lineasData||[]));
+  garPreview = null; garSub = 'retorno'; garForm.cantidad = '';
+  renderGar(); window.scrollTo(0,0);
+  if(!garLineas.length) toast('Esta garantía es de antes: agrega lo que regresó con "+ Agregar algo más".');
+}
+function salirRetornoGar(){
+  if(garSub!=='retorno') return;
+  garRet = null; garLineas = garLineasGuardadas || []; garLineasGuardadas = null; garPreview = null;
+}
+function cancelarRetornoGar(){ salirRetornoGar(); garSub='historial'; renderGar(); }
+
+// Separa las líneas en componentes: {label, kind:'item'|'hoja', itemId, n, pool:[piezas], medidas:[{color,ancho,alto}], estado, sirven}
+function componentesRetorno(lineas){
+  const comps = [];
+  const esHojaIdLocal = id => { const it=CATALOGO.find(i=>i.id===id); return it && esHoja(it); };
+  const addItem = (itemId, n, label) => { if(!itemId || !(n>0)) return; comps.push({label: label || CATALOGO.find(i=>i.id===itemId).nombre, kind:'item', itemId, n}); };
+  const addPieza = (p, extraLbl) => {
+    if(typeof p.cantidad!=='number' || !(p.cantidad>0)) return;
+    if(CORR_SUELTA_ITEM[p.nombre]){ const it=itemByName(CORR_SUELTA_ITEM[p.nombre]); addItem(it.id, p.cantidad, p.nombre+(extraLbl||'')); return; }
+    const res = piezasAConsumo([p], p.colorDestino);
+    if(!res.length) return;
+    const colorTxt = p.colorDestino && p.colorDestino!=='—' ? ' · '+p.colorDestino : '';
+    if(res.some(r=>esHojaIdLocal(r.itemId))) comps.push({label: p.nombre+colorTxt+(extraLbl||''), kind:'hoja', n:p.cantidad, pool:[p]});
+    else addItem(res[0].itemId, res[0].cantidad, p.nombre+(extraLbl||''));
+  };
+  const addMedida = (nombre, color, ancho, alto, n) => { if(n>0) comps.push({label:`${nombre} ${fmtNum(ancho)}×${fmtNum(alto)} cm · ${color}`, kind:'hoja', n, medidas:[{color, ancho, alto}]}); };
+  lineas.forEach(l=>{
+    const n = Number(l.cantidad)||0; if(!n) return;
+    if(l.tipo==='pieza'){
+      const p = PIEZAS_AUDIT.find(x=>x.key===l.pieza); if(!p) return;
+      addPieza({nombre:p.nombre, cantidad:n, dim:p.dim, colorDestino: p.tipo==='mel'? l.color : '—', estado:'ok'});
+    } else if(l.tipo==='medida'){
+      addMedida(l.nombre, l.color, Number(l.ancho), Number(l.alto), n);
+    } else if(l.tipo==='armado'){
+      const origen = ' (de '+describirArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:n}).split(' · ')[0].toLowerCase()+')';
+      piezasDeArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:n}).forEach(p=>addPieza(p, origen));
+    } else if(l.tipo==='item'){
+      addItem(l.itemId, n);
+    } else if(l.tipo==='puertas'){
+      const r = calcularPuerta(l.pTipo, Number(l.pAlto), Number(l.pAncho), false);
+      const quiere = l.pModo==='completas' ? null : Object.assign({}, l.pPiezas||{});
+      r.cortes.forEach(c=>{
+        const q = quiere ? Math.min(quiere[c.pieza]||0, c.cantidad) : c.cantidad*n;
+        if(quiere && q>0) quiere[c.pieza]-=q;
+        addMedida((PUERTA_PIEZA_LBL[c.pieza]||'Pieza').replace(/\(e?s\)/g,''), l.color, c.ancho, c.alto, q);
+      });
+      if(l.pModo==='completas' && l.pHerrajes){
+        const h = TIPOS_PUERTA_HERRAJES[l.pTipo];
+        [['Rieles',h.riel],['Sistemas',h.sistema],['Bastidores',h.bastidor],[l.pJaladera==='plana'?'Jaladera plana':'Jaladeras',h.jaladera]].forEach(([nom,q])=>{
+          const it=itemByName(nom); if(it && q) addItem(it.id, q*n); });
+      }
+    }
+  });
+  comps.forEach(c=>{ c.estado = c.kind==='hoja' ? 'merma' : 'sirve'; c.sirven = c.n; });
+  return comps;
+}
+function separarRetornoGar(){
+  if(!garLineas.length) return alert('Agrega primero lo que regresó.');
+  garRet.comps = componentesRetorno(garLineas);
+  if(!garRet.comps.length) return alert('No se encontraron piezas en lo que regresó.');
+  renderRetornoComps();
+  const c = document.getElementById('g-ret-card'); if(c && c.scrollIntoView) c.scrollIntoView({behavior:'smooth', block:'start'});
+}
+function retMarcar(i, estado){ const c=garRet.comps[i]; c.estado=estado; if(estado==='sirve' && !(c.sirven>0)) c.sirven=c.n; renderRetornoComps(); }
+function renderRetornoComps(){
+  const el = document.getElementById('g-result'); if(!el || !garRet || !garRet.comps) return;
+  const comps = garRet.comps;
+  const filas = comps.map((c,i)=>{
+    const sirve = c.estado==='sirve';
+    return `<div class="movitem" style="flex-direction:column;align-items:stretch;gap:8px;${sirve?'border-color:var(--ok)':''}">
+      <div><span class="invname">${fmtNum(c.n)} × ${c.label}</span><span class="hint" style="display:block;margin:2px 0 0">${c.kind==='hoja'?'Melamina / MDF':'Herraje'}</span></div>
+      <div class="chips"><button class="chip ${sirve?'on':''}" onclick="retMarcar(${i},'sirve')">✅ Sirve</button><button class="chip ${!sirve?'on':''}" onclick="retMarcar(${i},'merma')">🗑️ Merma</button></div>
+      ${sirve && c.n>1 ? `<label class="hint">¿Cuántas sirven? (de ${fmtNum(c.n)})<input type="number" min="0" max="${c.n}" inputmode="numeric" value="${c.sirven}" style="margin-top:4px" oninput="garRet.comps[${i}].sirven=Math.min(${c.n},Math.max(0,Number(this.value)||0))"></label>` : ''}
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div class="card" id="g-ret-card">
+    <div style="font-size:16px;font-weight:800">🔍 Revisa cada pieza</div>
+    <p class="hint">Por defecto la melamina queda como merma y los herrajes como que sirven. Cámbialo si no es así.</p>
+    <div class="movlist">${filas}</div>
+    <button class="btn" style="margin-top:12px;width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRetornoGar()">✅ Guardar lo que regresó</button>
+  </div>`;
+}
+// Convierte lo que sirve a artículos del inventario: [{itemId, cantidad}]
+function devolucionDeComps(comps){
+  const out = {}, pool = [], medidas = {};
+  comps.forEach(c=>{
+    const k = c.estado==='sirve' ? Math.min(c.n, Number(c.sirven)||0) : 0; if(!(k>0)) return;
+    if(c.kind==='item') out[c.itemId] = (out[c.itemId]||0) + k;
+    else {
+      (c.pool||[]).forEach(p=>pool.push({...p, cantidad:k}));
+      (c.medidas||[]).forEach(m=>(medidas[m.color]=medidas[m.color]||[]).push({ancho:m.ancho, alto:m.alto, cantidad:k}));
+    }
+  });
+  const porColor = {};
+  pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
+  Object.keys(porColor).forEach(c=>piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; }));
+  Object.keys(medidas).forEach(c=>{
+    const r = hojasParaCortesCombinado(medidas[c], 122, 244);
+    const it = itemByName('Melamina '+c);
+    if(it && r.costo>0) out[it.id] = (out[it.id]||0) + r.costo;
+  });
+  return Object.keys(out).map(itemId=>({itemId, cantidad: Math.round(out[itemId]*1000)/1000})).filter(x=>x.cantidad>0);
+}
+async function confirmarRetornoGar(){
+  if(!garRet || !garRet.comps) return;
+  const log = garRet.log, comps = garRet.comps;
+  const devuelto = devolucionDeComps(comps);
+  const sirve = [], merma = [];
+  comps.forEach(c=>{
+    const k = c.estado==='sirve' ? Math.min(c.n, Number(c.sirven)||0) : 0;
+    if(k>0) sirve.push(`${fmtNum(k)} × ${c.label}`);
+    if(c.n-k>0) merma.push(`${fmtNum(c.n-k)} × ${c.label}`);
+  });
+  const resumen = (devuelto.length ? 'Regresa al inventario:\n'+devuelto.map(d=>{ const it=CATALOGO.find(i=>i.id===d.itemId); return `• +${fmtNum(d.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (cortado)':''}`; }).join('\n') : 'Nada regresa al inventario.')
+    + (merma.length ? '\n\nMerma (solo se anota):\n'+merma.map(x=>'• '+x).join('\n') : '');
+  if(!confirm(resumen+'\n\n¿Guardar?')) return;
+  try{
+    const estado = estadoNuevoMovimiento();
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    const loteId = cryptoId();
+    const fecha = new Date().toISOString();
+    const nota = `Regresó de garantía${log.cliente?' · '+log.cliente:''}${log.motivo?' · '+log.motivo:''}`;
+    for(const d of devuelto){
+      const it = CATALOGO.find(i=>i.id===d.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:log.modulo||modulo(), itemId:d.itemId, itemNombre:it.nombre, tipo:'devolucion', cantidad:d.cantidad, nota, fecha, estado, loteId, garantiaId:log.id, creadoPor});
+    }
+    await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, devuelto, estado, loteId, creadoPor}});
+    toast(devuelto.length && estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar para que sume al inventario.</small>' : '✅ Guardado lo que regresó.');
+    salirRetornoGar(); garSub='historial'; renderGar(); window.scrollTo(0,0);
+  }catch(e){ alert('Error al guardar: '+e.message); }
 }
 
 // Aviso en la vista previa de una instalación: qué hojas no tienen suficiente material cortado
@@ -3508,7 +3790,7 @@ async function renderAprobaciones(){
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
-        ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
+        ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
         <div class="row" style="justify-content:flex-end;margin-top:8px">
           <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarLote('${key}')">Rechazar</button>
