@@ -3940,6 +3940,14 @@ function renderRep(){
     html += `<div class="card row" style="justify-content:space-between">
       <div><strong>PIN de administrador</strong><p class="hint" style="margin:2px 0 0">Se pide para "poner en cero" el inventario de cualquier módulo. Solo tú (admin) puedes cambiarlo.</p></div>
       <button class="btn small" onclick="cambiarPinCero()">Cambiar PIN</button>
+    </div>
+    <div class="card" style="border:1px solid var(--bad)">
+      <strong style="color:var(--bad)">🗑️ Borrar datos de prueba</strong>
+      <p class="hint" style="margin:4px 0 10px">Deja un módulo (o los 5) <strong>completamente en blanco</strong>: borra movimientos, instalaciones, garantías, traspasos, auditorías, faltantes, stock inicial e historial. Los usuarios y el PIN no se tocan. No se puede deshacer; descarga un respaldo antes.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn small" style="background:var(--bad)" onclick="borrarDatosModulo([modulo()])">Borrar todo de ${modulo()}</button>
+        <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="borrarDatosModulo(MODULOS.map(m=>m.nombre))">Borrar todo de los 5 módulos</button>
+      </div>
     </div>`;
   }
 
@@ -4187,6 +4195,46 @@ async function eliminarUsuarioUI(userId, email){
 }
 
 // ===== Respaldo manual: exporta toda la base local a un archivo JSON descargable =====
+// ===== Borrar datos de prueba (confirmado por el usuario) =====
+// Deja los módulos elegidos en blanco, como recién instalados. Se borra con la misma marca de
+// "borrado" que usa la sincronización, así también desaparece en la nube y en los demás celulares.
+const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto'];
+async function borrarDatosModulo(mods){
+  if(!esAdmin()) return alert('Solo Dirección puede borrar datos.');
+  const nombre = mods.length>1 ? 'LOS 5 MÓDULOS' : mods[0];
+  const pin = prompt(`🗑️ Vas a BORRAR TODO de ${nombre}.\n\nEscribe el PIN de Dirección:`);
+  if(pin===null) return;
+  if(pin!==(await getPinCero())) return alert('PIN incorrecto. No se borró nada.');
+  // Contar primero lo que se va a borrar
+  const aBorrar = [];
+  for(const col of COLECCIONES_MODULO){
+    try{
+      const snap = await db.collection(col).get();
+      snap.docs.forEach(d=>{ const x=d.data()||{}; const m = x.modulo || (col==='resets'||col==='conteoAbierto' ? d.id : null); if(mods.includes(m)) aBorrar.push([col,d.id]); });
+    }catch(e){}
+  }
+  try{
+    const snap = await db.collection('prestamos').get();
+    snap.docs.forEach(d=>{ const x=d.data()||{}; if(mods.includes(x.origen)||mods.includes(x.destino)) aBorrar.push(['prestamos',d.id]); });
+  }catch(e){}
+  const porCol = {}; aBorrar.forEach(([c])=>porCol[c]=(porCol[c]||0)+1);
+  const nombres = {movimientos:'movimientos (entradas, salidas, cortes, instalaciones, garantías…)', inicial:'stock inicial', inicialHist:'historial del stock inicial', resets:'puestas en cero', auditorias:'auditorías y conteos', deudasAuditoria:'faltantes (deuda)', garantiasLog:'garantías', instalacionesLog:'instalaciones', instalacionesPuertas:'instalaciones de puertas', conteoAbierto:'conteos abiertos', prestamos:'traspasos / préstamos'};
+  if(!aBorrar.length) return alert(`${nombre} ya está en blanco. No hay nada que borrar.`);
+  const detalle = Object.keys(porCol).map(c=>`• ${porCol[c]} ${nombres[c]||c}`).join('\n');
+  const aviso = mods.length===1 ? `\n\nOjo: los traspasos de ${mods[0]} con otros módulos también se borran, pero la entrada o salida que quedó en el OTRO módulo se queda allá.` : '';
+  const conf = prompt(`Se va a borrar de ${nombre}:\n\n${detalle}${aviso}\n\nNO se puede deshacer. Para confirmar escribe: BORRAR`);
+  if(conf===null) return;
+  if(conf.trim().toUpperCase()!=='BORRAR') return alert('No escribiste BORRAR. No se borró nada.');
+  try{
+    toast('Borrando… no cierres la app.');
+    for(const [col,id] of aBorrar){ await db.collection(col).doc(id).delete(); }
+    mods.forEach(m=>{ try{ localStorage.removeItem('borradorAud_'+m); }catch(e){} });
+    auditCapturas={}; auditPiezas={}; auditArmados=[];
+    alert(`✅ Listo: se borraron ${aBorrar.length} registro(s). ${nombre} quedó en blanco.\n\nSi otros celulares tenían la app abierta, se limpian solos al sincronizar.`);
+    setView('home');
+  }catch(e){ alert('Error al borrar: '+e.message+'\n\nVuelve a intentarlo; lo que ya se borró no regresa.'); }
+}
+
 async function exportarRespaldo(){
   const COLLECTIONS = ['inicial','movimientos','resets','auditorias','instalacionesLog','instalacionesPuertas','prestamos','config'];
   const data = {};
