@@ -173,6 +173,42 @@ async function init(){
   if(!moduloActual){ showPicker(); return; }
   await loadStock();
   setView('home');
+  abrirAccesoDirecto();
+  // Pide al teléfono que NO borre los datos guardados de la app (importante para lo anotado sin internet).
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+}
+
+// ===== App instalable (PWA) =====
+function esAppInstalada(){ return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
+function esIPhone(){ return /iphone|ipad|ipod/i.test(navigator.userAgent||'') || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); }
+// Accesos directos del ícono (mantener presionado): ?ir=entrada | corte | inst | inv
+function abrirAccesoDirecto(){
+  try{
+    const ir = new URLSearchParams(location.search).get('ir');
+    if(!ir) return;
+    history.replaceState(null, '', location.pathname);
+    if(ir==='entrada' && !esSoloLectura()) irA('mov',{tipo:'entrada'});
+    else if(ir==='corte' && !esSoloLectura()) irA('mov',{tipo:'corte',cat:'Melamina'});
+    else if(ir==='inst' && !esSoloLectura()) irA('inst');
+    else if(ir==='inv') irA('inv');
+  }catch(e){}
+}
+function avisoInstalarHtml(){
+  if(esAppInstalada()) return '';
+  try{ if(localStorage.getItem('am_ocultarInstalar')==='1') return ''; }catch(e){}
+  const cerrar = `<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="try{localStorage.setItem('am_ocultarInstalar','1')}catch(e){};renderHome()">Ahora no</button>`;
+  if(window.__installPrompt) return `<div class="card" style="padding:12px"><div class="pend"><div>📲 <strong>Instala la app</strong> en tu celular para abrirla desde su ícono, a pantalla completa.</div>
+    <div class="row" style="gap:6px;flex-wrap:nowrap">${cerrar}<button class="btn small" onclick="instalarApp()">Instalar</button></div></div></div>`;
+  if(esIPhone()) return `<div class="card" style="padding:12px"><div><strong>📲 Instala la app en tu iPhone</strong>
+    <ol style="margin:6px 0 8px 18px;padding:0;line-height:1.6"><li>Ábrela en <strong>Safari</strong>.</li><li>Toca <strong>Compartir</strong> (cuadro con flecha ⬆️).</li><li>Elige <strong>"Agregar a inicio"</strong> y toca <strong>Agregar</strong>.</li><li>Ábrela siempre desde el ícono nuevo.</li></ol>${cerrar}</div></div>`;
+  return '';
+}
+async function instalarApp(){
+  const p = window.__installPrompt; if(!p) return;
+  p.prompt();
+  try{ await p.userChoice; }catch(e){}
+  window.__installPrompt = null;
+  renderHome();
 }
 
 async function doLogout(){
@@ -685,6 +721,7 @@ function renderHome(){
   $('#main').innerHTML = `
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
+    ${avisoInstalarHtml()}
     <div id="home-apr"></div>
     <div class="tiles">${tiles.join('')}</div>`;
   if(esAdmin()) contarAprobacionesPendientes();

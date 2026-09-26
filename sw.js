@@ -1,6 +1,6 @@
 // Service worker: cachea el "app shell" para que la app abra y funcione sin internet.
 // Los datos van por src/db.js (IndexedDB + sync a Supabase), no por aquí.
-const CACHE = 'auditoriamodulos-v42';
+const CACHE = 'auditoriamodulos-v43';
 const APP_SHELL = [
   './',
   './index.html',
@@ -12,6 +12,9 @@ const APP_SHELL = [
   './auth.js',
   './icon-192.png',
   './icon-512.png',
+  './icon-maskable-192.png',
+  './icon-maskable-512.png',
+  './apple-touch-icon.png',
   './logo-badge.png',
   './logo-full.png',
   'https://cdn.jsdelivr.net/npm/dexie@3.2.6/dist/dexie.min.js',

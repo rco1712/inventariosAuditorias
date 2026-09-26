@@ -1,15 +1,32 @@
 {
-  "name": "AuditoriaModulos · Clóset Vera",
-  "short_name": "AuditModulos",
-  "description": "Inventario, despiece y auditoría física para los módulos de Clóset Vera",
-  "start_url": "./index.html",
+  "id": "./",
+  "name": "Closets Vera · Inventarios",
+  "short_name": "Closets Vera",
+  "description": "Inventario, instalaciones, garantías y auditoría de los 5 módulos de Closets Vera",
+  "lang": "es-MX",
+  "dir": "ltr",
+  "start_url": "./index.html?origen=app",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#f4f6fb",
   "theme_color": "#3E5CDE",
+  "categories": ["business", "productivity"],
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Llegó material", "short_name": "Entrada", "url": "./index.html?ir=entrada", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Corte del día", "short_name": "Corte", "url": "./index.html?ir=corte", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Instalación", "short_name": "Instalación", "url": "./index.html?ir=inst", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Ver inventario", "short_name": "Inventario", "url": "./index.html?ir=inv", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ],
+  "screenshots": [
+    { "src": "screenshot-1.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Inicio del coordinador" },
+    { "src": "screenshot-2.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Inventario de melamina" }
   ]
 }
