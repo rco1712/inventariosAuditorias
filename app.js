@@ -53,6 +53,7 @@ const NUM_MUEBLES_FAM = {Lateral:1, Central:1, Doble:2, King:2, Triple:3, 'Doble
 const FAMILIAS_COMP = Object.keys(NUM_MUEBLES_FAM);
 const MUEBLE_TIPO_OPCIONES = [
   {value:'entrepanera', label:'Entrepañera'},
+  {value:'cajonera_1', label:'Cajonera de 1 cajón'},
   {value:'cajonera_3', label:'Cajonera de 3 cajones'},
   {value:'cajonera_5', label:'Cajonera de 5 cajones'},
   {value:'cajonera_emma', label:'Cajonera Emma (4 cajones)'},
@@ -1378,14 +1379,14 @@ function piezasCajoneraMax(add, colorCaj, unidades){
   add('Entrepaño Max corto', 2*unidades, '27×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Entrepaño Max largo', 2*unidades, '40×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Respaldo Max', 1*unidades, '20×58 cm', colorCaj, 'ok', 'Cajonera Max');
-  add('Zócalo Max', 4*unidades, '12×58 cm', colorCaj, 'ok', 'Cajonera Max');
+  add('Zóclo Max', 4*unidades, '12×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Fondo de cajonera (MDF 3mm)', unidades, '55×122 cm', '—', 'ok', '1 por cajonera Max (misma regla que cualquier cajonera)');
   add('Melamina (cajonera Max)', unidades, '—', colorCaj, 'ok', 'Confirmado: 1 hoja de melamina por cajonera Max, misma melamina que el resto de los muebles (no es un artículo de catálogo aparte)');
 }
 function piezasEntrepaneraMax(add, color, unidades){
   add('Pared Max', 2*unidades, '40×185 cm', color, 'ok', 'Entrepañera Max (confirmado por el usuario)');
   add('Entrepaño Max largo', 5*unidades, '40×58 cm', color, 'ok', 'Entrepañera Max');
-  add('Zócalo Max', 2*unidades, '12×58 cm', color, 'ok', 'Entrepañera Max');
+  add('Zóclo Max', 2*unidades, '12×58 cm', color, 'ok', 'Entrepañera Max');
   add('Melamina (entrepañera Max)', unidades, '—', color, 'ok', 'Confirmado: 1 hoja de melamina por entrepañera Max, misma melamina que el resto de los muebles (no es un artículo de catálogo aparte)');
 }
 // Piezas de los cajones de una Cajonera Max (confirmado por el usuario): distintas a las de un
@@ -1418,7 +1419,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     // paredes de cada "mueble" interno — entrepañera, cajonera o espejo, los tres usan 2
     // paredes); NUNCA cambian según qué ocupa cada mueble.
     // Confirmado por el usuario: "Lateral Sencillo = 1 maletero chico (que es una pared) +
-    // 2 paredes + 5 entrepaños + 2 zócalos" = 3 paredes en total, con o sin cajones.
+    // 2 paredes + 5 entrepaños + 2 zóclos" = 3 paredes en total, con o sin cajones.
     // Nota general (confirmado por el usuario): cuando un modelo es Max, sus paredes ya no
     // salen de aquí — cada cajonera/entrepañera Max aporta sus propias "Pared Max" (ver
     // piezasCajoneraMax/piezasEntrepaneraMax), y sumar también la "Pared" plana de la familia
@@ -1466,8 +1467,8 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     // de 2 → coincide exactamente.
     const NUM_MUEBLES = {Lateral:1, Central:1, Doble:2, King:2, Triple:3, 'Doble Especial':2};
     const numMuebles = NUM_MUEBLES[fam];
-    const CAJONERA_ENTREPANOS = {3:5, 5:4, 6:10, 8:9, 10:8};
-    const MUEBLES_CAJONERA = {3:1, 5:1, 6:2, 8:2, 10:2};
+    const CAJONERA_ENTREPANOS = {1:4, 3:5, 5:4, 6:10, 8:9, 10:8};
+    const MUEBLES_CAJONERA = {1:1, 3:1, 5:1, 6:2, 8:2, 10:2};
 
     if(cajones===0 && espejos===0){
       if(maxOn){
@@ -1521,14 +1522,14 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     }
   }
 
-  // Zócalos: si el modelo lleva cajonera, sus zócalos dependen del color del FRENTE (confirmado
-  // por el usuario: "los zócalos dependen del frente del color"), no del color de la cajonera
+  // Zóclos: si el modelo lleva cajonera, sus zóclos dependen del color del FRENTE (confirmado
+  // por el usuario: "los zóclos dependen del frente del color"), no del color de la cajonera
   // ni de la estructura. Sin cajonera, se quedan con el color de estructura de siempre.
-  const colorZocalo = cajones>0 ? color : estructuraColor;
+  const colorZoclo = cajones>0 ? color : estructuraColor;
 
   // Espejos: el espejo ocupa un "mueble" completo (mismas 2 paredes + 5 entrepaños que una
   // entrepañera — ya contabilizado arriba en paredes/entrepaños, no se vuelve a sumar aquí),
-  // más su propio "fondo de cajonera de espejo" + 2 zócalos + jaladera + bisagra + el espejo
+  // más su propio "fondo de cajonera de espejo" + 2 zóclos + jaladera + bisagra + el espejo
   // en sí (confirmado por el usuario).
   if(espejos>0){
     add('Jaladera (por espejo)',espejos,'—',color,'ok','1 jaladera por espejo (confirmado por el usuario)');
@@ -1538,10 +1539,10 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
       if(espejos===1) add('Entrepaña normal',1,'—','—','ok','King con 1 espejo = 1 entrepaña normal + 1 entrepaña con espejo');
     }
     add('Espejo',espejos,'—','—','ok','1 "Espejos closet" por espejo (confirmado por el usuario, incluido King: "el espejo es espejo de clóset... aplica para todas las variantes de los modelos")');
-    add('Zócalo especial',espejos,'18×52 cm',colorZocalo,'ok','1 por espejo (confirmado por el usuario)'+(cajones>0?'; color del frente (zócalos de cajonera dependen del color de frente, confirmado por el usuario)':''));
-    add('Zócalo especial',espejos,'16×52 cm',colorZocalo,'ok','1 por espejo (confirmado por el usuario)');
+    add('Zóclo especial',espejos,'18×52 cm',colorZoclo,'ok','1 por espejo (confirmado por el usuario)'+(cajones>0?'; color del frente (zóclos de cajonera dependen del color de frente, confirmado por el usuario)':''));
+    add('Zóclo especial',espejos,'16×52 cm',colorZoclo,'ok','1 por espejo (confirmado por el usuario)');
   } else {
-    add('Zócalo normal',2,'10×52 cm',colorZocalo,'ok', cajones>0?'Color del frente (zócalos de cajonera dependen del color de frente, confirmado por el usuario)':'');
+    add('Zóclo normal',2,'10×52 cm',colorZoclo,'ok', cajones>0?'Color del frente (zóclos de cajonera dependen del color de frente, confirmado por el usuario)':'');
   }
 
   // Fondo de cajonera: confirmado por el usuario — "cada mueble que sea cajonera de 1, de 3,
@@ -1631,7 +1632,7 @@ const ARMADO_TIPOS = {
   corredera:    'Corredera suelta (hembra o macho)'
 };
 const ARMADO_CORREDERA = {hembra:'Hembra (la que va en la cajonera)', macho:'Macho (la que va en el cajón)'};
-const ARMADO_CAJONERAS = {'3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
+const ARMADO_CAJONERAS = {'1':'De 1 cajón','3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
 const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
 function armadoTienePuertitas(variante){ return ['3','5','emma','max'].includes(variante); }
 function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon' || a.tipo==='corredera') && a.variante!=='max'; }
@@ -1713,17 +1714,17 @@ function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
 function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, extra){
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
-  const CAJONERA_ENTREPANOS = {3:5, 5:4, 6:10, 8:9, 10:8};
-  const MUEBLES_CAJONERA = {3:1, 5:1, 6:2, 8:2, 10:2};
+  const CAJONERA_ENTREPANOS = {1:4, 3:5, 5:4, 6:10, 8:9, 10:8};
+  const MUEBLES_CAJONERA = {1:1, 3:1, 5:1, 6:2, 8:2, 10:2};
   if(tipo==='entrepanera'){
-    add('Pared',2,'191×40 cm',color,'ok','Adicional: entrepañera (2 paredes + 5 entrepaños + 2 zócalos)');
+    add('Pared',2,'191×40 cm',color,'ok','Adicional: entrepañera (2 paredes + 5 entrepaños + 2 zóclos)');
     add('Entrepaño',5,'52×40 cm',color,'ok');
-    add('Zócalo normal',2,'10×52 cm',color,'ok');
+    add('Zóclo normal',2,'10×52 cm',color,'ok');
   } else if(tipo==='cajonera'){
     add('Pared',2,'191×40 cm',color,'ok','Adicional: cajonera de '+cajones+' cajones');
     if(CAJONERA_ENTREPANOS[cajones]) add('Entrepaño',CAJONERA_ENTREPANOS[cajones],'40×52 cm',color,'ok');
     else add('Entrepaño','Pendiente','—','—','pendiente','Cantidad de entrepaños de cajonera de '+cajones+' cajones no confirmada; no se inventa');
-    add('Zócalo normal',2,'10×52 cm',color,'ok');
+    add('Zóclo normal',2,'10×52 cm',color,'ok');
     add('Frente',cajones,'18×54 cm',color,'ok');
     add('Pieza chica de cajón',cajones*2,'33×16.5 cm',color,'ok');
     add('Pieza grande de cajón',cajones*2,'46.4×16.5 cm',color,'ok');
@@ -1742,9 +1743,9 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     piezasCajonesMax(add, 4, color, color);
     if(conPuerta) piezasPuertitaCajonera(add, color, 'max', 'cajonera Max');
   } else if(tipo==='cajonera_emma'){
-    add('Pared',2,'191×40 cm',color,'ok','Cajonera Emma: 2 paredes + 4 entrepaños + 5 zócalos de 10×52 + 4 cajones (confirmado por el usuario)');
+    add('Pared',2,'191×40 cm',color,'ok','Cajonera Emma: 2 paredes + 4 entrepaños + 5 zóclos de 10×52 + 4 cajones (confirmado por el usuario)');
     add('Entrepaño',4,'52×40 cm',color,'ok');
-    add('Zócalo normal',5,'10×52 cm',color,'ok','Emma lleva 5 zócalos de 10×52 (confirmado por el usuario; distinto de los 2 de una cajonera/entrepañera normal)');
+    add('Zóclo normal',5,'10×52 cm',color,'ok','Emma lleva 5 zóclos de 10×52 (confirmado por el usuario; distinto de los 2 de una cajonera/entrepañera normal)');
     add('Frente',4,'18×54 cm',color,'ok');
     add('Pieza chica de cajón',4*2,'33×16.5 cm',color,'ok');
     add('Pieza grande de cajón',4*2,'46.4×16.5 cm',color,'ok');
@@ -1759,23 +1760,23 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     add('Pared',2,'191×40 cm',color,'ok','Adicional: cajonera de espejo');
     add('Entrepaño',5,'52×40 cm',color,'ok');
     add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Rendimiento confirmado: 4 fondos de cajonera por hoja de MDF 3mm');
-    add('Zócalo especial',1,'18×52 cm',color,'ok');
-    add('Zócalo especial',1,'16×52 cm',color,'ok');
+    add('Zóclo especial',1,'18×52 cm',color,'ok');
+    add('Zóclo especial',1,'16×52 cm',color,'ok');
     add('Espejo',1,'—','—','ok','1 "Espejos closet"');
     add('Jaladera (por espejo)',1,'—',color,'ok');
     add('Bisagra (por espejo)',1.5,'—','—','ok');
   } else if(tipo==='zapatera'){
     // Confirmado por el usuario: 2 paredes (191×40, iguales a las normales) + 8 entrepaños
-    // (7 de 27×40 + 1 de 30×40, 24 por hoja) + 2 zócalos de 27×10. Aplica solo como opción de
+    // (7 de 27×40 + 1 de 30×40, 24 por hoja) + 2 zóclos de 27×10. Aplica solo como opción de
     // mueble en Lateral y Central (en vez de entrepañera).
-    add('Pared',2,'191×40 cm',color,'ok','Adicional: zapatera (2 paredes + 8 entrepaños + 2 zócalos)');
+    add('Pared',2,'191×40 cm',color,'ok','Adicional: zapatera (2 paredes + 8 entrepaños + 2 zóclos)');
     add('Entrepaño zapatera',7,'27×40 cm',color,'ok','Confirmado: entrepaños de zapatera, 24 por hoja');
     add('Entrepaño zapatera',1,'30×40 cm',color,'ok','Confirmado: mismo rendimiento que el de 27×40 (24 por hoja)');
-    add('Zócalo zapatera',2,'27×10 cm',color,'ok','Confirmado por el usuario');
+    add('Zóclo zapatera',2,'27×10 cm',color,'ok','Confirmado por el usuario');
     if(conPuerta){
-      // Confirmado por el usuario: "zapatera con puerta" agrega 1 zócalo extra de 12×27 y la
+      // Confirmado por el usuario: "zapatera con puerta" agrega 1 zóclo extra de 12×27 y la
       // puerta en sí (172×30, 1.5 bisagras, 1 jaladera).
-      add('Zócalo zapatera',1,'12×27 cm',color,'ok','Zócalo extra cuando la zapatera lleva puerta (confirmado por el usuario)');
+      add('Zóclo zapatera',1,'12×27 cm',color,'ok','Zóclo extra cuando la zapatera lleva puerta (confirmado por el usuario)');
       add('Puerta de zapatera',1,'172×30 cm',color,'ok','Confirmado por el usuario: 172×30 cm');
       add('Bisagra (zapatera)',1.5,'—','—','ok','Confirmado por el usuario');
       add('Jaladera (zapatera)',1,'—',color,'ok','Confirmado por el usuario');
@@ -1792,6 +1793,9 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
 
 // Traduce el valor del selector "por muebles" (MUEBLE_TIPO_OPCIONES) a buildAdicionalPiezas
 function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
+  // Cajonera de 1 cajón (confirmado por el usuario): 2 paredes, 4 entrepaños, 2 zóclos, 1 fondo
+  // de cajonera y 1 cajón completo con sus herrajes (1 juego de corredera y 1 jaladera).
+  if(value==='cajonera_1') return buildAdicionalPiezas('cajonera', 1, color, correderaExt);
   if(value==='cajonera_3') return buildAdicionalPiezas('cajonera', 3, color, correderaExt);
   if(value==='cajonera_5') return buildAdicionalPiezas('cajonera', 5, color, correderaExt);
   if(value==='cajonera_otra') return buildAdicionalPiezas('cajonera', cajonesManual, color, correderaExt);
@@ -1801,20 +1805,20 @@ function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
 // ===== Composición "por muebles" (combinaciones) =====
 // Principio confirmado por el usuario y aplicado de forma general a TODOS los modelos/variantes:
 // cada "mueble" de una familia (entrepañera, cajonera normal, Cajonera Max, Cajonera Emma o
-// cajonera de espejo) trae sus PROPIAS paredes y zócalos — ver buildAdicionalPiezas: cada tipo
-// ya suma sus 2 paredes (o las que le tocan) y sus zócalos, sean "Zócalo normal", "Zócalo Max"
-// o "Zócalo especial". Por eso, al armar una combinación, el mueble SUSTITUYE su parte del
+// cajonera de espejo) trae sus PROPIAS paredes y zóclos — ver buildAdicionalPiezas: cada tipo
+// ya suma sus 2 paredes (o las que le tocan) y sus zóclos, sean "Zóclo normal", "Zóclo Max"
+// o "Zóclo especial". Por eso, al armar una combinación, el mueble SUSTITUYE su parte del
 // total de la familia — no se le agrega aparte lo que ya trae. En la práctica esto significa
-// que las piezas "Pared" y "Zócalo normal" del total plano de la familia (el que usa
+// que las piezas "Pared" y "Zóclo normal" del total plano de la familia (el que usa
 // buildDespiece para los modelos con nombre) nunca se cuentan en una combinación: siempre
 // vienen, completas, de la suma de los muebles elegidos. Esta regla es la misma sin importar
 // si el mueble es normal, Emma, Max o espejo, así que no hace falta un caso especial por tipo.
 
 // Deja solo las piezas de la familia que NO pertenecen a ningún mueble en particular: maleteros
-// extra y herrajes (tubos/bridas). "Pared" y "Zócalo normal" se descartan porque cada mueble ya
+// extra y herrajes (tubos/bridas). "Pared" y "Zóclo normal" se descartan porque cada mueble ya
 // aporta los suyos (ver nota arriba); "Entrepaño" se descarta porque lo define la combinación.
 function piezasFijasDeFamilia(base){
-  return base.piezas.filter(p => p.nombre!=='Entrepaño' && p.nombre!=='Pared' && p.nombre!=='Zócalo normal');
+  return base.piezas.filter(p => p.nombre!=='Entrepaño' && p.nombre!=='Pared' && p.nombre!=='Zóclo normal');
 }
 
 // Confirmado por el usuario: toda variante Max lleva maleteros grandes; el maletero chico
@@ -1834,7 +1838,7 @@ function sustituirMaleteroPorMax(piezasFijas){
 // Arma la composición completa de una familia eligiendo qué es cada uno de sus muebles fijos
 // (en vez de un modelo con nombre). Los maleteros extra y herrajes de la familia se toman de
 // buildDespiece con cajones=0/espejos=0 (son fijos, no cambian según qué ocupa cada mueble);
-// las paredes/zócalos/entrepaños los aporta cada mueble elegido (ver piezasFijasDeFamilia).
+// las paredes/zóclos/entrepaños los aporta cada mueble elegido (ver piezasFijasDeFamilia).
 function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt){
   const estructuraColor = todoColor ? color : 'Blanco';
   const colorCaj = colorCajonera || estructuraColor;
@@ -1845,11 +1849,11 @@ function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, 
   if(numMueblesMax>0) piezasFijas = sustituirMaleteroPorMax(piezasFijas);
 
   const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, colorCaj, correderaExt));
-  // Confirmado por el usuario: los zócalos de una cajonera dependen del color del FRENTE, no
+  // Confirmado por el usuario: los zóclos de una cajonera dependen del color del FRENTE, no
   // del color de la cajonera. Se corrige aquí (una sola vez, sobre lo que aportó cada mueble)
   // en vez de duplicar esta regla dentro de cada tipo de mueble en buildAdicionalPiezas.
   const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
-  if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zócalo normal') p.colorDestino = color; });
+  if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal') p.colorDestino = color; });
 
   return {piezas: piezasFijas.concat(piezasMuebles), maxNota: base.maxNota};
 }
