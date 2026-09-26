@@ -2073,7 +2073,7 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     add('Pieza grande de cajón',4*2,'46.4×16.5 cm',color,'ok');
     add('Fondo de cajón (MDF 3mm)',4,'49.4×33 cm','—','ok');
     add('Juego de corredera',4,'—','—','ok','1 por cajón');
-    add('Jaladera (por cajón)',4,'—',color,'ok');
+    // Confirmado por el usuario: los cajones de la cajonera Emma NO llevan jaladera.
     add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Emma ocupa 1 mueble = 1 fondo de cajonera (confirmado por el usuario)');
     // Confirmado por el usuario: la puertita de la cajonera Emma es la misma que la de la
     // cajonera de 5 cajones (80×27.3 cm).
