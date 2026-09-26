@@ -726,7 +726,9 @@ async function registrarMovLote(){
   if(!confirm(`¿Todo está bien?\n\n${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
   if(avisosAuto.length && !confirm('Todavía no se anota el corte de hoy:\n\n'+avisosAuto.join('\n')+'\n\nNo pasa nada: cuando se registre el corte del día se ajusta solo. ¿Continuar?')) return;
   try{
-    const estado = estadoNuevoMovimiento();
+    // Confirmado por el usuario: el Corte del día NO requiere aprobación (se aplica directo,
+    // aunque lo registre un coordinador). Lo demás sigue el flujo normal de aprobación.
+    const estado = tipo==='corte' ? 'aprobado' : estadoNuevoMovimiento();
     const loteId = cryptoId();
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const a of aplicar){
