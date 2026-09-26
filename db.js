@@ -24,10 +24,16 @@ function stripMeta(row){
 }
 
 async function emit(name, listener){
-  let rows = (await ddb.table(name).toArray()).filter(r => !r._deleted);
-  if (listener.where) {
-    const [field, , val] = listener.where;
-    rows = rows.filter(r => r[field] === val);
+  let rows;
+  if (listener.where && listener.where[0] === 'modulo') {
+    // 'modulo' está indexado: solo se leen los documentos de ese módulo (más rápido con mucho historial).
+    rows = (await ddb.table(name).where('modulo').equals(listener.where[2]).toArray()).filter(r => !r._deleted);
+  } else {
+    rows = (await ddb.table(name).toArray()).filter(r => !r._deleted);
+    if (listener.where) {
+      const [field, , val] = listener.where;
+      rows = rows.filter(r => r[field] === val);
+    }
   }
   listener.cb({ docs: rows.map(r => ({ id: r.id, data: () => stripMeta(r) })) });
 }
@@ -137,6 +143,15 @@ function kickSync(){
   syncTimer = setTimeout(syncAll, 600); // agrupa varias escrituras seguidas en una sola sincronización
 }
 
+// Sube lo capturado en este teléfono. La hora que se guarda en la nube es la hora de SUBIDA (no la
+// de captura): así, lo que se anotó sin internet y se sube horas después sí les llega a los demás
+// teléfonos (antes podía quedar "atrás" de su última sincronización y nunca descargarse).
+async function marcarLimpio(name, row, ts){
+  const actual = await ddb.table(name).get(row.id);
+  // Si mientras se subía alguien volvió a cambiar el documento, se deja pendiente para la próxima vuelta.
+  if (actual && actual._updatedAt !== row._updatedAt) return;
+  await ddb.table(name).put({ ...row, _dirty: false, _synced: true, _updatedAt: ts });
+}
 async function pushDirty(){
   const sb = getSupabase();
   if (!sb) return;
@@ -144,54 +159,69 @@ async function pushDirty(){
     if (!ddb.tables.some(t => t.name === name)) continue;
     const rows = await ddb.table(name).toArray();
     const dirty = rows.filter(r => r._dirty);
-    for (const row of dirty) {
-      const { error } = await sb.from('docs').upsert({
-        collection: name,
-        id: row.id,
-        modulo: row.modulo ?? null,
-        payload: stripMeta(row),
-        updated_at: row._updatedAt,
-        deleted: !!row._deleted
-      }, { onConflict: 'collection,id' });
-      if (!error) {
-        await ddb.table(name).put({ ...row, _dirty: false, _synced: true });
+    for (let k = 0; k < dirty.length; k += 200) {
+      const lote = dirty.slice(k, k + 200);
+      const ts = new Date().toISOString();
+      const aFila = row => ({ collection: name, id: row.id, modulo: row.modulo ?? null, payload: stripMeta(row), updated_at: ts, deleted: !!row._deleted });
+      const { error } = await sb.from('docs').upsert(lote.map(aFila), { onConflict: 'collection,id' });
+      if (!error) { for (const row of lote) await marcarLimpio(name, row, ts); continue; }
+      // Si el lote falla (p. ej. un documento sin permiso), se sube uno por uno para no atorar a los demás.
+      for (const row of lote) {
+        const t1 = new Date().toISOString();
+        const r = await sb.from('docs').upsert({ ...aFila(row), updated_at: t1 }, { onConflict: 'collection,id' });
+        if (!r.error) await marcarLimpio(name, row, t1);
+        else console.warn('No se pudo subir', name, row.id, r.error.message);
       }
     }
   }
 }
 
+// Descarga lo nuevo de la nube, por páginas (Supabase entrega máx. 1000 por consulta) y con un
+// margen de 5 minutos hacia atrás para no perder nada por diferencias de hora entre teléfonos.
 async function pullRemote(){
   const sb = getSupabase();
   if (!sb) return;
   const metaKey = 'lastSync';
   const meta = await ddb.table('_meta').get(metaKey);
-  const since = meta ? meta.value : '1970-01-01T00:00:00.000Z';
-  let query = sb.from('docs').select('*').gt('updated_at', since).order('updated_at', { ascending: true });
-  const { data, error } = await query;
-  if (error || !data) return;
+  // Una sola vez tras esta actualización: descarga TODO de nuevo, para recuperar capturas hechas sin
+  // internet que la versión anterior pudo haberse saltado.
+  const repaso = await ddb.table('_meta').get('resyncV2');
+  const ultima = (meta && repaso) ? meta.value : null;
+  let cursor = ultima ? new Date(new Date(ultima).getTime() - 5 * 60 * 1000).toISOString() : '1970-01-01T00:00:00.000Z';
+  let maxVisto = ultima;
   const touched = new Set();
-  for (const remote of data) {
-    if (!COLLECTIONS.includes(remote.collection)) COLLECTIONS.push(remote.collection);
-    if (!ddb.tables.some(t => t.name === remote.collection)) continue; // colección desconocida en el schema local, se ignora
-    const local = await ddb.table(remote.collection).get(remote.id);
-    const remoteNewer = !local || new Date(remote.updated_at) >= new Date(local._updatedAt || 0);
-    const localHasUnsyncedChange = local && local._dirty;
-    if (remoteNewer && !localHasUnsyncedChange) {
-      await ddb.table(remote.collection).put({
-        ...remote.payload,
-        id: remote.id,
-        modulo: remote.modulo,
-        _dirty: false,
-        _synced: true,
-        _deleted: !!remote.deleted,
-        _updatedAt: remote.updated_at
-      });
-      touched.add(remote.collection);
+  for (let pagina = 0; pagina < 200; pagina++) {
+    const { data, error } = await sb.from('docs').select('*').gt('updated_at', cursor).order('updated_at', { ascending: true }).limit(1000);
+    if (error || !data) break;
+    for (const remote of data) {
+      if (!COLLECTIONS.includes(remote.collection)) COLLECTIONS.push(remote.collection);
+      if (!ddb.tables.some(t => t.name === remote.collection)) continue; // colección desconocida en el schema local, se ignora
+      const local = await ddb.table(remote.collection).get(remote.id);
+      const tRemoto = new Date(remote.updated_at).getTime();
+      if (local && !local._dirty && new Date(local._updatedAt || 0).getTime() === tRemoto) continue; // ya lo tenemos igual
+      const remoteNewer = !local || tRemoto >= new Date(local._updatedAt || 0).getTime();
+      const localHasUnsyncedChange = local && local._dirty;
+      if (remoteNewer && !localHasUnsyncedChange) {
+        await ddb.table(remote.collection).put({
+          ...remote.payload,
+          id: remote.id,
+          modulo: remote.modulo,
+          _dirty: false,
+          _synced: true,
+          _deleted: !!remote.deleted,
+          _updatedAt: remote.updated_at
+        });
+        touched.add(remote.collection);
+      }
     }
+    if (data.length) {
+      cursor = data[data.length - 1].updated_at;
+      if (!maxVisto || new Date(cursor) > new Date(maxVisto)) maxVisto = cursor;
+    }
+    if (data.length < 1000) break;
   }
-  if (data.length) {
-    await ddb.table('_meta').put({ key: metaKey, value: data[data.length - 1].updated_at });
-  }
+  if (maxVisto && maxVisto !== ultima) await ddb.table('_meta').put({ key: metaKey, value: maxVisto });
+  if (!repaso) await ddb.table('_meta').put({ key: 'resyncV2', value: new Date().toISOString() });
   touched.forEach(notify);
 }
 

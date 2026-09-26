@@ -205,48 +205,53 @@ function renderSyncBadge(state){
   }
 }
 
+// Suscripciones activas: se cancelan al cambiar de módulo para no acumular escuchas repetidas
+// (antes cada cambio de módulo sumaba otra copia de todas y la app se iba poniendo lenta).
+let _subs = [];
 async function loadStock(){
+  _subs.forEach(u=>{ try{ if(typeof u==='function') u(); }catch(e){} }); _subs = [];
+  const sub = u => { if(typeof u==='function') _subs.push(u); };
   try{
-    db.collection('inicial').where('modulo','==',modulo()).onSnapshot(snap=>{
+    sub(db.collection('inicial').where('modulo','==',modulo()).onSnapshot(snap=>{
       inicialMap={}; inicialCortadoMap={}; inicialFechaMap={};
       snap.docs.forEach(d=>{ const x=d.data(); inicialMap[x.itemId]=x.cantidad; if(x.cortado) inicialCortadoMap[x.itemId]=x.cortado; if(x.fecha) inicialFechaMap[x.itemId]=x.fecha; });
       if(current==='home') renderHome();
       if(current==='inv') renderInv();
-    });
+    }));
   }catch(e){}
   try{
-    db.collection('movimientos').onSnapshot(snap=>{
+    sub(db.collection('movimientos').where('modulo','==',modulo()).onSnapshot(snap=>{
       movs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
       if(current==='inv') renderInv(); if(current==='mov') renderMov(); if(current==='home') renderHome();
-    });
+    }));
   }catch(e){}
   try{
-    db.collection('resets').onSnapshot(snap=>{
+    sub(db.collection('resets').onSnapshot(snap=>{
       resetMap={}; snap.docs.forEach(d=>{ resetMap[d.id]=d.data().fecha; });
       if(current==='inv') renderInv();
-    });
+    }));
   }catch(e){}
   try{
     // Conteo del almacén abierto por Dirección para los coordinadores (solo el día indicado).
-    db.collection('conteoAbierto').onSnapshot(snap=>{
+    sub(db.collection('conteoAbierto').onSnapshot(snap=>{
       conteoMap={}; snap.docs.forEach(d=>{ conteoMap[d.id]=d.data(); });
       if(current==='home') renderHome();
       if(current==='aud') renderAud();
-    });
+    }));
   }catch(e){}
   try{
-    db.collection('auditorias').onSnapshot(snap=>{
+    sub(db.collection('auditorias').where('modulo','==',modulo()).onSnapshot(snap=>{
       auditorias = snap.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
       if(current==='hist') renderHist();
-    });
+    }));
   }catch(e){}
   try{
     // Deuda por faltantes de auditoría (se conserva aparte aunque el inventario se ajuste)
-    db.collection('deudasAuditoria').onSnapshot(snap=>{
+    sub(db.collection('deudasAuditoria').where('modulo','==',modulo()).onSnapshot(snap=>{
       deudas = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fechaAuditoria||'').localeCompare(a.fechaAuditoria||''));
       if(current==='hist') renderHist();
       if(current==='rep') renderRep();
-    });
+    }));
   }catch(e){}
 }
 
@@ -394,7 +399,7 @@ async function ceroModulo(){
   const pinGuardado = await getPinCero();
   if(pin!==pinGuardado) return alert('PIN incorrecto. No se puso en cero el inventario.');
   if(!confirm('¿Poner en CERO el inventario de '+modulo()+'? Esto no borra el historial, pero el stock actual de este módulo partirá de 0. Los demás módulos no se afectan.')) return;
-  try{ await db.collection('resets').doc(modulo()).set({fecha:new Date().toISOString()}); alert('Inventario de '+modulo()+' reiniciado a cero.'); }
+  try{ await db.collection('resets').doc(modulo()).set({modulo:modulo(), fecha:new Date().toISOString()}); alert('Inventario de '+modulo()+' reiniciado a cero.'); }
   catch(e){ alert('Error: '+e.message); }
 }
 
@@ -1139,7 +1144,7 @@ async function saveAudit(){
     auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor='';
     borrarBorradorAud();
     if(ciego){
-      try{ await db.collection('conteoAbierto').doc(modulo()).set({...(conteoMap[modulo()]||{}), abierto:false, cerrado:new Date().toISOString(), cerradoPor:doc.creadoPor, auditoriaId:audId}); }catch(e){}
+      try{ await db.collection('conteoAbierto').doc(modulo()).set({...(conteoMap[modulo()]||{}), modulo:modulo(), abierto:false, cerrado:new Date().toISOString(), cerradoPor:doc.creadoPor, auditoriaId:audId}); }catch(e){}
       toast('✅ Conteo enviado a Dirección. ¡Gracias!');
       setView('home'); return;
     }
@@ -1184,8 +1189,8 @@ async function abrirConteo(mods, abrir){
   try{
     const quien = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const m of mods){
-      await db.collection('conteoAbierto').doc(m).set(abrir ? {abierto:true, fechaDia:fechaHoyLocal(), abiertoPor:quien, fecha:new Date().toISOString()}
-        : {...(conteoMap[m]||{}), abierto:false, cerrado:new Date().toISOString(), cerradoPor:quien});
+      await db.collection('conteoAbierto').doc(m).set(abrir ? {modulo:m, abierto:true, fechaDia:fechaHoyLocal(), abiertoPor:quien, fecha:new Date().toISOString()}
+        : {...(conteoMap[m]||{}), modulo:m, abierto:false, cerrado:new Date().toISOString(), cerradoPor:quien});
     }
     toast(abrir ? '✅ Conteo abierto para hoy.' : 'Conteo cerrado.');
     renderAud();
@@ -1216,7 +1221,7 @@ async function usarConteoComoInicial(id, a){
     // Punto de partida = momento del conteo: el "cero" justo en ese momento y el conteo 1 ms después,
     // así lo que se anote después del conteo (aunque se apruebe más tarde) sí cuenta.
     const t0 = new Date(a.fecha).getTime();
-    await db.collection('resets').doc(a.modulo).set({fecha:new Date(t0).toISOString(), porConteo:id});
+    await db.collection('resets').doc(a.modulo).set({modulo:a.modulo, fecha:new Date(t0).toISOString(), porConteo:id});
     const fechaIni = new Date(t0+1).toISOString();
     for(const it of CATALOGO){
       const r = res.find(x=>x.itemId===it.id) || {fisico:0};
