@@ -708,7 +708,7 @@ function renderHome(){
     t('🔄','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5');
     t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
     t('🛡️','Garantía','Material que se da en garantía',"irA('gar')",'#b3742c');
-    const enCamino = pedidos.filter(p=>p.modulo===modulo() && p.estado==='enCamino').length;
+    const enCamino = pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p)).length;
     t('🚚','Por llegar', enCamino ? `${enCamino} pedido(s) en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'#0e8a8a');
   }
   if(modoConteoCoord()) tiles.unshift(`<button class="tile" style="--tc:#E0453F;grid-column:1/-1" onclick="irA('aud')"><span class="tile-ic">📋</span><span class="tile-t">Conteo del almacén</span><span class="tile-s">Dirección abrió el conteo de hoy. Cuenta todo lo que hay.</span></button>`);
@@ -4204,11 +4204,11 @@ function calcularAvisos(){
       out.push({id:'lote_'+k+'_'+ms[0].estado, fecha:ms[0].revisadoEn, ic: ok?'✅':'❌',
         titulo: `Dirección ${ok?'aprobó':'rechazó'}: ${describirLote(ms)}`,
         texto: `${ms.length} artículo(s) · anotado el ${new Date(ms[0].fecha).toLocaleDateString('es-MX')}${ok?'':' · no se sumó ni se descontó'}`}); });
-    pedidos.filter(p=>p.modulo===modulo() && p.estado==='enCamino' && p.fecha>visto).forEach(p=>out.push({id:'ped_'+p.id, fecha:p.fecha, ic:'🚚',
+    pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p) && p.fecha>visto).forEach(p=>out.push({id:'ped_'+p.id, fecha:p.fecha, ic:'🚚',
       titulo:'Viene material en camino', texto:`${p.items.length} artículo(s)${p.proveedor?' · '+p.proveedor:''}${p.fechaEstimada?' · llega aprox. '+fechaCorta(p.fechaEstimada):''}`}));
   } else {
-    pedidos.filter(p=>p.estado==='recibido' && p.recibido && p.recibido.fecha>visto && estadoLoteMovs(p.recibido.loteId)==='pendiente').forEach(p=>out.push({id:'pedrec_'+p.id, fecha:p.recibido.fecha, ic:'📦',
-      titulo:`${p.modulo} recibió material`, texto:'Revisa lo que llegó y apruébalo para sumarlo al inventario.'}));
+    pedidos.forEach(p=>recepcionesDe(p).forEach((r,idx)=>{ if(r.fecha>visto && (p.modulo!==modulo() || estadoRecepcion(r)==='pendiente')) out.push({id:'pedrec_'+p.id+'_'+idx, fecha:r.fecha, ic:'📦',
+      titulo:`${p.modulo} recibió material`, texto:'Revisa lo que llegó y apruébalo para sumarlo al inventario.'}); }));
   }
   return out.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
 }
@@ -4261,19 +4261,39 @@ function estadoLoteMovs(loteId){
   if(ms.every(m=>m.estado==='rechazado')) return 'rechazado';
   return 'aprobado';
 }
+// Entregas parciales (confirmado por el usuario): un pedido puede llegar en varias entregas.
+// Cada entrega es una "recepción" con su propia aprobación; lo que falta sigue "en camino" hasta
+// que llegue o hasta que Dirección cierre el pedido. Si Dirección rechaza una entrega, esa cantidad
+// vuelve a quedar pendiente.
+function recepcionesDe(p){ return (p.recepciones && p.recepciones.length) ? p.recepciones : (p.recibido ? [p.recibido] : []); }
+function estadoRecepcion(r){ if(!(r.items||[]).some(i=>i.cantidad>0)) return 'vacia'; return estadoLoteMovs(r.loteId); }
+function resumenPedido(p){
+  const recs = recepcionesDe(p).filter(r=>estadoRecepcion(r)!=='rechazado');
+  const llego = {}; recs.forEach(r=>(r.items||[]).forEach(i=>{ llego[i.itemId]=(llego[i.itemId]||0)+(Number(i.cantidad)||0); }));
+  const filas = p.items.map(it=>({...it, llego: fmtNum(llego[it.itemId]||0), falta: fmtNum(Math.max(0, it.cantidad-(llego[it.itemId]||0)))}));
+  const extra = []; Object.keys(llego).forEach(id=>{ if(!p.items.some(i=>i.itemId===id)){ const it=CATALOGO.find(x=>x.id===id); extra.push({itemId:id, itemNombre:it?it.nombre:id, unidad:it?it.unidad:'', cantidad:0, llego:llego[id], falta:0}); } });
+  const faltan = filas.filter(f=>f.falta>0);
+  let estado;
+  if(p.estado==='cancelado') estado='cancelado';
+  else if(p.estado==='cerrado') estado='cerrado';
+  else if(faltan.length) estado = recs.length ? 'parcial' : 'camino';
+  else estado='completo';
+  return {filas:filas.concat(extra), faltan, estado, recs:recepcionesDe(p)};
+}
+function pedidoEnCamino(p){ const e=resumenPedido(p).estado; return e==='camino' || e==='parcial'; }
 function estadoPedidoTxt(p){
-  if(p.estado==='cancelado') return '<span class="tag">Cancelado</span>';
-  if(p.estado==='enCamino') return '<span class="tag" style="color:#0e8a8a;border-color:#0e8a8a">🚚 En camino</span>';
-  const e = estadoLoteMovs(p.recibido && p.recibido.loteId);
-  if(e==='aprobado') return '<span class="tag pos" style="border-color:var(--ok)">✓ Recibido y sumado</span>';
-  if(e==='rechazado') return '<span class="tag" style="color:var(--bad);border-color:var(--bad)">Rechazado</span>';
-  return '<span class="tag" style="color:#b3742c;border-color:#b3742c">Recibido · falta aprobar</span>';
+  const r = resumenPedido(p);
+  if(r.estado==='cancelado') return '<span class="tag">Cancelado</span>';
+  if(r.estado==='camino') return '<span class="tag" style="color:#0e8a8a;border-color:#0e8a8a">🚚 En camino</span>';
+  if(r.estado==='parcial') return '<span class="tag" style="color:#b3742c;border-color:#b3742c">⏳ Llegó incompleto · falta material</span>';
+  if(r.estado==='cerrado') return '<span class="tag">Cerrado con faltante</span>';
+  if(r.recs.some(x=>estadoRecepcion(x)==='pendiente')) return '<span class="tag" style="color:#b3742c;border-color:#b3742c">Completo · falta aprobar</span>';
+  return '<span class="tag pos" style="border-color:var(--ok)">✓ Completo y sumado</span>';
 }
 function renderPed(){
-  const mods = esAdmin() || esSoloLectura() ? null : [modulo()];
-  const visibles = pedidos.filter(p=>p.estado!=='cancelado' && (esAdmin() ? p.modulo===modulo() : (!mods || mods.includes(p.modulo))));
-  const enCamino = visibles.filter(p=>p.estado==='enCamino');
-  const recibidos = visibles.filter(p=>p.estado==='recibido');
+  const visibles = pedidos.filter(p=>p.estado!=='cancelado' && (esSoloLectura() || p.modulo===modulo()));
+  const enCamino = visibles.filter(pedidoEnCamino);
+  const recibidos = visibles.filter(p=>!pedidoEnCamino(p));
   const tabs = [['camino',`En camino (${enCamino.length})`],['recibidos',`Recibidos (${recibidos.length})`]].concat(esAdmin()?[['nuevo','+ Nuevo pedido']]:[]);
   if(!tabs.some(t=>t[0]===pedSub)) pedSub='camino';
   let cuerpo = '';
@@ -4285,28 +4305,31 @@ function renderPed(){
   }
   $('#main').innerHTML = `<div class="card">
       <div style="font-size:17px;font-weight:800">🚚 Material por llegar · ${modulo()}</div>
-      <p class="hint">${esAdmin()?'Sube lo que pediste para este módulo. Cuando llegue, el coordinador marca lo que recibió y tú lo apruebas para sumarlo al inventario.':'Aquí ves lo que Dirección pidió para tu módulo. Cuando llegue, marca lo que recibiste.'}</p>
+      <p class="hint">${esAdmin()?'Sube lo que pediste para este módulo. Cuando llegue, el coordinador marca lo que recibió y tú lo apruebas para sumarlo al inventario. Si llega incompleto, lo que falta sigue en camino.':'Aquí ves lo que Dirección pidió para tu módulo. Cuando llegue, marca lo que recibiste. Si llega incompleto, lo que falta sigue aquí hasta que llegue.'}</p>
       <div class="subtabs" style="margin:8px 0 0">${tabs.map(([k,l])=>`<button class="${pedSub===k?'active':''}" onclick="pedSub='${k}';pedRecibiendo=null;renderPed()">${l}</button>`).join('')}</div>
     </div>${cuerpo}`;
 }
 function pedCardHtml(p){
-  const rec = p.recibido;
-  const filas = p.items.map(it=>{ const r = rec ? (rec.items.find(x=>x.itemId===it.itemId)||{cantidad:0}).cantidad : null;
-    const dif = r===null ? '' : (r===it.cantidad ? '' : ` <span class="${r<it.cantidad?'neg':'pos'}">(llegó ${fmtNum(r)})</span>`);
-    return `<tr><td>${it.itemNombre}</td><td>${fmtNum(it.cantidad)} ${it.unidad||''}${dif}</td></tr>`; }).join('')
-    + (rec ? rec.items.filter(x=>!p.items.some(i=>i.itemId===x.itemId)).map(x=>`<tr><td>${x.itemNombre}</td><td class="pos">no pedido · llegó ${fmtNum(x.cantidad)}</td></tr>`).join('') : '');
-  const e = rec ? estadoLoteMovs(rec.loteId) : null;
-  const puedeRecibir = p.estado==='enCamino' && !esSoloLectura();
+  const r = resumenPedido(p);
+  const hayRecs = r.recs.length>0;
+  const filas = r.filas.map(f=>`<tr><td>${f.itemNombre}</td><td>${f.cantidad?fmtNum(f.cantidad)+' '+(f.unidad||''):'no pedido'}</td>${hayRecs?`<td class="${f.llego>0?'pos':''}">${fmtNum(f.llego)}</td><td class="${f.falta>0?'neg':''}"><strong>${f.falta>0?fmtNum(f.falta):'—'}</strong></td>`:''}</tr>`).join('');
+  const enCamino = r.estado==='camino' || r.estado==='parcial';
+  const puedeRecibir = enCamino && !esSoloLectura();
+  const recsHtml = r.recs.map((x,idx)=>{ const e=estadoRecepcion(x);
+    const tag = e==='aprobado'?'<span class="tag pos" style="border-color:var(--ok)">Sumado</span>':e==='rechazado'?'<span class="tag" style="color:var(--bad);border-color:var(--bad)">Rechazado</span>':e==='vacia'?'<span class="tag">No llegó nada</span>':'<span class="tag" style="color:#b3742c;border-color:#b3742c">Falta aprobar</span>';
+    return `<div class="movitem" style="flex-wrap:wrap;gap:6px"><span style="min-width:0"><span class="invname">Entrega ${idx+1} · ${fechaCorta(x.fecha)} · ${(x.por||'').split('@')[0]}</span>
+      <span class="hint" style="display:block;margin:2px 0 0">${(x.items||[]).filter(i=>i.cantidad>0).map(i=>fmtNum(i.cantidad)+' '+i.itemNombre).join(', ')||'—'}${x.nota?' · '+x.nota:''}</span></span>
+      <span class="row" style="gap:6px;flex-wrap:nowrap">${tag}${esAdmin() && e==='pendiente' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="rechazarRecepcion('${p.id}',${idx})">Rechazar</button><button class="btn small" onclick="aprobarRecepcion('${p.id}',${idx})">✅ Aprobar</button>`:''}</span></div>`; }).join('');
   return `<div class="card">
     <div class="row" style="justify-content:space-between"><strong>${p.proveedor||'Pedido'}</strong>${estadoPedidoTxt(p)}</div>
     <p class="hint" style="margin:4px 0">Subido el ${fechaCorta(p.fecha)}${p.fechaEstimada?' · llega aprox. '+fechaCorta(p.fechaEstimada):''}${p.nota?' · '+p.nota:''}</p>
-    <div class="wrap-x"><table><tr><th>Artículo</th><th>${rec?'Pedido':'Cantidad'}</th></tr>${filas}</table></div>
-    ${rec?`<p class="hint" style="margin:6px 0 0">Recibido el ${fechaCorta(rec.fecha)} por ${(rec.por||'').split('@')[0]}${rec.nota?' · '+rec.nota:''}</p>`:''}
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>Pedido</th>${hayRecs?'<th>Llegó</th><th>Falta</th>':''}</tr>${filas}</table></div>
+    ${r.recs.length?`<div class="movlist" style="margin-top:8px">${recsHtml}</div>`:''}
+    ${r.estado==='cerrado'?`<p class="hint" style="margin:6px 0 0">Cerrado el ${fechaCorta(p.cerradoEn)}: lo que faltaba ya no va a llegar.</p>`:''}
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap">
-      ${esAdmin() && p.estado==='enCamino' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="cancelarPedido('${p.id}')">Cancelar pedido</button>` : ''}
-      ${puedeRecibir ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="pedRecibiendo='${p.id}';renderPed()">📦 Marcar lo que llegó</button>` : ''}
-      ${esAdmin() && e==='pendiente' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="rechazarRecepcion('${p.id}')">Rechazar</button><button class="btn small" onclick="aprobarRecepcion('${p.id}')">✅ Aprobar y sumar</button>` : ''}
-      ${esAdmin() && e==='rechazado' ? `<button class="btn small" onclick="reabrirPedido('${p.id}')">Volver a "en camino"</button>` : ''}
+      ${esAdmin() && r.estado==='camino' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="cancelarPedido('${p.id}')">Cancelar pedido</button>` : ''}
+      ${esAdmin() && r.estado==='parcial' ? `<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="cerrarPedido('${p.id}')">Ya no llegará lo que falta</button>` : ''}
+      ${puedeRecibir ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="pedRecibiendo='${p.id}';renderPed()">📦 ${r.estado==='parcial'?'Llegó lo que faltaba':'Marcar lo que llegó'}</button>` : ''}
     </div>
   </div>`;
 }
@@ -4353,11 +4376,13 @@ async function guardarPedido(){
 }
 function pedRecibirHtml(id){
   const p = pedidos.find(x=>x.id===id); if(!p){ pedRecibiendo=null; return ''; }
+  const r = resumenPedido(p);
+  const filas = r.filas.filter(f=>f.cantidad>0);
   return `<div class="card" style="border:2px solid var(--ok)">
-    <strong>📦 ¿Qué llegó?</strong>
-    <p class="hint">Ya viene escrito lo que se pidió. Si llegó otra cantidad, cámbiala. Si algo no llegó, pon 0.</p>
-    <div class="movlist">${p.items.map(it=>`<label class="movitem"><span style="min-width:0"><span class="invname">${it.itemNombre}</span><span class="hint" style="display:block;margin:2px 0 0">Se pidieron ${fmtNum(it.cantidad)} ${it.unidad||''}</span></span>
-      <input type="number" min="0" inputmode="decimal" id="rec-${it.itemId}" value="${it.cantidad}"></label>`).join('')}</div>
+    <strong>📦 ¿Qué llegó${r.recs.length?' en esta entrega':''}?</strong>
+    <p class="hint">Ya viene escrito lo que ${r.recs.length?'falta por llegar':'se pidió'}. Si llegó otra cantidad, cámbiala. Si algo no llegó, pon 0 y seguirá pendiente.</p>
+    <div class="movlist">${filas.map(f=>`<label class="movitem"><span style="min-width:0"><span class="invname">${f.itemNombre}</span><span class="hint" style="display:block;margin:2px 0 0">Pedido ${fmtNum(f.cantidad)} ${f.unidad||''}${r.recs.length?' · ya llegó '+fmtNum(f.llego)+' · falta '+fmtNum(f.falta):''}</span></span>
+      <input type="number" min="0" inputmode="decimal" id="rec-${f.itemId}" value="${f.falta}"></label>`).join('')}</div>
     <input id="rec-nota" placeholder="Nota (opcional, ej. llegó una hoja dañada)" style="margin-top:10px">
     <div class="row" style="justify-content:space-between;margin-top:10px">
       <button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="pedRecibiendo=null;renderPed()">Cancelar</button>
@@ -4367,27 +4392,35 @@ function pedRecibirHtml(id){
 }
 async function confirmarRecepcion(id){
   const p = pedidos.find(x=>x.id===id); if(!p) return;
-  const items = p.items.map(it=>({itemId:it.itemId, itemNombre:it.itemNombre, unidad:it.unidad, cantidad:Math.max(0, Number(document.getElementById('rec-'+it.itemId).value)||0)}));
+  const r0 = resumenPedido(p);
+  const items = r0.filas.filter(f=>f.cantidad>0).map(f=>({itemId:f.itemId, itemNombre:f.itemNombre, unidad:f.unidad, cantidad:Math.max(0, Number(document.getElementById('rec-'+f.itemId).value)||0)}));
   const nota = (document.getElementById('rec-nota').value||'').trim();
   const llegan = items.filter(i=>i.cantidad>0);
-  const difs = items.filter(i=>i.cantidad!==(p.items.find(x=>x.itemId===i.itemId)||{}).cantidad);
-  if(!confirm(`Llegó:\n\n${llegan.map(i=>`• ${fmtNum(i.cantidad)} ${i.unidad} ${i.itemNombre}`).join('\n')||'(nada)'}${difs.length?`\n\n⚠️ ${difs.length} artículo(s) con cantidad distinta a lo pedido.`:''}\n\n¿Guardar?`)) return;
+  if(!llegan.length) return alert('No escribiste ninguna cantidad. Si no llegó nada, toca Cancelar.');
+  const quedan = r0.filas.filter(f=>f.cantidad>0).map(f=>({f, falta: fmtNum(f.falta - ((items.find(i=>i.itemId===f.itemId)||{}).cantidad||0))})).filter(x=>x.falta>0);
+  if(!confirm(`Llegó:\n\n${llegan.map(i=>`• ${fmtNum(i.cantidad)} ${i.unidad} ${i.itemNombre}`).join('\n')}${quedan.length?`\n\n⏳ Seguirá pendiente:\n${quedan.map(x=>`• ${fmtNum(x.falta)} ${x.f.unidad} ${x.f.itemNombre}`).join('\n')}`:'\n\n✅ Con esto el pedido queda completo.'}\n\n¿Guardar?`)) return;
   try{
     const estado = estadoNuevoMovimiento();
     const loteId = cryptoId(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString();
-    const notaMov = `Pedido${p.proveedor?' de '+p.proveedor:''}${nota?' · '+nota:''}`;
+    const nEntrega = r0.recs.length + 1;
+    const notaMov = `Pedido${p.proveedor?' de '+p.proveedor:''}${nEntrega>1?' · entrega '+nEntrega:''}${nota?' · '+nota:''}`;
     for(const i of llegan){
       await db.collection('movimientos').doc(cryptoId()).set({modulo:p.modulo, itemId:i.itemId, itemNombre:i.itemNombre, tipo:'entrada', cantidad:i.cantidad, nota:notaMov, fecha, estado, loteId, pedidoId:p.id, creadoPor});
     }
-    await db.collection('pedidos').doc(p.id).update({estado:'recibido', recibido:{fecha, por:creadoPor, items, nota, loteId}});
-    pedRecibiendo = null; pedSub='recibidos';
-    toast(estado==='pendiente' ? '✅ Guardado. Dirección lo revisa y lo suma al inventario.' : '✅ Recibido y sumado al inventario.');
+    const recepciones = recepcionesDe(p).concat([{fecha, por:creadoPor, items, nota, loteId}]);
+    await db.collection('pedidos').doc(p.id).update({recepciones, recibido:null, estado: quedan.length ? 'enCamino' : 'recibido'});
+    pedRecibiendo = null; pedSub = quedan.length ? 'camino' : 'recibidos';
+    toast(quedan.length ? '✅ Guardado. Lo que falta sigue en camino.' : (estado==='pendiente' ? '✅ Guardado. Dirección lo revisa y lo suma al inventario.' : '✅ Recibido y sumado al inventario.'));
     renderPed();
   }catch(e){ alert('Error: '+e.message); }
 }
-async function aprobarRecepcion(id){ const p=pedidos.find(x=>x.id===id); if(!p||!p.recibido) return; try{ await cambiarEstadoLote(p.recibido.loteId,'aprobado'); toast('✅ Sumado al inventario de '+p.modulo+'.'); renderPed(); }catch(e){ alert('Error: '+e.message); } }
-async function rechazarRecepcion(id){ const p=pedidos.find(x=>x.id===id); if(!p||!p.recibido) return; if(!confirm('¿Rechazar lo que se marcó como recibido? No se sumará al inventario.')) return; try{ await cambiarEstadoLote(p.recibido.loteId,'rechazado'); renderPed(); }catch(e){ alert('Error: '+e.message); } }
-async function reabrirPedido(id){ if(!confirm('¿Regresar este pedido a "en camino" para que el módulo vuelva a marcar lo que llegó?')) return; try{ await db.collection('pedidos').doc(id).update({estado:'enCamino', recibidoAnterior:(pedidos.find(x=>x.id===id)||{}).recibido||null, recibido:null}); pedSub='camino'; renderPed(); }catch(e){ alert('Error: '+e.message); } }
+async function aprobarRecepcion(id, idx){ const p=pedidos.find(x=>x.id===id); const r=p&&recepcionesDe(p)[idx]; if(!r) return; try{ await cambiarEstadoLote(r.loteId,'aprobado'); toast('✅ Sumado al inventario de '+p.modulo+'.'); renderPed(); }catch(e){ alert('Error: '+e.message); } }
+async function rechazarRecepcion(id, idx){ const p=pedidos.find(x=>x.id===id); const r=p&&recepcionesDe(p)[idx]; if(!r) return; if(!confirm('¿Rechazar esta entrega? No se sumará al inventario y esas cantidades vuelven a quedar pendientes.')) return; try{ await cambiarEstadoLote(r.loteId,'rechazado'); if(p.estado==='recibido') await db.collection('pedidos').doc(p.id).update({estado:'enCamino'}); renderPed(); }catch(e){ alert('Error: '+e.message); } }
+async function cerrarPedido(id){
+  const p=pedidos.find(x=>x.id===id); if(!p) return; const r=resumenPedido(p);
+  if(!confirm(`¿Cerrar este pedido? Lo que falta ya no se esperará:\n\n${r.faltan.map(f=>`• ${fmtNum(f.falta)} ${f.unidad} ${f.itemNombre}`).join('\n')}`)) return;
+  try{ await db.collection('pedidos').doc(id).update({estado:'cerrado', cerradoEn:new Date().toISOString(), faltanteAlCerrar:r.faltan.map(f=>({itemId:f.itemId, itemNombre:f.itemNombre, cantidad:f.falta}))}); pedSub='recibidos'; renderPed(); }catch(e){ alert('Error: '+e.message); }
+}
 async function cancelarPedido(id){ if(!confirm('¿Cancelar este pedido? Ya no aparecerá como en camino.')) return; try{ await db.collection('pedidos').doc(id).update({estado:'cancelado', canceladoEn:new Date().toISOString()}); renderPed(); }catch(e){ alert('Error: '+e.message); } }
 
 // ===== Panel de usuarios (solo admin) =====
