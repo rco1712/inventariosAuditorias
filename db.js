@@ -9,12 +9,15 @@ import { getSupabase, supabaseReady } from './supabase.js';
 
 const COLLECTIONS_V1 = ['inicial','movimientos','resets','auditorias','instalacionesLog','instalacionesPuertas','prestamos','config'];
 // v2: tablas nuevas (faltantes/deuda, garantías, conteo del almacén, historial del stock inicial).
-const COLLECTIONS = [...COLLECTIONS_V1, 'deudasAuditoria','garantiasLog','conteoAbierto','inicialHist'];
+const COLLECTIONS_V2 = [...COLLECTIONS_V1, 'deudasAuditoria','garantiasLog','conteoAbierto','inicialHist'];
+// v3: pedidos de material en camino (Administración los sube; el módulo marca lo que llegó).
+const COLLECTIONS = [...COLLECTIONS_V2, 'pedidos'];
 
 const ddb = new Dexie('auditoriamodulos');
 const storesDe = list => { const st = {}; list.forEach(c => { st[c] = 'id, modulo, _dirty, _updatedAt'; }); st['_meta'] = 'key'; return st; };
 ddb.version(1).stores(storesDe(COLLECTIONS_V1));
-ddb.version(2).stores(storesDe(COLLECTIONS));
+ddb.version(2).stores(storesDe(COLLECTIONS_V2));
+ddb.version(3).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 

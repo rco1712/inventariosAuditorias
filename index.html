@@ -160,6 +160,7 @@ details.card[open] > summary::after{content:'▴'}
   <button data-v="home" class="active">🏠 Inicio</button>
   <button data-v="inv">📦 Inventario</button>
   <button data-v="mov">✍️ Anotar</button>
+  <button data-v="ped">🚚 Por llegar</button>
   <button data-v="inst">🔧 Instalación</button>
   <button data-v="gar">🛡️ Garantías</button>
   <button data-v="trasp">🔄 Traspasos</button>
@@ -186,7 +187,7 @@ if ('serviceWorker' in navigator) {
   let recargando = false;
   function hayCapturaEnCurso(){
     const vista = (typeof current !== 'undefined') ? current : '';
-    if(['mov','inst','gar','aud','ini','trasp','usr'].includes(vista)){
+    if(['mov','inst','gar','aud','ini','trasp','usr','ped'].includes(vista)){
       return [...document.querySelectorAll('#main input')].some(i => (i.type==='checkbox' ? false : String(i.value||'').trim()!=='' && i.type!=='date'));
     }
     return false;

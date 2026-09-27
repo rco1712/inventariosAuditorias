@@ -9,7 +9,7 @@
 
 
 const $=s=>document.querySelector(s);
-let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={};
+let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={}, pedidos=[];
 let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
@@ -258,13 +258,22 @@ async function loadStock(){
   try{
     sub(db.collection('movimientos').where('modulo','==',modulo()).onSnapshot(snap=>{
       movs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
-      if(current==='inv') renderInv(); if(current==='mov') renderMov(); if(current==='home') renderHome();
+      if(current==='inv') renderInv(); if(current==='mov') renderMov(); if(current==='home') renderHome(); if(current==='ped') renderPed();
+      revisarAvisosNuevos();
     }));
   }catch(e){}
   try{
     sub(db.collection('resets').onSnapshot(snap=>{
       resetMap={}; snap.docs.forEach(d=>{ resetMap[d.id]=d.data().fecha; });
       if(current==='inv') renderInv();
+    }));
+  }catch(e){}
+  try{
+    // Pedidos de material en camino (todos los módulos para Dirección; el suyo para el coordinador).
+    sub(db.collection('pedidos').onSnapshot(snap=>{
+      pedidos = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+      if(current==='ped') renderPed(); if(current==='home') renderHome();
+      revisarAvisosNuevos();
     }));
   }catch(e){}
   try{
@@ -484,6 +493,7 @@ function setView(v){
   if(v==='gar') renderGar();
   if(v==='ini') renderIni();
   if(v==='movhist') renderMovHist();
+  if(v==='ped') renderPed();
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
@@ -698,6 +708,8 @@ function renderHome(){
     t('🔄','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5');
     t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
     t('🛡️','Garantía','Material que se da en garantía',"irA('gar')",'#b3742c');
+    const enCamino = pedidos.filter(p=>p.modulo===modulo() && p.estado==='enCamino').length;
+    t('🚚','Por llegar', enCamino ? `${enCamino} pedido(s) en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'#0e8a8a');
   }
   if(modoConteoCoord()) tiles.unshift(`<button class="tile" style="--tc:#E0453F;grid-column:1/-1" onclick="irA('aud')"><span class="tile-ic">📋</span><span class="tile-t">Conteo del almacén</span><span class="tile-s">Dirección abrió el conteo de hoy. Cuenta todo lo que hay.</span></button>`);
   t('📦','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'#2c46b8');
@@ -721,6 +733,7 @@ function renderHome(){
   $('#main').innerHTML = `
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
+    ${avisosCardHtml()}
     ${avisoInstalarHtml()}
     <div id="home-apr"></div>
     <div class="tiles">${tiles.join('')}</div>`;
@@ -1729,7 +1742,9 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
   // Color de la cajonera: independiente del frente y de "todo un color" (confirmado por el
   // usuario: "la cajonera puede ser de cualquier color y el frente también puede ser de
   // cualquier color"). Si no se especifica, cae en la estructuraColor de siempre.
-  const colorCaj = colorCajonera || estructuraColor;
+  // Confirmado por el usuario: "todo de un color" = frente, cajonera, estructura y piezas de cajón
+  // del mismo color, aunque en pantalla se haya elegido otro color de cajonera.
+  const colorCaj = todoColor ? color : (colorCajonera || estructuraColor);
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
   let maxNota = '';
@@ -2034,11 +2049,12 @@ function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
   }
 }
 
+const ESPEJOS_POR_HOJA = 5; // frentes de espejo completos por hoja 122×244 con sierra de 5 mm (confirmado por el usuario)
 // Frente de un espejo (confirmado por el usuario): 2 zóclos y 4 marcos, del color del frente.
 function piezasFrenteEspejo(add, n, colorFrente){
   add('Zóclo especial',n,'16×52 cm',colorFrente,'ok','Frente de espejo: 1 por espejo, color del frente');
   add('Zóclo especial',n,'18×52 cm',colorFrente,'ok','Frente de espejo: 1 por espejo, color del frente');
-  add('Marco de espejo',2*n,'10×160 cm',colorFrente,'ok','Frente de espejo: 2 por espejo, color del frente');
+  add('Marco de espejo',2*n,'10×160 cm',colorFrente,'ok','Frente de espejo: 2 por espejo, color del frente. Todo el frente se descuenta junto: 1 hoja = frentes de 5 espejos (0.20 hojas por espejo)');
   add('Marco de espejo',2*n,'10×35 cm',colorFrente,'ok','Frente de espejo: 2 por espejo, color del frente');
 }
 function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, extra){
@@ -2170,7 +2186,7 @@ function sustituirMaleteroPorMax(piezasFijas){
 // las paredes/zóclos/entrepaños los aporta cada mueble elegido (ver piezasFijasDeFamilia).
 function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt){
   const estructuraColor = todoColor ? color : 'Blanco';
-  const colorCaj = colorCajonera || estructuraColor;
+  const colorCaj = todoColor ? color : (colorCajonera || estructuraColor);
   const base = buildDespiece(fam, 0, 0, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
   let piezasFijas = piezasFijasDeFamilia(base);
 
@@ -2307,10 +2323,22 @@ function piezasAConsumo(piezas, color){
     if(r.costo>0) addConsumo('Melamina '+c, r.costo);
   });
 
-  // Frente de espejo (zóclos especiales y marcos): proporcional según cuántas piezas de esa medida
-  // salen de una hoja de 122×244, en la melamina del color del frente.
+  // Zóclos (todos: normal, Max, zapatera, de espejo) y marcos de espejo (confirmado por el usuario):
+  // proporcional según cuántas piezas de esa medida salen de una hoja de 122×244, en la melamina
+  // de su color (p. ej. zóclo 10×52 → 48 por hoja → cada uno = 1/48 de hoja).
+  const PIEZAS_PROPORCIONALES = ['Zóclo normal','Zóclo Max','Zóclo zapatera'];
+  // Frente de espejo completo (2 marcos 10×160 + 2 marcos 10×35 + zóclos 16×52 y 18×52): se cortan
+  // juntos; con sierra de 5 mm, 1 hoja da para los frentes de 5 espejos (confirmado por el usuario)
+  // → 0.20 hojas por espejo, en el color del frente. Se cuenta un espejo por cada 2 marcos largos.
+  const espejosPorColor = {};
   piezas.forEach(p=>{
-    if(p.estado!=='ok' || typeof p.cantidad!=='number' || (p.nombre!=='Zóclo especial' && p.nombre!=='Marco de espejo')) return;
+    if(p.estado!=='ok' || typeof p.cantidad!=='number' || p.nombre!=='Marco de espejo' || !/160/.test(String(p.dim))) return;
+    if(!p.colorDestino || p.colorDestino==='—') return;
+    espejosPorColor[p.colorDestino] = (espejosPorColor[p.colorDestino]||0) + p.cantidad/2;
+  });
+  Object.keys(espejosPorColor).forEach(c=>addConsumo('Melamina '+c, espejosPorColor[c]/ESPEJOS_POR_HOJA));
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number' || !PIEZAS_PROPORCIONALES.includes(p.nombre)) return;
     const m = String(p.dim).match(/([\d.]+)\s*×\s*([\d.]+)/);
     if(!m || !p.colorDestino || p.colorDestino==='—') return;
     const porHoja = piezasPorHojaIndividual(Number(m[1]), Number(m[2]), 122, 244);
@@ -2448,12 +2476,12 @@ function renderDesp(){
     </label>
     <div id="d-selector-wrap" style="margin-top:8px"></div>
     <div class="grid2" style="margin-top:8px">
-      <select id="d-color">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
+      <select id="d-color" onchange="syncTodoColor('d')">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
       <select id="d-color-cajonera">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     </div>
     <p class="hint" style="margin:2px 0 0">El segundo color es para cajonera(s)/cajonera de espejo, independiente del frente.</p>
     <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <input type="checkbox" id="d-todocolor" style="width:auto"> Cliente pidió "todo de un solo color"
+      <input type="checkbox" id="d-todocolor" style="width:auto" onchange="syncTodoColor('d')"> Cliente pidió "todo de un solo color"
     </label>
     <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
       <input type="checkbox" id="d-corredera-ext" style="width:auto"> Usar corredera de extensión (sustituye la corredera normal en las cajoneras; no aplica a Cajonera Max, que siempre lleva extensión)
@@ -2601,9 +2629,10 @@ function renderInstMueble(){
   <div class="card">
     <div class="paso">2</div><strong>¿De qué color?</strong>
     <label class="hint" style="display:block;margin-top:10px">Color de los frentes</label>
-    <select id="i-color" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
+    <select id="i-color" style="margin-top:4px" onchange="syncTodoColor('i')">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     <div id="i-cajcolor-wrap"></div>
-    <label class="row" style="margin-top:12px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-todocolor" style="width:22px;min-height:22px;flex:0 0 22px"> El cliente pidió todo del mismo color (también el interior)</label>
+    <label class="row" style="margin-top:12px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-todocolor" style="width:22px;min-height:22px;flex:0 0 22px" onchange="syncTodoColor('i')"> El cliente pidió todo del mismo color (también el interior)</label>
+    <p id="i-todocolor-hint" class="hint" style="display:none;margin:6px 0 0">✅ Frente, cajonera, estructura y piezas de cajón van del mismo color.</p>
   </div>
   <details class="card" ${iAdicionales.length?'open':''}>
     <summary><span class="paso">3</span><strong>¿Lleva algo extra?</strong> <span class="hint" style="margin:0 0 0 6px">(opcional)</span></summary>
@@ -2645,6 +2674,7 @@ function renderISelector(){
       ${iFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
       <label class="hint" style="display:block;margin-top:8px">Color de la cajonera / cajonera de espejo (independiente del frente)</label><select id="i-color-cajonera-comp">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     `;
+    syncTodoColor('i');
   } else {
     const fams = [...new Set(MODELOS.map(m=>m.fam))];
     if(!iFamSel || !fams.includes(iFamSel)) iFamSel = fams[0];
@@ -2668,6 +2698,21 @@ function renderInstMaxToggle(){
   wrapCaj.innerHTML = (m.cajones>0 || m.espejos>0)
     ? `<label class="hint" style="display:block;margin-top:10px">Color de la cajonera${m.espejos>0?' y del mueble de espejo':''}</label><select id="i-color-cajonera" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>`
     : '';
+  syncTodoColor('i');
+}
+
+// "Todo de un color" (confirmado por el usuario): al marcarlo, la cajonera toma en automático el
+// color del frente y se bloquea; al desmarcarlo se puede elegir otra vez.
+function syncTodoColor(prefix){
+  const chk = document.getElementById(prefix+'-todocolor');
+  const frente = document.getElementById(prefix+'-color');
+  if(!chk || !frente) return;
+  const ids = prefix==='i' ? ['i-color-cajonera','i-color-cajonera-comp'] : ['d-color-cajonera'];
+  ids.forEach(id=>{ const sel=document.getElementById(id); if(!sel) return;
+    if(chk.checked){ sel.value = frente.value; sel.disabled = true; sel.style.opacity = '.6'; }
+    else { sel.disabled = false; sel.style.opacity = ''; }
+  });
+  const hint = document.getElementById(prefix+'-todocolor-hint'); if(hint) hint.style.display = chk.checked ? 'block' : 'none';
 }
 
 function previewInst(){
@@ -4106,7 +4151,8 @@ async function renderAprobaciones(){
 async function cambiarEstadoLote(loteId, nuevoEstado){
   const snap = await db.collection('movimientos').get();
   const docs = snap.docs.filter(d=>{ const m=d.data(); return (m.loteId||d.id)===loteId && m.estado==='pendiente'; });
-  for(const d of docs){ await db.collection('movimientos').doc(d.id).update({estado:nuevoEstado}); }
+  const revisadoEn = new Date().toISOString(), revisadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+  for(const d of docs){ await db.collection('movimientos').doc(d.id).update({estado:nuevoEstado, revisadoEn, revisadoPor}); }
 }
 async function aprobarLote(loteId){
   try{ await cambiarEstadoLote(loteId,'aprobado'); renderAprobaciones(); }
@@ -4132,6 +4178,217 @@ async function rechazarInstalacion(logId){
     renderAprobaciones();
   }catch(e){ alert('Error: '+e.message); }
 }
+
+// ===== Avisos (confirmado por el usuario) =====
+// Cada módulo se entera cuando Dirección aprueba o rechaza lo que anotó (instalaciones, entradas,
+// salidas, garantías…) y cuando le mandan material en camino. Dirección se entera cuando un módulo
+// marca un pedido como recibido. Se muestran en Inicio y, si se activan, como notificación del celular
+// mientras la app esté abierta o en segundo plano.
+function claveAvisos(){ return 'avisosVisto_'+modulo()+'_'+(getCurrentUserEmail?getCurrentUserEmail():''); }
+function avisosVisto(){ try{ const v=localStorage.getItem(claveAvisos()); if(v) return v; const ahora=new Date().toISOString(); localStorage.setItem(claveAvisos(), ahora); return ahora; }catch(e){ return new Date(0).toISOString(); } }
+function describirLote(ms){
+  const tipos = [...new Set(ms.map(m=>m.tipo))];
+  if(ms.some(m=>m.pedidoId)) return 'Material recibido de un pedido';
+  if(tipos.includes('instalacion')) return 'Instalación';
+  if(tipos.includes('garantia')) return 'Garantía';
+  if(tipos.includes('devolucion')) return 'Regreso de garantía';
+  if(ms.some(m=>m.motivo==='armarJuegos')) return 'Armado de juegos de corredera';
+  return tipos.map(t=>(TIPO_LABEL[t]||t)).join(' y ');
+}
+function calcularAvisos(){
+  const visto = avisosVisto(); const out = [];
+  if(!esAdmin()){
+    const lotes = {};
+    movs.filter(m=>m.revisadoEn && m.revisadoEn>visto && (m.estado==='aprobado'||m.estado==='rechazado')).forEach(m=>{ (lotes[m.loteId||m.id]=lotes[m.loteId||m.id]||[]).push(m); });
+    Object.keys(lotes).forEach(k=>{ const ms=lotes[k]; const ok=ms[0].estado==='aprobado';
+      out.push({id:'lote_'+k+'_'+ms[0].estado, fecha:ms[0].revisadoEn, ic: ok?'✅':'❌',
+        titulo: `Dirección ${ok?'aprobó':'rechazó'}: ${describirLote(ms)}`,
+        texto: `${ms.length} artículo(s) · anotado el ${new Date(ms[0].fecha).toLocaleDateString('es-MX')}${ok?'':' · no se sumó ni se descontó'}`}); });
+    pedidos.filter(p=>p.modulo===modulo() && p.estado==='enCamino' && p.fecha>visto).forEach(p=>out.push({id:'ped_'+p.id, fecha:p.fecha, ic:'🚚',
+      titulo:'Viene material en camino', texto:`${p.items.length} artículo(s)${p.proveedor?' · '+p.proveedor:''}${p.fechaEstimada?' · llega aprox. '+fechaCorta(p.fechaEstimada):''}`}));
+  } else {
+    pedidos.filter(p=>p.estado==='recibido' && p.recibido && p.recibido.fecha>visto && estadoLoteMovs(p.recibido.loteId)==='pendiente').forEach(p=>out.push({id:'pedrec_'+p.id, fecha:p.recibido.fecha, ic:'📦',
+      titulo:`${p.modulo} recibió material`, texto:'Revisa lo que llegó y apruébalo para sumarlo al inventario.'}));
+  }
+  return out.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+}
+function fechaCorta(d){ return new Date((String(d).length===10?d+'T12:00:00':d)).toLocaleDateString('es-MX',{day:'numeric',month:'short'}); }
+function avisosCardHtml(){
+  const av = calcularAvisos();
+  const permiso = (typeof Notification!=='undefined') ? Notification.permission : 'unsupported';
+  const botonPermiso = permiso==='default' ? `<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="activarNotificaciones()">🔔 Avisarme en el celular</button>` : '';
+  if(!av.length) return botonPermiso ? `<div class="card" style="padding:12px"><div class="pend"><div class="hint" style="margin:0">Activa los avisos para enterarte cuando Dirección apruebe o te manden material.</div>${botonPermiso}</div></div>` : '';
+  return `<div class="card" style="padding:12px;border:2px solid var(--brand)">
+    <div class="row" style="justify-content:space-between"><strong>🔔 Novedades (${av.length})</strong><button class="btn small" onclick="marcarAvisosVistos()">Entendido</button></div>
+    <div class="movlist" style="margin-top:8px">${av.slice(0,6).map(a=>`<div class="movitem"><span style="min-width:0"><span class="invname">${a.ic} ${a.titulo}</span><span class="hint" style="display:block;margin:2px 0 0">${a.texto}</span></span></div>`).join('')}</div>
+    ${av.length>6?`<p class="hint">… y ${av.length-6} más</p>`:''}${botonPermiso?`<div style="margin-top:8px">${botonPermiso}</div>`:''}
+  </div>`;
+}
+function marcarAvisosVistos(){ try{ localStorage.setItem(claveAvisos(), new Date().toISOString()); }catch(e){} renderHome(); }
+async function activarNotificaciones(){
+  if(typeof Notification==='undefined') return alert('Este celular no permite avisos desde el navegador. En iPhone, primero instala la app en la pantalla de inicio.');
+  const r = await Notification.requestPermission();
+  toast(r==='granted' ? '🔔 Avisos activados.' : 'No se activaron los avisos.');
+  renderHome();
+}
+let _avisosNotificados = null;
+async function revisarAvisosNuevos(){
+  if(!moduloActual) return;
+  const av = calcularAvisos();
+  if(_avisosNotificados===null){ _avisosNotificados = new Set(av.map(a=>a.id)); return; } // al abrir no se repite lo que ya se ve en Inicio
+  const nuevos = av.filter(a=>!_avisosNotificados.has(a.id));
+  nuevos.forEach(a=>_avisosNotificados.add(a.id));
+  if(!nuevos.length || typeof Notification==='undefined' || Notification.permission!=='granted') return;
+  try{
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    for(const a of nuevos.slice(0,3)){
+      const opts = {body:a.texto, icon:'icon-192.png', badge:'icon-192.png', tag:a.id};
+      if(reg && reg.showNotification) await reg.showNotification(a.ic+' '+a.titulo, opts); else new Notification(a.ic+' '+a.titulo, opts);
+    }
+  }catch(e){}
+}
+
+// ===== Material por llegar (pedidos) — confirmado por el usuario =====
+// 1) Dirección/Administración sube lo que pidió para cada módulo (queda "en camino").
+// 2) Cuando llega, el coordinador marca lo que realmente llegó (puede ser distinto a lo pedido).
+// 3) Dirección lo revisa y lo aprueba: en ese momento se suma al inventario como Entrada.
+let pedSub = 'camino', pedForm = {modulo:null, cat:null, items:{}, proveedor:'', nota:'', fechaEstimada:''}, pedRecibiendo = null;
+function estadoLoteMovs(loteId){
+  if(!loteId) return null;
+  const ms = movs.filter(m=>m.loteId===loteId);
+  if(!ms.length) return 'pendiente';
+  if(ms.some(m=>m.estado==='pendiente')) return 'pendiente';
+  if(ms.every(m=>m.estado==='rechazado')) return 'rechazado';
+  return 'aprobado';
+}
+function estadoPedidoTxt(p){
+  if(p.estado==='cancelado') return '<span class="tag">Cancelado</span>';
+  if(p.estado==='enCamino') return '<span class="tag" style="color:#0e8a8a;border-color:#0e8a8a">🚚 En camino</span>';
+  const e = estadoLoteMovs(p.recibido && p.recibido.loteId);
+  if(e==='aprobado') return '<span class="tag pos" style="border-color:var(--ok)">✓ Recibido y sumado</span>';
+  if(e==='rechazado') return '<span class="tag" style="color:var(--bad);border-color:var(--bad)">Rechazado</span>';
+  return '<span class="tag" style="color:#b3742c;border-color:#b3742c">Recibido · falta aprobar</span>';
+}
+function renderPed(){
+  const mods = esAdmin() || esSoloLectura() ? null : [modulo()];
+  const visibles = pedidos.filter(p=>p.estado!=='cancelado' && (esAdmin() ? p.modulo===modulo() : (!mods || mods.includes(p.modulo))));
+  const enCamino = visibles.filter(p=>p.estado==='enCamino');
+  const recibidos = visibles.filter(p=>p.estado==='recibido');
+  const tabs = [['camino',`En camino (${enCamino.length})`],['recibidos',`Recibidos (${recibidos.length})`]].concat(esAdmin()?[['nuevo','+ Nuevo pedido']]:[]);
+  if(!tabs.some(t=>t[0]===pedSub)) pedSub='camino';
+  let cuerpo = '';
+  if(pedSub==='nuevo') cuerpo = pedNuevoHtml();
+  else if(pedRecibiendo) cuerpo = pedRecibirHtml(pedRecibiendo);
+  else {
+    const lista = pedSub==='camino' ? enCamino : recibidos;
+    cuerpo = lista.length ? lista.map(pedCardHtml).join('') : `<div class="card hint">${pedSub==='camino'?'No hay material en camino para '+modulo()+'.':'Todavía no hay pedidos recibidos.'}</div>`;
+  }
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">🚚 Material por llegar · ${modulo()}</div>
+      <p class="hint">${esAdmin()?'Sube lo que pediste para este módulo. Cuando llegue, el coordinador marca lo que recibió y tú lo apruebas para sumarlo al inventario.':'Aquí ves lo que Dirección pidió para tu módulo. Cuando llegue, marca lo que recibiste.'}</p>
+      <div class="subtabs" style="margin:8px 0 0">${tabs.map(([k,l])=>`<button class="${pedSub===k?'active':''}" onclick="pedSub='${k}';pedRecibiendo=null;renderPed()">${l}</button>`).join('')}</div>
+    </div>${cuerpo}`;
+}
+function pedCardHtml(p){
+  const rec = p.recibido;
+  const filas = p.items.map(it=>{ const r = rec ? (rec.items.find(x=>x.itemId===it.itemId)||{cantidad:0}).cantidad : null;
+    const dif = r===null ? '' : (r===it.cantidad ? '' : ` <span class="${r<it.cantidad?'neg':'pos'}">(llegó ${fmtNum(r)})</span>`);
+    return `<tr><td>${it.itemNombre}</td><td>${fmtNum(it.cantidad)} ${it.unidad||''}${dif}</td></tr>`; }).join('')
+    + (rec ? rec.items.filter(x=>!p.items.some(i=>i.itemId===x.itemId)).map(x=>`<tr><td>${x.itemNombre}</td><td class="pos">no pedido · llegó ${fmtNum(x.cantidad)}</td></tr>`).join('') : '');
+  const e = rec ? estadoLoteMovs(rec.loteId) : null;
+  const puedeRecibir = p.estado==='enCamino' && !esSoloLectura();
+  return `<div class="card">
+    <div class="row" style="justify-content:space-between"><strong>${p.proveedor||'Pedido'}</strong>${estadoPedidoTxt(p)}</div>
+    <p class="hint" style="margin:4px 0">Subido el ${fechaCorta(p.fecha)}${p.fechaEstimada?' · llega aprox. '+fechaCorta(p.fechaEstimada):''}${p.nota?' · '+p.nota:''}</p>
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>${rec?'Pedido':'Cantidad'}</th></tr>${filas}</table></div>
+    ${rec?`<p class="hint" style="margin:6px 0 0">Recibido el ${fechaCorta(rec.fecha)} por ${(rec.por||'').split('@')[0]}${rec.nota?' · '+rec.nota:''}</p>`:''}
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap">
+      ${esAdmin() && p.estado==='enCamino' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="cancelarPedido('${p.id}')">Cancelar pedido</button>` : ''}
+      ${puedeRecibir ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="pedRecibiendo='${p.id}';renderPed()">📦 Marcar lo que llegó</button>` : ''}
+      ${esAdmin() && e==='pendiente' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="rechazarRecepcion('${p.id}')">Rechazar</button><button class="btn small" onclick="aprobarRecepcion('${p.id}')">✅ Aprobar y sumar</button>` : ''}
+      ${esAdmin() && e==='rechazado' ? `<button class="btn small" onclick="reabrirPedido('${p.id}')">Volver a "en camino"</button>` : ''}
+    </div>
+  </div>`;
+}
+function pedNuevoHtml(){
+  const f = pedForm;
+  if(!f.modulo) f.modulo = modulo();
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  if(!f.cat) f.cat = cats[0];
+  const items = CATALOGO.filter(i=>i.cat===f.cat);
+  const elegidos = Object.keys(f.items).filter(id=>f.items[id]>0);
+  return `<div class="card">
+    <div class="paso">1</div><strong>¿Para qué módulo?</strong>
+    <select style="margin-top:8px" onchange="pedForm.modulo=this.value">${MODULOS.map(m=>`<option ${m.nombre===f.modulo?'selected':''}>${m.nombre}</option>`).join('')}</select>
+  </div>
+  <div class="card">
+    <div class="paso">2</div><strong>¿Qué va a llegar?</strong>
+    <div class="chips" style="margin-top:10px">${cats.map(c=>{ const n=CATALOGO.filter(i=>i.cat===c && f.items[i.id]>0).length; return `<button class="chip ${c===f.cat?'on':''}" onclick="pedForm.cat='${c}';renderPed()">${ICONO_CAT[c]||''} ${c}${n?' ✓'+n:''}</button>`; }).join('')}</div>
+    <div class="movlist" style="margin-top:10px">${items.map(it=>`<label class="movitem"><span class="invname">${it.nombre}</span>
+      <input type="number" min="0" inputmode="decimal" placeholder="—" value="${f.items[it.id]||''}" oninput="pedForm.items['${it.id}']=Number(this.value)||0"></label>`).join('')}</div>
+  </div>
+  <div class="card">
+    <div class="paso">3</div><strong>Datos del pedido</strong>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Proveedor</label><input style="margin-top:4px" value="${String(f.proveedor).replace(/"/g,'&quot;')}" oninput="pedForm.proveedor=this.value" placeholder="ej. Maderas del Norte"></div>
+      <div><label class="hint">Llega aprox.</label><input type="date" style="margin-top:4px" value="${f.fechaEstimada}" onchange="pedForm.fechaEstimada=this.value"></div>
+    </div>
+    <input style="margin-top:10px" value="${String(f.nota).replace(/"/g,'&quot;')}" oninput="pedForm.nota=this.value" placeholder="Nota (opcional, ej. número de orden)">
+    <p class="hint">${elegidos.length} artículo(s) capturados.</p>
+    <button class="btn" style="width:100%;min-height:52px" onclick="guardarPedido()">🚚 Guardar pedido en camino</button>
+  </div>`;
+}
+async function guardarPedido(){
+  if(!esAdmin()) return;
+  const f = pedForm;
+  const items = Object.keys(f.items).filter(id=>f.items[id]>0).map(id=>{ const it=CATALOGO.find(i=>i.id===id); return {itemId:id, itemNombre:it.nombre, unidad:it.unidad, cantidad:f.items[id]}; });
+  if(!items.length) return alert('Escribe la cantidad de al menos un artículo.');
+  if(!confirm(`Pedido para ${f.modulo}:\n\n${items.map(i=>`• ${fmtNum(i.cantidad)} ${i.unidad} ${i.itemNombre}`).join('\n')}\n\n¿Guardar como "en camino"?`)) return;
+  try{
+    await db.collection('pedidos').doc(cryptoId()).set({modulo:f.modulo, items, proveedor:f.proveedor.trim(), nota:f.nota.trim(), fechaEstimada:f.fechaEstimada||'', estado:'enCamino', fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''});
+    pedForm = {modulo:f.modulo, cat:f.cat, items:{}, proveedor:'', nota:'', fechaEstimada:''};
+    toast('✅ Pedido guardado. '+f.modulo+' lo verá en "Por llegar".');
+    pedSub='camino'; renderPed();
+  }catch(e){ alert('Error: '+e.message); }
+}
+function pedRecibirHtml(id){
+  const p = pedidos.find(x=>x.id===id); if(!p){ pedRecibiendo=null; return ''; }
+  return `<div class="card" style="border:2px solid var(--ok)">
+    <strong>📦 ¿Qué llegó?</strong>
+    <p class="hint">Ya viene escrito lo que se pidió. Si llegó otra cantidad, cámbiala. Si algo no llegó, pon 0.</p>
+    <div class="movlist">${p.items.map(it=>`<label class="movitem"><span style="min-width:0"><span class="invname">${it.itemNombre}</span><span class="hint" style="display:block;margin:2px 0 0">Se pidieron ${fmtNum(it.cantidad)} ${it.unidad||''}</span></span>
+      <input type="number" min="0" inputmode="decimal" id="rec-${it.itemId}" value="${it.cantidad}"></label>`).join('')}</div>
+    <input id="rec-nota" placeholder="Nota (opcional, ej. llegó una hoja dañada)" style="margin-top:10px">
+    <div class="row" style="justify-content:space-between;margin-top:10px">
+      <button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="pedRecibiendo=null;renderPed()">Cancelar</button>
+      <button class="btn" onclick="confirmarRecepcion('${p.id}')">✅ Guardar lo que llegó</button>
+    </div>
+  </div>`;
+}
+async function confirmarRecepcion(id){
+  const p = pedidos.find(x=>x.id===id); if(!p) return;
+  const items = p.items.map(it=>({itemId:it.itemId, itemNombre:it.itemNombre, unidad:it.unidad, cantidad:Math.max(0, Number(document.getElementById('rec-'+it.itemId).value)||0)}));
+  const nota = (document.getElementById('rec-nota').value||'').trim();
+  const llegan = items.filter(i=>i.cantidad>0);
+  const difs = items.filter(i=>i.cantidad!==(p.items.find(x=>x.itemId===i.itemId)||{}).cantidad);
+  if(!confirm(`Llegó:\n\n${llegan.map(i=>`• ${fmtNum(i.cantidad)} ${i.unidad} ${i.itemNombre}`).join('\n')||'(nada)'}${difs.length?`\n\n⚠️ ${difs.length} artículo(s) con cantidad distinta a lo pedido.`:''}\n\n¿Guardar?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento();
+    const loteId = cryptoId(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString();
+    const notaMov = `Pedido${p.proveedor?' de '+p.proveedor:''}${nota?' · '+nota:''}`;
+    for(const i of llegan){
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:p.modulo, itemId:i.itemId, itemNombre:i.itemNombre, tipo:'entrada', cantidad:i.cantidad, nota:notaMov, fecha, estado, loteId, pedidoId:p.id, creadoPor});
+    }
+    await db.collection('pedidos').doc(p.id).update({estado:'recibido', recibido:{fecha, por:creadoPor, items, nota, loteId}});
+    pedRecibiendo = null; pedSub='recibidos';
+    toast(estado==='pendiente' ? '✅ Guardado. Dirección lo revisa y lo suma al inventario.' : '✅ Recibido y sumado al inventario.');
+    renderPed();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function aprobarRecepcion(id){ const p=pedidos.find(x=>x.id===id); if(!p||!p.recibido) return; try{ await cambiarEstadoLote(p.recibido.loteId,'aprobado'); toast('✅ Sumado al inventario de '+p.modulo+'.'); renderPed(); }catch(e){ alert('Error: '+e.message); } }
+async function rechazarRecepcion(id){ const p=pedidos.find(x=>x.id===id); if(!p||!p.recibido) return; if(!confirm('¿Rechazar lo que se marcó como recibido? No se sumará al inventario.')) return; try{ await cambiarEstadoLote(p.recibido.loteId,'rechazado'); renderPed(); }catch(e){ alert('Error: '+e.message); } }
+async function reabrirPedido(id){ if(!confirm('¿Regresar este pedido a "en camino" para que el módulo vuelva a marcar lo que llegó?')) return; try{ await db.collection('pedidos').doc(id).update({estado:'enCamino', recibidoAnterior:(pedidos.find(x=>x.id===id)||{}).recibido||null, recibido:null}); pedSub='camino'; renderPed(); }catch(e){ alert('Error: '+e.message); } }
+async function cancelarPedido(id){ if(!confirm('¿Cancelar este pedido? Ya no aparecerá como en camino.')) return; try{ await db.collection('pedidos').doc(id).update({estado:'cancelado', canceladoEn:new Date().toISOString()}); renderPed(); }catch(e){ alert('Error: '+e.message); } }
 
 // ===== Panel de usuarios (solo admin) =====
 // Usa la Edge Function 'admin-usuarios' (ver auth.js / supabase/functions/admin-usuarios) para
@@ -4217,7 +4474,7 @@ async function eliminarUsuarioUI(userId, email){
 // ===== Borrar datos de prueba (confirmado por el usuario) =====
 // Deja los módulos elegidos en blanco, como recién instalados. Se borra con la misma marca de
 // "borrado" que usa la sincronización, así también desaparece en la nube y en los demás celulares.
-const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto'];
+const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto','pedidos'];
 async function borrarDatosModulo(mods){
   if(!esAdmin()) return alert('Solo Dirección puede borrar datos.');
   const nombre = mods.length>1 ? 'LOS 5 MÓDULOS' : mods[0];
@@ -4237,7 +4494,7 @@ async function borrarDatosModulo(mods){
     snap.docs.forEach(d=>{ const x=d.data()||{}; if(mods.includes(x.origen)||mods.includes(x.destino)) aBorrar.push(['prestamos',d.id]); });
   }catch(e){}
   const porCol = {}; aBorrar.forEach(([c])=>porCol[c]=(porCol[c]||0)+1);
-  const nombres = {movimientos:'movimientos (entradas, salidas, cortes, instalaciones, garantías…)', inicial:'stock inicial', inicialHist:'historial del stock inicial', resets:'puestas en cero', auditorias:'auditorías y conteos', deudasAuditoria:'faltantes (deuda)', garantiasLog:'garantías', instalacionesLog:'instalaciones', instalacionesPuertas:'instalaciones de puertas', conteoAbierto:'conteos abiertos', prestamos:'traspasos / préstamos'};
+  const nombres = {movimientos:'movimientos (entradas, salidas, cortes, instalaciones, garantías…)', inicial:'stock inicial', inicialHist:'historial del stock inicial', resets:'puestas en cero', auditorias:'auditorías y conteos', deudasAuditoria:'faltantes (deuda)', garantiasLog:'garantías', instalacionesLog:'instalaciones', instalacionesPuertas:'instalaciones de puertas', conteoAbierto:'conteos abiertos', prestamos:'traspasos / préstamos', pedidos:'pedidos por llegar'};
   if(!aBorrar.length) return alert(`${nombre} ya está en blanco. No hay nada que borrar.`);
   const detalle = Object.keys(porCol).map(c=>`• ${porCol[c]} ${nombres[c]||c}`).join('\n');
   const aviso = mods.length===1 ? `\n\nOjo: los traspasos de ${mods[0]} con otros módulos también se borran, pero la entrada o salida que quedó en el OTRO módulo se queda allá.` : '';

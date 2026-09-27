@@ -1,6 +1,6 @@
 // Service worker: cachea el "app shell" para que la app abra y funcione sin internet.
 // Los datos van por src/db.js (IndexedDB + sync a Supabase), no por aquí.
-const CACHE = 'auditoriamodulos-v46';
+const CACHE = 'auditoriamodulos-v50';
 const APP_SHELL = [
   './',
   './index.html',
@@ -69,4 +69,13 @@ self.addEventListener('fetch', (event) => {
       return res;
     }))
   );
+});
+
+// Avisos: al tocar una notificación, abre (o trae al frente) la app.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+    for (const c of cs) { if ('focus' in c) return c.focus(); }
+    return self.clients.openWindow('./index.html');
+  }));
 });
