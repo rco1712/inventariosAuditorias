@@ -9,7 +9,7 @@
 
 
 const $=s=>document.querySelector(s);
-let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={}, pedidos=[];
+let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={}, pedidos=[], minimosMap={};
 let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
@@ -89,7 +89,8 @@ const CATALOGO = [];
   cintillaPvcColores.forEach(c=>CATALOGO.push({cat:'Cintilla',nombre:'Cintilla '+c,unidad:'metros'}));
   cintillaPvcColores.forEach(c=>CATALOGO.push({cat:'PVC',nombre:'PVC '+c,unidad:'metros'}));
   ['Pegamento amarillo','Pegamento granulado'].forEach(n=>CATALOGO.push({cat:'Pegamento',nombre:n,unidad:'kg'}));
-  CATALOGO.push({cat:'Stickers',nombre:'Stickers (colores por definir)',unidad:'pza'});
+  // Stickers: mismos colores que la melamina (confirmado por el usuario; no hay stickers de MDF).
+  melColores.forEach(c=>CATALOGO.push({cat:'Stickers',nombre:'Sticker '+c,unidad:'pza'}));
   ['Aros colgadores','Bastidores','Bisagras','Clavo 25','Clavo 30','Emplaye','Escuadras','Espejos closet','Espejos 60x160','Jaladeras','Juego de corredera','Lambrín por caja','Pijas 1','Pijas 2','Pijas 3/4','Pijas 5/8','Pintura blanca','Pintura choco','Pintura de colores','Pintura negra','Resbalones','Rieles','Sistemas','Taquetes','Tarugos','Tornillos recortables','Tubos 1.5 m','Correderas de extensión','Jaladera plana','Push']
     .forEach(n=>CATALOGO.push({cat:'Herrajes',nombre:n,unidad:'pza'}));
   CATALOGO.push({cat:'Herrajes',nombre:'Juegos de bridas',unidad:'juego'});
@@ -113,6 +114,9 @@ const CORR_TIPOS = [
   {suf:' (extensión)', juego:'Correderas de extensión', hembra:'Corredera ext. hembra (sin pareja)', macho:'Corredera ext. macho (sin pareja)', etiqueta:'Corredera de extensión'}];
 function esCorrSuelta(it){ return !!it && /\(sin pareja\)$/.test(it.nombre); }
 function modulo(){return moduloActual;}
+// Búsqueda sin acentos ni mayúsculas ("correde" encuentra "Juego de corredera").
+function normTxt(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function coincide(nombre, q){ const n=normTxt(nombre); return normTxt(q).split(/\s+/).filter(Boolean).every(w=>n.includes(w)); }
 function inicialKey(mod,itemId){return mod+'__'+itemId;}
 
 function renderModBar(){
@@ -127,7 +131,8 @@ function renderModBar(){
 function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
   // Coordinadores: solo lo que usan en el día (se ocultan Catálogo e Historial, que son de consulta avanzada).
-  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist'] : []);
+  // Coordinador: menú corto (confirmado por el usuario) con lo del día; lo demás queda en "☰ Más".
+  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr','ped','mas'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist','gar','trasp','rep','desp'] : ['mas']);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
   });
@@ -266,6 +271,13 @@ async function loadStock(){
     sub(db.collection('resets').onSnapshot(snap=>{
       resetMap={}; snap.docs.forEach(d=>{ resetMap[d.id]=d.data().fecha; });
       if(current==='inv') renderInv();
+    }));
+  }catch(e){}
+  try{
+    // Stock mínimo por módulo (lo fija Dirección)
+    sub(db.collection('config').where('modulo','==',modulo()).onSnapshot(snap=>{
+      minimosMap = {}; snap.docs.forEach(d=>{ if(d.id==='minimos_'+modulo()) minimosMap = (d.data().valores)||{}; });
+      if(current==='home') renderHome(); if(current==='min') renderMin();
     }));
   }catch(e){}
   try{
@@ -494,6 +506,11 @@ function setView(v){
   if(v==='ini') renderIni();
   if(v==='movhist') renderMovHist();
   if(v==='ped') renderPed();
+  if(v==='mas') renderMas();
+  if(v==='cierre') renderCierre();
+  if(v==='min') renderMin();
+  if(v==='todos'){ todosCache=null; renderTodos(); }
+  if(v==='pend') renderPend();
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
@@ -693,7 +710,7 @@ function esCoordinador(){ return miPerfil && miPerfil.rol==='coordinador'; }
 // Abre una pantalla con opciones ya elegidas (p. ej. Entradas/Salidas en "Corte" de Melamina).
 function irA(v, opts){
   opts = opts||{};
-  if(v==='mov'){ if(opts.tipo) movTipo=opts.tipo; if(opts.cat) movCat=opts.cat; else if(opts.tipo==='corte' && !esHoja(CATALOGO.find(i=>i.cat===movCat))) movCat='Melamina'; }
+  if(v==='mov'){ if(opts.tipo && opts.tipo!==movTipo){ movVals={}; movBuscar=''; } if(opts.tipo) movTipo=opts.tipo; if(opts.cat) movCat=opts.cat; else if(opts.tipo==='corte' && !esHoja(CATALOGO.find(i=>i.cat===movCat))) movCat='Melamina'; }
   if(v==='hist' && opts.tab) histTab=opts.tab;
   setView(v);
   window.scrollTo(0,0);
@@ -703,7 +720,7 @@ function renderHome(){
   const t = (icon, titulo, sub, js, color) => tiles.push(`<button class="tile" style="--tc:${color||'var(--brand)'}" onclick="${js}"><span class="tile-ic">${icon}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`);
   if(!esSoloLectura()){
     t('📥','Llegó material','Anotar hojas, herrajes, etc. que entraron',"irA('mov',{tipo:'entrada'})",'#1f9d55');
-    t('✂️','Corte del día','Hojas que se cortaron hoy',"irA('mov',{tipo:'corte',cat:'Melamina'})",'#FF6B6A');
+    t('📝','Cierre del turno','Corte de hojas, PVC, cintilla, pegamento…',"irA('cierre')",'#FF6B6A');
     t('🔧','Instalación','Registrar un clóset o puerta instalada',"irA('inst')",'#3E5CDE');
     t('🔄','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5');
     t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
@@ -715,8 +732,10 @@ function renderHome(){
   t('📦','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'#2c46b8');
   if(esAdmin()){
     t('✅','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#1f9d55');
+    t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
     t('📋','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
   }
+  if(esSoloLectura()) t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
   if(esAdmin() || esSoloLectura()) t('🗂️','Historial','Auditorías y faltantes',"irA('hist')",'#6b7280');
   t('📊','Reportes','Reporte del día en PDF',"irA('rep')",'#3E5CDE');
   if(esAdmin()) t('👥','Usuarios','Dar de alta al personal',"irA('usr')",'#6b7280');
@@ -725,7 +744,7 @@ function renderHome(){
   const cp = cortesPendientes();
   if(cp.length && !esSoloLectura()) pend.push(`<div class="pend"><div>✂️ <strong>Falta registrar el corte</strong> de ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}.</div><button class="btn small" onclick="irA('mov',{tipo:'corte',cat:'${cp[0].it.cat}'})">Registrar</button></div>`);
   const misPend = movs.filter(m=>m.estado==='pendiente').length;
-  if(misPend && esCoordinador()) pend.push(`<div class="pend"><div>⏳ Tienes <strong>${misPend}</strong> movimiento(s) esperando que Dirección los apruebe.</div></div>`);
+  if(misPend && esCoordinador()) pend.push(`<div class="pend"><div>⏳ Tienes <strong>${misPend}</strong> movimiento(s) esperando que Dirección los apruebe.</div><button class="btn small" onclick="irA('pend')">Ver / corregir</button></div>`);
   const deudaPend = deudas.filter(d=>d.estado!=='saldada').length;
   if(deudaPend && (esAdmin()||esSoloLectura())) pend.push(`<div class="pend"><div>📉 Hay <strong>${deudaPend}</strong> faltante(s) de auditoría sin saldar.</div><button class="btn small" onclick="irA('hist',{tab:'deuda'})">Ver</button></div>`);
 
@@ -734,6 +753,8 @@ function renderHome(){
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${avisosCardHtml()}
+    ${recordatorioCierreHtml()}
+    ${stockBajoHtml()}
     ${avisoInstalarHtml()}
     <div id="home-apr"></div>
     <div class="tiles">${tiles.join('')}</div>`;
@@ -762,7 +783,7 @@ function toast(msg, tipo){
 
 let movCat = null;
 // Tipo y lado elegidos en Entradas/Salidas (se conservan al cambiar de categoría).
-let movTipo='entrada', movLado='completas';
+let movTipo='entrada', movLado='completas', movVals={}, movBuscar='';
 const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía', devolucion:'Regresó de garantía'};
 function etiquetaTipoMov(m){
   if(m.motivo==='armarJuegos') return 'Armado de juegos';
@@ -788,11 +809,11 @@ function renderMov(){
   const cats = movTipo==='corte' ? todasCats.filter(c=>esHoja(CATALOGO.find(i=>i.cat===c))) : todasCats;
   if(!movCat || !cats.includes(movCat)) movCat = cats[0];
   const items = CATALOGO.filter(i=>i.cat===movCat);
-  const catHoja = items.length>0 && esHoja(items[0]);
+  const catHoja = movBuscar ? true : (items.length>0 && esHoja(items[0]));
   const info = TIPO_INFO[movTipo];
   const tiposBtns = Object.keys(TIPO_INFO).map(k=>{ const x=TIPO_INFO[k];
-    return `<button class="tipobtn ${k===movTipo?'on':''} ${k==='instalacion'?'menor':''}" onclick="movTipo='${k}';renderMov()"><span class="tipo-ic">${x.ic}</span><span><strong>${x.t}</strong><br><small>${x.s}</small></span></button>`; }).join('');
-  const catsHtml = cats.map(c=>`<button class="chip ${c===movCat?'on':''}" onclick="movCat='${c}';renderMov()">${ICONO_CAT[c]||''} ${c}</button>`).join('');
+    return `<button class="tipobtn ${k===movTipo?'on':''} ${k==='instalacion'?'menor':''}" onclick="if(movTipo!=='${k}'){movVals={};movBuscar='';}movTipo='${k}';renderMov()"><span class="tipo-ic">${x.ic}</span><span><strong>${x.t}</strong><br><small>${x.s}</small></span></button>`; }).join('');
+  const catsHtml = cats.map(c=>{ const n=CATALOGO.filter(i=>i.cat===c && Number(movVals[i.id])>0).length; return `<button class="chip ${c===movCat&&!movBuscar?'on':''}" onclick="movCat='${c}';movBuscar='';renderMov()">${ICONO_CAT[c]||''} ${c}${n?' ✓'+n:''}</button>`; }).join('');
   const pregunta = {
     entrada:'¿Cuánto llegó de cada cosa?', corte:'¿Cuántas hojas se cortaron hoy de cada color?',
     salida:'¿Cuánto salió de cada cosa?', merma:'¿Cuánto se dañó o se perdió?', instalacion:'¿Cuánto se usó en la instalación?'
@@ -811,32 +832,44 @@ function renderMov(){
   </div>
   <div class="card">
     <div class="paso">2</div><strong>¿De qué material?</strong>
+    <input id="mv-buscar" type="search" placeholder="🔍 Buscar artículo (ej. corredera, blanco)" value="${String(movBuscar).replace(/"/g,'&quot;')}" style="margin-top:10px" oninput="movBuscar=this.value;renderMovLista()">
     <div class="chips" style="margin-top:10px">${catsHtml}</div>
   </div>
   <div class="card">
     <div class="paso">3</div><strong>${info.ic} ${pregunta}</strong>
     ${ayuda?`<p class="hint">${ayuda}</p>`:''}
-    ${movCat==='Herrajes'?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
+    ${movCat==='Herrajes'||movBuscar?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint">¿Qué se dañó?</label>
       <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value;renderMov()"><option value="completas" ${movLado==='completas'?'selected':''}>Hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>Material ya cortado o armado</option></select></div>` : ''}
-    <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca.</p>
-    <div class="movlist">
-      ${items.map(it=>{ const f=calcFormula(it.id);
-        const hay = f.esHoja ? (movTipo==='corte'||movTipo==='salida'||(movTipo==='merma'&&movLado!=='cortado') ? `${fmtNum(f.completas)} completas` : (movTipo==='merma' ? `${fmtNum(f.cortado)} ya cortadas` : `${fmtNum(f.final)} ${it.unidad}`)) : `${fmtNum(f.final)} ${it.unidad}`;
-        return `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay: ${hay}</span></span>
-          <input type="number" min="0" inputmode="decimal" id="mv-${it.id}" placeholder="—"></label>`;
-      }).join('')}
-    </div>
+    <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
+    <div class="movlist" id="mv-lista"></div>
+    ${movTipo==='merma'?fotoPickerHtml('merma','Foto de lo dañado (opcional)'):''}
     <input id="mv-nota" placeholder="Nota (opcional)" style="margin-top:12px">
-    <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="registrarMovLote()">Revisar y guardar</button>
+    <button class="btn" id="mv-guardar" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="registrarMovLote()">Revisar y guardar</button>
   </div>
   <details class="card">
     <summary><strong>Ver lo último que se anotó</strong></summary>
     <div class="wrap-x" style="margin-top:8px"><table><tr><th>Fecha</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Estado</th></tr>
-    ${movs.slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleString()}</td><td>${m.itemNombre}</td>
+    ${movs.filter(m=>m.tipo!=='nota').slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleString()}</td><td>${m.itemNombre}</td>
       <td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}</td><td>${m.nota||''}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}
     </table></div>
   </details>`;
+  renderMovLista();
+}
+function renderMovLista(){
+  const el = document.getElementById('mv-lista'); if(!el) return;
+  const cats = movTipo==='corte' ? ['Melamina','MDF'] : null;
+  const items = movBuscar.trim() ? CATALOGO.filter(i=>(!cats||cats.includes(i.cat)) && coincide(i.nombre, movBuscar)).slice(0,40) : CATALOGO.filter(i=>i.cat===movCat);
+  el.innerHTML = items.length ? items.map(it=>{ const f=calcFormula(it.id);
+    const hay = f.esHoja ? (movTipo==='corte'||movTipo==='salida'||(movTipo==='merma'&&movLado!=='cortado') ? `${fmtNum(f.completas)} completas` : (movTipo==='merma' ? `${fmtNum(f.cortado)} ya cortadas` : `${fmtNum(f.final)} ${it.unidad}`)) : `${fmtNum(f.final)} ${it.unidad}`;
+    return `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay: ${hay}</span></span>
+      <input type="number" min="0" inputmode="decimal" id="mv-${it.id}" placeholder="—" value="${movVals[it.id]||''}" oninput="movVals['${it.id}']=this.value;actualizarBotonMov()"></label>`;
+  }).join('') : '<p class="hint">No se encontró ningún artículo con ese nombre.</p>';
+  actualizarBotonMov();
+}
+function actualizarBotonMov(){
+  const n = Object.keys(movVals).filter(id=>Number(movVals[id])>0).length;
+  const b = document.getElementById('mv-guardar'); if(b) b.textContent = n ? `Revisar y guardar (${n} artículo${n>1?'s':''})` : 'Revisar y guardar';
 }
 
 // Etiqueta visual para el estado de aprobación de un movimiento/instalación.
@@ -851,14 +884,13 @@ async function registrarMovLote(){
   const nota = ($('#mv-nota').value||'').trim();
   const ladoEl = document.getElementById('mv-lado');
   const lado = ladoEl ? ladoEl.value : 'completas';
-  const items = CATALOGO.filter(i=>i.cat===movCat);
+  const items = CATALOGO.filter(i=>Number(movVals[i.id])>0 && (tipo!=='corte' || esHoja(i)));
   const decrece = tipo!=='entrada';
   const mod = modulo();
   const aplicar = [];
   const avisosAuto = [];
   for(const it of items){
-    const el = document.getElementById('mv-'+it.id);
-    const cantidad = Number(el.value);
+    const cantidad = Number(movVals[it.id]);
     if(!cantidad || cantidad<=0) continue;
     const f = calcFormula(it.id);
     const sinStock = (disp, que)=>{ alert('No alcanza: de "'+it.nombre+'" solo hay '+fmtNum(disp)+' ('+que+') y escribiste '+cantidad+'.\n\nRevisa la cantidad. No se guardó nada.'); };
@@ -891,12 +923,15 @@ async function registrarMovLote(){
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const a of aplicar){
       const doc = {modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString(),estado,loteId,creadoPor};
+      if(tipo==='merma' && (fotosTmp.merma||[]).length){ doc.fotos = fotosTmp.merma.length; doc.fotosRef = loteId; }
       if(a.lado) doc.lado = a.lado;
       await db.collection('movimientos').doc(cryptoId()).set(doc);
     }
     toast(estado==='pendiente'
       ? '✅ Guardado. <br><small>Dirección lo tiene que aprobar para que cuente en el inventario.</small>'
       : '✅ Guardado: '+aplicar.length+' artículo(s).');
+    if(tipo==='merma') await guardarFotos('merma', 'merma', loteId, mod);
+    movVals={}; movBuscar='';
     renderMov();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -1301,7 +1336,7 @@ function renderMovHist(){
   if(!mhHasta) mhHasta = fechaHoyLocal();
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   const desdeISO = new Date(mhDesde+'T00:00:00').toISOString(), hastaISO = new Date(mhHasta+'T23:59:59.999').toISOString();
-  const lista = movs.filter(m=>m.fecha>=desdeISO && m.fecha<=hastaISO && m.estado!=='rechazado'
+  const lista = movs.filter(m=>m.tipo!=='nota' && m.fecha>=desdeISO && m.fecha<=hastaISO && m.estado!=='rechazado'
     && (mhTipo==='todos' || m.tipo===mhTipo)
     && (mhItem==='todos' ? (mhCat==='todas' || (CATALOGO.find(i=>i.id===m.itemId)||{}).cat===mhCat) : m.itemId===mhItem));
   const aprob = lista.filter(m=>m.estado!=='pendiente');
@@ -1327,7 +1362,10 @@ function renderMovHist(){
       <div><label class="hint">Material</label><select style="margin-top:4px;min-width:0;width:100%" onchange="mhCat=this.value;mhItem='todos';renderMovHist()"><option value="todas">Todo</option>${cats.map(c=>`<option ${c===mhCat?'selected':''}>${c}</option>`).join('')}</select></div>
       <div><label class="hint">Artículo</label><select style="margin-top:4px;min-width:0;width:100%" onchange="mhItem=this.value;renderMovHist()"><option value="todos">Todos</option>${CATALOGO.filter(i=>mhCat==='todas'||i.cat===mhCat).map(i=>`<option value="${i.id}" ${i.id===mhItem?'selected':''}>${i.nombre}</option>`).join('')}</select></div>
     </div>
-    ${ini?`<button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="mhDesde='${aLocal(ini)}';mhHasta=fechaHoyLocal();renderMovHist()">Desde el conteo hasta hoy</button>`:''}
+    <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+      ${ini?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="mhDesde='${aLocal(ini)}';mhHasta=fechaHoyLocal();renderMovHist()">Desde el conteo hasta hoy</button>`:''}
+      <button class="btn small" onclick="descargarHistorialCSV()">📊 Descargar Excel</button>
+    </div>
     <div class="chips" style="margin-top:10px">${Object.keys(MH_TIPOS).map(k=>`<button class="chip ${k===mhTipo?'on':''}" onclick="mhTipo='${k}';renderMovHist()">${MH_TIPOS[k]}</button>`).join('')}</div>
   </div>
   <div class="card">
@@ -3024,6 +3062,7 @@ function renderGar(){
       </div>
       <label class="hint" style="display:block;margin-top:10px">¿Por qué? (motivo)</label>
       <input id="g-motivo" placeholder="ej. puerta rayada, cajón roto" style="margin-top:4px">
+      ${fotoPickerHtml('gar','Foto del daño (opcional)')}
       <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="previewGar()">Revisar material</button>
     </div>
     <div id="g-result"></div>`;
@@ -3109,6 +3148,8 @@ async function confirmarGar(){
     }
     const logDoc = {modulo:mod, fechaDia, cliente, motivo, lineas:garLineas.map(describirLineaGar), lineasData:JSON.parse(JSON.stringify(garLineas)), consumo:garPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor};
     if(garPreview.sobrantes && garPreview.sobrantes.length) logDoc.sobrantes = garPreview.sobrantes;
+    const nFotosGar = await guardarFotos('gar', 'garantia', logId, mod);
+    if(nFotosGar) logDoc.fotos = nFotosGar;
     await db.collection('garantiasLog').doc(logId).set(logDoc);
     toast(estado==='pendiente' ? '✅ Garantía guardada.<br><small>Dirección la tiene que aprobar para que se descuente.</small>' : '✅ Garantía registrada.');
     garLineas=[]; garPreview=null;
@@ -3134,12 +3175,14 @@ async function renderGarHistorial(){
         <div class="row" style="justify-content:space-between"><strong>↩️ Regresó el ${new Date(r.fecha).toLocaleDateString('es-MX')}</strong>${r.loteId && (r.devuelto||[]).length?badgeEstado(estadoLote(r.loteId, r.estado)):''}</div>
         ${(r.sirve||[]).length?`<div class="hint" style="margin:4px 0 0"><strong>✅ Sirvió (regresó al inventario):</strong><br>${r.sirve.join('<br>')}</div>`:''}
         ${(r.merma||[]).length?`<div class="hint" style="margin:4px 0 0"><strong>🗑️ Merma:</strong><br>${r.merma.join('<br>')}</div>`:''}
+        ${r.fotos?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;margin:4px 0" onclick="verFotos('${r.loteId}',${r.fotos},'Lo que regresó')">📷 Ver fotos (${r.fotos})</button>`:''}
         ${(r.devuelto||[]).length?`<details><summary class="hint">Lo que se sumó al inventario</summary><div class="hint">${r.devuelto.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `${it?it.nombre:c.itemId}: +${fmtNum(c.cantidad)} ${it?it.unidad:''}${it&&esHoja(it)?' (cortado)':''}`; }).join('<br>')}</div></details>`:''}
       </div>` : (puede ? `<button class="btn" style="margin-top:10px;width:100%;background:linear-gradient(135deg,#e0791a,#c2650f)" onclick="iniciarRetornoGarId('${l.id}')">↩️ Registrar lo que regresó</button>` : '<p class="hint" style="margin-top:8px">Todavía no se registra lo que regresó.</p>');
     return `<div class="card">
       <div class="row" style="justify-content:space-between"><strong>${fechaGarTxt(l)}</strong>${badgeEstado(estadoLote(l.id, l.estado))}</div>
       ${l.cliente||l.motivo?`<p class="hint" style="margin:4px 0">${l.cliente?'Cliente: '+l.cliente:''}${l.cliente&&l.motivo?' · ':''}${l.motivo?'Motivo: '+l.motivo:''}</p>`:''}
       <ul style="margin:6px 0 6px 18px;padding:0;line-height:1.6">${(l.lineas||[]).map(x=>`<li>${x}</li>`).join('')}</ul>
+      ${l.fotos?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;margin:4px 0" onclick="verFotos('${l.id}',${l.fotos},'Garantía')">📷 Ver fotos (${l.fotos})</button>`:''}
       <details><summary class="hint">Material descontado</summary><div class="hint">${(l.consumo||[]).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `${it?it.nombre:c.itemId}: ${fmtNum(c.cantidad)} ${it?it.unidad:''}`; }).join('<br>')}${(l.sobrantes||[]).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<br>Sobró: +${fmtNum(c.cantidad)} ${it?it.nombre:c.itemId}`; }).join('')}</div></details>
       ${retHtml}
     </div>`;
@@ -3234,6 +3277,7 @@ function renderRetornoComps(){
     <div style="font-size:16px;font-weight:800">🔍 Revisa cada pieza</div>
     <p class="hint">Por defecto la melamina queda como merma y los herrajes como que sirven. Cámbialo si no es así.</p>
     <div class="movlist">${filas}</div>
+    ${fotoPickerHtml('ret','Foto de lo que regresó (opcional)')}
     <button class="btn" style="margin-top:12px;width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRetornoGar()">✅ Guardar lo que regresó</button>
   </div>`;
 }
@@ -3281,7 +3325,8 @@ async function confirmarRetornoGar(){
       const it = CATALOGO.find(i=>i.id===d.itemId);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:log.modulo||modulo(), itemId:d.itemId, itemNombre:it.nombre, tipo:'devolucion', cantidad:d.cantidad, nota, fecha, estado, loteId, garantiaId:log.id, creadoPor});
     }
-    await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, devuelto, estado, loteId, creadoPor}});
+    const nFotosRet = await guardarFotos('ret', 'retorno', loteId, log.modulo||modulo());
+    await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, devuelto, estado, loteId, creadoPor, fotos:nFotosRet||0}});
     toast(devuelto.length && estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar para que sume al inventario.</small>' : '✅ Guardado lo que regresó.');
     salirRetornoGar(); garSub='historial'; renderGar(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
@@ -4005,6 +4050,10 @@ function renderRep(){
       <div><strong>PIN de administrador</strong><p class="hint" style="margin:2px 0 0">Se pide para "poner en cero" el inventario de cualquier módulo. Solo tú (admin) puedes cambiarlo.</p></div>
       <button class="btn small" onclick="cambiarPinCero()">Cambiar PIN</button>
     </div>
+    <div class="card row" style="justify-content:space-between">
+      <div><strong>⚠️ Stock mínimo</strong><p class="hint" style="margin:2px 0 0">Avisa cuando un módulo baja de lo mínimo.</p></div>
+      <button class="btn small" onclick="minVals=null;irA('min')">Configurar</button>
+    </div>
     <div class="card" style="border:1px solid var(--bad)">
       <strong style="color:var(--bad)">🗑️ Borrar datos de prueba</strong>
       <p class="hint" style="margin:4px 0 10px">Deja un módulo (o los 5) <strong>completamente en blanco</strong>: borra movimientos, instalaciones, garantías, traspasos, auditorías, faltantes, stock inicial e historial. Los usuarios y el PIN no se tocan. No se puede deshacer; descarga un respaldo antes.</p>
@@ -4106,7 +4155,9 @@ async function renderAprobaciones(){
     return;
   }
 
-  let html = `<div class="card"><strong>Aprobaciones</strong><p class="hint">Lo que capturan los coordinadores queda aquí hasta que lo apruebes o rechaces. Los traspasos entre módulos no requieren aprobación (se aplican de inmediato).</p></div>`;
+  const totalPend = loteIds.length + logsPendientes.length;
+  let html = `<div class="card"><strong>Aprobaciones</strong><p class="hint">Lo que capturan los coordinadores queda aquí hasta que lo apruebes o rechaces. Los traspasos entre módulos no requieren aprobación (se aplican de inmediato).</p>
+    ${totalPend>1?`<button class="btn" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="aprobarTodo()">✅ Aprobar todo (${totalPend})</button><p class="hint" style="margin:6px 0 0">Revisa la lista de abajo antes de aprobar todo junto.</p>`:''}</div>`;
 
   if(loteIds.length>0){
     html += `<div class="card"><h3>Entradas / Salidas pendientes (${loteIds.length})</h3></div>`;
@@ -4120,6 +4171,7 @@ async function renderAprobaciones(){
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
+        ${items.find(m=>m.fotos)?(()=>{ const f=items.find(m=>m.fotos); return `<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;margin-top:6px" onclick="verFotos('${f.fotosRef}',${f.fotos},'Evidencia')">📷 Ver fotos (${f.fotos})</button>`; })():''}
         <div class="row" style="justify-content:flex-end;margin-top:8px">
           <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarLote('${key}')">Rechazar</button>
           <button class="btn small" onclick="aprobarLote('${key}')">Aprobar</button>
@@ -4163,6 +4215,20 @@ async function rechazarLote(loteId){
   try{ await cambiarEstadoLote(loteId,'rechazado'); renderAprobaciones(); }
   catch(e){ alert('Error: '+e.message); }
 }
+async function aprobarTodo(){
+  try{
+    const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
+    const logs = snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.estado==='pendiente');
+    const lotes = [...new Set(snapMov.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').map(m=>m.loteId||m.id))];
+    const porMod = {}; logs.forEach(l=>porMod[l.modulo]=(porMod[l.modulo]||0)+1);
+    snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').forEach(m=>{ porMod[m.modulo]=porMod[m.modulo]||0; });
+    if(!confirm(`¿Aprobar TODO lo pendiente?\n\n• ${lotes.length} captura(s) de entradas, salidas, garantías, pedidos…\n• ${logs.length} instalación(es)\n\nMódulos: ${Object.keys(porMod).join(', ')}\n\nTodo se sumará o descontará del inventario.`)) return;
+    for(const l of logs){ await db.collection('instalacionesLog').doc(l.id).update({estado:'aprobado'}); await cambiarEstadoLote(l.id,'aprobado'); }
+    for(const k of lotes) await cambiarEstadoLote(k,'aprobado');
+    toast(`✅ Se aprobaron ${lotes.length+logs.length} captura(s).`);
+    renderAprobaciones();
+  }catch(e){ alert('Error: '+e.message); }
+}
 async function aprobarInstalacion(logId){
   try{
     await db.collection('instalacionesLog').doc(logId).update({estado:'aprobado'});
@@ -4176,6 +4242,303 @@ async function rechazarInstalacion(logId){
     await db.collection('instalacionesLog').doc(logId).update({estado:'rechazado'});
     await cambiarEstadoLote(logId,'rechazado');
     renderAprobaciones();
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+// ===== Cierre del turno (confirmado por el usuario) =====
+// Lo que NO se descuenta solo y hay que anotar al final del día: el corte de hojas (melamina/MDF) y
+// las salidas de consumibles (cintilla, PVC, pegamento, stickers). Tubos, correderas, jaladeras y
+// todo lo que llevan las instalaciones y garantías ya se descuenta en automático.
+const CATS_CONSUMIBLES = ['Cintilla','PVC','Pegamento','Stickers'];
+const HORA_RECORDATORIO_CIERRE = 17; // a partir de las 5 pm se recuerda el cierre del turno
+let cierreVals = {}, cierreBuscar = '';
+function cierreHechoHoy(){
+  const hoy = fechaHoyLocal();
+  const local = iso => new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  return movs.some(m=>m.cierreTurno && local(m.fecha)===hoy);
+}
+function recordatorioCierreHtml(){
+  if(esSoloLectura() || cierreHechoHoy() || new Date().getHours() < HORA_RECORDATORIO_CIERRE) return '';
+  return `<div class="card aviso" style="padding:12px"><div class="pend"><div>📝 <strong>¿Ya capturaste tus salidas de hoy?</strong><br><span class="hint" style="margin:0">Corte de hojas, PVC, cintilla, pegamento y stickers.</span></div><button class="btn small" onclick="irA('cierre')">Capturar</button></div></div>`;
+}
+function renderCierre(){
+  if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  const hojas = CATALOGO.filter(i=>esHoja(i));
+  const cons = CATALOGO.filter(i=>CATS_CONSUMIBLES.includes(i.cat) && (!cierreBuscar.trim() || coincide(i.nombre, cierreBuscar)));
+  const fila = (it, sub) => `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">${sub}</span></span>
+    <input type="number" min="0" inputmode="decimal" placeholder="—" value="${cierreVals[it.id]||''}" oninput="cierreVals['${it.id}']=this.value"></label>`;
+  const cp = cortesPendientes();
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">📝 Cierre del turno · ${modulo()}</div>
+      <p class="hint">Anota lo que se usó hoy y <strong>no</strong> se descuenta solo. Tubos, correderas, jaladeras y todo lo de instalaciones y garantías <strong>ya se descontó en automático</strong>.</p>
+      ${cierreHechoHoy()?'<p class="hint" style="color:var(--ok)">✅ Ya capturaste un cierre hoy. Puedes agregar más si faltó algo.</p>':''}
+    </div>
+    <div class="card">
+      <div class="paso">1</div><strong>✂️ Hojas que se cortaron hoy</strong>
+      ${cp.length?`<p class="hint">Se usaron sin corte anotado: ${cp.map(x=>fmtNum(x.f.autoCortes)+' de '+x.it.nombre.replace('Melamina ','')).join(', ')}.</p>`:''}
+      <div class="movlist" style="margin-top:8px">${hojas.map(it=>{ const f=calcFormula(it.id); return fila(it, `${fmtNum(f.completas)} completas${f.autoCortes?' · '+fmtNum(f.autoCortes)+' sin corte':''}`); }).join('')}</div>
+    </div>
+    <div class="card">
+      <div class="paso">2</div><strong>🎞️ Cintilla, PVC, pegamento y stickers que se usaron</strong>
+      <input type="search" placeholder="🔍 Buscar (ej. cintilla blanco)" value="${String(cierreBuscar).replace(/"/g,'&quot;')}" style="margin-top:8px" oninput="cierreBuscar=this.value;renderCierreConsumibles()">
+      <div class="movlist" id="cierre-cons" style="margin-top:8px">${cons.map(it=>fila(it, `Hay ${fmtNum(calcFormula(it.id).final)} ${it.unidad}`)).join('')}</div>
+    </div>
+    <div class="card">
+      <input id="cierre-nota" placeholder="Nota (opcional)">
+      <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarCierre()">✅ Guardar cierre del turno</button>
+    </div>`;
+}
+function renderCierreConsumibles(){
+  const el = document.getElementById('cierre-cons'); if(!el) return;
+  const cons = CATALOGO.filter(i=>CATS_CONSUMIBLES.includes(i.cat) && (!cierreBuscar.trim() || coincide(i.nombre, cierreBuscar)));
+  el.innerHTML = cons.map(it=>`<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(calcFormula(it.id).final)} ${it.unidad}</span></span>
+    <input type="number" min="0" inputmode="decimal" placeholder="—" value="${cierreVals[it.id]||''}" oninput="cierreVals['${it.id}']=this.value"></label>`).join('') || '<p class="hint">No se encontró.</p>';
+}
+async function guardarCierre(){
+  const nota = (document.getElementById('cierre-nota').value||'').trim();
+  const cortes = CATALOGO.filter(i=>esHoja(i) && Number(cierreVals[i.id])>0).map(it=>({it, q:Number(cierreVals[it.id])}));
+  const salidas = CATALOGO.filter(i=>CATS_CONSUMIBLES.includes(i.cat) && Number(cierreVals[i.id])>0).map(it=>({it, q:Number(cierreVals[it.id])}));
+  if(!cortes.length && !salidas.length){
+    if(!confirm('No escribiste nada.\n\n¿Hoy no se cortaron hojas ni se usó cintilla, PVC, pegamento o stickers?\n\nAceptar = sí, guardar "sin movimiento" para que no te lo vuelva a recordar hoy.')) return;
+  }
+  for(const c of cortes){ const f=calcFormula(c.it.id); if(c.q > f.completas + f.autoCortes + 1e-9) return alert(`No alcanza: de ${c.it.nombre} hay ${fmtNum(f.completas+f.autoCortes)} hojas completas y escribiste ${c.q}.`); }
+  for(const x of salidas){ const f=calcFormula(x.it.id); if(f.final - x.q < -1e-9) return alert(`No alcanza: de ${x.it.nombre} hay ${fmtNum(f.final)} ${x.it.unidad} y escribiste ${x.q}.`); }
+  if((cortes.length||salidas.length) && !confirm(`Cierre del turno:\n\n${cortes.length?'✂️ Corte:\n'+cortes.map(c=>`• ${fmtNum(c.q)} hojas ${c.it.nombre}`).join('\n')+'\n\n':''}${salidas.length?'📤 Salidas:\n'+salidas.map(x=>`• ${fmtNum(x.q)} ${x.it.unidad} ${x.it.nombre}`).join('\n'):''}\n\n¿Guardar?`)) return;
+  try{
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
+    const loteC = cryptoId(), loteS = cryptoId();
+    for(const c of cortes) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.it.id, itemNombre:c.it.nombre, tipo:'corte', cantidad:c.q, nota:'Cierre del turno'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteC, creadoPor, cierreTurno:true});
+    const estado = estadoNuevoMovimiento();
+    for(const x of salidas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'salida', cantidad:x.q, nota:'Cierre del turno (consumo)'+(nota?' · '+nota:''), fecha, estado, loteId:loteS, creadoPor, cierreTurno:true});
+    if(!cortes.length && !salidas.length) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:'_cierre', itemNombre:'Cierre sin movimiento', tipo:'nota', cantidad:0, nota:'Cierre del turno sin movimiento'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:cryptoId(), creadoPor, cierreTurno:true});
+    cierreVals = {}; cierreBuscar = '';
+    toast('✅ Cierre del turno guardado.'+(salidas.length && estado==='pendiente'?'<br><small>Las salidas esperan aprobación de Dirección.</small>':''));
+    setView('home');
+  }catch(e){ alert('Error: '+e.message); }
+}
+let _cierreAvisado = null;
+setInterval(async ()=>{
+  try{
+    if(!moduloActual) return;
+    const bajos = itemsBajos(); if(!bajos.length) return;
+    const clave = 'bajoAvisado_'+modulo()+'_'+fechaHoyLocal();
+    if(localStorage.getItem(clave) || typeof Notification==='undefined' || Notification.permission!=='granted') return;
+    localStorage.setItem(clave,'1');
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    const opts = {body: bajos.slice(0,4).map(x=>`${x.it.nombre}: ${fmtNum(x.f.final)} (mín. ${fmtNum(x.min)})`).join('\n'), icon:'icon-192.png', tag:'stockbajo'};
+    if(reg && reg.showNotification) await reg.showNotification('⚠️ Stock bajo en '+modulo(), opts); else new Notification('⚠️ Stock bajo en '+modulo(), opts);
+  }catch(e){}
+}, 10*60*1000);
+setInterval(async ()=>{
+  try{
+    if(!moduloActual || esSoloLectura() || cierreHechoHoy() || new Date().getHours() < HORA_RECORDATORIO_CIERRE) return;
+    const clave = 'cierreAvisado_'+modulo()+'_'+fechaHoyLocal();
+    if(_cierreAvisado===clave || localStorage.getItem(clave)) return;
+    _cierreAvisado = clave; localStorage.setItem(clave,'1');
+    if(typeof Notification==='undefined' || Notification.permission!=='granted') return;
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    const opts = {body:'Anota el corte de hojas y lo que se usó de PVC, cintilla, pegamento y stickers.', icon:'icon-192.png', tag:'cierre'};
+    if(reg && reg.showNotification) await reg.showNotification('📝 ¿Ya capturaste tus salidas de hoy?', opts); else new Notification('📝 ¿Ya capturaste tus salidas de hoy?', opts);
+  }catch(e){}
+}, 5*60*1000);
+
+// ===== Stock mínimo y aviso de stock bajo (confirmado por el usuario) =====
+function itemsBajos(){
+  return CATALOGO.filter(it=>Number(minimosMap[it.id])>0).map(it=>({it, min:Number(minimosMap[it.id]), f:calcFormula(it.id)})).filter(x=>x.f.final < x.min - 1e-9);
+}
+function stockBajoHtml(){
+  const b = itemsBajos(); if(!b.length) return '';
+  return `<div class="card" style="padding:12px;border:2px solid var(--bad)">
+    <strong style="color:var(--bad)">⚠️ Stock bajo en ${modulo()} (${b.length})</strong>
+    <div class="movlist" style="margin-top:8px">${b.slice(0,6).map(x=>`<div class="movitem"><span class="invname">${x.it.nombre}</span><span class="neg" style="white-space:nowrap"><strong>${fmtNum(x.f.final)}</strong> / mín. ${fmtNum(x.min)}</span></div>`).join('')}</div>
+    ${b.length>6?`<p class="hint">… y ${b.length-6} más</p>`:''}
+    ${esAdmin()?`<p class="hint" style="margin:6px 0 0">Antes de pedir, revisa <a href="#" onclick="irA('todos');return false;">si otro módulo tiene</a>.</p>`:''}
+  </div>`;
+}
+let minCat = null, minVals = null, minSoloModulo = false;
+function renderMin(){
+  if(!esAdmin()){ $('#main').innerHTML='<div class="card">Solo Dirección fija el stock mínimo.</div>'; return; }
+  if(!minVals) minVals = Object.assign({}, minimosMap);
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))]; if(!minCat) minCat = cats[cats.length-1];
+  const items = CATALOGO.filter(i=>i.cat===minCat);
+  $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:800">⚠️ Stock mínimo</div>
+      <p class="hint">Escribe cuánto es lo mínimo que debe haber de cada artículo. Si un módulo baja de ahí, le aparece un aviso a él y a ti. Deja vacío lo que no quieras vigilar.</p>
+      <div class="chips" style="margin-top:8px">${cats.map(c=>{ const n=CATALOGO.filter(i=>i.cat===c && Number(minVals[i.id])>0).length; return `<button class="chip ${c===minCat?'on':''}" onclick="minCat='${c}';renderMin()">${ICONO_CAT[c]||''} ${c}${n?' ✓'+n:''}</button>`; }).join('')}</div></div>
+    <div class="card"><div class="movlist">${items.map(it=>`<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(calcFormula(it.id).final)} ${it.unidad} en ${modulo()}</span></span>
+      <input type="number" min="0" inputmode="decimal" placeholder="—" value="${minVals[it.id]||''}" oninput="minVals['${it.id}']=Number(this.value)||0"></label>`).join('')}</div></div>
+    <div class="card">
+      <label class="row" style="gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" style="width:22px;min-height:22px;flex:0 0 22px" ${minSoloModulo?'checked':''} onchange="minSoloModulo=this.checked"> Solo para ${modulo()} (si no, aplica a los 5 módulos)</label>
+      <button class="btn" style="width:100%;margin-top:10px" onclick="guardarMinimos()">Guardar mínimos</button>
+    </div>`;
+}
+async function guardarMinimos(){
+  const valores = {}; Object.keys(minVals||{}).forEach(k=>{ if(Number(minVals[k])>0) valores[k]=Number(minVals[k]); });
+  const mods = minSoloModulo ? [modulo()] : MODULOS.map(m=>m.nombre);
+  try{ for(const m of mods) await db.collection('config').doc('minimos_'+m).set({modulo:m, valores, fecha:new Date().toISOString()}); toast('✅ Mínimos guardados para '+(mods.length>1?'los 5 módulos':mods[0])+'.'); minVals=null; setView('home'); }catch(e){ alert('Error: '+e.message); }
+}
+
+// ===== Los 5 módulos en una sola vista (Dirección / supervisores) =====
+let todosCat = null, todosSoloConAlgo = true, todosCache = null;
+async function inventarioTodos(){
+  const [mv, ini, rs, cfg] = await Promise.all(['movimientos','inicial','resets','config'].map(c=>db.collection(c).get()));
+  const resetF = {}; rs.docs.forEach(d=>{ resetF[d.id]=d.data().fecha; });
+  const iniMap = {}; ini.docs.forEach(d=>{ iniMap[d.id]=d.data(); });
+  const mins = {}; cfg.docs.forEach(d=>{ if(d.id.startsWith('minimos_')) mins[d.id.slice(8)] = d.data().valores||{}; });
+  const porModItem = {};
+  mv.docs.forEach(d=>{ const m=d.data(); if(m.estado==='pendiente'||m.estado==='rechazado') return; const k=m.modulo+'__'+m.itemId; (porModItem[k]=porModItem[k]||[]).push(m); });
+  const res = {};
+  MODULOS.forEach(({nombre})=>{ res[nombre] = {};
+    CATALOGO.forEach(it=>{ const b = lineaBase(resetF[nombre], iniMap[inicialKey(nombre,it.id)]||null);
+      const lista = (porModItem[nombre+'__'+it.id]||[]).filter(m=>!b.desde || m.fecha>b.desde);
+      res[nombre][it.id] = calcularFormula(it.id, b.inicial, b.inicialCortado, lista); }); });
+  return {res, mins};
+}
+async function renderTodos(){
+  if(!esAdmin() && !esSoloLectura()){ $('#main').innerHTML='<div class="card">Esta vista es para Dirección.</div>'; return; }
+  if(!todosCache){ $('#main').innerHTML='<div class="card hint">Calculando los 5 módulos…</div>'; try{ todosCache = await inventarioTodos(); }catch(e){ $('#main').innerHTML='<div class="card">No se pudo calcular: '+e.message+'</div>'; return; } }
+  const {res, mins} = todosCache;
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))]; if(!todosCat) todosCat = cats[0];
+  let items = CATALOGO.filter(i=>i.cat===todosCat);
+  if(todosSoloConAlgo) items = items.filter(it=>MODULOS.some(m=>Math.abs(res[m.nombre][it.id].final)>0.005 || (mins[m.nombre]||{})[it.id]));
+  const celda = (m,it) => { const f=res[m][it.id]; const min=Number((mins[m]||{})[it.id])||0; const bajo = min>0 && f.final<min-1e-9;
+    return `<td style="text-align:right;${bajo?'color:var(--bad);font-weight:800':(Math.abs(f.final)<0.005?'color:var(--sub)':'')}">${fmtNum(f.final)}${bajo?' ⚠️':''}</td>`; };
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">🗺️ Los 5 módulos</div>
+      <p class="hint">Cuánto hay de cada artículo en cada módulo (solo lo aprobado). En rojo ⚠️: debajo del mínimo. Antes de comprar, revisa si otro módulo tiene de sobra y haz un traspaso.</p>
+      <div class="chips" style="margin-top:8px">${cats.map(c=>`<button class="chip ${c===todosCat?'on':''}" onclick="todosCat='${c}';renderTodos()">${ICONO_CAT[c]||''} ${c}</button>`).join('')}</div>
+      <label class="row" style="gap:8px;margin-top:8px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" style="width:20px;min-height:20px;flex:0 0 20px" ${todosSoloConAlgo?'checked':''} onchange="todosSoloConAlgo=this.checked;renderTodos()"> Ocultar lo que está en cero en todos</label>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn small" onclick="todosCache=null;renderTodos()">🔄 Actualizar</button>
+        <button class="btn small" onclick="descargarInventarioTodosCSV()">📊 Descargar Excel</button>
+        ${esAdmin()?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="minVals=null;irA('min')">⚠️ Stock mínimo</button>`:''}
+      </div>
+    </div>
+    <div class="card"><div class="wrap-x"><table>
+      <tr><th>Artículo</th>${MODULOS.map(m=>`<th style="text-align:right" title="${m.nombre}">${m.nombre.slice(0,4)}.</th>`).join('')}<th style="text-align:right">Total</th></tr>
+      ${items.map(it=>`<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${MODULOS.map(m=>celda(m.nombre,it)).join('')}<td style="text-align:right"><strong>${fmtNum(MODULOS.reduce((s,m)=>s+res[m.nombre][it.id].final,0))}</strong></td></tr>`).join('') || `<tr><td colspan="7" class="hint">Nada en ${todosCat}.</td></tr>`}
+    </table></div>
+    <p class="hint">${MODULOS.map(m=>m.nombre.slice(0,4)+'. = '+m.nombre).join(' · ')}</p></div>`;
+}
+
+// ===== Descargar en Excel (archivo .csv que abre Excel) =====
+function descargarCSV(nombre, filas){
+  const esc = v => { const t = (v===null||v===undefined)?'':String(v); return /[",\n]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; };
+  const csv = '﻿' + filas.map(f=>f.map(esc).join(',')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombre; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+async function descargarInventarioTodosCSV(){
+  const {res, mins} = todosCache || await inventarioTodos();
+  const filas = [['Categoría','Artículo','Unidad', ...MODULOS.flatMap(m=>[m.nombre, m.nombre+' completas', m.nombre+' cortado', m.nombre+' mínimo']), 'Total']];
+  CATALOGO.forEach(it=>{ filas.push([it.cat, it.nombre, it.unidad, ...MODULOS.flatMap(m=>{ const f=res[m.nombre][it.id]; return [fmtNum(f.final), f.esHoja?fmtNum(f.completas):'', f.esHoja?fmtNum(f.cortado):'', (mins[m.nombre]||{})[it.id]||'']; }), fmtNum(MODULOS.reduce((s,m)=>s+res[m.nombre][it.id].final,0))]); });
+  descargarCSV(`inventario-5-modulos-${fechaHoyLocal()}.csv`, filas);
+}
+function descargarHistorialCSV(){
+  const desdeISO = new Date(mhDesde+'T00:00:00').toISOString(), hastaISO = new Date(mhHasta+'T23:59:59.999').toISOString();
+  const lista = movs.filter(m=>m.tipo!=='nota' && m.fecha>=desdeISO && m.fecha<=hastaISO && m.estado!=='rechazado'
+    && (mhTipo==='todos' || m.tipo===mhTipo) && (mhItem==='todos' ? (mhCat==='todas' || (CATALOGO.find(i=>i.id===m.itemId)||{}).cat===mhCat) : m.itemId===mhItem))
+    .sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+  const filas = [['Fecha','Hora','Módulo','Artículo','Unidad','Tipo','Cantidad','Estado','Nota','Anotó']];
+  lista.forEach(m=>{ const d=new Date(m.fecha); filas.push([d.toLocaleDateString('es-MX'), d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}), m.modulo, m.itemNombre, item2unidad(m.itemId), etiquetaTipoMov(m), fmtNum(m.cantidad), m.estado||'aprobado', m.nota||'', m.creadoPor||'']); });
+  descargarCSV(`historial-${modulo()}-${mhDesde}-a-${mhHasta}.csv`, filas);
+}
+
+// ===== Fotos de evidencia (confirmado por el usuario) =====
+// Se reducen a ~900 px antes de guardarse (≈100 KB c/u) para no llenar la base de datos. En los
+// demás celulares no se descargan solas: se piden a la nube solo al tocar "Ver fotos".
+let fotosTmp = {};
+function fotoPickerHtml(key, titulo){
+  const fs = fotosTmp[key]||[];
+  return `<div id="fotos-${key}" style="margin-top:10px"><label class="hint" style="display:block">${titulo}</label>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">
+      ${fs.map((f,i)=>`<div style="position:relative"><img src="${f}" style="width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line)"><button onclick="quitarFoto('${key}',${i})" style="position:absolute;top:-6px;right:-6px;width:24px;height:24px;border-radius:50%;border:none;background:var(--bad);color:#fff;font-weight:800;padding:0">×</button></div>`).join('')}
+      ${fs.length<4?`<label class="btn small" style="background:transparent;color:var(--brand);border:1px dashed var(--brand);box-shadow:none;cursor:pointer">📷 ${fs.length?'Otra foto':'Agregar foto'}<input type="file" accept="image/*" capture="environment" style="display:none" onchange="agregarFoto('${key}',this,'${titulo.replace(/'/g,"\\'")}')"></label>`:''}
+    </div></div>`;
+}
+function refrescarPicker(key, titulo){ const el=document.getElementById('fotos-'+key); if(el) el.outerHTML = fotoPickerHtml(key, titulo); }
+function agregarFoto(key, input, titulo){
+  const file = input.files && input.files[0]; if(!file) return;
+  const img = new Image(); const url = URL.createObjectURL(file);
+  img.onload = ()=>{
+    const max = 900, k = Math.min(1, max/Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    (fotosTmp[key] = fotosTmp[key]||[]).push(c.toDataURL('image/jpeg', 0.55));
+    URL.revokeObjectURL(url); refrescarPicker(key, titulo);
+  };
+  img.onerror = ()=>{ URL.revokeObjectURL(url); alert('No se pudo leer la foto.'); };
+  img.src = url;
+}
+function quitarFoto(key, i){ (fotosTmp[key]||[]).splice(i,1); const el=document.getElementById('fotos-'+key); if(el){ const t=el.querySelector('label.hint'); refrescarPicker(key, t?t.textContent:'Fotos'); } }
+async function guardarFotos(key, tipo, refId, mod){
+  const fs = fotosTmp[key]||[]; if(!fs.length) return 0;
+  const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+  for(let i=0;i<fs.length;i++) await db.collection('fotos').doc(refId+'_f'+i).set({modulo:mod, ref:{tipo, id:refId}, data:fs[i], fecha:new Date().toISOString(), creadoPor});
+  fotosTmp[key] = [];
+  return fs.length;
+}
+async function verFotos(refId, n, titulo){
+  const ids = Array.from({length:n}, (_,i)=>refId+'_f'+i);
+  let ov = document.getElementById('fotos-ov');
+  if(!ov){ ov = document.createElement('div'); ov.id='fotos-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(10,12,20,.92);z-index:9999;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px;align-items:center'; document.body.appendChild(ov); }
+  ov.innerHTML = `<div style="color:#fff;font-weight:800;align-self:stretch;display:flex;justify-content:space-between;align-items:center">📷 ${titulo||'Fotos'}<button class="btn small" onclick="document.getElementById('fotos-ov').remove()">Cerrar</button></div><p style="color:#ccc">Cargando…</p>`;
+  let fotos = [];
+  try{
+    if(window.buscarRemotos) fotos = await buscarRemotos('fotos', ids);
+    else for(const id of ids){ const d = await db.collection('fotos').doc(id).get(); if(d && d.data) fotos.push(d.data()); }
+  }catch(e){}
+  if(!document.getElementById('fotos-ov')) return;
+  ov.innerHTML = `<div style="color:#fff;font-weight:800;align-self:stretch;display:flex;justify-content:space-between;align-items:center">📷 ${titulo||'Fotos'}<button class="btn small" onclick="document.getElementById('fotos-ov').remove()">Cerrar</button></div>`
+    + (fotos.length ? fotos.map(f=>`<img src="${f.data}" style="max-width:100%;border-radius:12px">`).join('') : '<p style="color:#ccc">No se pudieron cargar las fotos (revisa tu internet).</p>');
+}
+
+// ===== Menú "Más" del coordinador =====
+function renderMas(){
+  const t = (ic, tit, sub, js, color) => `<button class="tile" style="--tc:${color}" onclick="${js}"><span class="tile-ic">${ic}</span><span class="tile-t">${tit}</span><span class="tile-s">${sub}</span></button>`;
+  $('#main').innerHTML = `<div class="card"><strong>☰ Más opciones</strong><p class="hint">Lo que se usa de vez en cuando.</p></div>
+    <div class="tiles">
+      ${t('⏳','Mis pendientes','Ver o corregir lo que espera aprobación',"irA('pend')",'#b3742c')}
+      ${t('🛡️','Garantías','Material que se da en garantía',"irA('gar')",'#b3742c')}
+      ${t('🔄','Traspasos','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5')}
+      ${t('📊','Reportes','Cierre del día en PDF',"irA('rep')",'#3E5CDE')}
+      ${t('📜','Historial','Entradas y salidas por fecha',"irA('movhist')",'#6b7280')}
+      ${t('📐','Despiece','Piezas de cada modelo',"irA('desp')",'#2c46b8')}
+    </div>`;
+}
+
+// ===== Corregir antes de que se apruebe (confirmado por el usuario) =====
+// Lo que sigue "pendiente" lo puede borrar quien lo anotó (o Dirección) para volverlo a capturar bien.
+// Ya aprobado no se puede borrar: se corrige con una auditoría.
+function renderPend(){
+  const lotes = {};
+  movs.filter(m=>m.estado==='pendiente').forEach(m=>{ const k=m.loteId||m.id; (lotes[k]=lotes[k]||[]).push(m); });
+  const yo = getCurrentUserEmail?getCurrentUserEmail():'';
+  const keys = Object.keys(lotes).sort((a,b)=>(lotes[b][0].fecha||'').localeCompare(lotes[a][0].fecha||''));
+  $('#main').innerHTML = `<div class="card"><strong>⏳ Pendientes de aprobar · ${modulo()}</strong>
+      <p class="hint">Si anotaste algo mal y todavía no se aprueba, bórralo aquí y vuelve a capturarlo bien. Lo ya aprobado no se puede borrar.</p></div>
+    ${keys.length ? keys.map(k=>{ const ms=lotes[k]; const puede = esAdmin() || !ms[0].creadoPor || ms[0].creadoPor===yo;
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between"><strong>${describirLote(ms)}</strong><span class="tag">${new Date(ms[0].fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span></div>
+        <p class="hint" style="margin:4px 0">${(ms[0].creadoPor||'').split('@')[0]}${ms[0].nota?' · '+ms[0].nota:''}</p>
+        <div class="hint">${ms.map(m=>`${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} ${m.itemNombre}`).join('<br>')}</div>
+        ${puede?`<div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="borrarLotePendiente('${k}')">🗑️ Borrar para corregir</button></div>`:'<p class="hint" style="margin-top:6px">Lo anotó otra persona.</p>'}
+      </div>`; }).join('') : '<div class="card hint">No hay nada pendiente. 🎉</div>'}`;
+}
+async function borrarLotePendiente(loteId){
+  const ms = movs.filter(m=>(m.loteId||m.id)===loteId && m.estado==='pendiente');
+  if(!ms.length) return alert('Ya no está pendiente (quizá ya se aprobó).');
+  if(!confirm(`¿Borrar esta captura?\n\n${describirLote(ms)}:\n${ms.map(m=>`• ${fmtNum(m.cantidad)} ${m.itemNombre}`).join('\n')}\n\nDespués puedes volver a capturarla bien.`)) return;
+  try{
+    for(const m of ms) await db.collection('movimientos').doc(m.id).delete();
+    // Registros ligados a esa captura
+    try{ const d = await db.collection('instalacionesLog').doc(loteId).get(); if(d && d.data) await db.collection('instalacionesLog').doc(loteId).delete(); }catch(e){}
+    try{ const d = await db.collection('garantiasLog').doc(loteId).get(); if(d && d.data) await db.collection('garantiasLog').doc(loteId).delete(); }catch(e){}
+    try{ const g = (await db.collection('garantiasLog').get()).docs.find(x=>((x.data()||{}).retorno||{}).loteId===loteId); if(g) await db.collection('garantiasLog').doc(g.id).update({retorno:null}); }catch(e){}
+    try{ const p = pedidos.find(x=>recepcionesDe(x).some(r=>r.loteId===loteId)); if(p){ const recepciones = recepcionesDe(p).filter(r=>r.loteId!==loteId); await db.collection('pedidos').doc(p.id).update(Object.assign({recepciones, recibido:null}, p.estado==='recibido'?{estado:'enCamino'}:{})); } }catch(e){}
+    for(let i=0;i<4;i++){ try{ await db.collection('fotos').doc(loteId+'_f'+i).delete(); }catch(e){} }
+    toast('🗑️ Borrado. Ya puedes capturarlo otra vez.');
+    renderPend();
   }catch(e){ alert('Error: '+e.message); }
 }
 
@@ -4318,7 +4681,7 @@ function pedCardHtml(p){
   const recsHtml = r.recs.map((x,idx)=>{ const e=estadoRecepcion(x);
     const tag = e==='aprobado'?'<span class="tag pos" style="border-color:var(--ok)">Sumado</span>':e==='rechazado'?'<span class="tag" style="color:var(--bad);border-color:var(--bad)">Rechazado</span>':e==='vacia'?'<span class="tag">No llegó nada</span>':'<span class="tag" style="color:#b3742c;border-color:#b3742c">Falta aprobar</span>';
     return `<div class="movitem" style="flex-wrap:wrap;gap:6px"><span style="min-width:0"><span class="invname">Entrega ${idx+1} · ${fechaCorta(x.fecha)} · ${(x.por||'').split('@')[0]}</span>
-      <span class="hint" style="display:block;margin:2px 0 0">${(x.items||[]).filter(i=>i.cantidad>0).map(i=>fmtNum(i.cantidad)+' '+i.itemNombre).join(', ')||'—'}${x.nota?' · '+x.nota:''}</span></span>
+      <span class="hint" style="display:block;margin:2px 0 0">${(x.items||[]).filter(i=>i.cantidad>0).map(i=>fmtNum(i.cantidad)+' '+i.itemNombre).join(', ')||'—'}${x.nota?' · '+x.nota:''}</span>${x.fotos?`<a href="#" class="hint" onclick="verFotos('${x.loteId}',${x.fotos},'Entrega');return false;">📷 Ver fotos (${x.fotos})</a>`:''}</span>
       <span class="row" style="gap:6px;flex-wrap:nowrap">${tag}${esAdmin() && e==='pendiente' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="rechazarRecepcion('${p.id}',${idx})">Rechazar</button><button class="btn small" onclick="aprobarRecepcion('${p.id}',${idx})">✅ Aprobar</button>`:''}</span></div>`; }).join('');
   return `<div class="card">
     <div class="row" style="justify-content:space-between"><strong>${p.proveedor||'Pedido'}</strong>${estadoPedidoTxt(p)}</div>
@@ -4346,9 +4709,9 @@ function pedNuevoHtml(){
   </div>
   <div class="card">
     <div class="paso">2</div><strong>¿Qué va a llegar?</strong>
-    <div class="chips" style="margin-top:10px">${cats.map(c=>{ const n=CATALOGO.filter(i=>i.cat===c && f.items[i.id]>0).length; return `<button class="chip ${c===f.cat?'on':''}" onclick="pedForm.cat='${c}';renderPed()">${ICONO_CAT[c]||''} ${c}${n?' ✓'+n:''}</button>`; }).join('')}</div>
-    <div class="movlist" style="margin-top:10px">${items.map(it=>`<label class="movitem"><span class="invname">${it.nombre}</span>
-      <input type="number" min="0" inputmode="decimal" placeholder="—" value="${f.items[it.id]||''}" oninput="pedForm.items['${it.id}']=Number(this.value)||0"></label>`).join('')}</div>
+    <input type="search" placeholder="🔍 Buscar artículo" value="${String(pedBuscar).replace(/"/g,'&quot;')}" style="margin-top:10px" oninput="pedBuscar=this.value;renderPedLista()">
+    <div class="chips" style="margin-top:10px">${cats.map(c=>{ const n=CATALOGO.filter(i=>i.cat===c && f.items[i.id]>0).length; return `<button class="chip ${c===f.cat&&!pedBuscar?'on':''}" onclick="pedForm.cat='${c}';pedBuscar='';renderPed()">${ICONO_CAT[c]||''} ${c}${n?' ✓'+n:''}</button>`; }).join('')}</div>
+    <div class="movlist" id="ped-lista" style="margin-top:10px">${pedListaHtml()}</div>
   </div>
   <div class="card">
     <div class="paso">3</div><strong>Datos del pedido</strong>
@@ -4361,6 +4724,14 @@ function pedNuevoHtml(){
     <button class="btn" style="width:100%;min-height:52px" onclick="guardarPedido()">🚚 Guardar pedido en camino</button>
   </div>`;
 }
+let pedBuscar = '';
+function pedListaHtml(){
+  const f = pedForm;
+  const items = pedBuscar.trim() ? CATALOGO.filter(i=>coincide(i.nombre, pedBuscar)).slice(0,40) : CATALOGO.filter(i=>i.cat===f.cat);
+  return items.length ? items.map(it=>`<label class="movitem"><span class="invname">${it.nombre}</span>
+      <input type="number" min="0" inputmode="decimal" placeholder="—" value="${f.items[it.id]||''}" oninput="pedForm.items['${it.id}']=Number(this.value)||0"></label>`).join('') : '<p class="hint">No se encontró ese artículo.</p>';
+}
+function renderPedLista(){ const el=document.getElementById('ped-lista'); if(el) el.innerHTML = pedListaHtml(); }
 async function guardarPedido(){
   if(!esAdmin()) return;
   const f = pedForm;
@@ -4384,6 +4755,7 @@ function pedRecibirHtml(id){
     <div class="movlist">${filas.map(f=>`<label class="movitem"><span style="min-width:0"><span class="invname">${f.itemNombre}</span><span class="hint" style="display:block;margin:2px 0 0">Pedido ${fmtNum(f.cantidad)} ${f.unidad||''}${r.recs.length?' · ya llegó '+fmtNum(f.llego)+' · falta '+fmtNum(f.falta):''}</span></span>
       <input type="number" min="0" inputmode="decimal" id="rec-${f.itemId}" value="${f.falta}"></label>`).join('')}</div>
     <input id="rec-nota" placeholder="Nota (opcional, ej. llegó una hoja dañada)" style="margin-top:10px">
+    ${fotoPickerHtml('rec','Foto de lo que llegó (opcional, útil si llegó dañado)')}
     <div class="row" style="justify-content:space-between;margin-top:10px">
       <button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="pedRecibiendo=null;renderPed()">Cancelar</button>
       <button class="btn" onclick="confirmarRecepcion('${p.id}')">✅ Guardar lo que llegó</button>
@@ -4405,9 +4777,11 @@ async function confirmarRecepcion(id){
     const nEntrega = r0.recs.length + 1;
     const notaMov = `Pedido${p.proveedor?' de '+p.proveedor:''}${nEntrega>1?' · entrega '+nEntrega:''}${nota?' · '+nota:''}`;
     for(const i of llegan){
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:p.modulo, itemId:i.itemId, itemNombre:i.itemNombre, tipo:'entrada', cantidad:i.cantidad, nota:notaMov, fecha, estado, loteId, pedidoId:p.id, creadoPor});
+      const nf = (fotosTmp.rec||[]).length;
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:p.modulo, itemId:i.itemId, itemNombre:i.itemNombre, tipo:'entrada', cantidad:i.cantidad, nota:notaMov, fecha, estado, loteId, pedidoId:p.id, creadoPor, ...(nf?{fotos:nf, fotosRef:loteId}:{})});
     }
-    const recepciones = recepcionesDe(p).concat([{fecha, por:creadoPor, items, nota, loteId}]);
+    const nFotosRec = await guardarFotos('rec', 'pedido', loteId, p.modulo);
+    const recepciones = recepcionesDe(p).concat([{fecha, por:creadoPor, items, nota, loteId, fotos:nFotosRec||0}]);
     await db.collection('pedidos').doc(p.id).update({recepciones, recibido:null, estado: quedan.length ? 'enCamino' : 'recibido'});
     pedRecibiendo = null; pedSub = quedan.length ? 'camino' : 'recibidos';
     toast(quedan.length ? '✅ Guardado. Lo que falta sigue en camino.' : (estado==='pendiente' ? '✅ Guardado. Dirección lo revisa y lo suma al inventario.' : '✅ Recibido y sumado al inventario.'));

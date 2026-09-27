@@ -11,13 +11,18 @@ const COLLECTIONS_V1 = ['inicial','movimientos','resets','auditorias','instalaci
 // v2: tablas nuevas (faltantes/deuda, garantías, conteo del almacén, historial del stock inicial).
 const COLLECTIONS_V2 = [...COLLECTIONS_V1, 'deudasAuditoria','garantiasLog','conteoAbierto','inicialHist'];
 // v3: pedidos de material en camino (Administración los sube; el módulo marca lo que llegó).
-const COLLECTIONS = [...COLLECTIONS_V2, 'pedidos'];
+const COLLECTIONS_V3 = [...COLLECTIONS_V2, 'pedidos'];
+// v4: fotos de evidencia (garantías, mermas, pedidos). No se descargan solas a todos los celulares:
+// se piden a la nube solo cuando alguien las abre (ver buscarFotosRemotas).
+const COLLECTIONS = [...COLLECTIONS_V3, 'fotos'];
+const NO_DESCARGAR = new Set(['fotos']);
 
 const ddb = new Dexie('auditoriamodulos');
 const storesDe = list => { const st = {}; list.forEach(c => { st[c] = 'id, modulo, _dirty, _updatedAt'; }); st['_meta'] = 'key'; return st; };
 ddb.version(1).stores(storesDe(COLLECTIONS_V1));
 ddb.version(2).stores(storesDe(COLLECTIONS_V2));
-ddb.version(3).stores(storesDe(COLLECTIONS));
+ddb.version(3).stores(storesDe(COLLECTIONS_V3));
+ddb.version(4).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 
@@ -199,6 +204,7 @@ async function pullRemote(){
     for (const remote of data) {
       if (!COLLECTIONS.includes(remote.collection)) COLLECTIONS.push(remote.collection);
       if (!ddb.tables.some(t => t.name === remote.collection)) continue; // colección desconocida en el schema local, se ignora
+      if (NO_DESCARGAR.has(remote.collection)) continue; // las fotos se bajan solo al abrirlas
       const local = await ddb.table(remote.collection).get(remote.id);
       const tRemoto = new Date(remote.updated_at).getTime();
       if (local && !local._dirty && new Date(local._updatedAt || 0).getTime() === tRemoto) continue; // ya lo tenemos igual
@@ -226,6 +232,18 @@ async function pullRemote(){
   if (maxVisto && maxVisto !== ultima) await ddb.table('_meta').put({ key: metaKey, value: maxVisto });
   if (!repaso) await ddb.table('_meta').put({ key: 'resyncV2', value: new Date().toISOString() });
   touched.forEach(notify);
+}
+
+// Trae de la nube documentos por id (p. ej. fotos que se tomaron en otro celular).
+export async function buscarRemotos(collection, ids){
+  const locales = [];
+  for (const id of ids) { const r = await ddb.table(collection).get(id); if (r && !r._deleted) locales.push(stripMeta(r)); }
+  if (locales.length === ids.length) return locales;
+  const sb = getSupabase();
+  if (!sb) return locales;
+  const { data, error } = await sb.from('docs').select('*').eq('collection', collection).in('id', ids);
+  if (error || !data) return locales;
+  return data.filter(d => !d.deleted).map(d => ({ ...d.payload, id: d.id }));
 }
 
 let syncing = false;
