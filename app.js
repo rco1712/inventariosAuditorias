@@ -4250,7 +4250,9 @@ async function rechazarInstalacion(logId){
 // las salidas de consumibles (cintilla, PVC, pegamento, stickers). Tubos, correderas, jaladeras y
 // todo lo que llevan las instalaciones y garantías ya se descuenta en automático.
 const CATS_CONSUMIBLES = ['Cintilla','PVC','Pegamento','Stickers'];
-const HORA_RECORDATORIO_CIERRE = 17; // a partir de las 5 pm se recuerda el cierre del turno
+const HORA_RECORDATORIO_CIERRE = 16; // el turno termina 4:30 pm: desde las 4 pm se recuerda el cierre (confirmado por el usuario)
+// Se trabaja de lunes a sábado; el domingo no se recuerda.
+function esHoraDeCierre(){ const d=new Date(); return d.getDay()!==0 && d.getHours()>=HORA_RECORDATORIO_CIERRE; }
 let cierreVals = {}, cierreBuscar = '';
 function cierreHechoHoy(){
   const hoy = fechaHoyLocal();
@@ -4258,7 +4260,7 @@ function cierreHechoHoy(){
   return movs.some(m=>m.cierreTurno && local(m.fecha)===hoy);
 }
 function recordatorioCierreHtml(){
-  if(esSoloLectura() || cierreHechoHoy() || new Date().getHours() < HORA_RECORDATORIO_CIERRE) return '';
+  if(esSoloLectura() || cierreHechoHoy() || !esHoraDeCierre()) return '';
   return `<div class="card aviso" style="padding:12px"><div class="pend"><div>📝 <strong>¿Ya capturaste tus salidas de hoy?</strong><br><span class="hint" style="margin:0">Corte de hojas, PVC, cintilla, pegamento y stickers.</span></div><button class="btn small" onclick="irA('cierre')">Capturar</button></div></div>`;
 }
 function renderCierre(){
@@ -4331,7 +4333,7 @@ setInterval(async ()=>{
 }, 10*60*1000);
 setInterval(async ()=>{
   try{
-    if(!moduloActual || esSoloLectura() || cierreHechoHoy() || new Date().getHours() < HORA_RECORDATORIO_CIERRE) return;
+    if(!moduloActual || esSoloLectura() || cierreHechoHoy() || !esHoraDeCierre()) return;
     const clave = 'cierreAvisado_'+modulo()+'_'+fechaHoyLocal();
     if(_cierreAvisado===clave || localStorage.getItem(clave)) return;
     _cierreAvisado = clave; localStorage.setItem(clave,'1');
