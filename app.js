@@ -2938,14 +2938,15 @@ function consumoGarantiaDetalle(lineas){
 
 function renderGar(){
   if(esSoloLectura()){ garSub='historial'; }
-  if(garSub==='retorno' && !garRet) garSub='historial';
+  if(garSub==='retorno' && !garRet) garSub='regreso';
   const hoy = new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
   const top = `<div class="card">
       <div style="font-size:17px;font-weight:800">🛡️ Garantías · ${modulo()}</div>
       <p class="hint">Material que se entrega en garantía. Se descuenta del inventario al confirmar.</p>
-      ${esSoloLectura()?'':`<div class="subtabs" style="margin:8px 0 0"><button class="${garSub==='nueva'?'active':''}" onclick="salirRetornoGar();garSub='nueva';renderGar()">Nueva garantía</button><button class="${garSub!=='nueva'?'active':''}" onclick="salirRetornoGar();garSub='historial';renderGar()">Garantías anteriores</button></div>`}
+      ${esSoloLectura()?'':`<div class="subtabs" style="margin:8px 0 0"><button class="${garSub==='nueva'?'active':''}" onclick="salirRetornoGar();garSub='nueva';renderGar()">Nueva</button><button class="${garSub==='regreso'||garSub==='retorno'?'active':''}" onclick="salirRetornoGar();garSub='regreso';renderGar()">↩️ Regreso <span id="gar-reg-n"></span></button><button class="${garSub==='historial'?'active':''}" onclick="salirRetornoGar();garSub='historial';renderGar()">Anteriores</button></div>`}
     </div>`;
-  if(garSub==='historial'){ $('#main').innerHTML = top + '<div id="gar-hist"><div class="card hint">Cargando…</div></div>'; renderGarHistorial(); return; }
+  if(garSub==='historial' || garSub==='regreso'){ $('#main').innerHTML = top + (garSub==='regreso'?'<div class="card hint" style="padding:12px">Aquí quedan las garantías cuyo material dañado <strong>todavía no regresa</strong>. Cuando el cliente lo entregue, toca <strong>↩️ Registrar lo que regresó</strong>.</div>':'') + '<div id="gar-hist"><div class="card hint">Cargando…</div></div>'; renderGarHistorial(); return; }
+  if(!esSoloLectura()) setTimeout(actualizarContadorRegreso, 0);
   const esRet = garSub==='retorno' && garRet;
   const topRet = esRet ? `<div class="card" style="border:2px solid var(--accent)">
       <div style="font-size:17px;font-weight:800">↩️ Lo que regresó el cliente</div>
@@ -3151,11 +3152,8 @@ async function confirmarGar(){
     const nFotosGar = await guardarFotos('gar', 'garantia', logId, mod);
     if(nFotosGar) logDoc.fotos = nFotosGar;
     await db.collection('garantiasLog').doc(logId).set(logDoc);
-    toast(estado==='pendiente' ? '✅ Garantía guardada.<br><small>Dirección la tiene que aprobar para que se descuente.</small>' : '✅ Garantía registrada.');
+    toast((estado==='pendiente' ? '✅ Garantía guardada.<br><small>Dirección la tiene que aprobar para que se descuente.</small>' : '✅ Garantía registrada.')+'<br><small>Cuando el cliente regrese lo dañado, anótalo en <strong>↩️ Regreso</strong>.</small>');
     garLineas=[]; garPreview=null;
-    if(confirm('¿El cliente ya regresó lo dañado?\n\nAceptar = anotar ahora qué regresó y qué sirve.\nCancelar = después (desde "Garantías anteriores").')){
-      iniciarRetornoGar({id:logId, ...logDoc}); return;
-    }
     renderGar(); window.scrollTo(0,0);
   }catch(e){ alert('Error al registrar: '+e.message); }
 }
@@ -3164,10 +3162,13 @@ async function renderGarHistorial(){
   let logs=[];
   try{ const snap = await db.collection('garantiasLog').get(); logs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }catch(e){}
   garHistLogs = logs;
-  const el = document.getElementById('gar-hist'); if(!el) return;
-  if(!logs.length){ el.innerHTML = '<div class="card">Aún no hay garantías registradas en '+modulo()+'.</div>'; return; }
   // El estado real sale de sus movimientos (se aprueban/rechazan desde Aprobaciones).
   const estadoLote = (loteId, def) => { const ms = movs.filter(m=>m.loteId===loteId); if(!ms.length) return def; if(ms.some(m=>m.estado==='pendiente')) return 'pendiente'; if(ms.every(m=>m.estado==='rechazado')) return 'rechazado'; return 'aprobado'; };
+  const esperando = logs.filter(l=>!l.retorno && estadoLote(l.id, l.estado)!=='rechazado');
+  const n = document.getElementById('gar-reg-n'); if(n) n.textContent = esperando.length ? '('+esperando.length+')' : '';
+  const el = document.getElementById('gar-hist'); if(!el) return;
+  if(garSub==='regreso'){ logs = esperando; if(!logs.length){ el.innerHTML = '<div class="card">No hay garantías esperando regreso en '+modulo()+'. 🎉</div>'; return; } }
+  if(!logs.length){ el.innerHTML = '<div class="card">Aún no hay garantías registradas en '+modulo()+'.</div>'; return; }
   const puede = puedeEscribir() && !esSoloLectura();
   el.innerHTML = logs.map(l=>{
     const r = l.retorno;
@@ -3207,7 +3208,15 @@ function salirRetornoGar(){
   if(garSub!=='retorno') return;
   garRet = null; garLineas = garLineasGuardadas || []; garLineasGuardadas = null; garPreview = null;
 }
-function cancelarRetornoGar(){ salirRetornoGar(); garSub='historial'; renderGar(); }
+function cancelarRetornoGar(){ salirRetornoGar(); garSub='regreso'; renderGar(); }
+async function actualizarContadorRegreso(){
+  try{
+    const snap = await db.collection('garantiasLog').get();
+    const rech = id => { const ms = movs.filter(m=>m.loteId===id); return ms.length && ms.every(m=>m.estado==='rechazado'); };
+    const k = snap.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===modulo() && !l.retorno && !rech(l.id)).length;
+    const n = document.getElementById('gar-reg-n'); if(n) n.textContent = k ? '('+k+')' : '';
+  }catch(e){}
+}
 
 // Separa las líneas en componentes: {label, kind:'item'|'hoja', itemId, n, pool:[piezas], medidas:[{color,ancho,alto}], estado, sirven}
 function componentesRetorno(lineas){
@@ -3328,7 +3337,7 @@ async function confirmarRetornoGar(){
     const nFotosRet = await guardarFotos('ret', 'retorno', loteId, log.modulo||modulo());
     await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, devuelto, estado, loteId, creadoPor, fotos:nFotosRet||0}});
     toast(devuelto.length && estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar para que sume al inventario.</small>' : '✅ Guardado lo que regresó.');
-    salirRetornoGar(); garSub='historial'; renderGar(); window.scrollTo(0,0);
+    salirRetornoGar(); garSub='regreso'; renderGar(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
 
@@ -4135,11 +4144,12 @@ function renderRep(){
 async function renderAprobaciones(){
   if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Esta sección es solo para Dirección.</div>'; return; }
   $('#main').innerHTML = '<div class="card">Cargando pendientes…</div>';
-  let todosMovs=[], todosLogs=[];
+  let todosMovs=[], todosLogs=[], garLogs=[];
   try{
-    const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
+    const [snapMov, snapLog, snapGar] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('garantiasLog').get()]);
     todosMovs = snapMov.docs.map(d=>({id:d.id,...d.data()}));
     todosLogs = snapLog.docs.map(d=>({id:d.id,...d.data()}));
+    garLogs = snapGar.docs.map(d=>({id:d.id,...d.data()}));
   }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${e.message}</div>`; return; }
 
   const logsPendientes = todosLogs.filter(l=>l.estado==='pendiente').sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
@@ -4160,7 +4170,7 @@ async function renderAprobaciones(){
     ${totalPend>1?`<button class="btn" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="aprobarTodo()">✅ Aprobar todo (${totalPend})</button><p class="hint" style="margin:6px 0 0">Revisa la lista de abajo antes de aprobar todo junto.</p>`:''}</div>`;
 
   if(loteIds.length>0){
-    html += `<div class="card"><h3>Entradas / Salidas pendientes (${loteIds.length})</h3></div>`;
+    html += `<div class="card"><h3>Entradas, salidas y garantías pendientes (${loteIds.length})</h3></div>`;
     html += loteIds.map(key=>{
       const items = lotes[key];
       const m0 = items[0];
@@ -4168,6 +4178,7 @@ async function renderAprobaciones(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
+        ${detalleGarantiaAprob(key, garLogs)}
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
@@ -4200,6 +4211,27 @@ async function renderAprobaciones(){
   $('#main').innerHTML = html;
 }
 
+// En Aprobaciones: de qué fue la garantía (o qué regresó el cliente), no solo el material.
+function detalleGarantiaAprob(loteId, garLogs){
+  const g = garLogs.find(x=>x.id===loteId);
+  const caja = (titulo, cuerpo) => `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(224,121,26,.10);border:1px solid rgba(224,121,26,.35)"><strong>${titulo}</strong>${cuerpo}</div>`;
+  if(g){
+    return caja('🛡️ Garantía'+(g.fechaDia?' · '+fechaGarTxt(g):''),
+      `${g.cliente?`<div class="hint" style="margin:4px 0 0"><strong>Cliente:</strong> ${g.cliente}</div>`:''}
+       ${g.motivo?`<div class="hint" style="margin:2px 0 0"><strong>Motivo:</strong> ${g.motivo}</div>`:''}
+       <div class="hint" style="margin:6px 0 0"><strong>Se entregó:</strong></div>
+       <ul style="margin:2px 0 0 18px;padding:0;line-height:1.5">${(g.lineas||[]).map(x=>`<li>${x}</li>`).join('') || '<li>—</li>'}</ul>
+       ${g.fotos?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;margin-top:6px" onclick="verFotos('${g.id}',${g.fotos},'Garantía')">📷 Ver fotos (${g.fotos})</button>`:''}`);
+  }
+  const r = garLogs.find(x=>x.retorno && x.retorno.loteId===loteId);
+  if(r){ const t=r.retorno;
+    return caja('↩️ Regreso de garantía'+(r.cliente?' · '+r.cliente:''),
+      `<div class="hint" style="margin:4px 0 0">De la garantía del ${fechaGarTxt(r)}${r.motivo?' ('+r.motivo+')':''}</div>
+       ${(t.sirve||[]).length?`<div class="hint" style="margin:6px 0 0"><strong>✅ Sirvió (regresa al inventario):</strong><br>${t.sirve.join('<br>')}</div>`:''}
+       ${(t.merma||[]).length?`<div class="hint" style="margin:6px 0 0"><strong>🗑️ Merma:</strong><br>${t.merma.join('<br>')}</div>`:''}`);
+  }
+  return '';
+}
 async function cambiarEstadoLote(loteId, nuevoEstado){
   const snap = await db.collection('movimientos').get();
   const docs = snap.docs.filter(d=>{ const m=d.data(); return (m.loteId||d.id)===loteId && m.estado==='pendiente'; });
