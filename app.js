@@ -24,7 +24,12 @@ let moduloActual = localStorage.getItem('am_modulo') || null;
 // para no decir "dueño"); el valor guardado en la base no cambia. Sin Supabase configurado,
 // miPerfil queda null y la app se comporta como antes (un solo usuario local, sin restricciones).
 let miPerfil = null;
-const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente' };
+const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente', administracion:'Administración' };
+// 'administracion' (confirmado por el usuario): la persona que surte el material. Sube los pedidos
+// que van a llegar, aprueba lo que llegó, ve lo que falta por entregar y el inventario de los 5
+// módulos. NO aprueba instalaciones ni captura entradas/salidas/instalaciones.
+function esAdministracion(){ return !!miPerfil && miPerfil.rol==='administracion'; }
+function puedePedidos(){ return esAdmin() || esAdministracion(); }
 function puedeEscribir(){ return !miPerfil || miPerfil.rol==='admin' || miPerfil.rol==='coordinador'; }
 function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // Lo que capture un coordinador queda "pendiente" hasta que Dirección lo apruebe; lo de
@@ -132,7 +137,8 @@ function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
   // Coordinadores: solo lo que usan en el día (se ocultan Catálogo e Historial, que son de consulta avanzada).
   // Coordinador: menú corto (confirmado por el usuario) con lo del día; lo demás queda en "☰ Más".
-  const ocultarTabs = (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr','ped','mas'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist','gar','trasp','rep','desp'] : ['mas']);
+  const ocultarTabs = miPerfil.rol==='administracion' ? ['mov','aud','inst','trasp','usr','apr','mas','gar','cat','desp','hist']
+    : (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr','ped','mas'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist','gar','trasp','rep','desp'] : ['mas']);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
   });
@@ -500,6 +506,10 @@ async function editInicial(itemId){
 
 function setView(v){
   current=v;
+  if(esSoloLectura() && ['mov','inst','trasp','pend','mas'].includes(v)){
+    document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
+    $('#main').innerHTML = `<div class="card">Tu cuenta (${ROL_LABELS[miPerfil.rol]||miPerfil.rol}) no captura en esta sección.</div>`; return;
+  }
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   if(v==='home') renderHome();
   if(v==='gar') renderGar();
@@ -511,6 +521,7 @@ function setView(v){
   if(v==='min') renderMin();
   if(v==='todos'){ todosCache=null; renderTodos(); }
   if(v==='pend') renderPend();
+  if(v==='tubos') renderTubos();
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
@@ -705,7 +716,7 @@ async function guardarIni(){
 
 // ===== Inicio: botones grandes según el rol =====
 const ICONO_CAT = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩'};
-function esSoloLectura(){ return miPerfil && (miPerfil.rol==='supervisor' || miPerfil.rol==='gerente'); }
+function esSoloLectura(){ return miPerfil && (miPerfil.rol==='supervisor' || miPerfil.rol==='gerente' || miPerfil.rol==='administracion'); }
 function esCoordinador(){ return miPerfil && miPerfil.rol==='coordinador'; }
 // Abre una pantalla con opciones ya elegidas (p. ej. Entradas/Salidas en "Corte" de Melamina).
 function irA(v, opts){
@@ -725,6 +736,7 @@ function renderHome(){
     t('🔄','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5');
     t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
     t('🛡️','Garantía','Material que se da en garantía',"irA('gar')",'#b3742c');
+    t('♻️','Tubos ahorrados','Tubos que regresan los instaladores',"irA('tubos')",'#1f9d55');
     const enCamino = pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p)).length;
     t('🚚','Por llegar', enCamino ? `${enCamino} pedido(s) en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'#0e8a8a');
   }
@@ -735,8 +747,14 @@ function renderHome(){
     t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
     t('📋','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
   }
+  if(esAdministracion()){
+    const enCaminoT = pedidos.filter(pedidoEnCamino).length;
+    tiles.unshift(`<button class="tile" style="--tc:#0e8a8a" onclick="pedSub='camino';irA('ped')"><span class="tile-ic">🚚</span><span class="tile-t">Pedidos en camino</span><span class="tile-s">${enCaminoT?enCaminoT+' pedido(s) de los 5 módulos':'No hay nada en camino'}</span></button>`,
+      `<button class="tile" style="--tc:#1f9d55" onclick="pedSub='nuevo';irA('ped')"><span class="tile-ic">➕</span><span class="tile-t">Nuevo pedido</span><span class="tile-s">Subir material que va a llegar</span></button>`,
+      `<button class="tile" style="--tc:#b3742c" onclick="pedSub='faltan';irA('ped')"><span class="tile-ic">📋</span><span class="tile-t">Falta por entregar</span><span class="tile-s">Reporte por módulo</span></button>`);
+  }
   if(esSoloLectura()) t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
-  if(esAdmin() || esSoloLectura()) t('🗂️','Historial','Auditorías y faltantes',"irA('hist')",'#6b7280');
+  if((esAdmin() || esSoloLectura()) && !esAdministracion()) t('🗂️','Historial','Auditorías y faltantes',"irA('hist')",'#6b7280');
   t('📊','Reportes','Reporte del día en PDF',"irA('rep')",'#3E5CDE');
   if(esAdmin()) t('👥','Usuarios','Dar de alta al personal',"irA('usr')",'#6b7280');
 
@@ -759,6 +777,11 @@ function renderHome(){
     <div id="home-apr"></div>
     <div class="tiles">${tiles.join('')}</div>`;
   if(esAdmin()) contarAprobacionesPendientes();
+  if(esAdministracion()){
+    const porAprobar = []; pedidos.forEach(p=>recepcionesDe(p).forEach((r,idx)=>{ if(estadoRecepcion(r)==='pendiente') porAprobar.push(p.modulo); }));
+    const el = document.getElementById('home-apr');
+    if(el && porAprobar.length) el.innerHTML = `<div class="card" style="padding:12px"><div class="pend"><div>📦 Hay <strong>${porAprobar.length}</strong> entrega(s) que llegaron y esperan tu aprobación (${[...new Set(porAprobar)].join(', ')}).</div><button class="btn small" onclick="pedSub='porAprobar';irA('ped')">Revisar</button></div></div>`;
+  }
 }
 async function contarAprobacionesPendientes(){
   try{
@@ -788,6 +811,7 @@ const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalació
 function etiquetaTipoMov(m){
   if(m.motivo==='armarJuegos') return 'Armado de juegos';
   if(m.motivo==='sobranteGarantia') return 'Sobrante de garantía';
+  if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
 function stockHojaTxt(f, unidad){
@@ -4527,6 +4551,56 @@ async function verFotos(refId, n, titulo){
     + (fotos.length ? fotos.map(f=>`<img src="${f.data}" style="max-width:100%;border-radius:12px">`).join('') : '<p style="color:#ccc">No se pudieron cargar las fotos (revisa tu internet).</p>');
 }
 
+// ===== Tubos ahorrados (confirmado por el usuario) =====
+// Los instaladores ahorran tubos en las instalaciones y los regresan al almacén: es una ENTRADA
+// que suma al inventario (con aprobación de Dirección, como cualquier entrada del coordinador).
+const TUBO_ITEM = 'Tubos 1.5 m';
+function tubosAhorradosMovs(){ return movs.filter(m=>m.motivo==='tuboAhorrado' && m.estado!=='rechazado'); }
+function renderTubos(){
+  if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  const it = itemByName(TUBO_ITEM);
+  const lista = tubosAhorradosMovs();
+  const mesIni = fechaHoyLocal().slice(0,7);
+  const local = iso => new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const delMes = lista.filter(m=>local(m.fecha).slice(0,7)===mesIni);
+  const porInst = {}; delMes.forEach(m=>{ const k=m.instalador||'(sin nombre)'; porInst[k]=(porInst[k]||0)+Number(m.cantidad||0); });
+  const nombres = [...new Set(lista.map(m=>m.instalador).filter(Boolean))];
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">♻️ Tubos ahorrados · ${modulo()}</div>
+      <p class="hint">Tubos que los instaladores <strong>no usaron</strong> y regresaron al almacén. Se suman al inventario como entrada.</p>
+      <label class="hint" style="display:block;margin-top:10px">¿Cuántos tubos (${TUBO_ITEM}) regresaron?</label>
+      <input id="tb-cant" type="number" min="0" step="1" inputmode="numeric" placeholder="Ej. 2" style="margin-top:4px;font-size:20px">
+      <label class="hint" style="display:block;margin-top:10px">¿Qué instalador los ahorró?</label>
+      <input id="tb-inst" list="tb-inst-list" placeholder="Nombre del instalador" style="margin-top:4px">
+      <datalist id="tb-inst-list">${nombres.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">`).join('')}</datalist>
+      <input id="tb-nota" placeholder="Nota (opcional, ej. cliente o folio)" style="margin-top:10px">
+      <p class="hint" style="margin-top:8px">Hay ahora: ${fmtNum(calcFormula(it.id).final)} ${it.unidad}</p>
+      <button class="btn" style="margin-top:6px;width:100%;min-height:54px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="guardarTubos()">✅ Guardar tubos ahorrados</button>
+    </div>
+    <div class="card"><strong>🏆 Este mes</strong>
+      ${Object.keys(porInst).length ? `<div class="movlist" style="margin-top:8px">${Object.entries(porInst).sort((a,b)=>b[1]-a[1]).map(([n,q])=>`<div class="movitem"><span class="invname">${n}</span><strong>${fmtNum(q)} tubo(s)</strong></div>`).join('')}</div>
+        <p class="hint">Total del mes: <strong>${fmtNum(delMes.reduce((s,m)=>s+Number(m.cantidad||0),0))}</strong> tubo(s).</p>` : '<p class="hint">Todavía no hay tubos ahorrados este mes.</p>'}
+    </div>
+    ${lista.length?`<details class="card"><summary><strong>Últimos registros</strong></summary><div class="wrap-x" style="margin-top:8px"><table><tr><th>Fecha</th><th>Instalador</th><th>Tubos</th><th>Estado</th></tr>
+      ${lista.slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleDateString('es-MX')}</td><td>${m.instalador||'—'}</td><td>${fmtNum(m.cantidad)}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}</table></div></details>`:''}`;
+}
+async function guardarTubos(){
+  const it = itemByName(TUBO_ITEM);
+  const cantidad = Number(document.getElementById('tb-cant').value);
+  const instalador = (document.getElementById('tb-inst').value||'').trim();
+  const notaExtra = (document.getElementById('tb-nota').value||'').trim();
+  if(!(cantidad>0)) return alert('Escribe cuántos tubos regresaron.');
+  if(!instalador) return alert('Escribe el nombre del instalador que ahorró los tubos.');
+  if(!confirm(`¿Todo está bien?\n\n♻️ ${fmtNum(cantidad)} tubo(s) ahorrados por ${instalador}\n\nSe suman al inventario de ${modulo()}.`)) return;
+  try{
+    const estado = estadoNuevoMovimiento();
+    await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'entrada', motivo:'tuboAhorrado', instalador, cantidad,
+      nota:'Tubos ahorrados · '+instalador+(notaExtra?' · '+notaExtra:''), fecha:new Date().toISOString(), estado, loteId:cryptoId(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''});
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Sumado al inventario.');
+    renderTubos();
+  }catch(e){ alert('Error: '+e.message); }
+}
+
 // ===== Menú "Más" del coordinador =====
 function renderMas(){
   const t = (ic, tit, sub, js, color) => `<button class="tile" style="--tc:${color}" onclick="${js}"><span class="tile-ic">${ic}</span><span class="tile-t">${tit}</span><span class="tile-s">${sub}</span></button>`;
@@ -4590,11 +4664,12 @@ function describirLote(ms){
   if(tipos.includes('garantia')) return 'Garantía';
   if(tipos.includes('devolucion')) return 'Regreso de garantía';
   if(ms.some(m=>m.motivo==='armarJuegos')) return 'Armado de juegos de corredera';
+  if(ms.some(m=>m.motivo==='tuboAhorrado')) return 'Tubos ahorrados';
   return tipos.map(t=>(TIPO_LABEL[t]||t)).join(' y ');
 }
 function calcularAvisos(){
   const visto = avisosVisto(); const out = [];
-  if(!esAdmin()){
+  if(!puedePedidos()){
     const lotes = {};
     movs.filter(m=>m.revisadoEn && m.revisadoEn>visto && (m.estado==='aprobado'||m.estado==='rechazado')).forEach(m=>{ (lotes[m.loteId||m.id]=lotes[m.loteId||m.id]||[]).push(m); });
     Object.keys(lotes).forEach(k=>{ const ms=lotes[k]; const ok=ms[0].estado==='aprobado';
@@ -4691,18 +4766,23 @@ function renderPed(){
   const visibles = pedidos.filter(p=>p.estado!=='cancelado' && (esSoloLectura() || p.modulo===modulo()));
   const enCamino = visibles.filter(pedidoEnCamino);
   const recibidos = visibles.filter(p=>!pedidoEnCamino(p));
-  const tabs = [['camino',`En camino (${enCamino.length})`],['recibidos',`Recibidos (${recibidos.length})`]].concat(esAdmin()?[['nuevo','+ Nuevo pedido']]:[]);
+  const porAprobar = visibles.filter(p=>recepcionesDe(p).some(r=>estadoRecepcion(r)==='pendiente'));
+  const tabs = [['camino',`En camino (${enCamino.length})`],['recibidos',`Recibidos (${recibidos.length})`]]
+    .concat(puedePedidos()&&porAprobar.length?[['porAprobar',`Por aprobar (${porAprobar.length})`]]:[])
+    .concat(puedePedidos()?[['faltan','📋 Falta por entregar'],['nuevo','+ Nuevo pedido']]:[]);
   if(!tabs.some(t=>t[0]===pedSub)) pedSub='camino';
   let cuerpo = '';
   if(pedSub==='nuevo') cuerpo = pedNuevoHtml();
+  else if(pedSub==='faltan') cuerpo = pedFaltanHtml(visibles.filter(pedidoEnCamino));
+  else if(pedSub==='porAprobar' && !pedRecibiendo) cuerpo = porAprobar.map(pedCardHtml).join('');
   else if(pedRecibiendo) cuerpo = pedRecibirHtml(pedRecibiendo);
   else {
     const lista = pedSub==='camino' ? enCamino : recibidos;
     cuerpo = lista.length ? lista.map(pedCardHtml).join('') : `<div class="card hint">${pedSub==='camino'?'No hay material en camino para '+modulo()+'.':'Todavía no hay pedidos recibidos.'}</div>`;
   }
   $('#main').innerHTML = `<div class="card">
-      <div style="font-size:17px;font-weight:800">🚚 Material por llegar · ${modulo()}</div>
-      <p class="hint">${esAdmin()?'Sube lo que pediste para este módulo. Cuando llegue, el coordinador marca lo que recibió y tú lo apruebas para sumarlo al inventario. Si llega incompleto, lo que falta sigue en camino.':'Aquí ves lo que Dirección pidió para tu módulo. Cuando llegue, marca lo que recibiste. Si llega incompleto, lo que falta sigue aquí hasta que llegue.'}</p>
+      <div style="font-size:17px;font-weight:800">🚚 Material por llegar · ${esSoloLectura()?'los 5 módulos':modulo()}</div>
+      <p class="hint">${esAdministracion()?'Aquí subes lo que va a llegar a cada módulo. Cuando llega, el coordinador marca lo que recibió y tú lo apruebas para sumarlo a su inventario. Si llega incompleto, lo que falta sigue en camino.':esAdmin()?'Sube lo que pediste para este módulo. Cuando llegue, el coordinador marca lo que recibió y tú lo apruebas para sumarlo al inventario. Si llega incompleto, lo que falta sigue en camino.':'Aquí ves lo que Dirección pidió para tu módulo. Cuando llegue, marca lo que recibiste. Si llega incompleto, lo que falta sigue aquí hasta que llegue.'}</p>
       <div class="subtabs" style="margin:8px 0 0">${tabs.map(([k,l])=>`<button class="${pedSub===k?'active':''}" onclick="pedSub='${k}';pedRecibiendo=null;renderPed()">${l}</button>`).join('')}</div>
     </div>${cuerpo}`;
 }
@@ -4716,16 +4796,16 @@ function pedCardHtml(p){
     const tag = e==='aprobado'?'<span class="tag pos" style="border-color:var(--ok)">Sumado</span>':e==='rechazado'?'<span class="tag" style="color:var(--bad);border-color:var(--bad)">Rechazado</span>':e==='vacia'?'<span class="tag">No llegó nada</span>':'<span class="tag" style="color:#b3742c;border-color:#b3742c">Falta aprobar</span>';
     return `<div class="movitem" style="flex-wrap:wrap;gap:6px"><span style="min-width:0"><span class="invname">Entrega ${idx+1} · ${fechaCorta(x.fecha)} · ${(x.por||'').split('@')[0]}</span>
       <span class="hint" style="display:block;margin:2px 0 0">${(x.items||[]).filter(i=>i.cantidad>0).map(i=>fmtNum(i.cantidad)+' '+i.itemNombre).join(', ')||'—'}${x.nota?' · '+x.nota:''}</span>${x.fotos?`<a href="#" class="hint" onclick="verFotos('${x.loteId}',${x.fotos},'Entrega');return false;">📷 Ver fotos (${x.fotos})</a>`:''}</span>
-      <span class="row" style="gap:6px;flex-wrap:nowrap">${tag}${esAdmin() && e==='pendiente' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="rechazarRecepcion('${p.id}',${idx})">Rechazar</button><button class="btn small" onclick="aprobarRecepcion('${p.id}',${idx})">✅ Aprobar</button>`:''}</span></div>`; }).join('');
+      <span class="row" style="gap:6px;flex-wrap:nowrap">${tag}${puedePedidos() && e==='pendiente' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="rechazarRecepcion('${p.id}',${idx})">Rechazar</button><button class="btn small" onclick="aprobarRecepcion('${p.id}',${idx})">✅ Aprobar</button>`:''}</span></div>`; }).join('');
   return `<div class="card">
-    <div class="row" style="justify-content:space-between"><strong>${p.proveedor||'Pedido'}</strong>${estadoPedidoTxt(p)}</div>
+    <div class="row" style="justify-content:space-between"><strong>${esSoloLectura()?'📍 '+p.modulo+' · ':''}${p.proveedor||'Pedido'}</strong>${estadoPedidoTxt(p)}</div>
     <p class="hint" style="margin:4px 0">Subido el ${fechaCorta(p.fecha)}${p.fechaEstimada?' · llega aprox. '+fechaCorta(p.fechaEstimada):''}${p.nota?' · '+p.nota:''}</p>
     <div class="wrap-x"><table><tr><th>Artículo</th><th>Pedido</th>${hayRecs?'<th>Llegó</th><th>Falta</th>':''}</tr>${filas}</table></div>
     ${r.recs.length?`<div class="movlist" style="margin-top:8px">${recsHtml}</div>`:''}
     ${r.estado==='cerrado'?`<p class="hint" style="margin:6px 0 0">Cerrado el ${fechaCorta(p.cerradoEn)}: lo que faltaba ya no va a llegar.</p>`:''}
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap">
-      ${esAdmin() && r.estado==='camino' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="cancelarPedido('${p.id}')">Cancelar pedido</button>` : ''}
-      ${esAdmin() && r.estado==='parcial' ? `<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="cerrarPedido('${p.id}')">Ya no llegará lo que falta</button>` : ''}
+      ${puedePedidos() && r.estado==='camino' ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="cancelarPedido('${p.id}')">Cancelar pedido</button>` : ''}
+      ${puedePedidos() && r.estado==='parcial' ? `<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="cerrarPedido('${p.id}')">Ya no llegará lo que falta</button>` : ''}
       ${puedeRecibir ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="pedRecibiendo='${p.id}';renderPed()">📦 ${r.estado==='parcial'?'Llegó lo que faltaba':'Marcar lo que llegó'}</button>` : ''}
     </div>
   </div>`;
@@ -4767,7 +4847,7 @@ function pedListaHtml(){
 }
 function renderPedLista(){ const el=document.getElementById('ped-lista'); if(el) el.innerHTML = pedListaHtml(); }
 async function guardarPedido(){
-  if(!esAdmin()) return;
+  if(!puedePedidos()) return;
   const f = pedForm;
   const items = Object.keys(f.items).filter(id=>f.items[id]>0).map(id=>{ const it=CATALOGO.find(i=>i.id===id); return {itemId:id, itemNombre:it.nombre, unidad:it.unidad, cantidad:f.items[id]}; });
   if(!items.length) return alert('Escribe la cantidad de al menos un artículo.');
@@ -4829,6 +4909,32 @@ async function cerrarPedido(id){
   if(!confirm(`¿Cerrar este pedido? Lo que falta ya no se esperará:\n\n${r.faltan.map(f=>`• ${fmtNum(f.falta)} ${f.unidad} ${f.itemNombre}`).join('\n')}`)) return;
   try{ await db.collection('pedidos').doc(id).update({estado:'cerrado', cerradoEn:new Date().toISOString(), faltanteAlCerrar:r.faltan.map(f=>({itemId:f.itemId, itemNombre:f.itemNombre, cantidad:f.falta}))}); pedSub='recibidos'; renderPed(); }catch(e){ alert('Error: '+e.message); }
 }
+// Reporte (confirmado por el usuario): qué material le falta por llegar a cada módulo.
+function faltantesPorModulo(lista){
+  const out = {};
+  lista.forEach(p=>resumenPedido(p).faltan.forEach(f=>{ const m=(out[p.modulo]=out[p.modulo]||{}); const k=f.itemId;
+    m[k] = m[k] || {itemNombre:f.itemNombre, unidad:f.unidad||'', falta:0, pedidos:[]};
+    m[k].falta = fmtNum(m[k].falta + Number(f.falta)); m[k].pedidos.push(`${p.proveedor||'Pedido'} (${fechaCorta(p.fecha)}${p.fechaEstimada?', llega aprox. '+fechaCorta(p.fechaEstimada):''})`); }));
+  return out;
+}
+function pedFaltanHtml(lista){
+  const fm = faltantesPorModulo(lista);
+  const mods = MODULOS.map(m=>m.nombre).filter(m=>fm[m]);
+  return `<div class="card"><strong>📋 Lo que falta por entregar</strong>
+      <p class="hint">Todo lo que se pidió y todavía no llega, por módulo (incluye lo que llegó incompleto).</p>
+      <button class="btn small" onclick="descargarFaltanCSV()">📊 Descargar Excel</button></div>
+    ${mods.length ? mods.map(m=>`<div class="card"><strong>📍 ${m}</strong>
+      <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th style="text-align:right">Falta</th><th>De qué pedido</th></tr>
+      ${Object.values(fm[m]).sort((a,b)=>a.itemNombre.localeCompare(b.itemNombre)).map(x=>`<tr><td>${x.itemNombre}</td><td style="text-align:right;white-space:nowrap"><strong>${fmtNum(x.falta)}</strong> ${x.unidad}</td><td class="hint" style="margin:0">${x.pedidos.join('<br>')}</td></tr>`).join('')}
+      </table></div></div>`).join('') : '<div class="card hint">No falta nada por entregar. 🎉</div>'}`;
+}
+function descargarFaltanCSV(){
+  const lista = pedidos.filter(p=>p.estado!=='cancelado' && (esSoloLectura() || p.modulo===modulo()) && pedidoEnCamino(p));
+  const fm = faltantesPorModulo(lista);
+  const filas = [['Módulo','Artículo','Unidad','Falta por llegar','Pedido(s)']];
+  MODULOS.forEach(({nombre})=>Object.values(fm[nombre]||{}).forEach(x=>filas.push([nombre, x.itemNombre, x.unidad, fmtNum(x.falta), x.pedidos.join(' | ')])));
+  descargarCSV(`falta-por-entregar-${fechaHoyLocal()}.csv`, filas);
+}
 async function cancelarPedido(id){ if(!confirm('¿Cancelar este pedido? Ya no aparecerá como en camino.')) return; try{ await db.collection('pedidos').doc(id).update({estado:'cancelado', canceladoEn:new Date().toISOString()}); renderPed(); }catch(e){ alert('Error: '+e.message); } }
 
 // ===== Panel de usuarios (solo admin) =====
@@ -4842,7 +4948,7 @@ async function renderUsuarios(){
   try{ usuariosCache = (await listarUsuarios()).perfiles || []; }
   catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar la lista de usuarios: ${e.message}<p class="hint">Si el error dice "Failed to fetch" o "404", probablemente la función 'admin-usuarios' todavía no está pegada en tu proyecto de Supabase — dile a Claude que te pase esa parte del README.</p></div>`; return; }
 
-  const rolOpts = (sel)=>['admin','coordinador','supervisor','gerente'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
+  const rolOpts = (sel)=>['admin','administracion','coordinador','supervisor','gerente'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
   const moduloOpts = (sel)=>`<option value="">(sin módulo)</option>`+MODULOS.map(m=>`<option value="${m.nombre}" ${m.nombre===sel?'selected':''}>${m.nombre}</option>`).join('');
 
   let html = `<div class="card">
