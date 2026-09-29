@@ -14,7 +14,7 @@ let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
 // Armados contados (cajoneras sin cajones, cajones completos, cuadros de cajón)
-let auditArmados=[], auditArmadoForm={tipo:'cajonera', variante:'3', color:'Blanco', colorCuadro:'Blanco', ext:false, puertitas:false, puertitasSinJal:false, sinFondo:false, sinHerrajes:false, cantidad:''};
+let auditArmados=[], auditArmadoForm={tipo:'cajonera', variante:'3', color:'Blanco', colorCuadro:'Blanco', ext:false, puertitas:false, puertitasSinJal:false, sinFondo:false, sinHerrajes:false, colorFrente:'', cantidad:''};
 let moduloActual = localStorage.getItem('am_modulo') || null;
 // Perfil del usuario (rol + módulo asignado). Lo llena boot() con getMyProfile() antes de
 // llamar a init(). rol guardado en la base (nunca cambia, lo usan los permisos/RLS): 'admin'
@@ -1156,6 +1156,7 @@ function renderAudArmadosHtml(){
     <div class="grid2" style="margin-top:10px">
       <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>
       ${esCorr?'':`<div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>`}
+      ${esCajonera?`<div><label class="hint">Color de frentes y zóclos</label><select style="margin-top:4px" onchange="${set('colorFrente')}">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
       ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
       <div><label class="hint">Cantidad</label><input type="number" min="0" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="auditArmadoForm.cantidad=this.value"></div>
     </div>
@@ -1192,6 +1193,7 @@ function agregarArmado(){
   if(sinH) a.sinHerrajes = true;
   if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)){ a.puertitas = !!f.puertitas; if(a.puertitas && f.puertitasSinJal && !sinH) a.puertitasSinJal = true; }
   if(f.tipo==='cajonera' && f.sinFondo) a.sinFondo = true;
+  if(f.tipo==='cajonera' && f.colorFrente && f.colorFrente!==f.color) a.colorFrente = f.colorFrente;
   auditArmados.push(a);
   f.cantidad = '';
   renderAud();
@@ -2011,6 +2013,8 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
   else if(fam==='Triple'){ add('Tubo',4,'—','—','ok'); add('Juego de bridas',4,'—','—','ok'); }
   else if(fam==='King'){ add('Tubo',5,'—','—','ok'); add('Juego de bridas',5,'—','—','ok'); }
 
+  // Igual que los zóclos normales: si el modelo lleva cajonera, los zóclos Max van del color del frente.
+  if(cajones>0) piezas.forEach(p=>{ if(p.nombre==='Zóclo Max') p.colorDestino = color; });
   return {piezas, maxNota};
 }
 
@@ -2112,7 +2116,7 @@ function piezasDeArmado(a){
     const tipoAdic = esMax ? 'cajonera_max' : (a.variante==='emma' ? 'cajonera_emma' : 'cajonera');
     const cajones = (esMax || a.variante==='emma') ? 4 : Number(a.variante);
     const conPuerta = !!a.puertitas && armadoTienePuertitas(a.variante);
-    buildAdicionalPiezas(tipoAdic, cajones, a.color, !!a.ext, conPuerta)
+    buildAdicionalPiezas(tipoAdic, cajones, a.color, !!a.ext, conPuerta, {colorFrente:a.colorFrente})
       .filter(p=>p.estado==='ok' && !PIEZAS_DE_CAJON.includes(p.nombre) && !(a.sinFondo && p.nombre.startsWith('Fondo de cajonera')))
       .forEach(p=>add(p.nombre, p.cantidad, p.dim, p.colorDestino));
     add('Corredera hembra'+sufCorr, cajones, '—', '—');
@@ -2145,7 +2149,7 @@ function piezasDeArmado(a){
 function describirArmado(a){
   let d;
   if(a.tipo==='corredera') d = 'Corredera suelta · '+(a.variante==='macho'?'macho':'hembra');
-  else if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color;
+  else if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (frentes y zóclos '+a.colorFrente+')':'');
   else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro;
   else d = ARMADO_TIPOS[a.tipo]+(a.variante==='max'?' Max':'')+' · '+a.color;
   if(a.sinHerrajes) d += ' · sin herrajes';
@@ -2259,8 +2263,15 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     if(largo>0 && fondo>0) add('Repisa', cant, `${fmtNum(largo)}×${fmtNum(fondo)} cm`, color, 'ok', `${cant} repisa(s) de ${fmtNum(largo)}×${fmtNum(fondo)} cm; se descuenta la parte proporcional de la hoja`);
     else add('Repisa','Pendiente','—','—','pendiente','Falta capturar la medida de la repisa (largo × fondo).');
   }
+  // Color de frentes y zóclos (confirmado por el usuario): en las cajoneras, los zóclos, frentes,
+  // puertitas y el frente del espejo van del color del FRENTE; la estructura (paredes, entrepaños)
+  // y el cuadro del cajón se quedan del color de la cajonera.
+  const colorFrente = extra && extra.colorFrente;
+  if(colorFrente && colorFrente!==color && String(tipo).startsWith('cajonera'))
+    piezas.forEach(p=>{ if(PIEZAS_COLOR_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
   return piezas;
 }
+const PIEZAS_COLOR_FRENTE = ['Zóclo normal','Zóclo Max','Zóclo especial','Marco de espejo','Frente','Frente Max','Puertita de cajonera'];
 
 // Traduce el valor del selector "por muebles" (MUEBLE_TIPO_OPCIONES) a buildAdicionalPiezas
 function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
@@ -2324,7 +2335,7 @@ function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, 
   // del color de la cajonera. Se corrige aquí (una sola vez, sobre lo que aportó cada mueble)
   // en vez de duplicar esta regla dentro de cada tipo de mueble en buildAdicionalPiezas.
   const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
-  if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal') p.colorDestino = color; });
+  if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = color; });
   // El frente del espejo (zóclos especiales y marcos) va del color del FRENTE, no de la cajonera.
   piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo especial' || p.nombre==='Marco de espejo') p.colorDestino = color; });
 
@@ -2528,7 +2539,7 @@ function renderAdicBox(prefix){
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
       <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}</td>
-      <td>${a.color}</td>
+      <td>${a.color}${a.colorFrente?'<div class="hint" style="margin:0">frentes y zóclos: '+a.colorFrente+'</div>':''}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
   box.innerHTML = `<div class="card">
@@ -2537,7 +2548,7 @@ function renderAdicBox(prefix){
     ${list.length? `<div class="wrap-x"><table><tr><th>Extra</th><th>Color</th><th></th></tr>${rows}</table></div>` : (prefix==='d'?'<p class="hint">Sin adicionales.</p>':'')}
     <div class="grid2" style="margin-top:8px">
       <div><label class="hint">¿Qué es?</label><select id="${prefix}-adic-tipo" style="margin-top:4px" onchange="toggleAdicionalCajones('${prefix}')">${Object.keys(TIPOS_ADICIONAL).map(k=>`<option value="${k}">${TIPOS_ADICIONAL[k]}</option>`).join('')}</select></div>
-      <div><label class="hint">Color</label><select id="${prefix}-adic-color" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label class="hint">Color</label><select id="${prefix}-adic-color" style="margin-top:4px" onchange="const f=document.getElementById('${prefix}-adic-colorfrente'); if(f && !f.dataset.tocado) f.value=this.value">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
     </div>
     <div id="${prefix}-adic-cajones-wrap"></div>
     <button class="btn small" style="margin-top:10px;width:100%" onclick="agregarAdicional('${prefix}')">+ Agregar este extra</button>
@@ -2559,6 +2570,10 @@ function toggleAdicionalCajones(prefix){
       <label class="hint" style="display:block;margin-top:8px">¿Cuántas repisas?</label>
       <div class="chips" style="margin-top:4px" id="${prefix}-adic-cant-wrap">${[1,2,3].map(n=>`<button type="button" class="chip ${n===1?'on':''}" data-n="${n}" onclick="this.parentNode.querySelectorAll('.chip').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${n}</button>`).join('')}</div>
       <p class="hint">Se descuenta solo la parte de la hoja que usan las repisas, no la hoja completa.</p>`;
+  }
+  if(String(sel.value).startsWith('cajonera')){
+    const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
+    html += `<label class="hint" style="display:block;margin-top:8px">Color de frentes y zóclos</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
   }
   const labelPuerta = ADIC_CON_PUERTA_LABEL[sel.value];
   if(labelPuerta){
@@ -2582,6 +2597,8 @@ function agregarAdicional(prefix){
   const puertaEl = document.getElementById(prefix+'-adic-puerta');
   const conPuerta = !!(puertaEl && puertaEl.checked);
   const nuevo = {tipo, cajones, color, conPuerta};
+  const cf = document.getElementById(prefix+'-adic-colorfrente');
+  if(cf && String(tipo).startsWith('cajonera') && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
   if(tipo==='repisa'){
     const largo = Number(document.getElementById(prefix+'-adic-largo').value);
     const fondo = Number(document.getElementById(prefix+'-adic-fondo').value);
@@ -2924,7 +2941,7 @@ function previewInst(){
 // inventario (jaladera, espejo, juego de correderas…). Se descuenta igual que una instalación
 // (las hojas salen del material cortado; si no hay, se toman hojas provisionalmente).
 let garLineas = [], garTipo = 'pieza', garSub = 'nueva', garPreview = null, garRet = null, garHistLogs = [];
-let garForm = {pieza:'pared', color:'Blanco', cantidad:'', medidaNombre:'Puerta', ancho:'', alto:'', armTipo:'cajon', armVar:'normal', colorCuadro:'Blanco', ext:false, itemId:null,
+let garForm = {pieza:'pared', color:'Blanco', cantidad:'', medidaNombre:'Puerta', ancho:'', alto:'', armTipo:'cajon', armVar:'normal', colorCuadro:'Blanco', colorFrente:'', ext:false, itemId:null,
   pTipo:'Normal', pAlto:'', pAncho:'', pModo:'completas', pHerrajes:true, pJaladera:'normal', pPiezas:{puerta:1, marco:0, fijo:0, paredFalsa:0, extFijo:0}};
 const GAR_TIPOS = {
   puertas:{ic:'🚪', t:'Puertas', s:'Completas, 1 puerta, el fijo… (por medida del hueco)'},
@@ -2938,7 +2955,7 @@ const GAR_MEDIDA_NOMBRES = ['Puerta','Marco','Fijo','Pared falsa','Extensión de
 function describirLineaGar(l){
   if(l.tipo==='pieza'){ const p=PIEZAS_AUDIT.find(x=>x.key===l.pieza); return `${l.cantidad} × ${p?p.label:l.pieza}${p&&p.tipo==='mel'?' · '+l.color:''}`; }
   if(l.tipo==='medida') return `${l.cantidad} × ${l.nombre} de ${fmtNum(l.ancho)}×${fmtNum(l.alto)} cm · ${l.color}`;
-  if(l.tipo==='armado') return `${l.cantidad} × ${describirArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:l.cantidad})}`;
+  if(l.tipo==='armado') return `${l.cantidad} × ${describirArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, colorFrente:l.colorFrente, ext:l.ext, cantidad:l.cantidad})}`;
   if(l.tipo==='item'){ const it=CATALOGO.find(i=>i.id===l.itemId); return `${l.cantidad} ${it?it.unidad:''} de ${it?it.nombre:l.itemId}`; }
   if(l.tipo==='puertas'){
     const base = `puertas "${l.pTipo}" (hueco ${fmtNum(l.pAlto)} alto × ${fmtNum(l.pAncho)} ancho) · ${l.color}`;
@@ -2973,7 +2990,7 @@ function consumoGarantiaDetalle(lineas){
     } else if(l.tipo==='medida'){
       (medidas[l.color] = medidas[l.color]||[]).push({ancho:Number(l.ancho), alto:Number(l.alto), cantidad:n});
     } else if(l.tipo==='armado'){
-      piezasDeArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:n}).forEach(p=>{
+      piezasDeArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, colorFrente:l.colorFrente, ext:l.ext, cantidad:n}).forEach(p=>{
         if(CORR_SUELTA_ITEM[p.nombre]) medias[p.nombre] = (medias[p.nombre]||0) + p.cantidad;
         else pool.push(p);
       });
@@ -3105,6 +3122,7 @@ function renderGar(){
         <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="garForm.armVar=this.value;renderGar()">${Object.keys(vars).map(k=>`<option value="${k}" ${k===f.armVar?'selected':''}>${vars[k]}</option>`).join('')}</select></div>
         <div><label class="hint">${esCaj?'Color de la cajonera':(f.armTipo==='cajon'?'Color del frente':'Color del cuadro')}</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select></div>
         ${f.armTipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="garForm.colorCuadro=this.value">${colorOpts(f.colorCuadro)}</select></div>`:''}
+        ${esCaj?`<div><label class="hint">Color de frentes y zóclos</label><select style="margin-top:4px" onchange="garForm.colorFrente=this.value">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
         <div><label class="hint">¿Cuántos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1"></div>
       </div>
       ${(f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" style="width:22px;min-height:22px;flex:0 0 22px" ${f.ext?'checked':''} onchange="garForm.ext=this.checked"> Lleva corredera de extensión</label>`:''}
@@ -3187,7 +3205,7 @@ function agregarLineaGar(){
       l = {tipo:'puertas', pTipo:f.pTipo, pAlto:al, pAncho:an, color:f.color, pModo:'completas', pHerrajes:!!f.pHerrajes, pJaladera:f.pJaladera, cantidad:n};
     }
   }
-  else if(garTipo==='armado'){ l = {tipo:'armado', armTipo:f.armTipo, armVar:f.armVar, color:f.color, colorCuadro:f.colorCuadro, ext: (f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? !!f.ext : false, cantidad:n}; }
+  else if(garTipo==='armado'){ l = {tipo:'armado', armTipo:f.armTipo, armVar:f.armVar, color:f.color, colorCuadro:f.colorCuadro, colorFrente:(f.armTipo==='cajonera' && f.colorFrente && f.colorFrente!==f.color)?f.colorFrente:undefined, ext: (f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? !!f.ext : false, cantidad:n}; }
   else { l = {tipo:'item', itemId:f.itemId, cantidad:n}; }
   garLineas.push(l);
   garForm.cantidad=''; garForm.ancho=''; garForm.alto='';
@@ -3335,8 +3353,8 @@ function componentesRetorno(lineas){
     } else if(l.tipo==='medida'){
       addMedida(l.nombre, l.color, Number(l.ancho), Number(l.alto), n);
     } else if(l.tipo==='armado'){
-      const origen = ' (de '+describirArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:n}).split(' · ')[0].toLowerCase()+')';
-      piezasDeArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, ext:l.ext, cantidad:n}).forEach(p=>addPieza(p, origen));
+      const origen = ' (de '+describirArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, colorFrente:l.colorFrente, ext:l.ext, cantidad:n}).split(' · ')[0].toLowerCase()+')';
+      piezasDeArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, colorFrente:l.colorFrente, ext:l.ext, cantidad:n}).forEach(p=>addPieza(p, origen));
     } else if(l.tipo==='item'){
       addItem(l.itemId, n);
     } else if(l.tipo==='puertas'){
