@@ -14,7 +14,7 @@ let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
 // Armados contados (cajoneras sin cajones, cajones completos, cuadros de cajón)
-let auditArmados=[], auditArmadoForm={tipo:'cajonera', variante:'3', color:'Blanco', colorCuadro:'Blanco', ext:false, puertitas:false, cantidad:''};
+let auditArmados=[], auditArmadoForm={tipo:'cajonera', variante:'3', color:'Blanco', colorCuadro:'Blanco', ext:false, puertitas:false, puertitasSinJal:false, sinFondo:false, sinHerrajes:false, cantidad:''};
 let moduloActual = localStorage.getItem('am_modulo') || null;
 // Perfil del usuario (rol + módulo asignado). Lo llena boot() con getMyProfile() antes de
 // llamar a init(). rol guardado en la base (nunca cambia, lo usan los permisos/RLS): 'admin'
@@ -455,8 +455,23 @@ async function cambiarPinCero(){
   catch(e){ alert('Error: '+e.message); }
 }
 
-async function ceroModulo(){
+// "Poner en cero" (confirmado por el usuario): se elige entre empezar de cero borrando TODO el
+// historial del módulo, o solo dejar el inventario en 0 conservando el historial.
+function ceroModulo(){
   if(!esAdmin()) return alert('Solo el administrador puede poner el inventario en cero.');
+  let ov = document.getElementById('cero-ov'); if(ov) ov.remove();
+  ov = document.createElement('div'); ov.id='cero-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(10,12,20,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div class="card" style="max-width:420px;width:100%;margin:0">
+    <div style="font-size:17px;font-weight:800">Poner en cero · ${modulo()}</div>
+    <p class="hint">¿Qué quieres hacer?</p>
+    <button class="btn" style="width:100%;min-height:64px;text-align:left;background:var(--bad);margin-top:6px" onclick="document.getElementById('cero-ov').remove();borrarDatosModulo([modulo()])">🧹 Empezar de cero: borrar TODO<br><small style="font-weight:400">Inventario, entradas, salidas, cortes, instalaciones, garantías, traspasos, auditorías, pedidos y todo el historial de ${modulo()}.</small></button>
+    <button class="btn" style="width:100%;min-height:64px;text-align:left;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none;margin-top:10px" onclick="document.getElementById('cero-ov').remove();ceroSoloInventario()">0️⃣ Solo poner el inventario en 0<br><small style="font-weight:400;color:var(--sub)">El historial se conserva; el stock parte de 0 desde hoy.</small></button>
+    <button class="btn small" style="width:100%;margin-top:10px;background:transparent;color:var(--sub);border:none;box-shadow:none" onclick="document.getElementById('cero-ov').remove()">Cancelar</button>
+  </div>`;
+  document.body.appendChild(ov);
+}
+async function ceroSoloInventario(){
   const pin = prompt('Ingresa el PIN de administrador para confirmar:');
   if(pin===null) return;
   const pinGuardado = await getPinCero();
@@ -1125,7 +1140,7 @@ function renderAudArmadosHtml(){
   const labelColor = esCajonera ? 'Color de la cajonera' : (f.tipo==='cajon' ? 'Color del frente' : 'Color del cuadro');
   const usaCorredera = armadoUsaCorredera(f);
   const puedePuertitas = esCajonera && armadoTienePuertitas(f.variante);
-  const set = (campo, rerender=true) => `auditArmadoForm.${campo}=this.${campo==='ext'||campo==='puertitas'?'checked':'value'};${rerender?'renderAud()':''}`;
+  const set = (campo, rerender=true) => `auditArmadoForm.${campo}=this.${campo==='ext'||campo==='puertitas'||campo==='sinFondo'||campo==='sinHerrajes'?'checked':'value'};${rerender?'renderAud()':''}`;
   const preview = Number(f.cantidad)>0 ? describirArmado(f) : '';
   return `<div class="card">
     <h3>📦 Armados</h3>
@@ -1138,9 +1153,17 @@ function renderAudArmadosHtml(){
       ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
       <div><label class="hint">Cantidad</label><input type="number" min="0" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="auditArmadoForm.cantidad=this.value"></div>
     </div>
-    ${usaCorredera?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="${set('ext')}"> ${esCorr?'Es corredera de extensión':'Lleva corredera de extensión (si no, corredera normal)'}</label>`:''}
+    ${(esCajonera||f.tipo==='cajon')?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinHerrajes?'checked':''} onchange="${set('sinHerrajes')}"> Sin herrajes (sin correderas${f.tipo==='cajon'?' ni jaladera':', bisagras ni jaladeras'})</label>`:''}
+    ${usaCorredera && !((esCajonera||f.tipo==='cajon') && f.sinHerrajes)?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="${set('ext')}"> ${esCorr?'Es corredera de extensión':'Lleva corredera de extensión (si no, corredera normal)'}</label>`:''}
     ${f.variante==='max' && f.tipo!=='cuadro_fondo' && f.tipo!=='cuadro_sin'?`<p class="hint">Max: siempre lleva corredera de extensión${f.tipo==='cajon'?' y no lleva jaladera':''}.</p>`:''}
-    ${puedePuertitas?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.puertitas?'checked':''} onchange="${set('puertitas')}"> Trae sus puertitas puestas (con bisagras y ${f.variante==='max'?'push':'jaladeras'})</label>`:''}
+    ${puedePuertitas?(()=>{ const jal = f.variante==='max'?'push':'jaladeras'; const val = !f.puertitas ? 'no' : (f.puertitasSinJal ? 'sinjal' : 'si');
+      return `<div style="margin-top:10px"><label class="hint">¿Trae sus puertitas puestas?</label>
+      <select style="margin-top:4px" onchange="auditArmadoForm.puertitas=this.value!=='no';auditArmadoForm.puertitasSinJal=this.value==='sinjal';renderAud()">
+        <option value="no" ${val==='no'?'selected':''}>No trae puertitas</option>
+        <option value="si" ${val==='si'?'selected':''}>Sí, ${f.sinHerrajes?'puertitas':'con bisagras y '+jal}</option>
+        ${f.sinHerrajes?'':`<option value="sinjal" ${val==='sinjal'?'selected':''}>Sí, con bisagras pero SIN ${jal}</option>`}
+      </select></div>`; })():''}
+    ${esCajonera?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinFondo?'checked':''} onchange="${set('sinFondo')}"> Sin fondo (todavía no le ponen el fondo de MDF)</label>`:''}
     ${esCajonera && !armadoTienePuertitas(f.variante)?`<p class="hint">La cajonera ${ARMADO_CAJONERAS[f.variante].toLowerCase()} todavía no tiene medida de puertita confirmada.</p>`:''}
     <button class="btn" style="margin-top:12px;width:100%" onclick="agregarArmado()">Agregar</button>
   </div>
@@ -1158,8 +1181,11 @@ function agregarArmado(){
   if(!n || n<=0) return alert('Captura la cantidad.');
   const a = {tipo:f.tipo, variante:f.variante, color:f.color, cantidad:n};
   if(f.tipo==='cajon') a.colorCuadro = f.colorCuadro;
-  if(armadoUsaCorredera(f)) a.ext = !!f.ext;
-  if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)) a.puertitas = !!f.puertitas;
+  const sinH = (f.tipo==='cajonera'||f.tipo==='cajon') && !!f.sinHerrajes;
+  if(armadoUsaCorredera(f) && !sinH) a.ext = !!f.ext;
+  if(sinH) a.sinHerrajes = true;
+  if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)){ a.puertitas = !!f.puertitas; if(a.puertitas && f.puertitasSinJal && !sinH) a.puertitasSinJal = true; }
+  if(f.tipo==='cajonera' && f.sinFondo) a.sinFondo = true;
   auditArmados.push(a);
   f.cantidad = '';
   renderAud();
@@ -1993,6 +2019,18 @@ Object.values(PUERTITA_CAJONERA).forEach(s=>{ PUERTITA_POR_HOJA_POR_DIM[s.dim] =
 // Piezas sueltas (ya cortadas) que se cuentan en la auditoría. Se convierten a hojas con
 // piezasAConsumo(), el MISMO motor que usa el despiece para descontar, así una hoja cortada
 // y contada en piezas vuelve a dar exactamente la hoja que se descontó.
+// Cargador 10×40 (confirmado por el usuario): con sierra de 5 mm salen 3 a lo ancho (3×40 + 2 cortes
+// = 121 cm de 122) × 23 a lo largo (23×10 + 22 cortes = 241 cm de 244) = 69 por hoja.
+const CARGADORES_POR_HOJA = 69;
+// Piezas sueltas de un frente de espejo (conteo): el frente completo cuesta 1/5 de hoja
+// (ESPEJOS_POR_HOJA). Cada pieza suelta vale su parte de ese 1/5 según su área, así que contar
+// las 6 piezas de un frente da exactamente 0.20 hojas, igual que al instalarlo.
+const FRENTE_ESPEJO_PIEZAS = {'10×160 cm':2, '10×35 cm':2, '16×52 cm':1, '18×52 cm':1};
+function fraccionPiezaFrenteEspejo(dim){
+  const area = d => { const m=String(d).match(/([\d.]+)\s*×\s*([\d.]+)/); return m ? Number(m[1])*Number(m[2]) : 0; };
+  const total = Object.keys(FRENTE_ESPEJO_PIEZAS).reduce((s,d)=>s+area(d)*FRENTE_ESPEJO_PIEZAS[d],0);
+  return total ? area(dim)/total/ESPEJOS_POR_HOJA : 0;
+}
 const PIEZAS_AUDIT = [
   {key:'pared',       tipo:'mel', nombre:'Pared',                    dim:'191×40 cm',   label:'Pared (o maletero chico)', rinde:'3 por hoja (junto con 3 entrepaños)'},
   {key:'entrepano',   tipo:'mel', nombre:'Entrepaño',                dim:'52×40 cm',    label:'Entrepaño',                rinde:'Van con las paredes (3+3); los que sobren, 14 por hoja'},
@@ -2008,6 +2046,12 @@ const PIEZAS_AUDIT = [
   {key:'puertita5',   tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['5'].dim,   label:'Puertita de cajonera de 5 / Emma', rinde:PUERTITA_CAJONERA['5'].porHoja+' por hoja'},
   {key:'puertitamax', tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['max'].dim, label:'Puertita de cajonera Max',         rinde:PUERTITA_CAJONERA['max'].porHoja+' por hoja'},
   {key:'puertazap',   tipo:'mel', nombre:'Puerta de zapatera',       dim:'172×30 cm',   label:'Puerta de zapatera',       rinde:'Corte combinado (igual que en despiece)'},
+  {key:'zoclo',       tipo:'mel', nombre:'Zóclo normal',             dim:'10×52 cm',    label:'Zóclo 10×52',              rinde:'48 por hoja'},
+  {key:'cargador',    tipo:'mel', nombre:'Cargador',                 dim:'10×40 cm',    label:'Cargador 10×40',           rinde:CARGADORES_POR_HOJA+' por hoja (sierra de 5 mm)'},
+  {key:'espzoclo16',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'16×52 cm',    label:'Zóclo de espejo 16×52',    rinde:'Parte del frente de espejo (5 frentes por hoja)'},
+  {key:'espzoclo18',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'18×52 cm',    label:'Zóclo de espejo 18×52',    rinde:'Parte del frente de espejo (5 frentes por hoja)'},
+  {key:'espmarco160', tipo:'mel', nombre:'Pieza de frente de espejo',dim:'10×160 cm',   label:'Marco de espejo largo 10×160', rinde:'Parte del frente de espejo (5 frentes por hoja)'},
+  {key:'espmarco35',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'10×35 cm',    label:'Marco de espejo corto 10×35',  rinde:'Parte del frente de espejo (5 frentes por hoja)'},
   {key:'fondocajon',  tipo:'mdf', nombre:'Fondo de cajón (MDF 3mm)',     dim:'49.4×33 cm',  label:'Fondo de cajón (MDF 3mm)',     rinde:'14 por hoja de MDF 3mm'},
   {key:'fondocajonera',tipo:'mdf',nombre:'Fondo de cajonera (MDF 3mm)',  dim:'55×122 cm',   label:'Fondo de cajonera (MDF 3mm)',  rinde:'4 por hoja de MDF 3mm'},
   {key:'fondomax',    tipo:'mdf', nombre:'Fondo de cajón (MDF 5mm, Max)',dim:'55.5×37.9 cm',label:'Fondo de cajón Max (MDF 5mm)', rinde:'12 por hoja de MDF 5mm'}
@@ -2038,10 +2082,12 @@ function armadoTienePuertitas(variante){ return ['3','5','emma','max'].includes(
 function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon' || a.tipo==='corredera') && a.variante!=='max'; }
 
 // Devuelve las piezas (formato del despiece) de un armado, ya multiplicadas por su cantidad.
+// Herrajes de un armado (para la opción "sin herrajes" del conteo, confirmada por el usuario).
+function esPiezaHerraje(nombre){ return /^(Bisagra|Jaladera|Push|Juego de corredera|Correderas de extensión|Corredera )/.test(nombre); }
 function piezasDeArmado(a){
   const n = Number(a.cantidad)||0;
   const piezas = [];
-  const add = (nombre,cantidad,dim,colorDestino,estado)=>piezas.push({nombre, cantidad: typeof cantidad==='number'? cantidad*n : cantidad, dim, colorDestino, estado:estado||'ok'});
+  const add = (nombre,cantidad,dim,colorDestino,estado)=>((a.sinHerrajes && esPiezaHerraje(nombre)) || (a.puertitasSinJal && /^(Jaladera \(puertita|Push \(puertita)/.test(nombre))) ? null : piezas.push({nombre, cantidad: typeof cantidad==='number'? cantidad*n : cantidad, dim, colorDestino, estado:estado||'ok'});
   // Medias correderas: 'Corredera hembra' / 'Corredera macho' (+ ' (extensión)'). No se descuentan
   // solas: piezasAuditAHojas las junta en parejas para formar juegos completos.
   const sufCorr = (a.variante==='max' || a.ext) ? ' (extensión)' : '';
@@ -2051,7 +2097,7 @@ function piezasDeArmado(a){
     const cajones = (esMax || a.variante==='emma') ? 4 : Number(a.variante);
     const conPuerta = !!a.puertitas && armadoTienePuertitas(a.variante);
     buildAdicionalPiezas(tipoAdic, cajones, a.color, !!a.ext, conPuerta)
-      .filter(p=>p.estado==='ok' && !PIEZAS_DE_CAJON.includes(p.nombre))
+      .filter(p=>p.estado==='ok' && !PIEZAS_DE_CAJON.includes(p.nombre) && !(a.sinFondo && p.nombre.startsWith('Fondo de cajonera')))
       .forEach(p=>add(p.nombre, p.cantidad, p.dim, p.colorDestino));
     add('Corredera hembra'+sufCorr, cajones, '—', '—');
   } else if(a.tipo==='corredera'){
@@ -2086,8 +2132,10 @@ function describirArmado(a){
   else if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color;
   else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro;
   else d = ARMADO_TIPOS[a.tipo]+(a.variante==='max'?' Max':'')+' · '+a.color;
-  if(armadoUsaCorredera(a)) d += a.ext ? ' · corredera de extensión' : ' · corredera normal';
-  if(a.tipo==='cajonera' && a.puertitas && armadoTienePuertitas(a.variante)) d += ' · con puertitas';
+  if(a.sinHerrajes) d += ' · sin herrajes';
+  else if(armadoUsaCorredera(a)) d += a.ext ? ' · corredera de extensión' : ' · corredera normal';
+  if(a.tipo==='cajonera' && a.puertitas && armadoTienePuertitas(a.variante)) d += a.puertitasSinJal ? ' · con puertitas (sin '+(a.variante==='max'?'push':'jaladeras')+')' : ' · con puertitas';
+  if(a.tipo==='cajonera' && a.sinFondo) d += ' · sin fondo';
   return d;
 }
 function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
@@ -2399,6 +2447,12 @@ function piezasAConsumo(piezas, color){
     espejosPorColor[p.colorDestino] = (espejosPorColor[p.colorDestino]||0) + p.cantidad/2;
   });
   Object.keys(espejosPorColor).forEach(c=>addConsumo('Melamina '+c, espejosPorColor[c]/ESPEJOS_POR_HOJA));
+  // Piezas sueltas de frente de espejo (conteo/garantía) y cargadores 10×40
+  piezas.forEach(p=>{
+    if(p.estado!=='ok' || typeof p.cantidad!=='number' || !p.colorDestino || p.colorDestino==='—') return;
+    if(p.nombre==='Pieza de frente de espejo') addConsumo('Melamina '+p.colorDestino, p.cantidad*fraccionPiezaFrenteEspejo(p.dim));
+    if(p.nombre==='Cargador') addConsumo('Melamina '+p.colorDestino, p.cantidad/CARGADORES_POR_HOJA);
+  });
   piezas.forEach(p=>{
     if(p.estado!=='ok' || typeof p.cantidad!=='number' || !PIEZAS_PROPORCIONALES.includes(p.nombre)) return;
     const m = String(p.dim).match(/([\d.]+)\s*×\s*([\d.]+)/);
@@ -5021,7 +5075,7 @@ async function eliminarUsuarioUI(userId, email){
 // ===== Borrar datos de prueba (confirmado por el usuario) =====
 // Deja los módulos elegidos en blanco, como recién instalados. Se borra con la misma marca de
 // "borrado" que usa la sincronización, así también desaparece en la nube y en los demás celulares.
-const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto','pedidos'];
+const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto','pedidos','fotos'];
 async function borrarDatosModulo(mods){
   if(!esAdmin()) return alert('Solo Dirección puede borrar datos.');
   const nombre = mods.length>1 ? 'LOS 5 MÓDULOS' : mods[0];
@@ -5041,7 +5095,7 @@ async function borrarDatosModulo(mods){
     snap.docs.forEach(d=>{ const x=d.data()||{}; if(mods.includes(x.origen)||mods.includes(x.destino)) aBorrar.push(['prestamos',d.id]); });
   }catch(e){}
   const porCol = {}; aBorrar.forEach(([c])=>porCol[c]=(porCol[c]||0)+1);
-  const nombres = {movimientos:'movimientos (entradas, salidas, cortes, instalaciones, garantías…)', inicial:'stock inicial', inicialHist:'historial del stock inicial', resets:'puestas en cero', auditorias:'auditorías y conteos', deudasAuditoria:'faltantes (deuda)', garantiasLog:'garantías', instalacionesLog:'instalaciones', instalacionesPuertas:'instalaciones de puertas', conteoAbierto:'conteos abiertos', prestamos:'traspasos / préstamos', pedidos:'pedidos por llegar'};
+  const nombres = {movimientos:'movimientos (entradas, salidas, cortes, instalaciones, garantías…)', inicial:'stock inicial', inicialHist:'historial del stock inicial', resets:'puestas en cero', auditorias:'auditorías y conteos', deudasAuditoria:'faltantes (deuda)', garantiasLog:'garantías', instalacionesLog:'instalaciones', instalacionesPuertas:'instalaciones de puertas', conteoAbierto:'conteos abiertos', prestamos:'traspasos / préstamos', pedidos:'pedidos por llegar', fotos:'fotos de evidencia'};
   if(!aBorrar.length) return alert(`${nombre} ya está en blanco. No hay nada que borrar.`);
   const detalle = Object.keys(porCol).map(c=>`• ${porCol[c]} ${nombres[c]||c}`).join('\n');
   const aviso = mods.length===1 ? `\n\nOjo: los traspasos de ${mods[0]} con otros módulos también se borran, pero la entrada o salida que quedó en el OTRO módulo se queda allá.` : '';
