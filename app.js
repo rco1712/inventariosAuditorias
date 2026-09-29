@@ -12,7 +12,7 @@ const $=s=>document.querySelector(s);
 let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={}, pedidos=[], minimosMap={};
 let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
-let auditPiezas={}, auditPiezaGrupo=null, audTipo='inicial', audAuditor='';
+let auditPiezas={}, auditPiezaGrupo=null, audTipo='seguimiento', audAuditor='', audPaso=0, audHechas={};
 // Armados contados (cajoneras sin cajones, cajones completos, cuadros de cajón)
 let auditArmados=[], auditArmadoForm={tipo:'cajonera', variante:'3', color:'Blanco', colorCuadro:'Blanco', ext:false, puertitas:false, puertitasSinJal:false, sinFondo:false, sinHerrajes:false, colorFrente:'', cantidad:''};
 let moduloActual = localStorage.getItem('am_modulo') || null;
@@ -370,6 +370,15 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
         if(m.limpiarDeuda) deuda = 0; // el conteo físico manda: ya no hay hojas "sin corte" pendientes
       } else completas += q;
     }
+    else if(m.tipo==='sobrante'){
+      // Material que regresó sin instalarse y se aparta en "Sobrantes": sale del inventario (del
+      // cortado; si no alcanza, toma hojas completas como una instalación) hasta que se transforme.
+      salidas+=q;
+      if(!hoja){ completas-=q; return; }
+      if(cortado >= q-EPS){ cortado-=q; return; }
+      const falta = q - Math.max(0,cortado); const hojas = Math.ceil(falta - EPS);
+      faltoCortado += falta; deuda += hojas; completas -= hojas; cortado = Math.max(0,cortado) + hojas - q;
+    }
     else if(m.tipo==='instalacion' || m.tipo==='garantia'){
       // Garantías consumen igual que una instalación (del material cortado), pero se cuentan aparte.
       if(m.tipo==='garantia') garantias+=q; else instalaciones+=q;
@@ -527,7 +536,7 @@ function setView(v){
   }
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   if(v==='home') renderHome();
-  if(v==='gar') renderGar();
+  if(v==='gar'){ if(garSub==='sobrante') salirSobrante(); renderGar(); }
   if(v==='ini') renderIni();
   if(v==='movhist') renderMovHist();
   if(v==='ped') renderPed();
@@ -537,6 +546,7 @@ function setView(v){
   if(v==='todos'){ todosCache=null; renderTodos(); }
   if(v==='pend') renderPend();
   if(v==='tubos') renderTubos();
+  if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
@@ -761,6 +771,7 @@ function renderHome(){
     t('✅','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#1f9d55');
     t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
     t('📋','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
+    t('🧩','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#0e8a8a');
   }
   if(esAdministracion()){
     const enCaminoT = pedidos.filter(pedidoEnCamino).length;
@@ -822,11 +833,12 @@ function toast(msg, tipo){
 let movCat = null;
 // Tipo y lado elegidos en Entradas/Salidas (se conservan al cambiar de categoría).
 let movTipo='entrada', movLado='completas', movVals={}, movBuscar='';
-const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía', devolucion:'Regresó de garantía'};
+const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía', devolucion:'Regresó de garantía', sobrante:'A sobrantes'};
 function etiquetaTipoMov(m){
   if(m.motivo==='armarJuegos') return 'Armado de juegos';
   if(m.motivo==='sobranteGarantia') return 'Sobrante de garantía';
   if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
+  if(m.motivo==='deSobrante') return 'Sobrante transformado';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
 function stockHojaTxt(f, unidad){
@@ -975,38 +987,123 @@ async function registrarMovLote(){
   }catch(e){ alert('Error: '+e.message); }
 }
 
+// ===== Conteo / auditoría paso a paso (confirmado por el usuario) =====
+// Se cuenta por secciones en orden. No se puede pasar a la siguiente sección si quedó algún
+// artículo sin contar: hay que escribirlo o ponerlo en 0. Piezas cortadas y armados se confirman
+// al terminar. En cualquier artículo se puede SUMAR lo que aparezca después (botón ➕).
+const AUD_SECCIONES = [
+  {k:'Melamina', t:'Melamina', s:'Solo hojas completas'},
+  {k:'MDF', t:'MDF', s:'Solo hojas completas'},
+  {k:'Cintilla', t:'Cintilla'}, {k:'PVC', t:'PVC'}, {k:'Pegamento', t:'Pegamento'}, {k:'Stickers', t:'Stickers'},
+  {k:'Herrajes', t:'Herrajes'},
+  {k:'__piezas', t:'Piezas cortadas', s:'Piezas sueltas ya cortadas'},
+  {k:'__armados', t:'Armados', s:'Cajoneras, cajones y cuadros armados'},
+  {k:'__revisar', t:'Revisar y enviar'}
+];
+const AUD_ICONO = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩', __piezas:'✂️', __armados:'📦', __revisar:'✅'};
+function itemsSeccionAud(k){ return CATALOGO.filter(i=>i.cat===k && !esCorrSuelta(i)); }
+function faltanSeccionAud(k){ return itemsSeccionAud(k).filter(i=>auditCapturas[i.id]===undefined); }
+function seccionCompletaAud(k){
+  if(k==='__revisar') return false;
+  if(k==='__piezas' || k==='__armados') return !!audHechas[k];
+  return faltanSeccionAud(k).length===0;
+}
+function primerPasoPendienteAud(){ const i = AUD_SECCIONES.findIndex(x=>!seccionCompletaAud(x.k)); return i<0 ? AUD_SECCIONES.length-1 : i; }
+function irPasoAud(i){
+  if(i > primerPasoPendienteAud()) return toast('Primero termina la sección en la que vas.');
+  audPaso = i; auditCat = AUD_SECCIONES[i].k; renderAud(); window.scrollTo(0,0);
+}
+function siguientePasoAud(){
+  const sec = AUD_SECCIONES[audPaso];
+  if(sec.k==='__piezas' || sec.k==='__armados'){
+    const n = sec.k==='__piezas' ? contarPiezasSueltas() : auditArmados.length;
+    const q = sec.k==='__piezas'
+      ? (n ? `¿Ya contaste TODAS las piezas cortadas, de todos los colores? (llevas ${n} tipo(s) de pieza)` : '¿No hay piezas cortadas sueltas en el módulo?')
+      : (n ? `¿Ya contaste TODOS los armados? (llevas ${n})` : '¿No hay cajoneras, cajones ni cuadros armados en el módulo?');
+    if(!confirm(q+'\n\nAceptar = sí, seguir.  Cancelar = regresar a contar.')) return;
+    audHechas[sec.k] = true;
+  } else {
+    const faltan = faltanSeccionAud(sec.k);
+    if(faltan.length){
+      if(!confirm(`Te faltan ${faltan.length} artículo(s) sin contar en ${sec.t}:\n\n${faltan.slice(0,12).map(i=>'• '+i.nombre).join('\n')}${faltan.length>12?'\n… y '+(faltan.length-12)+' más':''}\n\n¿De esos NO hay nada?\n\nAceptar = ponerlos en 0 y seguir.\nCancelar = regresar a contarlos.`)) return;
+      faltan.forEach(i=>{ auditCapturas[i.id] = 0; });
+    }
+  }
+  guardarBorradorAud();
+  audPaso = Math.min(audPaso+1, AUD_SECCIONES.length-1); auditCat = AUD_SECCIONES[audPaso].k;
+  renderAud(); window.scrollTo(0,0);
+}
+function sumarAud(id){
+  const it = CATALOGO.find(i=>i.id===id); if(!it) return;
+  const actual = Number(auditCapturas[id])||0;
+  const v = prompt(`➕ ¿Cuánto más encontraste de ${it.nombre}?\n\nLlevas ${fmtNum(actual)} ${it.unidad}. Lo que escribas se SUMA.`);
+  if(v===null || String(v).trim()==='') return;
+  const n = Number(String(v).replace(',','.')); if(!isFinite(n)) return alert('Escribe solo el número.');
+  auditCapturas[id] = fmtNum(actual + n); guardarBorradorAud(); renderAud();
+  toast(`${it.nombre}: ahora ${fmtNum(actual+n)} ${it.unidad}`);
+}
+function sumarPiezaAud(grupo, key){
+  const p = PIEZAS_AUDIT.find(x=>x.key===key); if(!p) return;
+  const actual = ((auditPiezas[grupo]||{})[key])||0;
+  const v = prompt(`➕ ¿Cuántas piezas más encontraste de ${p.label}?\n\nLlevas ${actual}. Lo que escribas se SUMA.`);
+  if(v===null || String(v).trim()==='') return;
+  const n = Number(v); if(!isFinite(n)) return alert('Escribe solo el número.');
+  setAuditPieza(grupo, key, String(actual+n)); guardarBorradorAud(); renderAud();
+  toast(`${p.label}: ahora ${actual+n}`);
+}
+function etiquetaTipoAud(t){ return t==='conteo' ? 'Conteo inicial' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'); }
 function renderAud(){
   const ciego = modoConteoCoord();
   if(esCoordinador() && !ciego){ $('#main').innerHTML = '<div class="card">📋 El conteo del almacén solo se abre cuando Dirección lo activa, y solo ese día.</div>'; return; }
   if(esSoloLectura()){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   recuperarBorradorAud();
   if(ciego){ audTipo='conteo'; if(!audAuditor) audAuditor=(getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0]; }
-  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
-  if(!auditCat) auditCat = cats[0];
-  const catsHtml = cats.map(c=>{
-    const capturadosEnCat = CATALOGO.filter(i=>i.cat===c && auditCapturas[i.id]!==undefined).length;
-    return `<button class="btn small" style="background:${c===auditCat?'var(--brand)':'transparent'};color:${c===auditCat?'var(--brand-ink)':'var(--ink)'};border:1px solid var(--line);margin:2px" onclick="selectAuditCat('${c}')">${c} ${capturadosEnCat?('✓'+capturadosEnCat):''}</button>`;
-  }).join('') + [['__piezas','✂️ Piezas cortadas',contarPiezasSueltas()],['__armados','📦 Armados',auditArmados.length]].map(([k,label,n])=>
-    `<button class="btn small" style="background:${auditCat===k?'var(--accent)':'transparent'};color:${auditCat===k?'#fff':'var(--ink)'};border:1px solid ${auditCat===k?'var(--accent)':'var(--line)'};margin:2px" onclick="selectAuditCat('${k}')">${label} ${n?('✓'+n):''}</button>`).join('');
+  if(audTipo==='inicial') audTipo='seguimiento';
+  // auditCat puede venir de fuera (selectAuditCat); se alinea con el paso.
+  const idxCat = AUD_SECCIONES.findIndex(x=>x.k===auditCat);
+  if(idxCat>=0) audPaso = idxCat; else { audPaso = Math.min(audPaso, AUD_SECCIONES.length-1); auditCat = AUD_SECCIONES[audPaso].k; }
+  const sec = AUD_SECCIONES[audPaso];
+  const limite = primerPasoPendienteAud();
+  const hechas = AUD_SECCIONES.filter(x=>seccionCompletaAud(x.k)).length;
+  const chips = AUD_SECCIONES.map((x,i)=>{ const ok = seccionCompletaAud(x.k), on = i===audPaso, bloq = i>limite;
+    return `<button class="chip ${on?'on':''}" style="${bloq?'opacity:.45;':''}${ok&&!on?'border-color:var(--ok);color:var(--ok);':''}" onclick="irPasoAud(${i})">${ok?'✓ ':(bloq?'🔒 ':'')}${AUD_ICONO[x.k]||''} ${x.t}</button>`; }).join('');
 
   let cuerpo;
-  if(auditCat==='__piezas'){
+  if(sec.k==='__piezas'){
     cuerpo = renderAudPiezasHtml();
-  } else if(auditCat==='__armados'){
+  } else if(sec.k==='__armados'){
     cuerpo = renderAudArmadosHtml();
+  } else if(sec.k==='__revisar'){
+    const filas = AUD_SECCIONES.filter(x=>x.k!=='__revisar').map(x=>{
+      let det;
+      if(x.k==='__piezas') det = `${contarPiezasSueltas()} tipo(s) de pieza`;
+      else if(x.k==='__armados') det = `${auditArmados.length} armado(s)`;
+      else { const its=itemsSeccionAud(x.k); const conAlgo=its.filter(i=>Number(auditCapturas[i.id])>0).length; det = `${its.length-faltanSeccionAud(x.k).length} de ${its.length} contados · ${conAlgo} con existencia`; }
+      return `<div class="movitem"><span class="invname">${seccionCompletaAud(x.k)?'✅':'⏳'} ${AUD_ICONO[x.k]||''} ${x.t}</span><span class="hint" style="margin:0;text-align:right">${det}</span></div>`; }).join('');
+    const listo = primerPasoPendienteAud()===AUD_SECCIONES.length-1;
+    cuerpo = `<div class="card"><h3>✅ Revisar y enviar</h3>
+      <div class="movlist" style="margin-top:8px">${filas}</div>
+      ${listo?'<p class="hint" style="margin-top:8px">Todo está contado. Si encontraste algo más, regresa a su sección y usa ➕ para sumarlo.</p>':'<p class="neg" style="margin-top:8px">Todavía hay secciones sin terminar.</p>'}
+      <button class="btn" style="width:100%;min-height:54px;font-size:16px;margin-top:10px" ${listo?'':'disabled'} onclick="saveAudit()">${ciego?'📤 Enviar conteo a Dirección':(audTipo==='conteo'?'Guardar conteo inicial':'Guardar auditoría')}</button>
+    </div>
+    ${resumenCardHtml()}`;
   } else {
-    const items = CATALOGO.filter(i=>i.cat===auditCat && !esCorrSuelta(i));
+    const items = itemsSeccionAud(sec.k);
     const eq = piezasAuditAHojas();
     const catHoja = items.length>0 && esHoja(items[0]);
+    const faltan = faltanSeccionAud(sec.k).length;
     cuerpo = `<div class="card">
-    <h3>${auditCat}</h3>
-    ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
-    ${auditCat==='Herrajes'?'<p class="hint">Aquí van los <strong>juegos de corredera completos</strong> (hembra + macho juntos). Las hembras o machos <strong>sueltos</strong> se cuentan en 📦 Armados → Corredera suelta; la app arma los juegos y lo que sobra lo guarda como "sin pareja".</p>':''}
-    <div class="wrap-x"><table><tr><th>Artículo</th>${ciego?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas contadas':'Físico contado'}</th></tr>
-      ${items.map(it=>{ const f=calcFormula(it.id);
+    <h3>${AUD_ICONO[sec.k]||''} ${sec.t}</h3>
+    ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va más adelante en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
+    ${sec.k==='Herrajes'?'<p class="hint">Aquí van los <strong>juegos de corredera completos</strong> (hembra + macho juntos). Las hembras o machos <strong>sueltos</strong> se cuentan en 📦 Armados → Corredera suelta.</p>':''}
+    <p class="hint">Escribe cuánto hay de cada uno; si no hay, pon <strong>0</strong>. Si después aparece más, toca <strong>➕</strong> y se suma a lo que ya llevas.</p>
+    <p class="hint" style="font-weight:700;${faltan?'color:#b3742c':'color:var(--ok)'}" id="aud-faltan">${faltan?`Faltan ${faltan} de ${items.length} por contar`:'✓ Todo contado en esta sección'}</p>
+    <div class="wrap-x"><table><tr><th>Artículo</th>${ciego?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
+      ${items.map(it=>{ const f=calcFormula(it.id); const v=auditCapturas[it.id];
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
-        return `<tr><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${ciego?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
-          <td><input type="number" inputmode="decimal" value="${auditCapturas[it.id]??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value)">${extra}</td></tr>`;
+        return `<tr style="${v===undefined?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${ciego?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
+          <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="decimal" style="min-width:70px" placeholder="—" value="${v??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value);actualizarFaltanAud()">
+          <button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" title="Sumar" onclick="sumarAud('${it.id}')">➕</button></div>${extra}</td></tr>`;
       }).join('')}
     </table></div>
   </div>`;
@@ -1015,21 +1112,31 @@ function renderAud(){
   $('#main').innerHTML = `
   ${esAdmin() ? conteoAdminCardHtml() : ''}
   ${ciego ? `<div class="card" style="border:2px solid var(--bad)"><div style="font-size:17px;font-weight:800">📋 Conteo del almacén · ${modulo()}</div>
-    <p class="hint">Cuenta <strong>todo</strong> lo que hay en el módulo, también lo que está guardado en el taller, en cajas o en esquinas. Escribe solo lo que cuentas. Al terminar toca <strong>Enviar conteo a Dirección</strong>.</p></div>` : ''}
+    <p class="hint">Cuenta <strong>todo</strong> lo que hay en el módulo, también lo del taller, en cajas o en esquinas. Ve sección por sección; la app no te deja avanzar si algo quedó sin contar.</p></div>` : ''}
   <div class="card">
-    <strong>${ciego?'Cómo contar':'Auditoría física · '+modulo()}</strong>
-    <p class="hint">Cuenta lo que existe físicamente ahora mismo, tal como está. Las hojas completas y herrajes sueltos se capturan en su categoría; las piezas ya cortadas en <strong>✂️ Piezas cortadas</strong>, y las cajoneras, cajones y cuadros armados en <strong>📦 Armados</strong>. La app convierte todo a hojas y herrajes.</p>
-    <div class="grid2">
-      <select id="aud-tipo" onchange="audTipo=this.value" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="inicial" ${audTipo==='inicial'?'selected':''}>Auditoría inicial</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría de seguimiento</option></select>
-      <input id="aud-auditor" placeholder="Nombre del auditor" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
+    <strong>${ciego?'Conteo paso a paso':(audTipo==='conteo'?'Conteo inicial':'Auditoría')+' · '+modulo()}</strong>
+    <div class="grid2" style="margin-top:8px">
+      <select id="aud-tipo" onchange="audTipo=this.value;renderAud()" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="seguimiento" ${audTipo!=='conteo'?'selected':''}>Auditoría</option></select>
+      <input id="aud-auditor" placeholder="Nombre de quien cuenta" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
+    ${ciego?'':`<p class="hint" style="margin-top:6px">${audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
+    <div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>
+    <p class="hint" style="margin:4px 0 0">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas</p>
+    <div class="chips" style="margin-top:8px">${chips}</div>
   </div>
-  <div class="card"><div>${catsHtml}</div></div>
   ${cuerpo}
-  <div class="card row" style="justify-content:space-between">
-    <span class="hint" id="aud-contador">${textoContadorAudit()}</span>
-    <button class="btn" onclick="saveAudit()">${ciego?'📤 Enviar conteo a Dirección':'Finalizar y guardar auditoría'}</button>
+  <div class="card row" style="justify-content:space-between;gap:8px">
+    <button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" ${audPaso===0?'disabled':''} onclick="irPasoAud(${Math.max(0,audPaso-1)})">← Anterior</button>
+    <span class="hint" id="aud-contador" style="margin:0;text-align:center;flex:1">${textoContadorAudit()}</span>
+    ${sec.k==='__revisar'?'':`<button class="btn" onclick="siguientePasoAud()">Siguiente →</button>`}
   </div>`;
+}
+function actualizarFaltanAud(){
+  const sec = AUD_SECCIONES[audPaso]; const el = document.getElementById('aud-faltan'); if(!el || !sec) return;
+  const n = faltanSeccionAud(sec.k).length, tot = itemsSeccionAud(sec.k).length;
+  el.textContent = n ? `Faltan ${n} de ${tot} por contar` : '✓ Todo contado en esta sección';
+  el.style.color = n ? '#b3742c' : 'var(--ok)';
+  const c = document.getElementById('aud-contador'); if(c) c.textContent = textoContadorAudit();
 }
 function selectAuditCat(c){ auditCat=c; renderAud(); }
 // Borrador del conteo/auditoría: se guarda en el teléfono cada pocos segundos, para no perder lo
@@ -1038,7 +1145,7 @@ function claveBorradorAud(){ return 'borradorAud_'+modulo(); }
 function guardarBorradorAud(){
   try{
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
-    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditPiezas, auditArmados, audAuditor, fecha:new Date().toISOString()}));
+    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, fecha:new Date().toISOString()}));
     else localStorage.removeItem(claveBorradorAud());
   }catch(e){}
 }
@@ -1054,6 +1161,7 @@ function recuperarBorradorAud(){
     if(hayAhora) return;
     const b = JSON.parse(raw);
     auditCapturas = b.auditCapturas||{}; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
+    audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo;
     toast('↩️ Se recuperó lo que ya habías contado.');
   }catch(e){}
 }
@@ -1194,14 +1302,19 @@ function agregarArmado(){
   if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)){ a.puertitas = !!f.puertitas; if(a.puertitas && f.puertitasSinJal && !sinH) a.puertitasSinJal = true; }
   if(f.tipo==='cajonera' && f.sinFondo) a.sinFondo = true;
   if(f.tipo==='cajonera' && f.colorFrente && f.colorFrente!==f.color) a.colorFrente = f.colorFrente;
-  auditArmados.push(a);
+  // Si ya habías capturado el mismo armado, se SUMA a esa línea (no se repite).
+  const clave = x => JSON.stringify(Object.assign({}, x, {cantidad:0}));
+  const igual = auditArmados.find(x=>clave(x)===clave(a));
+  if(igual){ igual.cantidad = Number(igual.cantidad) + n; toast(`Sumado: ahora ${igual.cantidad} de ese armado.`); }
+  else auditArmados.push(a);
+  guardarBorradorAud();
   f.cantidad = '';
   renderAud();
 }
 function quitarArmado(i){ auditArmados.splice(i,1); guardarBorradorAud(); renderAud(); }
 function vaciarConteoAud(){
   if(!confirm('¿Borrar TODO lo que llevas capturado en este conteo?\n\n(Hojas, herrajes, piezas cortadas y armados. No se toca el inventario.)')) return;
-  auditCapturas={}; auditPiezas={}; auditArmados=[]; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
+  auditCapturas={}; auditPiezas={}; auditArmados=[]; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
 }
 function renderAudPiezasHtml(){
   if(!auditPiezaGrupo) auditPiezaGrupo = MEL_COLORES[0];
@@ -1216,13 +1329,14 @@ function renderAudPiezasHtml(){
   return `<div class="card">
     <h3>✂️ Piezas cortadas</h3>
     <p class="hint">Cuenta las piezas que ya están cortadas y sueltas en el módulo. La app las convierte a hojas con los mismos rendimientos del despiece y las suma al conteo físico de esa hoja.</p>
+    <p class="hint">🧩 <strong>No cuentes</strong> lo que está apartado en <strong>Sobrantes</strong>: eso ya está fuera del inventario hasta que se transforme.</p>
     <label class="hint">Color / material</label>
     <select onchange="auditPiezaGrupo=this.value;renderAud()" style="margin-top:4px">${opciones}</select>
     <div class="wrap-x" style="margin-top:10px"><table><tr><th>Pieza</th><th>Rinde</th><th>Cantidad</th></tr>
       ${lista.map(p=>`<tr>
         <td>${p.label}<div class="tag">${p.dim}</div></td>
         <td class="hint" style="margin:0">${p.rinde}</td>
-        <td><input type="number" min="0" inputmode="numeric" style="min-width:80px" value="${counts[p.key]??''}" oninput="setAuditPieza('${auditPiezaGrupo}','${p.key}',this.value)"></td>
+        <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="numeric" style="min-width:70px" value="${counts[p.key]??''}" oninput="setAuditPieza('${auditPiezaGrupo}','${p.key}',this.value)"><button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="sumarPiezaAud('${auditPiezaGrupo}','${p.key}')">➕</button></div></td>
       </tr>`).join('')}
     </table></div>
   </div>
@@ -1288,7 +1402,7 @@ async function saveAudit(){
     if(bc.length) doc.correderas = bc;
     const audId = cryptoId();
     await db.collection('auditorias').doc(audId).set(doc);
-    auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor='';
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
     borrarBorradorAud();
     if(ciego){
       try{ await db.collection('conteoAbierto').doc(modulo()).set({...(conteoMap[modulo()]||{}), modulo:modulo(), abierto:false, cerrado:new Date().toISOString(), cerradoPor:doc.creadoPor, auditoriaId:audId}); }catch(e){}
@@ -1385,7 +1499,7 @@ async function usarConteoComoInicial(id, a){
 
 // ===== Historial de entradas y salidas (por fecha) =====
 let mhDesde = null, mhHasta = null, mhTipo = 'todos', mhCat = 'todas', mhItem = 'todos';
-const MH_TIPOS = {todos:'Todo', entrada:'📥 Entradas', salida:'📤 Salidas', instalacion:'🔧 Instalaciones', garantia:'🛡️ Garantías', devolucion:'↩️ Regresó de garantía', merma:'⚠️ Mermas', corte:'✂️ Cortes', ajuste:'⚖️ Ajustes'};
+const MH_TIPOS = {todos:'Todo', entrada:'📥 Entradas', salida:'📤 Salidas', instalacion:'🔧 Instalaciones', garantia:'🛡️ Garantías', devolucion:'↩️ Regresó de garantía', sobrante:'🧩 A sobrantes', merma:'⚠️ Mermas', corte:'✂️ Cortes', ajuste:'⚖️ Ajustes'};
 function fechaInicioModulo(){
   // Fecha del stock inicial vigente (el conteo): la más reciente de los iniciales capturados.
   const fs = Object.values(inicialFechaMap).filter(Boolean).sort();
@@ -1406,7 +1520,7 @@ function renderMovHist(){
   const tot = {};
   aprob.forEach(m=>{ const t = tot[m.itemId] = tot[m.itemId] || {entrada:0, salida:0, instalacion:0, garantia:0, merma:0, otros:0};
     const q = Number(m.cantidad)||0;
-    if(m.tipo==='entrada'||m.tipo==='devolucion') t.entrada+=q; else if(m.tipo==='salida') t.salida+=q; else if(m.tipo==='instalacion') t.instalacion+=q;
+    if(m.tipo==='entrada'||m.tipo==='devolucion') t.entrada+=q; else if(m.tipo==='salida'||m.tipo==='sobrante') t.salida+=q; else if(m.tipo==='instalacion') t.instalacion+=q;
     else if(m.tipo==='garantia') t.garantia+=q; else if(m.tipo==='merma') t.merma+=q; else if(m.tipo==='ajuste') t.otros+=q; });
   const ids = Object.keys(tot).sort((a,b)=>(CATALOGO.findIndex(i=>i.id===a))-(CATALOGO.findIndex(i=>i.id===b)));
   const nom = id => (CATALOGO.find(i=>i.id===id)||{nombre:id}).nombre;
@@ -1456,7 +1570,7 @@ function renderHist(){
   $('#main').innerHTML = tabs + auditorias.map(a=>`
     <div class="card">
       <div class="row" style="justify-content:space-between;cursor:pointer" onclick="toggleAud('${a.id}')">
-        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag" ${a.conteoInicial?'style="color:var(--bad);border-color:var(--bad)"':''}>${a.conteoInicial?'📋 Conteo inicial':a.tipo}</div> <div class="tag">Auditor: ${a.auditor}</div>
+        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag" ${a.conteoInicial?'style="color:var(--bad);border-color:var(--bad)"':''}>${a.conteoInicial?'📋 Conteo inicial':etiquetaTipoAud(a.tipo)}</div> <div class="tag">Auditor: ${a.auditor}</div>
           ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ ${a.conteoInicial?'Es el stock inicial':'Aplicada al inventario'}</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">${a.conteoInicial?'Esperando tu aprobación':'Sin aplicar'}</div>`}</div>
         ${a.conteoInicial ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).filter(r=>Math.abs(Number(r.fisico)||0)>0.005).length} artículo(s) con existencia</div>` : `<div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>`}
       </div>
@@ -1519,7 +1633,7 @@ async function generarReporteAuditoriaPDF(a){
   doc.setFontSize(10);
   doc.text(`Módulo: ${a.modulo}`, marginL, y); y+=5;
   doc.text(`Fecha de la auditoría: ${fechaStr}`, marginL, y); y+=5;
-  doc.text(`Auditor: ${a.auditor||'—'} · Tipo: ${a.tipo||'—'} · ${a.aplicada?'Aplicada al inventario':'Todavía NO aplicada al inventario'}`, marginL, y); y+=7;
+  doc.text(`Auditor: ${a.auditor||'—'} · Tipo: ${etiquetaTipoAud(a.tipo)} · ${a.aplicada?'Aplicada al inventario':'Todavía NO aplicada al inventario'}`, marginL, y); y+=7;
   // Resumen
   doc.setFillColor(238,242,255); doc.rect(marginL, y, W, 17, 'F');
   doc.setFontSize(10); doc.setFont(undefined,'bold');
@@ -2734,6 +2848,7 @@ function renderInst(){
         ${op('puertas','🚪','Puertas','Puertas corredizas')}
       </div>
       <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';renderInst()">📅 Ver instalaciones anteriores</button>
+      ${esSoloLectura()?'':`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="irA('sob')">🧩 Regresó material sin instalar → Sobrantes</button>`}
     </div>
     <div id="inst-body"></div>`;
   if(instSub==='mueble') renderInstMueble();
@@ -3136,6 +3251,7 @@ function renderGar(){
       <input type="number" min="0" inputmode="decimal" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1">`;
   }
   const lista = garLineas.length ? `<div class="movlist">${garLineas.map((l,i)=>`<div class="movitem"><span style="min-width:0">${describirLineaGar(l)}</span><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;flex:0 0 auto" onclick="garLineas.splice(${i},1);garPreview=null;if(garRet)garRet.comps=null;renderGar()">Quitar</button></div>`).join('')}</div>` : '<p class="hint">Todavía no agregas nada.</p>';
+  if(garSub==='sobrante'){ renderSobranteNuevo(lista, campos); return; }
   if(esRet){
     $('#main').innerHTML = topRet + `
     <div class="card">
@@ -4256,9 +4372,10 @@ function renderRep(){
 async function renderAprobaciones(){
   if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Esta sección es solo para Dirección.</div>'; return; }
   $('#main').innerHTML = '<div class="card">Cargando pendientes…</div>';
-  let todosMovs=[], todosLogs=[], garLogs=[];
+  let todosMovs=[], todosLogs=[], garLogs=[], sobLogs=[];
   try{
-    const [snapMov, snapLog, snapGar] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('garantiasLog').get()]);
+    const [snapMov, snapLog, snapGar, snapSob] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('garantiasLog').get(), db.collection('sobrantes').get()]);
+    sobLogs = snapSob.docs.map(d=>({id:d.id,...d.data()}));
     todosMovs = snapMov.docs.map(d=>({id:d.id,...d.data()}));
     todosLogs = snapLog.docs.map(d=>({id:d.id,...d.data()}));
     garLogs = snapGar.docs.map(d=>({id:d.id,...d.data()}));
@@ -4290,7 +4407,7 @@ async function renderAprobaciones(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
-        ${detalleGarantiaAprob(key, garLogs)}
+        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
@@ -4344,6 +4461,15 @@ function detalleGarantiaAprob(loteId, garLogs){
   }
   return '';
 }
+function detalleSobranteAprob(loteId, sobLogs){
+  const caja = (titulo, cuerpo) => `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>${titulo}</strong>${cuerpo}</div>`;
+  const s = sobLogs.find(x=>x.id===loteId);
+  if(s) return caja('🧩 Material a sobrantes', `${s.nota?`<div class="hint" style="margin:4px 0 0">${s.nota}</div>`:''}<ul style="margin:4px 0 0 18px;padding:0;line-height:1.5">${(s.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul><div class="hint" style="margin:4px 0 0">No se instaló y regresó al taller. Sale del inventario hasta que se transforme.</div>`);
+  const t = sobLogs.find(x=>(x.transformaciones||[]).some(tr=>tr.loteId===loteId));
+  if(t){ const tr = t.transformaciones.find(z=>z.loteId===loteId);
+    return caja('✂️ Sobrante transformado', `<div class="hint" style="margin:4px 0 0">Del sobrante: ${(t.lineas||[]).join(', ')}${t.nota?' — '+t.nota:''}</div><div class="hint" style="margin:4px 0 0"><strong>Salió:</strong> ${tr.piezas.join(', ')}</div>`); }
+  return '';
+}
 async function cambiarEstadoLote(loteId, nuevoEstado){
   const snap = await db.collection('movimientos').get();
   const docs = snap.docs.filter(d=>{ const m=d.data(); return (m.loteId||d.id)===loteId && m.estado==='pendiente'; });
@@ -4390,14 +4516,23 @@ async function rechazarInstalacion(logId){
 }
 
 // ===== Cierre del turno (confirmado por el usuario) =====
-// Lo que NO se descuenta solo y hay que anotar al final del día: el corte de hojas (melamina/MDF) y
-// las salidas de consumibles (cintilla, PVC, pegamento, stickers). Tubos, correderas, jaladeras y
-// todo lo que llevan las instalaciones y garantías ya se descuenta en automático.
+// Lo que NO se descuenta solo con las instalaciones y garantías se captura al final del día:
+//  1) el corte de hojas (cuántas se cortaron), y
+//  2) los consumibles (cintilla, PVC, pegamento, stickers y los herrajes que no lleva el
+//     despiece: pijas, taquetes, clavos, escuadras, tarugos, etc.). Aquí el coordinador escribe
+//     CUÁNTO TIENE (lo que cuenta físicamente) y la app descuenta la diferencia como salida.
+// Tubos, bridas, correderas, jaladeras, bisagras, push, espejos, rieles, sistemas y bastidores
+// se descuentan en automático, por eso no aparecen aquí.
 const CATS_CONSUMIBLES = ['Cintilla','PVC','Pegamento','Stickers'];
+const HERRAJES_AUTOMATICOS = ['Bastidores','Bisagras','Espejos closet','Jaladeras','Jaladera plana','Juego de corredera','Correderas de extensión',
+  'Corredera hembra (sin pareja)','Corredera macho (sin pareja)','Corredera ext. hembra (sin pareja)','Corredera ext. macho (sin pareja)',
+  'Rieles','Sistemas','Tubos 1.5 m','Juegos de bridas','Push'];
+function esConsumibleCierre(it){ return CATS_CONSUMIBLES.includes(it.cat) || (it.cat==='Herrajes' && !HERRAJES_AUTOMATICOS.includes(it.nombre)); }
+const CIERRE_CATS = ['Cintilla','PVC','Pegamento','Stickers','Herrajes'];
 const HORA_RECORDATORIO_CIERRE = 16; // el turno termina 4:30 pm: desde las 4 pm se recuerda el cierre (confirmado por el usuario)
 // Se trabaja de lunes a sábado; el domingo no se recuerda.
 function esHoraDeCierre(){ const d=new Date(); return d.getDay()!==0 && d.getHours()>=HORA_RECORDATORIO_CIERRE; }
-let cierreVals = {}, cierreBuscar = '';
+let cierreVals = {}, cierreBuscar = '', cierreCat = 'Cintilla';
 function cierreHechoHoy(){
   const hoy = fechaHoyLocal();
   const local = iso => new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
@@ -4405,60 +4540,101 @@ function cierreHechoHoy(){
 }
 function recordatorioCierreHtml(){
   if(esSoloLectura() || cierreHechoHoy() || !esHoraDeCierre()) return '';
-  return `<div class="card aviso" style="padding:12px"><div class="pend"><div>📝 <strong>¿Ya capturaste tus salidas de hoy?</strong><br><span class="hint" style="margin:0">Corte de hojas, PVC, cintilla, pegamento y stickers.</span></div><button class="btn small" onclick="irA('cierre')">Capturar</button></div></div>`;
+  return `<div class="card aviso" style="padding:12px"><div class="pend"><div>📝 <strong>¿Ya capturaste tus salidas de hoy?</strong><br><span class="hint" style="margin:0">Corte de hojas y cuánto te queda de cintilla, PVC, pegamento, stickers, pijas y demás.</span></div><button class="btn small" onclick="irA('cierre')">Capturar</button></div></div>`;
 }
+// Lo que la app espera que haya, contando también lo que todavía espera aprobación (para no
+// descontar dos veces si ayer se hizo un cierre que Dirección no ha aprobado).
+function stockEsperadoCierre(itemId){
+  let q = calcFormula(itemId).final;
+  movs.filter(m=>m.itemId===itemId && m.estado==='pendiente').forEach(m=>{
+    const c = Number(m.cantidad)||0;
+    if(m.tipo==='entrada'||m.tipo==='devolucion') q += c;
+    else if(m.tipo==='salida'||m.tipo==='merma'||m.tipo==='garantia'||m.tipo==='instalacion') q -= c;
+    else if(m.tipo==='ajuste') q += c;
+  });
+  return fmtNum(q);
+}
+function vacioCierre(v){ return v===undefined || v===null || String(v).trim()===''; }
+function filaCierreConteo(it){
+  const esp = stockEsperadoCierre(it.id); const v = cierreVals[it.id];
+  let dif = '';
+  if(!vacioCierre(v)){ const d = fmtNum(esp - Number(v)); dif = d>0 ? `<span class="neg"> → se usó ${fmtNum(d)}</span>` : (d<0 ? `<span style="color:#b3742c"> → tienes ${fmtNum(-d)} de más</span>` : '<span class="pos"> → sin cambio</span>'); }
+  return `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0" id="cdif-${it.id}">La app dice: ${fmtNum(esp)} ${it.unidad}${dif}</span></span>
+    <input type="number" min="0" inputmode="decimal" placeholder="Hay" value="${vacioCierre(v)?'':v}" oninput="cierreVals['${it.id}']=this.value;refrescarDifCierre('${it.id}')"></label>`;
+}
+function refrescarDifCierre(id){
+  const it = CATALOGO.find(i=>i.id===id); const el = document.getElementById('cdif-'+id); if(!it||!el) return;
+  const tmp = document.createElement('div'); tmp.innerHTML = filaCierreConteo(it);
+  const nuevo = tmp.querySelector('#cdif-'+id); if(nuevo) el.innerHTML = nuevo.innerHTML;
+  const c = document.getElementById('cierre-cuenta'); if(c) c.textContent = cuentaCierreTxt();
+}
+function cuentaCierreTxt(){ const n = CATALOGO.filter(i=>esConsumibleCierre(i) && !vacioCierre(cierreVals[i.id])).length; return n ? `Llevas ${n} artículo(s) contados.` : ''; }
 function renderCierre(){
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   const hojas = CATALOGO.filter(i=>esHoja(i));
-  const cons = CATALOGO.filter(i=>CATS_CONSUMIBLES.includes(i.cat) && (!cierreBuscar.trim() || coincide(i.nombre, cierreBuscar)));
-  const fila = (it, sub) => `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">${sub}</span></span>
+  const filaCorte = (it, sub) => `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">${sub}</span></span>
     <input type="number" min="0" inputmode="decimal" placeholder="—" value="${cierreVals[it.id]||''}" oninput="cierreVals['${it.id}']=this.value"></label>`;
   const cp = cortesPendientes();
   $('#main').innerHTML = `<div class="card">
       <div style="font-size:17px;font-weight:800">📝 Cierre del turno · ${modulo()}</div>
-      <p class="hint">Anota lo que se usó hoy y <strong>no</strong> se descuenta solo. Tubos, correderas, jaladeras y todo lo de instalaciones y garantías <strong>ya se descontó en automático</strong>.</p>
+      <p class="hint">Tubos, bridas, correderas, jaladeras, bisagras, espejos, rieles, sistemas y bastidores <strong>ya se descontaron solos</strong> con las instalaciones y garantías. Aquí solo va lo demás.</p>
       ${cierreHechoHoy()?'<p class="hint" style="color:var(--ok)">✅ Ya capturaste un cierre hoy. Puedes agregar más si faltó algo.</p>':''}
     </div>
     <div class="card">
       <div class="paso">1</div><strong>✂️ Hojas que se cortaron hoy</strong>
       ${cp.length?`<p class="hint">Se usaron sin corte anotado: ${cp.map(x=>fmtNum(x.f.autoCortes)+' de '+x.it.nombre.replace('Melamina ','')).join(', ')}.</p>`:''}
-      <div class="movlist" style="margin-top:8px">${hojas.map(it=>{ const f=calcFormula(it.id); return fila(it, `${fmtNum(f.completas)} completas${f.autoCortes?' · '+fmtNum(f.autoCortes)+' sin corte':''}`); }).join('')}</div>
+      <div class="movlist" style="margin-top:8px">${hojas.map(it=>{ const f=calcFormula(it.id); return filaCorte(it, `${fmtNum(f.completas)} completas${f.autoCortes?' · '+fmtNum(f.autoCortes)+' sin corte':''}`); }).join('')}</div>
     </div>
     <div class="card">
-      <div class="paso">2</div><strong>🎞️ Cintilla, PVC, pegamento y stickers que se usaron</strong>
-      <input type="search" placeholder="🔍 Buscar (ej. cintilla blanco)" value="${String(cierreBuscar).replace(/"/g,'&quot;')}" style="margin-top:8px" oninput="cierreBuscar=this.value;renderCierreConsumibles()">
-      <div class="movlist" id="cierre-cons" style="margin-top:8px">${cons.map(it=>fila(it, `Hay ${fmtNum(calcFormula(it.id).final)} ${it.unidad}`)).join('')}</div>
+      <div class="paso">2</div><strong>📦 ¿Cuánto te queda?</strong>
+      <p class="hint">Cuenta lo que tienes <strong>ahora</strong> y escríbelo. La app calcula cuánto se usó y lo descuenta. Deja vacío lo que no contaste.</p>
+      <div class="chips" style="margin-top:8px">${CIERRE_CATS.map(c=>{ const n=CATALOGO.filter(i=>i.cat===c && esConsumibleCierre(i) && !vacioCierre(cierreVals[i.id])).length; return `<button class="chip ${c===cierreCat&&!cierreBuscar?'on':''}" onclick="cierreCat='${c}';cierreBuscar='';renderCierre()">${ICONO_CAT[c]||''} ${c==='Herrajes'?'Pijas y demás':c}${n?' ✓'+n:''}</button>`; }).join('')}</div>
+      <input type="search" placeholder="🔍 Buscar (ej. pijas, cintilla blanco)" value="${String(cierreBuscar).replace(/"/g,'&quot;')}" style="margin-top:8px" oninput="cierreBuscar=this.value;renderCierreConsumibles()">
+      <div class="movlist" id="cierre-cons" style="margin-top:8px"></div>
+      <p class="hint" id="cierre-cuenta" style="margin-top:6px">${cuentaCierreTxt()}</p>
     </div>
     <div class="card">
       <input id="cierre-nota" placeholder="Nota (opcional)">
       <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarCierre()">✅ Guardar cierre del turno</button>
     </div>`;
+  renderCierreConsumibles();
 }
 function renderCierreConsumibles(){
   const el = document.getElementById('cierre-cons'); if(!el) return;
-  const cons = CATALOGO.filter(i=>CATS_CONSUMIBLES.includes(i.cat) && (!cierreBuscar.trim() || coincide(i.nombre, cierreBuscar)));
-  el.innerHTML = cons.map(it=>`<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(calcFormula(it.id).final)} ${it.unidad}</span></span>
-    <input type="number" min="0" inputmode="decimal" placeholder="—" value="${cierreVals[it.id]||''}" oninput="cierreVals['${it.id}']=this.value"></label>`).join('') || '<p class="hint">No se encontró.</p>';
+  const q = cierreBuscar.trim();
+  const cons = CATALOGO.filter(i=>esConsumibleCierre(i) && (q ? coincide(i.nombre, q) : i.cat===cierreCat));
+  el.innerHTML = cons.map(filaCierreConteo).join('') || '<p class="hint">No se encontró.</p>';
 }
 async function guardarCierre(){
   const nota = (document.getElementById('cierre-nota').value||'').trim();
   const cortes = CATALOGO.filter(i=>esHoja(i) && Number(cierreVals[i.id])>0).map(it=>({it, q:Number(cierreVals[it.id])}));
-  const salidas = CATALOGO.filter(i=>CATS_CONSUMIBLES.includes(i.cat) && Number(cierreVals[i.id])>0).map(it=>({it, q:Number(cierreVals[it.id])}));
-  if(!cortes.length && !salidas.length){
-    if(!confirm('No escribiste nada.\n\n¿Hoy no se cortaron hojas ni se usó cintilla, PVC, pegamento o stickers?\n\nAceptar = sí, guardar "sin movimiento" para que no te lo vuelva a recordar hoy.')) return;
+  const contados = CATALOGO.filter(i=>esConsumibleCierre(i) && !vacioCierre(cierreVals[i.id]));
+  for(const it of contados){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
+  const salidas = [], deMas = [], iguales = [];
+  contados.forEach(it=>{ const esp = stockEsperadoCierre(it.id), hay = Number(cierreVals[it.id]); const d = fmtNum(esp - hay);
+    if(d>0) salidas.push({it, q:d, esp, hay}); else if(d<0) deMas.push({it, esp, hay}); else iguales.push(it); });
+  if(!cortes.length && !contados.length){
+    if(!confirm('No escribiste nada.\n\n¿Hoy no se cortaron hojas y no quieres contar consumibles?\n\nAceptar = sí, guardar "sin movimiento" para que no te lo vuelva a recordar hoy.')) return;
   }
   for(const c of cortes){ const f=calcFormula(c.it.id); if(c.q > f.completas + f.autoCortes + 1e-9) return alert(`No alcanza: de ${c.it.nombre} hay ${fmtNum(f.completas+f.autoCortes)} hojas completas y escribiste ${c.q}.`); }
-  for(const x of salidas){ const f=calcFormula(x.it.id); if(f.final - x.q < -1e-9) return alert(`No alcanza: de ${x.it.nombre} hay ${fmtNum(f.final)} ${x.it.unidad} y escribiste ${x.q}.`); }
-  if((cortes.length||salidas.length) && !confirm(`Cierre del turno:\n\n${cortes.length?'✂️ Corte:\n'+cortes.map(c=>`• ${fmtNum(c.q)} hojas ${c.it.nombre}`).join('\n')+'\n\n':''}${salidas.length?'📤 Salidas:\n'+salidas.map(x=>`• ${fmtNum(x.q)} ${x.it.unidad} ${x.it.nombre}`).join('\n'):''}\n\n¿Guardar?`)) return;
+  if(cortes.length || contados.length){
+    const txt = `Cierre del turno:\n\n`
+      + (cortes.length ? '✂️ Corte:\n'+cortes.map(c=>`• ${fmtNum(c.q)} hojas ${c.it.nombre}`).join('\n')+'\n\n' : '')
+      + (salidas.length ? '📤 Se usó (se descuenta):\n'+salidas.map(x=>`• ${fmtNum(x.q)} ${x.it.unidad} ${x.it.nombre} (había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)})`).join('\n')+'\n\n' : '')
+      + (iguales.length ? `✔️ Sin cambio: ${iguales.length} artículo(s)\n\n` : '')
+      + (deMas.length ? '⚠️ Tienes MÁS de lo que dice la app (no se toca; si llegó material, anótalo en "Llegó material"):\n'+deMas.map(x=>`• ${x.it.nombre}: app ${fmtNum(x.esp)}, tú ${fmtNum(x.hay)}`).join('\n')+'\n\n' : '')
+      + '¿Guardar?';
+    if(!confirm(txt)) return;
+  }
   try{
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
     const loteC = cryptoId(), loteS = cryptoId();
     for(const c of cortes) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.it.id, itemNombre:c.it.nombre, tipo:'corte', cantidad:c.q, nota:'Cierre del turno'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteC, creadoPor, cierreTurno:true});
     const estado = estadoNuevoMovimiento();
-    for(const x of salidas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'salida', cantidad:x.q, nota:'Cierre del turno (consumo)'+(nota?' · '+nota:''), fecha, estado, loteId:loteS, creadoPor, cierreTurno:true});
+    for(const x of salidas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'salida', cantidad:x.q, nota:`Cierre del turno: había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)}`+(nota?' · '+nota:''), fecha, estado, loteId:loteS, creadoPor, cierreTurno:true, conteoCierre:{esperado:x.esp, contado:x.hay}});
     if(!cortes.length && !salidas.length) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:'_cierre', itemNombre:'Cierre sin movimiento', tipo:'nota', cantidad:0, nota:'Cierre del turno sin movimiento'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:cryptoId(), creadoPor, cierreTurno:true});
     cierreVals = {}; cierreBuscar = '';
-    toast('✅ Cierre del turno guardado.'+(salidas.length && estado==='pendiente'?'<br><small>Las salidas esperan aprobación de Dirección.</small>':''));
+    toast('✅ Cierre del turno guardado.'+(salidas.length && estado==='pendiente'?'<br><small>Lo que se usó espera aprobación de Dirección.</small>':''));
     setView('home');
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -4483,7 +4659,7 @@ setInterval(async ()=>{
     _cierreAvisado = clave; localStorage.setItem(clave,'1');
     if(typeof Notification==='undefined' || Notification.permission!=='granted') return;
     const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
-    const opts = {body:'Anota el corte de hojas y lo que se usó de PVC, cintilla, pegamento y stickers.', icon:'icon-192.png', tag:'cierre'};
+    const opts = {body:'Anota el corte de hojas y cuánto te queda de cintilla, PVC, pegamento, stickers, pijas y demás.', icon:'icon-192.png', tag:'cierre'};
     if(reg && reg.showNotification) await reg.showNotification('📝 ¿Ya capturaste tus salidas de hoy?', opts); else new Notification('📝 ¿Ya capturaste tus salidas de hoy?', opts);
   }catch(e){}
 }, 5*60*1000);
@@ -4689,6 +4865,205 @@ async function guardarTubos(){
   }catch(e){ alert('Error: '+e.message); }
 }
 
+// ===== Sobrantes (confirmado por el usuario) =====
+// Material que salió para una instalación, NO se instaló y regresó al taller para aprovecharse
+// en otra cosa. Al mandarlo a Sobrantes, su melamina/MDF SALE del inventario (los herrajes no se
+// tocan). Cuando se transforma, se anotan las piezas EXACTAS que salieron y esas regresan al
+// inventario como material cortado. Lo que ya no se aprovecha queda como merma del sobrante.
+let sobrantesCache = [], sobTab = 'abiertos', sobTransf = null, sobPreview = null, sobNota = '';
+const SOB_TIPOS = ['puertas','pieza','medida','armado'];
+function iniciarSobrante(){
+  if(garSub!=='sobrante'){ garLineasGuardadas = garLineas; }
+  garLineas = []; garPreview = null; sobPreview = null; sobNota = ''; garSub = 'sobrante';
+  if(!SOB_TIPOS.includes(garTipo)) garTipo = 'puertas';
+  renderGar(); window.scrollTo(0,0);
+}
+function salirSobrante(){
+  if(garSub!=='sobrante') return;
+  garLineas = garLineasGuardadas || []; garLineasGuardadas = null; garPreview = null; sobPreview = null; garSub = 'nueva';
+}
+function consumoSobrante(lineas){
+  return consumoGarantiaDetalle(lineas).consumo.filter(c=>esHojaId(c.itemId) && c.cantidad>0).map(c=>({itemId:c.itemId, cantidad:fmtNum(c.cantidad)}));
+}
+function renderSobranteNuevo(lista, campos){
+  const tipoBtns = SOB_TIPOS.map(k=>{ const x=GAR_TIPOS[k];
+    return `<button class="tipobtn ${k===garTipo?'on':''}" onclick="garTipo='${k}';renderGar()"><span class="tipo-ic">${x.ic}</span><span><strong>${x.t}</strong><br><small>${x.s}</small></span></button>`; }).join('');
+  if(!SOB_TIPOS.includes(garTipo)){ garTipo='puertas'; return renderGar(); }
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #0e8a8a">
+      <div style="font-size:17px;font-weight:800">🧩 Mandar a sobrantes · ${modulo()}</div>
+      <p class="hint">Material que salió para una instalación, <strong>no se instaló</strong> y regresó al taller. Su melamina/MDF sale del inventario y queda apartada en Sobrantes hasta que se transforme en otra cosa. Los herrajes no se tocan.</p>
+      <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="salirSobrante();renderSob()">Cancelar</button>
+    </div>
+    <div class="card">
+      <div class="paso">1</div><strong>¿Qué regresó?</strong>
+      <div class="tipos" style="margin-top:10px">${tipoBtns}</div>
+      <div style="margin-top:12px">${campos}</div>
+      <button class="btn" style="margin-top:12px;width:100%" onclick="agregarLineaGar()">+ Agregar</button>
+    </div>
+    <div class="card">
+      <div class="paso">2</div><strong>Lo que va a sobrantes (${garLineas.length})</strong>
+      <div style="margin-top:10px">${lista}</div>
+    </div>
+    <div class="card">
+      <div class="paso">3</div><strong>¿De dónde viene?</strong>
+      <input id="sob-nota" placeholder="Ej. Puertas del cliente Pérez, no las quiso" value="${String(sobNota).replace(/"/g,'&quot;')}" oninput="sobNota=this.value" style="margin-top:8px">
+      <button class="btn" style="margin-top:12px;width:100%;min-height:50px" onclick="previewSobrante()">Revisar material</button>
+    </div>
+    <div id="sob-result"></div>`;
+  if(sobPreview) pintarPreviewSobrante();
+}
+function previewSobrante(){
+  if(!garLineas.length) return alert('Primero agrega lo que regresó (paso 1).');
+  sobPreview = consumoSobrante(garLineas);
+  if(!sobPreview.length) return alert('Eso no tiene melamina ni MDF. A sobrantes solo va la melamina/MDF; los herrajes se quedan en el inventario.');
+  pintarPreviewSobrante();
+}
+function pintarPreviewSobrante(){
+  const el = document.getElementById('sob-result'); if(!el) return;
+  sobPreview = consumoSobrante(garLineas); if(!sobPreview.length){ el.innerHTML=''; return; }
+  el.innerHTML = `<div class="card" id="sob-prev">
+    <div style="font-size:16px;font-weight:800">📋 Esto sale del inventario y pasa a Sobrantes</div>
+    <div class="movlist" style="margin-top:8px">${sobPreview.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<div class="movitem"><span class="invname">${it.nombre}</span><strong>${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="confirmarSobrante()">🧩 Mandar a sobrantes</button>
+  </div>`;
+  const pc = document.getElementById('sob-prev'); if(pc && pc.scrollIntoView) pc.scrollIntoView({behavior:'smooth', block:'start'});
+}
+async function confirmarSobrante(){
+  if(!sobPreview || !sobPreview.length) return;
+  const nota = (sobNota||'').trim();
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
+    const id = cryptoId();
+    for(const c of sobPreview){ const it=CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.itemId, itemNombre:it.nombre, tipo:'sobrante', cantidad:c.cantidad, nota:'A sobrantes'+(nota?' · '+nota:''), fecha, estado, loteId:id, sobranteId:id, creadoPor}); }
+    const restante = {}; sobPreview.forEach(c=>{ restante[c.itemId] = c.cantidad; });
+    await db.collection('sobrantes').doc(id).set({modulo:mod, fecha, nota, lineas:garLineas.map(describirLineaGar), lineasData:JSON.parse(JSON.stringify(garLineas)), material:sobPreview, restante, estado:'abierto', transformaciones:[], creadoPor});
+    toast(estado==='pendiente' ? '🧩 Mandado a sobrantes.<br><small>Dirección lo aprueba para que salga del inventario.</small>' : '🧩 Mandado a sobrantes.');
+    salirSobrante(); sobTab='abiertos'; renderSob();
+  }catch(e){ alert('Error: '+e.message); }
+}
+function estadoAprobSob(loteId){ const ms = movs.filter(m=>m.loteId===loteId); if(!ms.length) return 'aprobado'; if(ms.some(m=>m.estado==='pendiente')) return 'pendiente'; if(ms.every(m=>m.estado==='rechazado')) return 'rechazado'; return 'aprobado'; }
+async function renderSob(){
+  current = 'sob';
+  $('#main').innerHTML = '<div class="card hint">Cargando sobrantes…</div>';
+  try{ const snap = await db.collection('sobrantes').get(); sobrantesCache = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }catch(e){ sobrantesCache=[]; }
+  if(current!=='sob') return;
+  const vivos = sobrantesCache.filter(x=>estadoAprobSob(x.id)!=='rechazado');
+  const abiertos = vivos.filter(x=>x.estado!=='cerrado'), cerrados = vivos.filter(x=>x.estado==='cerrado');
+  // Totales por material de lo que sigue apartado
+  const tot = {}; abiertos.forEach(x=>Object.keys(x.restante||{}).forEach(k=>{ tot[k]=(tot[k]||0)+Number(x.restante[k]||0); }));
+  const totHtml = Object.keys(tot).filter(k=>tot[k]>0.0005).map(k=>{ const it=CATALOGO.find(i=>i.id===k); return `<div class="movitem"><span class="invname">${it?it.nombre:k}</span><strong>${fmtNum(tot[k])} ${it?it.unidad:''}</strong></div>`; }).join('');
+  const puede = !esSoloLectura();
+  const cardSob = x => { const ea = estadoAprobSob(x.id);
+    const rest = Object.keys(x.restante||{}).filter(k=>x.restante[k]>0.0005).map(k=>{ const it=CATALOGO.find(i=>i.id===k); return `${fmtNum(x.restante[k])} ${it?it.unidad:''} de ${it?it.nombre:k}`; }).join('<br>');
+    const trans = (x.transformaciones||[]).map(t=>`<div class="hint" style="margin:4px 0 0">✂️ ${new Date(t.fecha).toLocaleDateString('es-MX')}: salieron ${t.piezas.join(', ')} ${badgeEstado(estadoAprobSob(t.loteId))}</div>`).join('');
+    return `<div class="card">
+      <div class="row" style="justify-content:space-between"><strong>${new Date(x.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'long'})}</strong>${badgeEstado(ea)}</div>
+      ${x.nota?`<p class="hint" style="margin:4px 0">${x.nota}</p>`:''}
+      <ul style="margin:6px 0 6px 18px;padding:0;line-height:1.5">${(x.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul>
+      ${x.estado==='cerrado' ? `<p class="hint" style="margin:4px 0">Terminado${x.mermaFinal&&x.mermaFinal.length?' · merma: '+x.mermaFinal.map(m=>{const it=CATALOGO.find(i=>i.id===m.itemId); return fmtNum(m.cantidad)+' '+(it?it.unidad+' '+it.nombre:'');}).join(', '):''}</p>` : `<p class="hint" style="margin:4px 0"><strong>Queda:</strong><br>${rest||'—'}</p>`}
+      ${trans}
+      ${puede && x.estado!=='cerrado' && ea!=='rechazado' ? `<button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="iniciarTransformacion('${x.id}')">✂️ Se transformó: anotar qué salió</button>` : ''}
+    </div>`; };
+  let cuerpo;
+  if(sobTransf) cuerpo = transformacionHtml();
+  else cuerpo = (sobTab==='abiertos' ? (abiertos.length ? abiertos.map(cardSob).join('') : '<div class="card hint">No hay sobrantes apartados. 🎉</div>') : (cerrados.length ? cerrados.map(cardSob).join('') : '<div class="card hint">Todavía no hay sobrantes terminados.</div>'));
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">🧩 Sobrantes · ${modulo()}</div>
+      <p class="hint">Material que regresó sin instalarse. Está <strong>fuera del inventario</strong> hasta que se transforme; entonces regresa lo que salió de él (como material cortado). En las auditorías no se cuenta.</p>
+      ${puede?`<button class="btn" style="width:100%;margin-top:6px" onclick="iniciarSobrante()">+ Mandar material a sobrantes</button>`:''}
+      ${totHtml?`<p class="hint" style="margin:10px 0 4px"><strong>Apartado ahora:</strong></p><div class="movlist">${totHtml}</div>`:''}
+      <div class="subtabs" style="margin:10px 0 0"><button class="${sobTab==='abiertos'?'active':''}" onclick="sobTab='abiertos';sobTransf=null;renderSob()">Apartados (${abiertos.length})</button><button class="${sobTab==='cerrados'?'active':''}" onclick="sobTab='cerrados';sobTransf=null;renderSob()">Terminados (${cerrados.length})</button></div>
+    </div>${cuerpo}`;
+}
+// --- Transformación: se anotan las piezas exactas que salieron del sobrante ---
+function iniciarTransformacion(id){
+  const x = sobrantesCache.find(s=>s.id===id); if(!x) return;
+  const colores = Object.keys(x.restante||{}).map(k=>CATALOGO.find(i=>i.id===k)).filter(it=>it && it.cat==='Melamina').map(it=>it.nombre.replace('Melamina ',''));
+  sobTransf = {id, color: colores[0]||'Blanco', piezas:{}, medidas:[], mAncho:'', mAlto:'', mCant:''};
+  renderSob(); window.scrollTo(0,0);
+}
+function piezasTransformacion(){
+  const t = sobTransf; const pool = [];
+  Object.keys(t.piezas).forEach(k=>{ const n=Number(t.piezas[k]); const p=PIEZAS_AUDIT.find(x=>x.key===k); if(p && n>0) pool.push({nombre:p.nombre, cantidad:n, dim:p.dim, colorDestino: p.tipo==='mel'?t.color:'—', estado:'ok'}); });
+  const out = {};
+  const porColor = {}; pool.forEach(p=>{ (porColor[p.colorDestino]=porColor[p.colorDestino]||[]).push(p); });
+  Object.keys(porColor).forEach(c=>piezasAConsumo(porColor[c], c).forEach(r=>{ if(esHojaId(r.itemId)) out[r.itemId]=(out[r.itemId]||0)+r.cantidad; }));
+  t.medidas.forEach(m=>{ const porHoja = piezasPorHojaIndividual(m.ancho, m.alto, 122, 244); const it=itemByName('Melamina '+t.color); if(it && porHoja>0) out[it.id]=(out[it.id]||0)+m.cantidad/porHoja; });
+  Object.keys(out).forEach(k=>out[k]=fmtNum(out[k]));
+  return out;
+}
+function descPiezasTransformacion(){
+  const t = sobTransf;
+  return Object.keys(t.piezas).filter(k=>Number(t.piezas[k])>0).map(k=>{ const p=PIEZAS_AUDIT.find(x=>x.key===k); return `${t.piezas[k]} ${p.label}`; })
+    .concat(t.medidas.map(m=>`${m.cantidad} pieza(s) de ${fmtNum(m.ancho)}×${fmtNum(m.alto)}`));
+}
+function transformacionHtml(){
+  const t = sobTransf; const x = sobrantesCache.find(s=>s.id===t.id); if(!x){ sobTransf=null; return ''; }
+  const colores = Object.keys(x.restante||{}).map(k=>CATALOGO.find(i=>i.id===k)).filter(it=>it && it.cat==='Melamina').map(it=>it.nombre.replace('Melamina ',''));
+  const hayMDF = Object.keys(x.restante||{}).some(k=>{ const it=CATALOGO.find(i=>i.id===k); return it && it.cat==='MDF'; });
+  const lista = PIEZAS_AUDIT.filter(p=>p.tipo==='mel' || hayMDF);
+  const eq = piezasTransformacion();
+  const rest = x.restante||{};
+  const eqHtml = Object.keys(eq).map(k=>{ const it=CATALOGO.find(i=>i.id===k); const r=Number(rest[k]||0); const pasa = eq[k] > r + 0.0005;
+    return `<div class="movitem"><span class="invname">${it.nombre}</span><span class="${pasa?'neg':''}"><strong>${fmtNum(eq[k])}</strong> de ${fmtNum(r)} ${it.unidad}${pasa?' ⚠️':''}</span></div>`; }).join('');
+  return `<div class="card" style="border:2px solid #0e8a8a">
+      <div style="font-size:16px;font-weight:800">✂️ ¿Qué salió de este sobrante?</div>
+      <p class="hint">${(x.lineas||[]).join(' · ')}${x.nota?' — '+x.nota:''}</p>
+      <p class="hint">Anota las piezas <strong>exactas</strong> que se sacaron. Regresan al inventario como material cortado.</p>
+      ${colores.length>1?`<label class="hint">Color</label><select style="margin-top:4px" onchange="sobTransf.color=this.value;renderSob()">${colores.map(c=>`<option ${c===t.color?'selected':''}>${c}</option>`).join('')}</select>`:`<p class="hint" style="margin:0">Color: <strong>${t.color}</strong></p>`}
+      <div class="wrap-x" style="margin-top:10px"><table><tr><th>Pieza</th><th>Cantidad</th></tr>
+        ${lista.map(p=>`<tr><td>${p.label}<div class="tag">${p.dim}</div></td><td><input type="number" min="0" inputmode="numeric" style="min-width:70px" value="${t.piezas[p.key]||''}" onchange="sobTransf.piezas['${p.key}']=Number(this.value)||0;renderSob()"></td></tr>`).join('')}
+      </table></div>
+      <details style="margin-top:10px"><summary class="hint"><strong>+ Pieza a medida</strong></summary>
+        <div class="grid2" style="margin-top:8px">
+          <div><label class="hint">Ancho (cm)</label><input type="number" inputmode="decimal" value="${t.mAncho}" oninput="sobTransf.mAncho=this.value"></div>
+          <div><label class="hint">Alto (cm)</label><input type="number" inputmode="decimal" value="${t.mAlto}" oninput="sobTransf.mAlto=this.value"></div>
+          <div><label class="hint">¿Cuántas?</label><input type="number" inputmode="numeric" value="${t.mCant}" oninput="sobTransf.mCant=this.value"></div>
+        </div>
+        <button class="btn small" style="margin-top:8px" onclick="agregarMedidaTransf()">Agregar</button>
+        ${t.medidas.length?`<p class="hint">${t.medidas.map((m,i)=>`${m.cantidad} de ${fmtNum(m.ancho)}×${fmtNum(m.alto)} <a href="#" onclick="sobTransf.medidas.splice(${i},1);renderSob();return false;">quitar</a>`).join(' · ')}</p>`:''}
+      </details>
+    </div>
+    <div class="card">
+      <strong>Equivale a</strong>
+      ${eqHtml?`<div class="movlist" style="margin-top:8px">${eqHtml}</div><p class="hint">"de X" = lo que queda en este sobrante.</p>`:'<p class="hint">Todavía no anotas piezas.</p>'}
+      <div class="row" style="justify-content:space-between;margin-top:10px">
+        <button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="sobTransf=null;renderSob()">Cancelar</button>
+        <button class="btn" onclick="confirmarTransformacion()">✅ Guardar</button>
+      </div>
+    </div>`;
+}
+function agregarMedidaTransf(){
+  const t = sobTransf; const an=Number(t.mAncho), al=Number(t.mAlto), n=Number(t.mCant)||1;
+  if(!an || !al) return alert('Escribe ancho y alto.');
+  if(piezasPorHojaIndividual(an, al, 122, 244)<1) return alert('Esa pieza no cabe en una hoja de 122×244 cm.');
+  t.medidas.push({ancho:an, alto:al, cantidad:n}); t.mAncho=''; t.mAlto=''; t.mCant=''; renderSob();
+}
+async function confirmarTransformacion(){
+  const t = sobTransf; const x = sobrantesCache.find(s=>s.id===t.id); if(!x) return;
+  const eq = piezasTransformacion(); const piezas = descPiezasTransformacion();
+  if(!Object.keys(eq).length) return alert('Anota qué piezas salieron.');
+  const rest = Object.assign({}, x.restante||{});
+  const pasados = Object.keys(eq).filter(k=>eq[k] > Number(rest[k]||0) + 0.0005);
+  if(pasados.length) return alert('Las piezas equivalen a más material del que queda en este sobrante:\n\n'+pasados.map(k=>`• ${CATALOGO.find(i=>i.id===k).nombre}: ${fmtNum(eq[k])} y solo quedan ${fmtNum(rest[k]||0)}`).join('\n')+'\n\nRevisa las cantidades.');
+  const usado = {}; Object.keys(eq).forEach(k=>{ usado[k]=eq[k]; rest[k] = fmtNum(Number(rest[k]||0) - eq[k]); });
+  const quedaAlgo = Object.keys(rest).some(k=>rest[k]>0.0005);
+  let cerrar = !quedaAlgo;
+  if(quedaAlgo) cerrar = confirm(`Regresa al inventario:\n${Object.keys(eq).map(k=>`• ${fmtNum(eq[k])} ${CATALOGO.find(i=>i.id===k).nombre}`).join('\n')}\n\nEn el sobrante todavía queda:\n${Object.keys(rest).filter(k=>rest[k]>0.0005).map(k=>`• ${fmtNum(rest[k])} ${CATALOGO.find(i=>i.id===k).nombre}`).join('\n')}\n\n¿Ya se acabó este sobrante?\nAceptar = sí, lo que queda es MERMA.\nCancelar = no, lo que queda sigue apartado para después.`);
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    for(const k of Object.keys(eq)){ const it=CATALOGO.find(i=>i.id===k);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:x.modulo, itemId:k, itemNombre:it.nombre, tipo:'devolucion', motivo:'deSobrante', cantidad:eq[k], nota:'Sobrante transformado: '+piezas.join(', '), fecha, estado, loteId, sobranteId:x.id, creadoPor}); }
+    const upd = {transformaciones:(x.transformaciones||[]).concat([{fecha, piezas, usado, loteId, creadoPor}]), restante: rest};
+    if(cerrar){ upd.estado='cerrado'; upd.cerradoEn=fecha; upd.mermaFinal = Object.keys(rest).filter(k=>rest[k]>0.0005).map(k=>({itemId:k, cantidad:rest[k]})); }
+    await db.collection('sobrantes').doc(x.id).update(upd);
+    sobTransf = null;
+    toast('✂️ Guardado.'+(estado==='pendiente'?'<br><small>Dirección lo aprueba para que se sume al inventario.</small>':''));
+    renderSob();
+  }catch(e){ alert('Error: '+e.message); }
+}
+
 // ===== Menú "Más" del coordinador =====
 function renderMas(){
   const t = (ic, tit, sub, js, color) => `<button class="tile" style="--tc:${color}" onclick="${js}"><span class="tile-ic">${ic}</span><span class="tile-t">${tit}</span><span class="tile-s">${sub}</span></button>`;
@@ -4700,6 +5075,7 @@ function renderMas(){
       ${t('📊','Reportes','Cierre del día en PDF',"irA('rep')",'#3E5CDE')}
       ${t('📜','Historial','Entradas y salidas por fecha',"irA('movhist')",'#6b7280')}
       ${t('📐','Despiece','Piezas de cada modelo',"irA('desp')",'#2c46b8')}
+      ${t('🧩','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#0e8a8a')}
     </div>`;
 }
 
@@ -4733,6 +5109,11 @@ async function borrarLotePendiente(loteId){
     try{ const g = (await db.collection('garantiasLog').get()).docs.find(x=>((x.data()||{}).retorno||{}).loteId===loteId); if(g) await db.collection('garantiasLog').doc(g.id).update({retorno:null}); }catch(e){}
     try{ const p = pedidos.find(x=>recepcionesDe(x).some(r=>r.loteId===loteId)); if(p){ const recepciones = recepcionesDe(p).filter(r=>r.loteId!==loteId); await db.collection('pedidos').doc(p.id).update(Object.assign({recepciones, recibido:null}, p.estado==='recibido'?{estado:'enCamino'}:{})); } }catch(e){}
     for(let i=0;i<4;i++){ try{ await db.collection('fotos').doc(loteId+'_f'+i).delete(); }catch(e){} }
+    try{ const d = await db.collection('sobrantes').doc(loteId).get(); if(d && d.data) await db.collection('sobrantes').doc(loteId).delete(); }catch(e){}
+    try{ const sb = sobrantesCache.find(x=>(x.transformaciones||[]).some(t=>t.loteId===loteId));
+      if(sb){ const t = sb.transformaciones.find(t=>t.loteId===loteId); const restante = Object.assign({}, sb.restante||{});
+        Object.keys(t.usado||{}).forEach(k=>{ restante[k] = fmtNum((restante[k]||0) + t.usado[k]); });
+        await db.collection('sobrantes').doc(sb.id).update({transformaciones: sb.transformaciones.filter(x=>x.loteId!==loteId), restante, estado:'abierto', mermaFinal:null}); } }catch(e){}
     toast('🗑️ Borrado. Ya puedes capturarlo otra vez.');
     renderPend();
   }catch(e){ alert('Error: '+e.message); }
@@ -4750,6 +5131,8 @@ function describirLote(ms){
   if(ms.some(m=>m.pedidoId)) return 'Material recibido de un pedido';
   if(tipos.includes('instalacion')) return 'Instalación';
   if(tipos.includes('garantia')) return 'Garantía';
+  if(ms.some(m=>m.motivo==='deSobrante')) return 'Sobrante transformado';
+  if(tipos.includes('sobrante')) return 'Material a sobrantes';
   if(tipos.includes('devolucion')) return 'Regreso de garantía';
   if(ms.some(m=>m.motivo==='armarJuegos')) return 'Armado de juegos de corredera';
   if(ms.some(m=>m.motivo==='tuboAhorrado')) return 'Tubos ahorrados';
@@ -5109,7 +5492,7 @@ async function eliminarUsuarioUI(userId, email){
 // ===== Borrar datos de prueba (confirmado por el usuario) =====
 // Deja los módulos elegidos en blanco, como recién instalados. Se borra con la misma marca de
 // "borrado" que usa la sincronización, así también desaparece en la nube y en los demás celulares.
-const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto','pedidos','fotos'];
+const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto','pedidos','fotos','sobrantes'];
 async function borrarDatosModulo(mods){
   if(!esAdmin()) return alert('Solo Dirección puede borrar datos.');
   const nombre = mods.length>1 ? 'LOS 5 MÓDULOS' : mods[0];
@@ -5129,7 +5512,7 @@ async function borrarDatosModulo(mods){
     snap.docs.forEach(d=>{ const x=d.data()||{}; if(mods.includes(x.origen)||mods.includes(x.destino)) aBorrar.push(['prestamos',d.id]); });
   }catch(e){}
   const porCol = {}; aBorrar.forEach(([c])=>porCol[c]=(porCol[c]||0)+1);
-  const nombres = {movimientos:'movimientos (entradas, salidas, cortes, instalaciones, garantías…)', inicial:'stock inicial', inicialHist:'historial del stock inicial', resets:'puestas en cero', auditorias:'auditorías y conteos', deudasAuditoria:'faltantes (deuda)', garantiasLog:'garantías', instalacionesLog:'instalaciones', instalacionesPuertas:'instalaciones de puertas', conteoAbierto:'conteos abiertos', prestamos:'traspasos / préstamos', pedidos:'pedidos por llegar', fotos:'fotos de evidencia'};
+  const nombres = {movimientos:'movimientos (entradas, salidas, cortes, instalaciones, garantías…)', inicial:'stock inicial', inicialHist:'historial del stock inicial', resets:'puestas en cero', auditorias:'auditorías y conteos', deudasAuditoria:'faltantes (deuda)', garantiasLog:'garantías', instalacionesLog:'instalaciones', instalacionesPuertas:'instalaciones de puertas', conteoAbierto:'conteos abiertos', prestamos:'traspasos / préstamos', pedidos:'pedidos por llegar', fotos:'fotos de evidencia', sobrantes:'sobrantes'};
   if(!aBorrar.length) return alert(`${nombre} ya está en blanco. No hay nada que borrar.`);
   const detalle = Object.keys(porCol).map(c=>`• ${porCol[c]} ${nombres[c]||c}`).join('\n');
   const aviso = mods.length===1 ? `\n\nOjo: los traspasos de ${mods[0]} con otros módulos también se borran, pero la entrada o salida que quedó en el OTRO módulo se queda allá.` : '';

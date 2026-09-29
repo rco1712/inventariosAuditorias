@@ -14,7 +14,9 @@ const COLLECTIONS_V2 = [...COLLECTIONS_V1, 'deudasAuditoria','garantiasLog','con
 const COLLECTIONS_V3 = [...COLLECTIONS_V2, 'pedidos'];
 // v4: fotos de evidencia (garantías, mermas, pedidos). No se descargan solas a todos los celulares:
 // se piden a la nube solo cuando alguien las abre (ver buscarFotosRemotas).
-const COLLECTIONS = [...COLLECTIONS_V3, 'fotos'];
+const COLLECTIONS_V4 = [...COLLECTIONS_V3, 'fotos'];
+// v5: sobrantes (material que regresó sin instalarse y se aparta hasta transformarse).
+const COLLECTIONS = [...COLLECTIONS_V4, 'sobrantes'];
 const NO_DESCARGAR = new Set(['fotos']);
 
 const ddb = new Dexie('auditoriamodulos');
@@ -22,7 +24,8 @@ const storesDe = list => { const st = {}; list.forEach(c => { st[c] = 'id, modul
 ddb.version(1).stores(storesDe(COLLECTIONS_V1));
 ddb.version(2).stores(storesDe(COLLECTIONS_V2));
 ddb.version(3).stores(storesDe(COLLECTIONS_V3));
-ddb.version(4).stores(storesDe(COLLECTIONS));
+ddb.version(4).stores(storesDe(COLLECTIONS_V4));
+ddb.version(5).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 

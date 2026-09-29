@@ -188,7 +188,7 @@ if ('serviceWorker' in navigator) {
   let recargando = false;
   function hayCapturaEnCurso(){
     const vista = (typeof current !== 'undefined') ? current : '';
-    if(['mov','inst','gar','aud','ini','trasp','usr','ped','pend','tubos','cierre'].includes(vista)){
+    if(['mov','inst','gar','aud','ini','trasp','usr','ped','pend','tubos','cierre','sob'].includes(vista)){
       return [...document.querySelectorAll('#main input')].some(i => (i.type==='checkbox' ? false : String(i.value||'').trim()!=='' && i.type!=='date'));
     }
     return false;
