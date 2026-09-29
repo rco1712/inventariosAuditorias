@@ -1021,29 +1021,56 @@ function seccionCompletaAud(k){
   return faltanSeccionAud(k).length===0;
 }
 function primerPasoPendienteAud(){ const i = AUD_SECCIONES.findIndex(x=>!seccionCompletaAud(x.k)); return i<0 ? AUD_SECCIONES.length-1 : i; }
+// Se puede ir a cualquier sección (confirmado por el usuario: a veces algo no se puede contar
+// todavía y hay que seguir con otra). Lo que quede pendiente se muestra en cada sección y no se
+// puede guardar/enviar hasta que todo esté contado o puesto en 0.
 function irPasoAud(i){
-  if(i > primerPasoPendienteAud()) return toast('Primero termina la sección en la que vas.');
+  if(AUD_SECCIONES[audPaso]) audHechas['v_'+AUD_SECCIONES[audPaso].k] = true;
   audPaso = i; auditCat = AUD_SECCIONES[i].k; renderAud(); window.scrollTo(0,0);
 }
-function siguientePasoAud(){
-  const sec = AUD_SECCIONES[audPaso];
-  if(sec.k==='__piezas' || sec.k==='__armados'){
-    const n = sec.k==='__piezas' ? contarPiezasSueltas() : auditArmados.length;
-    const q = sec.k==='__piezas'
-      ? (n ? `¿Ya contaste TODAS las piezas cortadas, de todos los colores? (llevas ${n} tipo(s) de pieza)` : '¿No hay piezas cortadas sueltas en el módulo?')
-      : (n ? `¿Ya contaste TODOS los armados? (llevas ${n})` : '¿No hay cajoneras, cajones ni cuadros armados en el módulo?');
-    if(!confirm(q+'\n\nAceptar = sí, seguir.  Cancelar = regresar a contar.')) return;
-    audHechas[sec.k] = true;
-  } else {
-    const faltan = faltanSeccionAud(sec.k);
-    if(faltan.length){
-      if(!confirm(`Te faltan ${faltan.length} artículo(s) sin contar en ${sec.t}:\n\n${faltan.slice(0,12).map(i=>'• '+i.nombre).join('\n')}${faltan.length>12?'\n… y '+(faltan.length-12)+' más':''}\n\n¿De esos NO hay nada?\n\nAceptar = ponerlos en 0 y seguir.\nCancelar = regresar a contarlos.`)) return;
-      faltan.forEach(i=>{ auditCapturas[i.id] = 0; });
-    }
-  }
+function avanzarPasoAud(){
+  audHechas['v_'+AUD_SECCIONES[audPaso].k] = true; // sección vista (para marcar lo que quedó pendiente)
   guardarBorradorAud();
   audPaso = Math.min(audPaso+1, AUD_SECCIONES.length-1); auditCat = AUD_SECCIONES[audPaso].k;
   renderAud(); window.scrollTo(0,0);
+}
+// Ventana con 3 opciones (las alertas del celular solo tienen 2).
+function modalAud(titulo, texto, botones){
+  let ov = document.getElementById('aud-ov'); if(ov) ov.remove();
+  ov = document.createElement('div'); ov.id='aud-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(10,12,20,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div class="card" style="max-width:440px;width:100%;margin:0;max-height:85vh;overflow:auto"><div style="font-size:16px;font-weight:800">${titulo}</div><div class="hint" style="margin-top:6px">${texto}</div>
+    ${botones.map((b,i)=>`<button class="btn" data-i="${i}" style="width:100%;min-height:50px;margin-top:10px;text-align:left;${b.estilo||''}">${b.t}${b.s?`<br><small style="font-weight:400">${b.s}</small>`:''}</button>`).join('')}</div>`;
+  document.body.appendChild(ov);
+  ov.querySelectorAll('button[data-i]').forEach(btn=>btn.onclick=()=>{ ov.remove(); const f=botones[Number(btn.dataset.i)].fn; if(f) f(); });
+}
+function siguientePasoAud(){
+  const sec = AUD_SECCIONES[audPaso];
+  const secundario = 'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none';
+  if(sec.k==='__piezas' || sec.k==='__armados'){
+    if(audHechas[sec.k]) return avanzarPasoAud();
+    const n = sec.k==='__piezas' ? contarPiezasSueltas() : auditArmados.length;
+    const q = sec.k==='__piezas'
+      ? (n ? `¿Ya contaste TODAS las piezas cortadas, de todos los colores? Llevas ${n} tipo(s) de pieza.` : '¿No hay piezas cortadas sueltas en el módulo?')
+      : (n ? `¿Ya contaste TODOS los armados? Llevas ${n}.` : '¿No hay cajoneras, cajones ni cuadros armados en el módulo?');
+    return modalAud(`${AUD_ICONO[sec.k]} ${sec.t}`, q, [
+      {t:'✅ Sí, ya terminé esta sección', fn:()=>{ audHechas[sec.k]=true; avanzarPasoAud(); }},
+      {t:'⏭️ Dejarla pendiente y seguir', s:'Regresas después a terminarla', estilo:secundario, fn:avanzarPasoAud},
+      {t:'← Regresar a contar', estilo:secundario}
+    ]);
+  }
+  const faltan = faltanSeccionAud(sec.k);
+  if(!faltan.length) return avanzarPasoAud();
+  modalAud(`Faltan ${faltan.length} en ${sec.t}`, faltan.slice(0,15).map(i=>'• '+i.nombre).join('<br>')+(faltan.length>15?`<br>… y ${faltan.length-15} más`:''), [
+    {t:'0️⃣ De esos no hay: ponerlos en 0 y seguir', fn:()=>{ faltan.forEach(i=>{ auditCapturas[i.id]=0; }); avanzarPasoAud(); }},
+    {t:'⏭️ Dejarlos pendientes y seguir', s:'Todavía no se pueden contar; regresas después', estilo:secundario, fn:avanzarPasoAud},
+    {t:'← Regresar a contarlos', estilo:secundario}
+  ]);
+}
+function pendienteSeccionTxt(k){
+  if(k==='__revisar') return '';
+  if(k==='__piezas' || k==='__armados') return audHechas[k] ? '' : 'sin confirmar';
+  const n = faltanSeccionAud(k).length; return n ? `faltan ${n}` : '';
 }
 function sumarAud(id){
   const it = CATALOGO.find(i=>i.id===id); if(!it) return;
@@ -1077,8 +1104,9 @@ function renderAud(){
   const sec = AUD_SECCIONES[audPaso];
   const limite = primerPasoPendienteAud();
   const hechas = AUD_SECCIONES.filter(x=>seccionCompletaAud(x.k)).length;
-  const chips = AUD_SECCIONES.map((x,i)=>{ const ok = seccionCompletaAud(x.k), on = i===audPaso, bloq = i>limite;
-    return `<button class="chip ${on?'on':''}" style="${bloq?'opacity:.45;':''}${ok&&!on?'border-color:var(--ok);color:var(--ok);':''}" onclick="irPasoAud(${i})">${ok?'✓ ':(bloq?'🔒 ':'')}${AUD_ICONO[x.k]||''} ${x.t}</button>`; }).join('');
+  const chips = AUD_SECCIONES.map((x,i)=>{ const ok = seccionCompletaAud(x.k), on = i===audPaso; const pend = pendienteSeccionTxt(x.k);
+    const empezada = x.k!=='__revisar' && !ok && (audHechas['v_'+x.k] || (!x.k.startsWith('__') && itemsSeccionAud(x.k).some(it=>auditCapturas[it.id]!==undefined)));
+    return `<button class="chip ${on?'on':''}" style="${ok&&!on?'border-color:var(--ok);color:var(--ok);':''}${!ok&&empezada&&!on?'border-color:#b3742c;color:#b3742c;':''}" onclick="irPasoAud(${i})">${ok?'✓ ':(empezada?'⏳ ':'')}${AUD_ICONO[x.k]||''} ${x.t}${!ok&&empezada&&pend?` <small>(${pend})</small>`:''}</button>`; }).join('');
 
   let cuerpo;
   if(sec.k==='__piezas'){
@@ -1091,11 +1119,15 @@ function renderAud(){
       if(x.k==='__piezas') det = `${contarPiezasSueltas()} tipo(s) de pieza`;
       else if(x.k==='__armados') det = `${auditArmados.length} armado(s)`;
       else { const its=itemsSeccionAud(x.k); const conAlgo=its.filter(i=>Number(auditCapturas[i.id])>0).length; det = `${its.length-faltanSeccionAud(x.k).length} de ${its.length} contados · ${conAlgo} con existencia`; }
-      return `<div class="movitem"><span class="invname">${seccionCompletaAud(x.k)?'✅':'⏳'} ${AUD_ICONO[x.k]||''} ${x.t}</span><span class="hint" style="margin:0;text-align:right">${det}</span></div>`; }).join('');
+      const ok = seccionCompletaAud(x.k); const idx = AUD_SECCIONES.findIndex(z=>z.k===x.k);
+      let falta = '';
+      if(!ok){ if(x.k.startsWith('__')) falta = 'Falta confirmar que ya se contó todo.';
+        else { const f=faltanSeccionAud(x.k); falta = `Faltan: ${f.slice(0,6).map(i=>i.nombre).join(', ')}${f.length>6?' y '+(f.length-6)+' más':''}`; } }
+      return `<div class="movitem" style="flex-wrap:wrap;gap:6px"><span style="min-width:0;flex:1 1 60%"><span class="invname">${ok?'✅':'⏳'} ${AUD_ICONO[x.k]||''} ${x.t}</span><span class="hint" style="display:block;margin:2px 0 0">${det}</span>${falta?`<span class="hint" style="display:block;margin:2px 0 0;color:#b3742c">${falta}</span>`:''}</span>${ok?'':`<button class="btn small" onclick="irPasoAud(${idx})">Ir a contar</button>`}</div>`; }).join('');
     const listo = primerPasoPendienteAud()===AUD_SECCIONES.length-1;
     cuerpo = `<div class="card"><h3>✅ Revisar y enviar</h3>
       <div class="movlist" style="margin-top:8px">${filas}</div>
-      ${listo?'<p class="hint" style="margin-top:8px">Todo está contado. Si encontraste algo más, regresa a su sección y usa ➕ para sumarlo.</p>':'<p class="neg" style="margin-top:8px">Todavía hay secciones sin terminar.</p>'}
+      ${listo?'<p class="hint" style="margin-top:8px">Todo está contado. Si encontraste algo más, regresa a su sección y usa ➕ para sumarlo.</p>':'<p class="neg" style="margin-top:8px">Todavía hay secciones pendientes. Termínalas para poder guardar; si de verdad no hay de lo que falta, entra a la sección y ponlo en 0.</p>'}
       <button class="btn" style="width:100%;min-height:54px;font-size:16px;margin-top:10px" ${listo?'':'disabled'} onclick="saveAudit()">${ciego?'📤 Enviar conteo a Dirección':(audTipo==='conteo'?'Guardar conteo inicial':'Guardar auditoría')}</button>
     </div>
     ${resumenCardHtml()}`;
@@ -1133,7 +1165,7 @@ function renderAud(){
     </div>
     ${ciego?'':`<p class="hint" style="margin-top:6px">${audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
     <div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>
-    <p class="hint" style="margin:4px 0 0">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas</p>
+    <p class="hint" style="margin:4px 0 0">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas. Puedes pasar a cualquier sección; lo pendiente se marca con ⏳.</p>
     <div class="chips" style="margin-top:8px">${chips}</div>
   </div>
   ${cuerpo}
