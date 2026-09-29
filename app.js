@@ -159,11 +159,18 @@ async function chooseModulo(nombre){
   moduloActual = nombre;
   localStorage.setItem('am_modulo', nombre);
   document.getElementById('nav').style.display='flex';
-  renderModBar();
+  renderModBar(); ajustarNavSticky();
   await loadStock();
   setView('home');
 }
 
+// El menú de pestañas se pega justo debajo del encabezado; su altura cambia según la pantalla
+// (PC, celular, nombre del módulo), así que se calcula en vez de usar un número fijo.
+function ajustarNavSticky(){
+  try{ const h=document.querySelector('header'), n=document.getElementById('nav'); if(h&&n) n.style.top = h.offsetHeight+'px'; }catch(e){}
+}
+window.addEventListener('resize', ajustarNavSticky);
+try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky); document.addEventListener('DOMContentLoaded', ()=>{ const h=document.querySelector('header'); if(h) ro.observe(h); }); const h0=document.querySelector('header'); if(h0) ro.observe(h0); } }catch(e){}
 async function init(){
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.onclick=()=>setView(b.dataset.v));
   document.getElementById('logoutBtn').onclick = doLogout;
@@ -182,6 +189,10 @@ async function init(){
   }
   renderModBar();
   if(!moduloActual){ showPicker(); return; }
+  // Al iniciar sesión por primera vez el menú quedaba oculto (lo esconde la pantalla de login) y
+  // las cuentas con módulo fijo nunca lo volvían a mostrar: se muestra siempre que ya hay módulo.
+  document.getElementById('nav').style.display='flex';
+  ajustarNavSticky();
   await loadStock();
   setView('home');
   abrirAccesoDirecto();
