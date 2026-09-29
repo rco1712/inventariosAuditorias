@@ -1039,11 +1039,16 @@ function guardarBorradorAud(){
   try{
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
     if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditPiezas, auditArmados, audAuditor, fecha:new Date().toISOString()}));
+    else localStorage.removeItem(claveBorradorAud());
   }catch(e){}
 }
 function borrarBorradorAud(){ try{ localStorage.removeItem(claveBorradorAud()); }catch(e){} }
+let _borradorRevisado = {};
 function recuperarBorradorAud(){
   try{
+    // Solo se recupera UNA vez al abrir el conteo (no cada vez que se redibuja la pantalla); si no,
+    // al quitar lo último capturado regresaba el borrador y no se podía dejar en blanco.
+    if(_borradorRevisado[modulo()]) return; _borradorRevisado[modulo()] = true;
     const raw = localStorage.getItem(claveBorradorAud()); if(!raw) return;
     const hayAhora = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
     if(hayAhora) return;
@@ -1126,6 +1131,7 @@ function resumenCardHtml(){
     <h3>Equivalencia total (piezas cortadas + armados)</h3>
     <div id="aud-piezas-resumen" class="wrap-x">${resumenPiezasHtml()}</div>
     <p class="hint">Esto se suma a lo que captures en cada categoría (hojas completas, herrajes sueltos). Si no capturas nada en esa categoría, se toma como 0.</p>
+    <button class="btn small" style="margin-top:6px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="vaciarConteoAud()">🗑️ Empezar el conteo en blanco</button>
   </div>`;
 }
 
@@ -1190,7 +1196,11 @@ function agregarArmado(){
   f.cantidad = '';
   renderAud();
 }
-function quitarArmado(i){ auditArmados.splice(i,1); renderAud(); }
+function quitarArmado(i){ auditArmados.splice(i,1); guardarBorradorAud(); renderAud(); }
+function vaciarConteoAud(){
+  if(!confirm('¿Borrar TODO lo que llevas capturado en este conteo?\n\n(Hojas, herrajes, piezas cortadas y armados. No se toca el inventario.)')) return;
+  auditCapturas={}; auditPiezas={}; auditArmados=[]; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
+}
 function renderAudPiezasHtml(){
   if(!auditPiezaGrupo) auditPiezaGrupo = MEL_COLORES[0];
   const esMDF = auditPiezaGrupo===AUD_GRUPO_MDF;
