@@ -850,6 +850,7 @@ function etiquetaTipoMov(m){
   if(m.motivo==='sobranteGarantia') return 'Sobrante de garantía';
   if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
   if(m.motivo==='deSobrante') return 'Sobrante transformado';
+  if(m.motivo==='regresoMerma') return 'Merma (regresó sin instalar)';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
 function stockHojaTxt(f, unidad){
@@ -2489,11 +2490,12 @@ function combinarParedEntrepano(piezas){
   Object.keys(porColor).forEach(color=>{
     const {paredes,entrepanos} = porColor[color];
     if(!paredes && !entrepanos) return;
-    const hojasPorParedes = paredes/3;
-    const entrepanosDeRegalo = hojasPorParedes*3;
-    const entrepanosExtra = Math.max(0, entrepanos - entrepanosDeRegalo);
-    const hojasExtra = entrepanosExtra/14;
-    resultado.push({color, hojas: hojasPorParedes + hojasExtra});
+    // 1 hoja = 3 paredes + 3 entrepaños (corte combinado): cada pareja pared+entrepaño = 1/3 de hoja.
+    // Entrepaño suelto = 1/14. Pared SIN su entrepaño (confirmado por el usuario) = 1/3 − 1/14,
+    // porque la tira del entrepaño que sale junto a ella no se usó y se queda como material.
+    const parejas = Math.min(paredes, entrepanos);
+    const hojas = parejas/3 + (paredes-parejas)*(1/3 - 1/14) + (entrepanos-parejas)/14;
+    resultado.push({color, hojas});
   });
   return resultado;
 }
@@ -4475,6 +4477,7 @@ function detalleGarantiaAprob(loteId, garLogs){
 function detalleSobranteAprob(loteId, sobLogs){
   const caja = (titulo, cuerpo) => `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>${titulo}</strong>${cuerpo}</div>`;
   const s = sobLogs.find(x=>x.id===loteId);
+  if(s && s.directoMerma) return caja('🗑️ Merma: regresó sin instalar y no sirve', `${s.nota?`<div class="hint" style="margin:4px 0 0">${s.nota}</div>`:''}<ul style="margin:4px 0 0 18px;padding:0;line-height:1.5">${(s.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul>`);
   if(s) return caja('🧩 Material a sobrantes', `${s.nota?`<div class="hint" style="margin:4px 0 0">${s.nota}</div>`:''}<ul style="margin:4px 0 0 18px;padding:0;line-height:1.5">${(s.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul><div class="hint" style="margin:4px 0 0">No se instaló y regresó al taller. Sale del inventario hasta que se transforme.</div>`);
   const t = sobLogs.find(x=>(x.transformaciones||[]).some(tr=>tr.loteId===loteId));
   if(t){ const tr = t.transformaciones.find(z=>z.loteId===loteId);
@@ -4933,24 +4936,32 @@ function pintarPreviewSobrante(){
   const el = document.getElementById('sob-result'); if(!el) return;
   sobPreview = consumoSobrante(garLineas); if(!sobPreview.length){ el.innerHTML=''; return; }
   el.innerHTML = `<div class="card" id="sob-prev">
-    <div style="font-size:16px;font-weight:800">📋 Esto sale del inventario y pasa a Sobrantes</div>
+    <div style="font-size:16px;font-weight:800">📋 Esto sale del inventario</div>
     <div class="movlist" style="margin-top:8px">${sobPreview.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<div class="movitem"><span class="invname">${it.nombre}</span><strong>${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>
-    <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="confirmarSobrante()">🧩 Mandar a sobrantes</button>
+    <p class="hint" style="margin-top:10px">¿Qué se hace con esto?</p>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:6px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="confirmarSobrante('sobrante')">🧩 Sobrantes: se va a aprovechar</button>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="confirmarSobrante('merma')">🗑️ Merma: ya no sirve</button>
   </div>`;
   const pc = document.getElementById('sob-prev'); if(pc && pc.scrollIntoView) pc.scrollIntoView({behavior:'smooth', block:'start'});
 }
-async function confirmarSobrante(){
+async function confirmarSobrante(destino){
   if(!sobPreview || !sobPreview.length) return;
   const nota = (sobNota||'').trim();
+  const aMerma = destino==='merma';
+  if(aMerma && !confirm('🗑️ Mandar a MERMA:\n\n'+sobPreview.map(c=>`• ${fmtNum(c.cantidad)} ${CATALOGO.find(i=>i.id===c.itemId).nombre}`).join('\n')+'\n\nSale del inventario y ya no se aprovecha. ¿Continuar?')) return;
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
     const id = cryptoId();
     for(const c of sobPreview){ const it=CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.itemId, itemNombre:it.nombre, tipo:'sobrante', cantidad:c.cantidad, nota:'A sobrantes'+(nota?' · '+nota:''), fecha, estado, loteId:id, sobranteId:id, creadoPor}); }
-    const restante = {}; sobPreview.forEach(c=>{ restante[c.itemId] = c.cantidad; });
-    await db.collection('sobrantes').doc(id).set({modulo:mod, fecha, nota, lineas:garLineas.map(describirLineaGar), lineasData:JSON.parse(JSON.stringify(garLineas)), material:sobPreview, restante, estado:'abierto', transformaciones:[], creadoPor});
-    toast(estado==='pendiente' ? '🧩 Mandado a sobrantes.<br><small>Dirección lo aprueba para que salga del inventario.</small>' : '🧩 Mandado a sobrantes.');
-    salirSobrante(); sobTab='abiertos'; renderSob();
+      if(aMerma) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.itemId, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'regresoMerma', cantidad:c.cantidad, nota:'Regresó sin instalar y no sirve'+(nota?' · '+nota:''), fecha, estado, loteId:id, sobranteId:id, creadoPor});
+      else await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.itemId, itemNombre:it.nombre, tipo:'sobrante', cantidad:c.cantidad, nota:'A sobrantes'+(nota?' · '+nota:''), fecha, estado, loteId:id, sobranteId:id, creadoPor}); }
+    const restante = {}; if(!aMerma) sobPreview.forEach(c=>{ restante[c.itemId] = c.cantidad; });
+    const doc = {modulo:mod, fecha, nota, lineas:garLineas.map(describirLineaGar), lineasData:JSON.parse(JSON.stringify(garLineas)), material:sobPreview, restante, estado: aMerma?'cerrado':'abierto', transformaciones:[], creadoPor};
+    if(aMerma){ doc.directoMerma = true; doc.cerradoEn = fecha; doc.mermaFinal = sobPreview.map(c=>({itemId:c.itemId, cantidad:c.cantidad})); }
+    await db.collection('sobrantes').doc(id).set(doc);
+    const pend = estado==='pendiente' ? '<br><small>Dirección lo aprueba para que salga del inventario.</small>' : '';
+    toast((aMerma ? '🗑️ Registrado como merma.' : '🧩 Mandado a sobrantes.')+pend);
+    salirSobrante(); sobTab = aMerma ? 'cerrados' : 'abiertos'; renderSob();
   }catch(e){ alert('Error: '+e.message); }
 }
 function estadoAprobSob(loteId){ const ms = movs.filter(m=>m.loteId===loteId); if(!ms.length) return 'aprobado'; if(ms.some(m=>m.estado==='pendiente')) return 'pendiente'; if(ms.every(m=>m.estado==='rechazado')) return 'rechazado'; return 'aprobado'; }
@@ -4972,9 +4983,10 @@ async function renderSob(){
       <div class="row" style="justify-content:space-between"><strong>${new Date(x.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'long'})}</strong>${badgeEstado(ea)}</div>
       ${x.nota?`<p class="hint" style="margin:4px 0">${x.nota}</p>`:''}
       <ul style="margin:6px 0 6px 18px;padding:0;line-height:1.5">${(x.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul>
-      ${x.estado==='cerrado' ? `<p class="hint" style="margin:4px 0">Terminado${x.mermaFinal&&x.mermaFinal.length?' · merma: '+x.mermaFinal.map(m=>{const it=CATALOGO.find(i=>i.id===m.itemId); return fmtNum(m.cantidad)+' '+(it?it.unidad+' '+it.nombre:'');}).join(', '):''}</p>` : `<p class="hint" style="margin:4px 0"><strong>Queda:</strong><br>${rest||'—'}</p>`}
+      ${x.estado==='cerrado' ? `<p class="hint" style="margin:4px 0">${x.directoMerma?'🗑️ Se fue directo a merma':'Terminado'}${x.mermaFinal&&x.mermaFinal.length?' · merma: '+x.mermaFinal.map(m=>{const it=CATALOGO.find(i=>i.id===m.itemId); return fmtNum(m.cantidad)+' '+(it?it.unidad+' '+it.nombre:'');}).join(', '):''}</p>` : `<p class="hint" style="margin:4px 0"><strong>Queda:</strong><br>${rest||'—'}</p>`}
       ${trans}
-      ${puede && x.estado!=='cerrado' && ea!=='rechazado' ? `<button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="iniciarTransformacion('${x.id}')">✂️ Se transformó: anotar qué salió</button>` : ''}
+      ${puede && x.estado!=='cerrado' && ea!=='rechazado' ? `<button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="iniciarTransformacion('${x.id}')">✂️ Se transformó: anotar qué salió</button>
+        <button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="sobranteAMerma('${x.id}')">🗑️ Ya no sirve: lo que queda es merma</button>` : ''}
     </div>`; };
   let cuerpo;
   if(sobTransf) cuerpo = transformacionHtml();
@@ -4986,6 +4998,15 @@ async function renderSob(){
       ${totHtml?`<p class="hint" style="margin:10px 0 4px"><strong>Apartado ahora:</strong></p><div class="movlist">${totHtml}</div>`:''}
       <div class="subtabs" style="margin:10px 0 0"><button class="${sobTab==='abiertos'?'active':''}" onclick="sobTab='abiertos';sobTransf=null;renderSob()">Apartados (${abiertos.length})</button><button class="${sobTab==='cerrados'?'active':''}" onclick="sobTab='cerrados';sobTransf=null;renderSob()">Terminados (${cerrados.length})</button></div>
     </div>${cuerpo}`;
+}
+async function sobranteAMerma(id){
+  const x = sobrantesCache.find(s=>s.id===id); if(!x) return;
+  const rest = Object.keys(x.restante||{}).filter(k=>x.restante[k]>0.0005);
+  if(!confirm('🗑️ Lo que queda de este sobrante ya no sirve:\n\n'+rest.map(k=>`• ${fmtNum(x.restante[k])} ${CATALOGO.find(i=>i.id===k).nombre}`).join('\n')+'\n\nSe marca como MERMA y el sobrante se cierra. (Ya había salido del inventario, así que no se descuenta otra vez.) ¿Continuar?')) return;
+  try{
+    await db.collection('sobrantes').doc(id).update({estado:'cerrado', cerradoEn:new Date().toISOString(), mermaFinal: rest.map(k=>({itemId:k, cantidad:x.restante[k]}))});
+    toast('🗑️ Sobrante cerrado como merma.'); sobTab='cerrados'; renderSob();
+  }catch(e){ alert('Error: '+e.message); }
 }
 // --- Transformación: se anotan las piezas exactas que salieron del sobrante ---
 function iniciarTransformacion(id){
@@ -5143,6 +5164,7 @@ function describirLote(ms){
   if(tipos.includes('instalacion')) return 'Instalación';
   if(tipos.includes('garantia')) return 'Garantía';
   if(ms.some(m=>m.motivo==='deSobrante')) return 'Sobrante transformado';
+  if(ms.some(m=>m.motivo==='regresoMerma')) return 'Merma de material que regresó';
   if(tipos.includes('sobrante')) return 'Material a sobrantes';
   if(tipos.includes('devolucion')) return 'Regreso de garantía';
   if(ms.some(m=>m.motivo==='armarJuegos')) return 'Armado de juegos de corredera';
