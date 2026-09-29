@@ -1889,6 +1889,12 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
       }
     }
 
+    // Cargadores 10×40 (confirmado por el usuario): Lateral 1, Doble 0, Doble Especial 1 (2 si es a
+    // 3 metros), Triple 1, King 3, Central 2. Van en el color de la estructura y se descuentan
+    // proporcional: 69 por hoja con sierra de 5 mm.
+    const CARGADORES_FAMILIA = {Lateral:1, Central:2, Doble:0, 'Doble Especial': especial3m ? 2 : 1, Triple:1, King:3};
+    if(CARGADORES_FAMILIA[fam]) add('Cargador', CARGADORES_FAMILIA[fam], '10×40 cm', estructuraColor, 'ok', fam==='Doble Especial'&&especial3m ? 'Doble Especial a 3 metros lleva 2 cargadores (confirmado por el usuario)' : 'Cargadores 10×40 del modelo (confirmado por el usuario)');
+
     // Entrepaños: cada familia se compone de N "muebles" fijos (confirmado por el usuario:
     // Lateral y Central = 1; Doble, King y Doble Especial = 2; Triple = 3). Cada mueble es
     // entrepañera (5 entrepaños), cajonera (los entrepaños de la tabla confirmada, y ocupa
