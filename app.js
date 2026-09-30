@@ -35,7 +35,7 @@ function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // Lo que capture un coordinador queda "pendiente" hasta que Dirección lo apruebe; lo de
 // Dirección (o traspasos, que siempre son inmediatos) se guarda ya "aprobado".
 function estadoNuevoMovimiento(){ return esAdmin() ? 'aprobado' : 'pendiente'; }
-let instSub = 'mueble', instRegreso = false;
+let instSub = 'mueble', instRegreso = false, instRegresoLibre = false;
 let instPreview = null; // {piezas, consumo:[{itemId,cantidad}], bloqueado, motivosBloqueo:[]}
 // Adicionales: muebles extra que se agregan a un modelo (cajonera, entrepañera, cajonera de
 // espejo, zapatera, repisa), sin contar como uno de los muebles fijos del modelo elegido.
@@ -563,7 +563,7 @@ function setView(v){
   if(v==='tubos') renderTubos();
   if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
-  if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; renderInst(); }
+  if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; instRegresoLibre=false; renderInst(); }
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
 }
 
@@ -3061,7 +3061,7 @@ function calcDespiece(){
 // ===== Capa 4: Instalaciones / Descuentos =====
 let instLog = [];
 function renderInst(){
-  const op = (k, ic, t, sub) => `<button class="tipobtn ${instSub===k?'on':''}" onclick="instSub='${k}';instRegreso=false;instPreview=null;renderInst()"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
+  const op = (k, ic, t, sub) => `<button class="tipobtn ${instSub===k?'on':''}" onclick="instSub='${k}';instRegreso=false;instRegresoLibre=false;instPreview=null;renderInst()"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
   $('#main').innerHTML = `
     <div class="card">
       <div style="font-size:17px;font-weight:800;margin-bottom:10px">🔧 ¿Qué se instaló?</div>
@@ -3069,8 +3069,8 @@ function renderInst(){
         ${op('mueble','🗄️','Clóset','Un modelo o muebles')}
         ${op('puertas','🚪','Puertas','Puertas corredizas')}
       </div>
-      <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=false;renderInst()">📅 Ver instalaciones anteriores</button>
-      ${esSoloLectura()?'':`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=true;renderInst()">↩️ Regresó un modelo completo → vuelve al inventario</button>
+      <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=false;instRegresoLibre=false;renderInst()">📅 Ver instalaciones anteriores</button>
+      ${esSoloLectura()?'':`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=true;instRegresoLibre=false;renderInst()">↩️ Regresó un modelo completo → vuelve al inventario</button>
       <button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="irA('sob')">🧩 Regresaron piezas sueltas sin instalar → Sobrantes</button>`}
     </div>
     <div id="inst-body"></div>`;
@@ -3089,7 +3089,13 @@ async function cargarInstLog(){
 async function renderInstHistorial(){
   $('#inst-body').innerHTML = `<div class="card hint">Cargando historial de ${modulo()}…</div>`;
   await cargarInstLog();
-  if(instLog.length===0){ $('#inst-body').innerHTML = `<div class="card">Aún no hay instalaciones registradas en ${modulo()}.</div>`; return; }
+  const avisoReg = instRegreso ? `<div class="card" style="border:2px solid #1f9d55"><strong>↩️ Regresó un modelo completo</strong>
+    <p class="hint" style="margin-top:4px">Todo su material (melamina, cargadores, herrajes…) vuelve al inventario; la melamina regresa como <strong>material cortado</strong>. No va a merma ni a sobrantes.</p>
+    <button class="btn" style="width:100%;min-height:50px;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="instSub='mueble';instRegresoLibre=true;instRegreso=false;instPreview=null;renderInst();window.scrollTo(0,0)">🗄️ Elegir el clóset que regresó</button>
+    <button class="btn" style="width:100%;min-height:50px;margin-top:8px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="instSub='puertas';instRegresoLibre=true;instRegreso=false;puertaPreview=null;renderInst();window.scrollTo(0,0)">🚪 Elegir las puertas que regresaron</button>
+    <p class="hint" style="margin:8px 0 0">Úsalo aunque no haya una instalación registrada: eliges el modelo, su color y sus extras, y todo se suma al inventario.${instLog.length?' Si el modelo sí se registró como instalación, también puedes buscarla abajo y tocar "↩️ Regresó completo".':''}</p>
+    <p class="hint" style="margin:4px 0 0">Si solo regresaron algunas piezas, usa 🧩 Sobrantes.</p></div>` : '';
+  if(instLog.length===0){ $('#inst-body').innerHTML = avisoReg + (instRegreso ? '' : `<div class="card">Aún no hay instalaciones registradas en ${modulo()}.</div>`); return; }
   const porDia = {};
   instLog.forEach(x=>{ (porDia[x.fechaDia] = porDia[x.fechaDia]||[]).push(x); });
   const dias = Object.keys(porDia).sort((a,b)=>b.localeCompare(a));
@@ -3099,9 +3105,7 @@ async function renderInstHistorial(){
     if(!puede || x.estado==='rechazado') return '';
     if(x.estado==='pendiente') return '<span class="hint" style="margin:0">Aún sin aprobar</span>';
     return `<button class="btn small" style="background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="regresarInstalacion('${x.id}')">↩️ Regresó completo</button>`; };
-  const aviso = instRegreso ? `<div class="card" style="border:2px solid #1f9d55"><strong>↩️ Regresó un modelo completo</strong>
-    <p class="hint" style="margin-top:4px">Busca la instalación que regresó sin instalarse y toca <strong>"↩️ Regresó completo"</strong>. Todo su material (melamina, cargadores, herrajes…) vuelve al inventario; la melamina regresa como <strong>material cortado</strong>. No va a merma ni a sobrantes.</p>
-    <p class="hint" style="margin:4px 0 0">Si solo regresaron algunas piezas, usa 🧩 Sobrantes.</p></div>` : '';
+  const aviso = avisoReg;
   $('#inst-body').innerHTML = aviso + dias.map(dia=>`
     <div class="card">
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
@@ -3138,18 +3142,39 @@ async function regresarInstalacion(logId){
     renderInstHistorial();
   }catch(e){ alert('Error: '+e.message); }
 }
+// Regreso de un modelo completo elegido a mano (sin instalación registrada): mismo cálculo que una
+// instalación, pero todo se SUMA al inventario (confirmado por el usuario).
+async function confirmarRegresoLibre(){
+  if(!instPreview || instPreview.bloqueado || !instRegresoLibre) return;
+  const nota = ($('#i-nota').value||'').trim();
+  const desc = `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`;
+  const cons = instPreview.consumo.filter(c=>Number(c.cantidad)>0);
+  if(!confirm(`↩️ Regresar al inventario:\n${desc}\n\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n')}\n\n¿Continuar?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', modeloRegreso:desc, cantidad:fmtNum(Number(c.cantidad)), nota:'Regresó modelo completo · '+desc+(nota?' · '+nota:''), fecha, estado, loteId, creadoPor});
+    }
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Modelo regresado al inventario.');
+    instPreview=null; iAdicionales=[]; renderInstMueble(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
 function detalleRegresoInstAprob(items, logs){
   const m = items.find(x=>x.motivo==='regresoInstalacion'); if(!m) return '';
   const l = logs.find(x=>x.id===m.instalacionId);
-  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.nota||'')}</div><div class="hint" style="margin:2px 0 0">Todo vuelve al inventario (la melamina como cortado).</div></div>`;
+  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.modeloRegreso?m.modeloRegreso+' · elegido a mano (sin instalación registrada)':(m.nota||''))}</div><div class="hint" style="margin:2px 0 0">Todo vuelve al inventario (la melamina como cortado).</div></div>`;
 }
 
 let iFamSel = null; // familia elegida (para no mostrar todos los modelos juntos)
 function renderInstMueble(){
   const hoy = new Date(); const hoyStr = new Date(hoy.getTime()-hoy.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const reg = instRegresoLibre;
   $('#inst-body').innerHTML = `
+  ${reg?`<div class="card" style="border:2px solid #1f9d55"><strong>↩️ Modelo completo que regresa al inventario</strong>
+    <p class="hint" style="margin-top:4px">Elige el modelo igual que en una instalación. Al confirmar, todo su material se <strong>SUMA</strong> al inventario (la melamina como material cortado).</p>
+    <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="instRegresoLibre=false;instSub='historial';instRegreso=true;renderInst()">Cancelar</button></div>`:''}
   <div class="card">
-    <div class="paso">1</div><strong>¿Qué modelo se instaló?</strong>
+    <div class="paso">1</div><strong>¿Qué modelo ${reg?'regresó':'se instaló'}?</strong>
     <div id="i-selector-wrap" style="margin-top:10px"></div>
     <div id="i-max-wrap"></div>
     <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="iModoComp=!iModoComp;renderInstMueble()">${iModoComp?'← Elegir de la lista de modelos':'¿No está el modelo? Ármalo mueble por mueble'}</button>
@@ -3169,10 +3194,10 @@ function renderInstMueble(){
     <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> Las cajoneras llevan corredera de extensión</label>
   </details>
   <div class="card">
-    <div class="paso">4</div><strong>Datos de la instalación</strong>
+    <div class="paso">4</div><strong>${reg?'Datos del regreso':'Datos de la instalación'}</strong>
     <div class="grid2" style="margin-top:10px">
       <div><label class="hint">Fecha</label><input id="i-fecha" type="date" value="${hoyStr}" style="margin-top:4px"></div>
-      <div><label class="hint">Cliente (opcional)</label><input id="i-nota" placeholder="Nombre o referencia" style="margin-top:4px"></div>
+      <div><label class="hint">${reg?'¿De dónde viene? (opcional)':'Cliente (opcional)'}</label><input id="i-nota" placeholder="${reg?'Cliente o motivo del regreso':'Nombre o referencia'}" style="margin-top:4px"></div>
     </div>
     <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="previewInst()">Revisar material</button>
   </div>
@@ -3281,15 +3306,15 @@ function previewInst(){
   });
 
   const bloqueadoPorReceta = pendientes.length>0;
-  const bloqueadoPorStock = faltantes.length>0;
+  const bloqueadoPorStock = !instRegresoLibre && faltantes.length>0; // un regreso suma, no necesita existencia
   instPreview = {modeloNombre:titulo,color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
 
   let html = `<div class="card" id="i-preview-card">
-    <div style="font-size:16px;font-weight:800">📋 Esto se va a descontar</div>
+    <div style="font-size:16px;font-weight:800">${instRegresoLibre?'↩️ Esto regresa al inventario':'📋 Esto se va a descontar'}</div>
     <p class="hint" style="margin-top:4px"><strong>${titulo}</strong> · ${color}${colorCajonera?' · cajonera '+colorCajonera:''}${iAdicionales.length?' · + '+iAdicionales.length+' extra(s)':''}</p>
     ${notaModelo? `<div class="warn">${notaModelo}</div>`:''}
     ${maxNota? `<div class="warn">${maxNota}</div>`:''}
-    <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
+    <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = !instRegresoLibre && f.final-c.cantidad<0;
       return `<div class="movitem" style="${insuf?'border-color:var(--bad)':''}"><span style="min-width:0"><span class="invname">${CATALOGO.find(i=>i.id===c.itemId).nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.final)} ${item2unidad(c.itemId)}</span></span>
         <strong class="${insuf?'neg':''}" style="font-size:17px;white-space:nowrap">${fmtNum(c.cantidad)} ${item2unidad(c.itemId)}</strong></div>`;
     }).join('')}</div>
@@ -3304,6 +3329,8 @@ function previewInst(){
     html += `<div class="card aviso"><strong>⛔ No alcanza el material en ${modulo()}</strong>
       <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">${faltantes.map(f=>`<li>${f.nombre}: hay <strong>${fmtNum(f.disponible)}</strong> y se necesitan <strong>${fmtNum(f.requerido)}</strong></li>`).join('')}</ul>
       <p class="hint">Revisa que el modelo y el color sean correctos, o que ya se hayan anotado las entradas de material. No se descontó nada.</p></div>`;
+  } else if(instRegresoLibre){
+    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoLibre()">↩️ Regresar al inventario</button></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
     html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarInst()">✅ Confirmar instalación</button></div>`;
@@ -3901,9 +3928,14 @@ const TIPOS_PUERTA_HERRAJES = {
   'Con cubo al centro': {riel:2, sistema:2, bastidor:2, jaladera:4}
 };
 function renderInstPuertas(){
+  const reg = instRegresoLibre;
   $('#inst-body').innerHTML = `
+  ${reg?`<div class="card" style="border:2px solid #1f9d55"><strong>↩️ Puertas completas que regresan al inventario</strong>
+    <p class="hint" style="margin-top:4px">Captúralas igual que una instalación de puertas. Al confirmar, todo se <strong>SUMA</strong> al inventario (la melamina como material cortado).</p>
+    <label class="row" style="margin-top:8px;gap:10px;font-size:14px;flex-wrap:nowrap;font-weight:700"><input type="checkbox" id="p-reg-herrajes" checked style="width:22px;min-height:22px;flex:0 0 22px"> También regresaron sus herrajes (riel, sistema, bastidor y jaladeras)</label>
+    <button class="btn small" style="margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="instRegresoLibre=false;instSub='historial';instRegreso=true;renderInst()">Cancelar</button></div>`:''}
   <div class="card">
-    <div class="paso">1</div><strong>¿Qué tipo de puerta?</strong>
+    <div class="paso">1</div><strong>¿Qué tipo de puerta${reg?' regresó':''}?</strong>
     <select id="p-tipo" style="margin-top:10px" onchange="renderPuertaParedFalsaExtra()">${Object.keys(TIPOS_PUERTA).map(t=>`<option>${t}</option>`).join('')}</select>
     <div id="p-pared-falsa-extra-wrap" style="margin-top:8px"></div>
   </div>
@@ -3922,10 +3954,10 @@ function renderInstPuertas(){
     </div>
   </div>
   <div class="card">
-    <div class="paso">4</div><strong>Datos de la instalación</strong>
+    <div class="paso">4</div><strong>${reg?'Datos del regreso':'Datos de la instalación'}</strong>
     <div class="grid2" style="margin-top:10px">
       <div><label class="hint">Fecha</label><input id="p-fecha" type="date" value="${new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)}" style="margin-top:4px"></div>
-      <div><label class="hint">Cliente (opcional)</label><input id="p-nota" placeholder="Nombre o referencia" style="margin-top:4px"></div>
+      <div><label class="hint">${reg?'¿De dónde viene? (opcional)':'Cliente (opcional)'}</label><input id="p-nota" placeholder="${reg?'Cliente o motivo del regreso':'Nombre o referencia'}" style="margin-top:4px"></div>
     </div>
     <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="calcPuerta()">Revisar material</button>
   </div>
@@ -4209,6 +4241,8 @@ function calcPuerta(){
     {itemId: itemByName('Bastidores').id, cantidad: herrajesTipo.bastidor},
     {itemId: itemByName(nombreJaladera).id, cantidad: herrajesTipo.jaladera}
   ];
+  const regHerr = !instRegresoLibre || !document.getElementById('p-reg-herrajes') || document.getElementById('p-reg-herrajes').checked;
+  if(!regHerr) consumo.length = 0; // regreso sin herrajes: solo la melamina
   if(hojasMelamina>0) consumo.push({itemId: itemByName('Melamina '+color).id, cantidad: hojasMelamina});
 
   const faltantes = [];
@@ -4218,16 +4252,16 @@ function calcPuerta(){
       faltantes.push({nombre:CATALOGO.find(i=>i.id===c.itemId).nombre, disponible:f.final, requerido:c.cantidad});
     }
   });
-  const bloqueado = faltantes.length>0;
-  puertaPreview = {tipo, color, alto, ancho, consumo, faltantes, bloqueado};
+  const bloqueado = !instRegresoLibre && faltantes.length>0; // un regreso suma, no necesita existencia
+  puertaPreview = {tipo, color, alto, ancho, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr};
 
   let html = `<div class="card"><h3>${tipo} · ${color}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
     ${piezas.map(p=>`<tr><td>${p.n}</td><td>${p.v}</td><td class="hint">${p.nota}</td></tr>`).join('')}
     </table></div>
     <div class="hint">Melamina de 15mm (color ${color}): todas las piezas de este corte se acomodan juntas en hojas de 122×244 cm, aprovechando el sobrante entre puertas/marcos/fijos. Se van a cortar <strong>${empaque.hojas} hoja(s) física(s)</strong> del almacén, pero solo se descuenta <strong>${hojasMelamina}</strong> del inventario (lo que realmente ocupan las piezas; el resto queda como sobrante disponible para otro corte).</div>
-    <div class="wrap-x" style="margin-top:8px"><table><tr><th>Material/herraje a descontar</th><th>Cantidad</th><th>Disponible</th></tr>
-    ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = f.final-c.cantidad<0;
+    <div class="wrap-x" style="margin-top:8px"><table><tr><th>${instRegresoLibre?'↩️ Regresa al inventario':'Material/herraje a descontar'}</th><th>Cantidad</th><th>Disponible</th></tr>
+    ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = !instRegresoLibre && f.final-c.cantidad<0;
       return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${fmtNum(f.final)}</td></tr>`;
     }).join('')}
     </table></div>
@@ -4237,6 +4271,8 @@ function calcPuerta(){
     html += `<div class="card aviso"><strong>⛔ No alcanza el material en ${modulo()}</strong>
       <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">${faltantes.map(f=>`<li>${f.nombre}: hay <strong>${fmtNum(f.disponible)}</strong> y se necesitan <strong>${fmtNum(f.requerido)}</strong></li>`).join('')}</ul>
       <p class="hint">Revisa las medidas y el color, o que ya se hayan anotado las entradas de material. No se descontó nada.</p></div>`;
+  } else if(instRegresoLibre){
+    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoPuerta()">↩️ Regresar puertas al inventario</button></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
     html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="registrarPuerta('${tipo}',${alto},${ancho})">✅ Confirmar instalación de puertas</button></div>`;
@@ -4244,9 +4280,28 @@ function calcPuerta(){
   $('#p-result').innerHTML = html;
 }
 
+// Puertas completas que regresan sin instalación registrada (confirmado por el usuario): mismo
+// cálculo que una instalación de puertas, pero todo se SUMA al inventario.
+async function confirmarRegresoPuerta(){
+  const pp = puertaPreview;
+  if(!pp || !pp.regreso || !instRegresoLibre) return;
+  if(pp.color!==$('#p-color').value || pp.tipo!==$('#p-tipo').value || pp.alto!==Number($('#p-alto').value) || pp.ancho!==Number($('#p-ancho').value)) return alert('Vuelve a tocar "Revisar material": los datos cambiaron.');
+  const nota = ($('#p-nota').value||'').trim();
+  const desc = `Puerta ${pp.tipo} · ${pp.color} · ${pp.alto}×${pp.ancho} cm${pp.conHerrajes?'':' · sin herrajes'}`;
+  const cons = pp.consumo.filter(c=>Number(c.cantidad)>0);
+  if(!confirm(`↩️ Regresar al inventario:\n${desc}\n\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n')}\n\n¿Continuar?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', modeloRegreso:desc, cantidad:fmtNum(Number(c.cantidad)), nota:'Regresaron puertas completas · '+desc+(nota?' · '+nota:''), fecha, estado, loteId, creadoPor});
+    }
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Puertas regresadas al inventario.');
+    puertaPreview=null; renderInstPuertas(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
 async function registrarPuerta(tipo, alto, ancho){
   const colorSel = $('#p-color') ? $('#p-color').value : null;
-  if(!puertaPreview || puertaPreview.bloqueado || puertaPreview.tipo!==tipo || puertaPreview.alto!==alto || puertaPreview.ancho!==ancho || puertaPreview.color!==colorSel){
+  if(!puertaPreview || puertaPreview.bloqueado || puertaPreview.regreso || puertaPreview.tipo!==tipo || puertaPreview.alto!==alto || puertaPreview.ancho!==ancho || puertaPreview.color!==colorSel){
     alert('Vuelve a calcular las medidas antes de registrar (los datos cambiaron o no hay vista previa).');
     return;
   }
