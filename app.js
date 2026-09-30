@@ -1013,10 +1013,26 @@ const AUD_SECCIONES = [
   {k:'__revisar', t:'Revisar y enviar'}
 ];
 const AUD_ICONO = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩', __piezas:'✂️', __armados:'📦', __revisar:'✅'};
-function itemsSeccionAud(k){ return CATALOGO.filter(i=>i.cat===k && !esCorrSuelta(i)); }
+function itemsSeccionAud(k){ return CATALOGO.filter(i=>i.cat===k); }
+// Correderas sueltas contadas en Herrajes (hembra / macho sin su pareja): entran al mismo "pool"
+// que las de cajoneras y cajones armados, para formar juegos cuando hay pareja.
+const CORR_SUELTA_PIEZA = {'Corredera hembra (sin pareja)':'Corredera hembra', 'Corredera macho (sin pareja)':'Corredera macho',
+  'Corredera ext. hembra (sin pareja)':'Corredera hembra (extensión)', 'Corredera ext. macho (sin pareja)':'Corredera macho (extensión)'};
+function piezasCorrSueltasAud(){
+  return Object.keys(CORR_SUELTA_PIEZA).map(n=>{ const it=itemByName(n); const q=it?Number(auditCapturas[it.id])||0:0; return q>0 ? {nombre:CORR_SUELTA_PIEZA[n], cantidad:q, dim:'—', colorDestino:'—', estado:'ok'} : null; }).filter(Boolean);
+}
 function faltanSeccionAud(k){ return itemsSeccionAud(k).filter(i=>auditCapturas[i.id]===undefined); }
+function esComplementoAud(){ return audTipo==='complemento' && !modoConteoCoord(); }
+// Complemento del conteo inicial: solo se captura lo que faltó; nada es obligatorio.
+function capturadosSeccionAud(k){
+  if(k==='__piezas') return contarPiezasSueltas();
+  if(k==='__armados') return auditArmados.length;
+  if(k==='__revisar') return 0;
+  return itemsSeccionAud(k).filter(i=>Number(auditCapturas[i.id])>0).length;
+}
 function seccionCompletaAud(k){
   if(k==='__revisar') return false;
+  if(esComplementoAud()) return true;
   if(k==='__piezas' || k==='__armados') return !!audHechas[k];
   return faltanSeccionAud(k).length===0;
 }
@@ -1047,6 +1063,7 @@ function modalAud(titulo, texto, botones){
 function siguientePasoAud(){
   const sec = AUD_SECCIONES[audPaso];
   const secundario = 'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none';
+  if(esComplementoAud()) return avanzarPasoAud();
   if(sec.k==='__piezas' || sec.k==='__armados'){
     if(audHechas[sec.k]) return avanzarPasoAud();
     const n = sec.k==='__piezas' ? contarPiezasSueltas() : auditArmados.length;
@@ -1068,7 +1085,7 @@ function siguientePasoAud(){
   ]);
 }
 function pendienteSeccionTxt(k){
-  if(k==='__revisar') return '';
+  if(k==='__revisar' || esComplementoAud()) return '';
   if(k==='__piezas' || k==='__armados') return audHechas[k] ? '' : 'sin confirmar';
   const n = faltanSeccionAud(k).length; return n ? `faltan ${n}` : '';
 }
@@ -1090,7 +1107,7 @@ function sumarPiezaAud(grupo, key){
   setAuditPieza(grupo, key, String(actual+n)); guardarBorradorAud(); renderAud();
   toast(`${p.label}: ahora ${actual+n}`);
 }
-function etiquetaTipoAud(t){ return t==='conteo' ? 'Conteo inicial' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'); }
+function etiquetaTipoAud(t){ return t==='conteo' ? 'Conteo inicial' : (t==='complemento' ? '➕ Complemento del conteo inicial' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría')); }
 function renderAud(){
   const ciego = modoConteoCoord();
   if(esCoordinador() && !ciego){ $('#main').innerHTML = '<div class="card">📋 El conteo del almacén solo se abre cuando Dirección lo activa, y solo ese día.</div>'; return; }
@@ -1104,7 +1121,10 @@ function renderAud(){
   const sec = AUD_SECCIONES[audPaso];
   const limite = primerPasoPendienteAud();
   const hechas = AUD_SECCIONES.filter(x=>seccionCompletaAud(x.k)).length;
-  const chips = AUD_SECCIONES.map((x,i)=>{ const ok = seccionCompletaAud(x.k), on = i===audPaso; const pend = pendienteSeccionTxt(x.k);
+  const comp = esComplementoAud();
+  const chips = comp ? AUD_SECCIONES.map((x,i)=>{ const on=i===audPaso, n=capturadosSeccionAud(x.k);
+    return `<button class="chip ${on?'on':''}" style="${n&&!on?'border-color:var(--ok);color:var(--ok);':''}" onclick="irPasoAud(${i})">${AUD_ICONO[x.k]||''} ${x.t}${n?` <small>(${n})</small>`:''}</button>`; }).join('')
+  : AUD_SECCIONES.map((x,i)=>{ const ok = seccionCompletaAud(x.k), on = i===audPaso; const pend = pendienteSeccionTxt(x.k);
     const empezada = x.k!=='__revisar' && !ok && (audHechas['v_'+x.k] || (!x.k.startsWith('__') && itemsSeccionAud(x.k).some(it=>auditCapturas[it.id]!==undefined)));
     return `<button class="chip ${on?'on':''}" style="${ok&&!on?'border-color:var(--ok);color:var(--ok);':''}${!ok&&empezada&&!on?'border-color:#b3742c;color:#b3742c;':''}" onclick="irPasoAud(${i})">${ok?'✓ ':(empezada?'⏳ ':'')}${AUD_ICONO[x.k]||''} ${x.t}${!ok&&empezada&&pend?` <small>(${pend})</small>`:''}</button>`; }).join('');
 
@@ -1113,6 +1133,17 @@ function renderAud(){
     cuerpo = renderAudPiezasHtml();
   } else if(sec.k==='__armados'){
     cuerpo = renderAudArmadosHtml();
+  } else if(sec.k==='__revisar' && comp){
+    const lin = [];
+    CATALOGO.forEach(it=>{ const v=Number(auditCapturas[it.id])||0; if(v>0) lin.push(`${it.nombre}: <strong>${fmtNum(v)}</strong> ${it.unidad||''}`); });
+    const np = contarPiezasSueltas(), na = auditArmados.length;
+    if(np) lin.push(`✂️ ${np} tipo(s) de pieza cortada`);
+    if(na) lin.push(`📦 ${na} armado(s): ${auditArmados.slice(0,6).map(a=>a.cantidad+' × '+describirArmado(a)).join(', ')}${na>6?'…':''}`);
+    cuerpo = `<div class="card"><h3>✅ Revisar complemento</h3>
+      <p class="hint">Esto se va a <strong>SUMAR</strong> al stock inicial de ${modulo()}. Lo que ya estaba contado no se toca.</p>
+      ${lin.length?`<div class="movlist" style="margin-top:8px">${lin.map(x=>`<div class="movitem"><span>${x}</span></div>`).join('')}</div>`:'<p class="neg">Todavía no capturas nada. Ve a la sección donde está lo que te faltó y escribe la cantidad.</p>'}
+      <button class="btn" style="width:100%;min-height:54px;font-size:16px;margin-top:10px" ${lin.length?'':'disabled'} onclick="saveAudit()">Guardar complemento</button>
+    </div>`;
   } else if(sec.k==='__revisar'){
     const filas = AUD_SECCIONES.filter(x=>x.k!=='__revisar').map(x=>{
       let det;
@@ -1139,13 +1170,13 @@ function renderAud(){
     cuerpo = `<div class="card">
     <h3>${AUD_ICONO[sec.k]||''} ${sec.t}</h3>
     ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va más adelante en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
-    ${sec.k==='Herrajes'?'<p class="hint">Aquí van los <strong>juegos de corredera completos</strong> (hembra + macho juntos). Las hembras o machos <strong>sueltos</strong> se cuentan en 📦 Armados → Corredera suelta.</p>':''}
+    ${sec.k==='Herrajes'?'<p class="hint">🔩 <strong>Correderas:</strong> en "Juego de corredera" van los juegos completos (hembra + macho juntos). Las <strong>hembras y machos sueltos</strong> van en sus renglones "(sin pareja)", normal o de extensión. La app los junta con los de cajoneras y cajones armados y forma juegos donde hay pareja.</p>':''}
     <p class="hint">Escribe cuánto hay de cada uno; si no hay, pon <strong>0</strong>. Si después aparece más, toca <strong>➕</strong> y se suma a lo que ya llevas.</p>
-    <p class="hint" style="font-weight:700;${faltan?'color:#b3742c':'color:var(--ok)'}" id="aud-faltan">${faltan?`Faltan ${faltan} de ${items.length} por contar`:'✓ Todo contado en esta sección'}</p>
+    ${comp?'<p class="hint" style="font-weight:700;color:var(--brand)">➕ Escribe SOLO lo que te faltó contar. Lo demás déjalo vacío.</p>':`<p class="hint" style="font-weight:700;${faltan?'color:#b3742c':'color:var(--ok)'}" id="aud-faltan">${faltan?`Faltan ${faltan} de ${items.length} por contar`:'✓ Todo contado en esta sección'}</p>`}
     <div class="wrap-x"><table><tr><th>Artículo</th>${ciego?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id); const v=auditCapturas[it.id];
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
-        return `<tr style="${v===undefined?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${ciego?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
+        return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${ciego?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
           <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="decimal" style="min-width:70px" placeholder="—" value="${v??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value);actualizarFaltanAud()">
           <button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" title="Sumar" onclick="sumarAud('${it.id}')">➕</button></div>${extra}</td></tr>`;
       }).join('')}
@@ -1158,14 +1189,14 @@ function renderAud(){
   ${ciego ? `<div class="card" style="border:2px solid var(--bad)"><div style="font-size:17px;font-weight:800">📋 Conteo del almacén · ${modulo()}</div>
     <p class="hint">Cuenta <strong>todo</strong> lo que hay en el módulo, también lo del taller, en cajas o en esquinas. Ve sección por sección; la app no te deja avanzar si algo quedó sin contar.</p></div>` : ''}
   <div class="card">
-    <strong>${ciego?'Conteo paso a paso':(audTipo==='conteo'?'Conteo inicial':'Auditoría')+' · '+modulo()}</strong>
+    <strong>${ciego?'Conteo paso a paso':etiquetaTipoAud(audTipo)+' · '+modulo()}</strong>
     <div class="grid2" style="margin-top:8px">
-      <select id="aud-tipo" onchange="audTipo=this.value;renderAud()" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="seguimiento" ${audTipo!=='conteo'?'selected':''}>Auditoría</option></select>
+      <select id="aud-tipo" onchange="audTipo=this.value;renderAud()" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option></select>
       <input id="aud-auditor" placeholder="Nombre de quien cuenta" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
-    ${ciego?'':`<p class="hint" style="margin-top:6px">${audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
-    <div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>
-    <p class="hint" style="margin:4px 0 0">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas. Puedes pasar a cualquier sección; lo pendiente se marca con ⏳.</p>
+    ${ciego?'':`<p class="hint" style="margin-top:6px">${comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
+    ${comp?'':`<div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>`}
+    <p class="hint" style="margin:4px 0 0;${comp?'display:none':''}">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas. Puedes pasar a cualquier sección; lo pendiente se marca con ⏳.</p>
     <div class="chips" style="margin-top:8px">${chips}</div>
   </div>
   ${cuerpo}
@@ -1230,6 +1261,7 @@ function piezasAuditAHojas(){
       .forEach(p=>pool.push({nombre:p.nombre, cantidad:counts[p.key], dim:p.dim, colorDestino:grupo, estado:'ok'}));
   });
   auditArmados.forEach(a=>piezasDeArmado(a).forEach(p=>pool.push(p)));
+  piezasCorrSueltasAud().forEach(p=>pool.push(p));
   const porColor = {};
   pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
   const out = {};
@@ -1249,7 +1281,7 @@ function piezasAuditAHojas(){
 // Junta hembras (de cajoneras) y machos (de cajones) en parejas. Devuelve por tipo de corredera:
 // {item, etiqueta, hembras, machos, pares, hembrasSinPareja, machosSinPareja}
 function balanceCorrederas(pool){
-  if(!pool){ pool=[]; auditArmados.forEach(a=>piezasDeArmado(a).forEach(p=>pool.push(p))); }
+  if(!pool){ pool=[]; auditArmados.forEach(a=>piezasDeArmado(a).forEach(p=>pool.push(p))); piezasCorrSueltasAud().forEach(p=>pool.push(p)); }
   return [['', 'Juego de corredera', 'Corredera normal'], [' (extensión)', 'Correderas de extensión', 'Corredera de extensión']].map(([suf,item,etiqueta])=>{
     const h = pool.filter(p=>p.nombre==='Corredera hembra'+suf).reduce((s,p)=>s+(Number(p.cantidad)||0),0);
     const m = pool.filter(p=>p.nombre==='Corredera macho'+suf).reduce((s,p)=>s+(Number(p.cantidad)||0),0);
@@ -1292,27 +1324,35 @@ function renderAudArmadosHtml(){
   const f = auditArmadoForm;
   const esCajonera = f.tipo==='cajonera';
   const esCorr = f.tipo==='corredera';
-  const variantes = esCajonera ? ARMADO_CAJONERAS : (esCorr ? ARMADO_CORREDERA : {normal:'Normal', max:'Max'});
+  const esEsp = ARMADO_ES_ESPEJO(f.tipo);
+  const variantes = esCajonera ? ARMADO_CAJONERAS : (esCorr ? ARMADO_CORREDERA : (esEsp ? {normal:'Normal'} : {normal:'Normal', max:'Max'}));
   if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
   const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
-  const labelColor = esCajonera ? 'Color de la cajonera' : (f.tipo==='cajon' ? 'Color del frente' : 'Color del cuadro');
+  const labelColor = (esCajonera||f.tipo==='cajonera_espejo') ? 'Color de la cajonera' : ((f.tipo==='cajon'||f.tipo==='puerta_espejo') ? 'Color del frente' : (f.tipo==='puerta_zapatera' ? 'Color de la puerta' : 'Color del cuadro'));
   const usaCorredera = armadoUsaCorredera(f);
   const puedePuertitas = esCajonera && armadoTienePuertitas(f.variante);
   const set = (campo, rerender=true) => `auditArmadoForm.${campo}=this.${campo==='ext'||campo==='puertitas'||campo==='sinFondo'||campo==='sinHerrajes'?'checked':'value'};${rerender?'renderAud()':''}`;
   const preview = Number(f.cantidad)>0 ? describirArmado(f) : '';
   return `<div class="card">
     <h3>📦 Armados</h3>
-    <p class="hint">Cajoneras armadas sin cajones, cajones completos, cuadros de cajón y correderas sueltas. Las cajoneras traen la corredera <strong>hembra</strong> y los cajones la <strong>macho</strong>: solo se cuenta un juego cuando hay pareja.</p>
+    <p class="hint">Cajoneras armadas sin cajones, cajones completos, cuadros de cajón, cajoneras de espejo, puertas de espejo y puertas de zapatera (las correderas sueltas se cuentan en 🔩 Herrajes). Las cajoneras traen la corredera <strong>hembra</strong> y los cajones la <strong>macho</strong>: solo se cuenta un juego cuando hay pareja.</p>
     <label class="hint">¿Qué encontraste?</label>
     <select style="margin-top:4px" onchange="${set('tipo')}">${Object.keys(ARMADO_TIPOS).map(k=>`<option value="${k}" ${k===f.tipo?'selected':''}>${ARMADO_TIPOS[k]}</option>`).join('')}</select>
     <div class="grid2" style="margin-top:10px">
-      <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>
+      ${esEsp?'':`<div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>`}
       ${esCorr?'':`<div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>`}
-      ${esCajonera?`<div><label class="hint">Color de frentes y zóclos</label><select style="margin-top:4px" onchange="${set('colorFrente')}">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
+      ${(esCajonera||f.tipo==='cajonera_espejo')?`<div><label class="hint">Color de ${f.tipo==='cajonera_espejo'?'los zóclos':'frentes y zóclos'}</label><select style="margin-top:4px" onchange="${set('colorFrente')}">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
       ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
       <div><label class="hint">Cantidad</label><input type="number" min="0" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="auditArmadoForm.cantidad=this.value"></div>
     </div>
     ${(esCajonera||f.tipo==='cajon')?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinHerrajes?'checked':''} onchange="${set('sinHerrajes')}"> Sin herrajes (sin correderas${f.tipo==='cajon'?' ni jaladera':', bisagras ni jaladeras'})</label>`:''}
+    ${f.tipo==='puerta_zapatera'?`<p class="hint" style="margin-top:10px">Puerta de 172×30 (0.25 hojas). Marca los herrajes que trae puestos.</p>
+      <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peBisagras!==false?'checked':''} onchange="auditArmadoForm.peBisagras=this.checked;renderAud()"> Con bisagras (1.5)</label>
+      <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peJaladera!==false?'checked':''} onchange="auditArmadoForm.peJaladera=this.checked;renderAud()"> Con jaladera (1)</label>`:''}
+    ${f.tipo==='puerta_espejo'?`<p class="hint" style="margin-top:10px">La puerta lleva 2 marcos de 10×160 y 2 de 10×35 (los zóclos van con la cajonera de espejo).</p>
+      <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peBisagras!==false?'checked':''} onchange="auditArmadoForm.peBisagras=this.checked;renderAud()"> Con bisagras (1.5)</label>
+      <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peJaladera!==false?'checked':''} onchange="auditArmadoForm.peJaladera=this.checked;renderAud()"> Con jaladera (1)</label>
+      <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinEspejo?'checked':''} onchange="auditArmadoForm.sinEspejo=this.checked;renderAud()"> Sin espejo (solo los marcos)</label>`:''}
     ${usaCorredera && !((esCajonera||f.tipo==='cajon') && f.sinHerrajes)?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="${set('ext')}"> ${esCorr?'Es corredera de extensión':'Lleva corredera de extensión (si no, corredera normal)'}</label>`:''}
     ${f.variante==='max' && f.tipo!=='cuadro_fondo' && f.tipo!=='cuadro_sin'?`<p class="hint">Max: siempre lleva corredera de extensión${f.tipo==='cajon'?' y no lleva jaladera':''}.</p>`:''}
     ${puedePuertitas?(()=>{ const jal = f.variante==='max'?'push':'jaladeras'; const val = !f.puertitas ? 'no' : (f.puertitasSinJal ? 'sinjal' : 'si');
@@ -1322,7 +1362,8 @@ function renderAudArmadosHtml(){
         <option value="si" ${val==='si'?'selected':''}>Sí, ${f.sinHerrajes?'puertitas':'con bisagras y '+jal}</option>
         ${f.sinHerrajes?'':`<option value="sinjal" ${val==='sinjal'?'selected':''}>Sí, con bisagras pero SIN ${jal}</option>`}
       </select></div>`; })():''}
-    ${esCajonera?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinFondo?'checked':''} onchange="${set('sinFondo')}"> Sin fondo (todavía no le ponen el fondo de MDF)</label>`:''}
+    ${(esCajonera||f.tipo==='cajonera_espejo')?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinFondo?'checked':''} onchange="${set('sinFondo')}"> Sin fondo (todavía no le ponen el fondo de MDF)</label>`:''}
+    ${f.tipo==='cajonera_espejo'?'<p class="hint">Lleva 2 paredes, 5 entrepaños, su fondo y los zóclos de espejo (16×52 y 18×52). La puerta de espejo se cuenta aparte como "Puerta de espejo".</p>':''}
     ${esCajonera && !armadoTienePuertitas(f.variante)?`<p class="hint">La cajonera ${ARMADO_CAJONERAS[f.variante].toLowerCase()} todavía no tiene medida de puertita confirmada.</p>`:''}
     <button class="btn" style="margin-top:12px;width:100%" onclick="agregarArmado()">Agregar</button>
   </div>
@@ -1341,6 +1382,9 @@ function agregarArmado(){
   const a = {tipo:f.tipo, variante:f.variante, color:f.color, cantidad:n};
   if(f.tipo==='cajon') a.colorCuadro = f.colorCuadro;
   const sinH = (f.tipo==='cajonera'||f.tipo==='cajon') && !!f.sinHerrajes;
+  if(f.tipo==='puerta_zapatera'){ if(f.peBisagras===false) a.sinBisagras = true; if(f.peJaladera===false) a.sinJaladera = true; }
+  if(f.tipo==='puerta_espejo'){ if(f.sinEspejo) a.sinEspejo = true; if(f.peBisagras===false) a.sinBisagras = true; if(f.peJaladera===false) a.sinJaladera = true; }
+  if(f.tipo==='cajonera_espejo'){ if(f.sinFondo) a.sinFondo = true; if(f.colorFrente && f.colorFrente!==f.color) a.colorFrente = f.colorFrente; }
   if(armadoUsaCorredera(f) && !sinH) a.ext = !!f.ext;
   if(sinH) a.sinHerrajes = true;
   if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)){ a.puertitas = !!f.puertitas; if(a.puertitas && f.puertitasSinJal && !sinH) a.puertitasSinJal = true; }
@@ -1408,16 +1452,20 @@ async function saveAudit(){
   // cero. Lo que no se capturó se toma como 0 físico; antes se avisa de los que sí tenían existencia.
   const ciego = modoConteoCoord();
   if(ciego && !confirm('¿Ya contaste TODO el almacén?\n\nLo que no escribiste se toma como 0.\n\nAl enviar, el conteo le llega a Dirección y esta opción se cierra.')) return;
-  const noContados = ciego ? [] : CATALOGO.filter(it=>auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
+  const comp = tipo==='complemento';
+  if(comp && !confirm('¿Guardar este COMPLEMENTO del conteo inicial de '+modulo()+'?\n\nSolo lleva lo que acabas de capturar; se va a SUMAR al stock inicial sin tocar lo que ya estaba contado.')) return;
+  const noContados = (ciego||comp) ? [] : CATALOGO.filter(it=>auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
   if(noContados.length && !confirm(`Hay ${noContados.length} artículo(s) que según el inventario SÍ hay, pero no los contaste:\n\n${noContados.slice(0,15).map(it=>'• '+it.nombre+' (debería haber '+fmtNum(calcFormula(it.id).final)+')').join('\n')}${noContados.length>15?'\n… y '+(noContados.length-15)+' más':''}\n\nSi guardas así, se toman como 0 (faltante). ¿Guardar de todos modos?\n\n(Cancelar = regresar a contarlos)`)) return;
   CATALOGO.forEach(it=>{
     const itemId = it.id;
     const f = calcFormula(itemId);
-    const hojasCompletas = auditCapturas[itemId]!==undefined ? auditCapturas[itemId] : 0;
+    // Las correderas sueltas ya entraron al balance de juegos (eq), no se suman dos veces.
+    const hojasCompletas = (auditCapturas[itemId]!==undefined && !esCorrSuelta(it)) ? auditCapturas[itemId] : 0;
     const hojasEnPiezas = fmtNum(eq[itemId]||0);
     const fisico = fmtNum(hojasCompletas + hojasEnPiezas);
     const diff = fmtNum(fisico - f.final);
     if(diff!==0) totalDiff++;
+    if(comp && !(fisico>0.0005)) return; // en el complemento solo va lo que se encontró
     const r = {itemId, nombre:it.nombre, cat:it.cat, unidad:it.unidad, teorico:fmtNum(f.final), fisico, diff, capturado: auditCapturas[itemId]!==undefined || !!eq[itemId]};
     if(hojasEnPiezas){ r.hojasCompletas = hojasCompletas; r.hojasEnPiezas = hojasEnPiezas; }
     if(f.esHoja){
@@ -1440,6 +1488,7 @@ async function saveAudit(){
   try{
     const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:true,creadoPor:getCurrentUserEmail?getCurrentUserEmail():''};
     if(tipo==='conteo') doc.conteoInicial = true;
+    if(comp){ doc.complemento = true; doc.totalDiff = 0; }
     if(piezasContadas.length) doc.piezasContadas = piezasContadas;
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
     const bc = balanceCorrederas();
@@ -1453,9 +1502,13 @@ async function saveAudit(){
       toast('✅ Conteo enviado a Dirección. ¡Gracias!');
       setView('home'); return;
     }
-    toast('✅ Auditoría guardada.');
+    toast(comp ? '✅ Complemento guardado.' : '✅ Auditoría guardada.');
     histTab='aud';
     setView('hist');
+    if(comp){
+      if(esAdmin() && confirm('¿SUMAR ahora este complemento al stock inicial de '+doc.modulo+'?\n\nTambién lo puedes hacer después desde el Historial.')) await sumarComplementoInicial(audId, {...doc, id:audId});
+      return;
+    }
     if(confirm('¿Quieres descargar el REPORTE DE AUDITORÍA en PDF (teórico vs. físico de cada artículo)?')){
       try{ await generarReporteAuditoriaPDF({...doc, id:audId}); }catch(e){ alert('No se pudo generar el PDF: '+e.message); }
     }
@@ -1541,6 +1594,38 @@ async function usarConteoComoInicial(id, a){
   }catch(e){ alert('Error: '+e.message); }
 }
 
+// Complemento del conteo inicial (confirmado por el usuario: hubo cosas que no se pudieron contar
+// porque no venían en la lista). Lo contado se SUMA al stock inicial de cada artículo, con la misma
+// fecha del conteo, así lo que ya se había contado no se toca y los movimientos siguen igual.
+async function sumarComplementoUI(id){ const a = auditorias.find(x=>x.id===id); if(a) await sumarComplementoInicial(id, a); }
+async function sumarComplementoInicial(id, a){
+  if(!esAdmin()) return alert('Solo Dirección puede sumar al stock inicial.');
+  if(a.aplicada) return alert('Este complemento ya se sumó.');
+  if(a.modulo!==modulo()) return alert('Cambia al módulo '+a.modulo+' para sumar este complemento.');
+  const res = (a.resultados||[]).filter(r=>(Number(r.fisico)||0)>0.0005);
+  if(!res.length) return alert('Este complemento no tiene nada que sumar.');
+  const resetF = resetMap[a.modulo];
+  const fechaBase = resetF ? new Date(new Date(resetF).getTime()+1).toISOString() : (fechaInicioModulo() || new Date().toISOString());
+  const lineas = res.map(r=>{ const vigente = inicialFechaMap[r.itemId] && (!resetF || inicialFechaMap[r.itemId] > resetF);
+    const antes = vigente ? Number(inicialMap[r.itemId])||0 : 0;
+    return {r, antes, despues: fmtNum(antes + Number(r.fisico)), vigente}; });
+  if(!confirm(`Sumar al STOCK INICIAL de ${a.modulo}:\n\n${lineas.slice(0,15).map(l=>`• ${l.r.nombre}: ${fmtNum(l.antes)} + ${fmtNum(l.r.fisico)} = ${fmtNum(l.despues)}`).join('\n')}${lineas.length>15?'\n… y '+(lineas.length-15)+' más':''}\n\nLo demás no cambia. ¿Continuar?`)) return;
+  if(!(await pedirPinAdmin('sumar el complemento al stock inicial'))) return;
+  try{
+    const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    for(const l of lineas){
+      const it = CATALOGO.find(i=>i.id===l.r.itemId); if(!it) continue;
+      const d = {modulo:a.modulo, itemId:it.id, cantidad:l.despues, fecha: l.vigente ? inicialFechaMap[it.id] : fechaBase, creadoPor, origen:'complemento', complementoId:id};
+      if(esHoja(it)){ const cortAntes = l.vigente ? Number(inicialCortadoMap[it.id])||0 : 0; d.cortado = fmtNum(cortAntes + (Number(l.r.fisicoCortado)||0)); }
+      await registrarCambioInicial(it, d, 'Complemento del conteo');
+      await db.collection('inicial').doc(inicialKey(a.modulo, it.id)).set(d);
+    }
+    await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor});
+    alert(`✅ Listo. Se sumaron ${lineas.length} artículo(s) al stock inicial de ${a.modulo}.`);
+    if(current==='hist') renderHist();
+  }catch(e){ alert('Error: '+e.message); }
+}
+
 // ===== Historial de entradas y salidas (por fecha) =====
 let mhDesde = null, mhHasta = null, mhTipo = 'todos', mhCat = 'todas', mhItem = 'todos';
 const MH_TIPOS = {todos:'Todo', entrada:'📥 Entradas', salida:'📤 Salidas', instalacion:'🔧 Instalaciones', garantia:'🛡️ Garantías', devolucion:'↩️ Regresó de garantía', sobrante:'🧩 A sobrantes', merma:'⚠️ Mermas', corte:'✂️ Cortes', ajuste:'⚖️ Ajustes'};
@@ -1614,19 +1699,20 @@ function renderHist(){
   $('#main').innerHTML = tabs + auditorias.map(a=>`
     <div class="card">
       <div class="row" style="justify-content:space-between;cursor:pointer" onclick="toggleAud('${a.id}')">
-        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag" ${a.conteoInicial?'style="color:var(--bad);border-color:var(--bad)"':''}>${a.conteoInicial?'📋 Conteo inicial':etiquetaTipoAud(a.tipo)}</div> <div class="tag">Auditor: ${a.auditor}</div>
-          ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ ${a.conteoInicial?'Es el stock inicial':'Aplicada al inventario'}</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">${a.conteoInicial?'Esperando tu aprobación':'Sin aplicar'}</div>`}</div>
-        ${a.conteoInicial ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).filter(r=>Math.abs(Number(r.fisico)||0)>0.005).length} artículo(s) con existencia</div>` : `<div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>`}
+        <div><strong>${new Date(a.fecha).toLocaleString()}</strong><div class="tag" ${a.conteoInicial||a.complemento?'style="color:var(--bad);border-color:var(--bad)"':''}>${a.conteoInicial?'📋 Conteo inicial':etiquetaTipoAud(a.tipo)}</div> <div class="tag">Auditor: ${a.auditor}</div>
+          ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ ${a.conteoInicial?'Es el stock inicial':(a.complemento?'Sumado al stock inicial':'Aplicada al inventario')}</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">${a.conteoInicial||a.complemento?'Esperando tu aprobación':'Sin aplicar'}</div>`}</div>
+        ${a.complemento ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).length} artículo(s) a sumar</div>` : a.conteoInicial ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).filter(r=>Math.abs(Number(r.fisico)||0)>0.005).length} artículo(s) con existencia</div>` : `<div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>`}
       </div>
       <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
         <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 Reporte PDF</button>
-        ${!a.aplicada && esAdmin() ? (a.conteoInicial ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="usarConteoComoInicialUI('${a.id}')">✅ Usar como stock inicial</button>` : `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>`) : ''}
+        ${!a.aplicada && esAdmin() ? (a.complemento ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="sumarComplementoUI('${a.id}')">➕ Sumar al stock inicial</button>` : a.conteoInicial ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="usarConteoComoInicialUI('${a.id}')">✅ Usar como stock inicial</button>` : `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>`) : ''}
         ${esAdmin() ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarAuditoria('${a.id}')">🗑️ Borrar</button>` : ''}
       </div>
-      ${a.conteoInicial ? resumenHojasConteoHtml(a) : ''}
+      ${a.conteoInicial||a.complemento ? resumenHojasConteoHtml(a) : ''}
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
         ${(()=>{ const fila = r=>`<tr><td>${r.nombre}${r.capturado===false&&Math.abs(Number(r.teorico))>0.005?' <span class="tag">no contado</span>':''}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}${r.hojasEnPiezas&&r.teoricoCompletas===undefined?`<div class="hint" style="margin-top:3px">${fmtNum(r.hojasCompletas)} sueltas/completas + ${fmtNum(r.hojasEnPiezas)} en piezas/armados</div>`:''}</td><td class="${r.diff<0?'neg':(r.diff>0?'pos':'')}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>${detalleLadosHtml(r)}`;
+          if(a.complemento) return `<h3>Lo que se suma al stock inicial</h3><table><tr><th>Artículo</th><th>Contado</th></tr>${a.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.fisico)} ${r.unidad||''}${r.fisicoCortado?`<div class="hint" style="margin-top:3px">${fmtNum(r.fisicoCompletas)} completas + ${fmtNum(r.fisicoCortado)} en piezas/armados</div>`:''}</td></tr>`).join('')}</table>`;
           const dif = a.resultados.filter(r=>Math.abs(Number(r.diff)||0)>0.005), ok = a.resultados.filter(r=>!(Math.abs(Number(r.diff)||0)>0.005));
           return `<h3>Con diferencia (${dif.length})</h3>
           ${dif.length?`<table><tr><th>Artículo</th><th>Teórico</th><th>Físico</th><th>Dif.</th></tr>${dif.map(fila).join('')}</table>`:'<p class="hint">Todo cuadra. 🎉</p>'}
@@ -2225,6 +2311,7 @@ const PIEZAS_AUDIT = [
   {key:'puertitamax', tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['max'].dim, label:'Puertita de cajonera Max',         rinde:PUERTITA_CAJONERA['max'].porHoja+' por hoja'},
   {key:'puertazap',   tipo:'mel', nombre:'Puerta de zapatera',       dim:'172×30 cm',   label:'Puerta de zapatera',       rinde:'Corte combinado (igual que en despiece)'},
   {key:'zoclo',       tipo:'mel', nombre:'Zóclo normal',             dim:'10×52 cm',    label:'Zóclo 10×52',              rinde:'48 por hoja'},
+  {key:'zoclozap',    tipo:'mel', nombre:'Zóclo zapatera',           dim:'10×27 cm',    label:'Zóclo de zapatera 10×27',  rinde:'108 por hoja'},
   {key:'cargador',    tipo:'mel', nombre:'Cargador',                 dim:'10×40 cm',    label:'Cargador 10×40',           rinde:CARGADORES_POR_HOJA+' por hoja (sierra de 5 mm)'},
   {key:'espzoclo16',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'16×52 cm',    label:'Zóclo de espejo 16×52',    rinde:'Parte del frente de espejo (5 frentes por hoja)'},
   {key:'espzoclo18',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'18×52 cm',    label:'Zóclo de espejo 18×52',    rinde:'Parte del frente de espejo (5 frentes por hoja)'},
@@ -2251,8 +2338,12 @@ const ARMADO_TIPOS = {
   cajon:        'Cajón completo',
   cuadro_fondo: 'Cuadro de cajón con fondo',
   cuadro_sin:   'Cuadro de cajón sin fondo',
-  corredera:    'Corredera suelta (hembra o macho)'
+  cajonera_espejo: 'Cajonera de espejo (sin la puerta)',
+  puerta_espejo:   'Puerta de espejo (marcos con su espejo)',
+  puerta_zapatera: 'Puerta de zapatera (172×30)'
+  // Las correderas sueltas ahora se cuentan en Herrajes → "(sin pareja)".
 };
+const ARMADO_ES_ESPEJO = t => t==='cajonera_espejo' || t==='puerta_espejo' || t==='puerta_zapatera'; // (sin variante Normal/Max)
 const ARMADO_CORREDERA = {hembra:'Hembra (la que va en la cajonera)', macho:'Macho (la que va en el cajón)'};
 const ARMADO_CAJONERAS = {'1':'De 1 cajón','3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
 const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
@@ -2278,6 +2369,26 @@ function piezasDeArmado(a){
       .filter(p=>p.estado==='ok' && !PIEZAS_DE_CAJON.includes(p.nombre) && !(a.sinFondo && p.nombre.startsWith('Fondo de cajonera')))
       .forEach(p=>add(p.nombre, p.cantidad, p.dim, p.colorDestino));
     add('Corredera hembra'+sufCorr, cajones, '—', '—');
+  } else if(a.tipo==='cajonera_espejo'){
+    // Estructura de la cajonera de espejo (sin la puerta): 2 paredes + 5 entrepaños + fondo.
+    // Confirmado por el usuario: la cajonera de espejo lleva los zóclos de espejo (16×52 y 18×52).
+    // Cada pieza del frente de espejo vale su parte de 1/5 de hoja (ver fraccionPiezaFrenteEspejo).
+    const cz = a.colorFrente || a.color;
+    add('Pared', 2, '191×40 cm', a.color); add('Entrepaño', 5, '52×40 cm', a.color);
+    add('Pieza de frente de espejo', 1, '16×52 cm', cz); add('Pieza de frente de espejo', 1, '18×52 cm', cz);
+    if(!a.sinFondo) add('Fondo de cajonera (MDF 3mm)', 1, '55×122 cm', '—');
+  } else if(a.tipo==='puerta_espejo'){
+    // Puerta de espejo: solo los marcos (2 de 10×160 y 2 de 10×35) + su espejo; bisagras (1.5) y
+    // jaladera (1) se eligen por separado (confirmado por el usuario).
+    add('Pieza de frente de espejo', 2, '10×160 cm', a.color); add('Pieza de frente de espejo', 2, '10×35 cm', a.color);
+    if(!a.sinEspejo) add('Espejo', 1, '—', '—');
+    if(!a.sinJaladera) add('Jaladera (por espejo)', 1, '—', a.color);
+    if(!a.sinBisagras) add('Bisagra (por espejo)', 1.5, '—', '—');
+  } else if(a.tipo==='puerta_zapatera'){
+    // Puerta de zapatera 172×30 con sus herrajes opcionales: 1.5 bisagras y 1 jaladera.
+    add('Puerta de zapatera', 1, '172×30 cm', a.color);
+    if(!a.sinBisagras) add('Bisagra (zapatera)', 1.5, '—', '—');
+    if(!a.sinJaladera) add('Jaladera (zapatera)', 1, '—', a.color);
   } else if(a.tipo==='corredera'){
     add('Corredera '+(a.variante==='macho'?'macho':'hembra')+sufCorr, 1, '—', '—');
   } else if(a.tipo==='cajon'){
@@ -2308,6 +2419,9 @@ function describirArmado(a){
   let d;
   if(a.tipo==='corredera') d = 'Corredera suelta · '+(a.variante==='macho'?'macho':'hembra');
   else if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (frentes y zóclos '+a.colorFrente+')':'');
+  else if(a.tipo==='cajonera_espejo') d = 'Cajonera de espejo (sin puerta) · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (zóclos '+a.colorFrente+')':'')+(a.sinFondo?' · sin fondo':'');
+  else if(a.tipo==='puerta_zapatera') d = 'Puerta de zapatera · '+a.color+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':' · con bisagras y jaladera')));
+  else if(a.tipo==='puerta_espejo') d = 'Puerta de espejo · '+a.color+(a.sinEspejo?' · sin espejo':'')+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':'')));
   else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro;
   else d = ARMADO_TIPOS[a.tipo]+(a.variante==='max'?' Max':'')+' · '+a.color;
   if(a.sinHerrajes) d += ' · sin herrajes';
