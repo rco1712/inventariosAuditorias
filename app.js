@@ -35,7 +35,7 @@ function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // Lo que capture un coordinador queda "pendiente" hasta que Dirección lo apruebe; lo de
 // Dirección (o traspasos, que siempre son inmediatos) se guarda ya "aprobado".
 function estadoNuevoMovimiento(){ return esAdmin() ? 'aprobado' : 'pendiente'; }
-let instSub = 'mueble';
+let instSub = 'mueble', instRegreso = false;
 let instPreview = null; // {piezas, consumo:[{itemId,cantidad}], bloqueado, motivosBloqueo:[]}
 // Adicionales: muebles extra que se agregan a un modelo (cajonera, entrepañera, cajonera de
 // espejo, zapatera, repisa), sin contar como uno de los muebles fijos del modelo elegido.
@@ -46,7 +46,9 @@ const TIPOS_ADICIONAL = {
   cajonera: 'Cajonera (cantidad libre)',
   cajonera_emma: 'Cajonera Emma (4 cajones)',
   cajonera_espejo: 'Cajonera de espejo',
+  cajonera_espejo_max: 'Espejo Max',
   cajonera_max: 'Cajonera Max (4 cajones)',
+  entrepanera_max: 'Entrepañera Max',
   zapatera: 'Zapatera',
   repisa: 'Repisa'
 };
@@ -63,7 +65,9 @@ const MUEBLE_TIPO_OPCIONES = [
   {value:'cajonera_5', label:'Cajonera de 5 cajones'},
   {value:'cajonera_emma', label:'Cajonera Emma (4 cajones)'},
   {value:'cajonera_espejo', label:'Cajonera de espejo'},
+  {value:'cajonera_espejo_max', label:'Espejo Max'},
   {value:'cajonera_max', label:'Cajonera Max (4 cajones)'},
+  {value:'entrepanera_max', label:'Entrepañera Max'},
   {value:'cajonera_otra', label:'Cajonera (otra cantidad)'},
   {value:'zapatera', label:'Zapatera (en vez de entrepañera; solo Lateral y Central)'}
 ];
@@ -851,6 +855,7 @@ function etiquetaTipoMov(m){
   if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
   if(m.motivo==='deSobrante') return 'Sobrante transformado';
   if(m.motivo==='regresoMerma') return 'Merma (regresó sin instalar)';
+  if(m.motivo==='regresoInstalacion') return 'Regresó de instalación';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
 function stockHojaTxt(f, unidad){
@@ -1325,7 +1330,7 @@ function renderAudArmadosHtml(){
   const esCajonera = f.tipo==='cajonera';
   const esCorr = f.tipo==='corredera';
   const esEsp = ARMADO_ES_ESPEJO(f.tipo);
-  const variantes = esCajonera ? ARMADO_CAJONERAS : (esCorr ? ARMADO_CORREDERA : (esEsp ? {normal:'Normal'} : {normal:'Normal', max:'Max'}));
+  const variantes = esCajonera ? ARMADO_CAJONERAS : (esCorr ? ARMADO_CORREDERA : (ARMADO_SIN_VARIANTE(f.tipo) ? {normal:'Normal'} : {normal:'Normal', max:'Max'}));
   if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
   const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
   const labelColor = (esCajonera||f.tipo==='cajonera_espejo') ? 'Color de la cajonera' : ((f.tipo==='cajon'||f.tipo==='puerta_espejo') ? 'Color del frente' : (f.tipo==='puerta_zapatera' ? 'Color de la puerta' : 'Color del cuadro'));
@@ -1339,7 +1344,7 @@ function renderAudArmadosHtml(){
     <label class="hint">¿Qué encontraste?</label>
     <select style="margin-top:4px" onchange="${set('tipo')}">${Object.keys(ARMADO_TIPOS).map(k=>`<option value="${k}" ${k===f.tipo?'selected':''}>${ARMADO_TIPOS[k]}</option>`).join('')}</select>
     <div class="grid2" style="margin-top:10px">
-      ${esEsp?'':`<div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>`}
+      ${ARMADO_SIN_VARIANTE(f.tipo)?'':`<div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>`}
       ${esCorr?'':`<div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>`}
       ${(esCajonera||f.tipo==='cajonera_espejo')?`<div><label class="hint">Color de ${f.tipo==='cajonera_espejo'?'los zóclos':'frentes y zóclos'}</label><select style="margin-top:4px" onchange="${set('colorFrente')}">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
       ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
@@ -1349,7 +1354,7 @@ function renderAudArmadosHtml(){
     ${f.tipo==='puerta_zapatera'?`<p class="hint" style="margin-top:10px">Puerta de 172×30 (0.25 hojas). Marca los herrajes que trae puestos.</p>
       <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peBisagras!==false?'checked':''} onchange="auditArmadoForm.peBisagras=this.checked;renderAud()"> Con bisagras (1.5)</label>
       <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peJaladera!==false?'checked':''} onchange="auditArmadoForm.peJaladera=this.checked;renderAud()"> Con jaladera (1)</label>`:''}
-    ${f.tipo==='puerta_espejo'?`<p class="hint" style="margin-top:10px">La puerta lleva 2 marcos de 10×160 y 2 de 10×35 (los zóclos van con la cajonera de espejo).</p>
+    ${f.tipo==='puerta_espejo'?`<p class="hint" style="margin-top:10px">La puerta lleva 2 marcos de ${f.variante==='max'?'13×160':'10×160'} y 2 de 10×35 (los zóclos van con la cajonera de espejo).</p>
       <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peBisagras!==false?'checked':''} onchange="auditArmadoForm.peBisagras=this.checked;renderAud()"> Con bisagras (1.5)</label>
       <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.peJaladera!==false?'checked':''} onchange="auditArmadoForm.peJaladera=this.checked;renderAud()"> Con jaladera (1)</label>
       <label class="row" style="margin-top:6px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinEspejo?'checked':''} onchange="auditArmadoForm.sinEspejo=this.checked;renderAud()"> Sin espejo (solo los marcos)</label>`:''}
@@ -1363,7 +1368,7 @@ function renderAudArmadosHtml(){
         ${f.sinHerrajes?'':`<option value="sinjal" ${val==='sinjal'?'selected':''}>Sí, con bisagras pero SIN ${jal}</option>`}
       </select></div>`; })():''}
     ${(esCajonera||f.tipo==='cajonera_espejo')?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinFondo?'checked':''} onchange="${set('sinFondo')}"> Sin fondo (todavía no le ponen el fondo de MDF)</label>`:''}
-    ${f.tipo==='cajonera_espejo'?'<p class="hint">Lleva 2 paredes, 5 entrepaños, su fondo y los zóclos de espejo (16×52 y 18×52). La puerta de espejo se cuenta aparte como "Puerta de espejo".</p>':''}
+    ${f.tipo==='cajonera_espejo'?(f.variante==='max'?'<p class="hint">Max: 2 paredes de 40×185, 5 entrepaños de 40×58, su fondo y los zóclos de 16×58 y 18×58. La puerta se cuenta aparte.</p>':'<p class="hint">Lleva 2 paredes, 5 entrepaños, su fondo y los zóclos de espejo (16×52 y 18×52). La puerta de espejo se cuenta aparte como "Puerta de espejo".</p>'):''}
     ${esCajonera && !armadoTienePuertitas(f.variante)?`<p class="hint">La cajonera ${ARMADO_CAJONERAS[f.variante].toLowerCase()} todavía no tiene medida de puertita confirmada.</p>`:''}
     <button class="btn" style="margin-top:12px;width:100%" onclick="agregarArmado()">Agregar</button>
   </div>
@@ -1609,7 +1614,24 @@ async function sumarComplementoInicial(id, a){
   const lineas = res.map(r=>{ const vigente = inicialFechaMap[r.itemId] && (!resetF || inicialFechaMap[r.itemId] > resetF);
     const antes = vigente ? Number(inicialMap[r.itemId])||0 : 0;
     return {r, antes, despues: fmtNum(antes + Number(r.fisico)), vigente}; });
-  if(!confirm(`Sumar al STOCK INICIAL de ${a.modulo}:\n\n${lineas.slice(0,15).map(l=>`• ${l.r.nombre}: ${fmtNum(l.antes)} + ${fmtNum(l.r.fisico)} = ${fmtNum(l.despues)}`).join('\n')}${lineas.length>15?'\n… y '+(lineas.length-15)+' más':''}\n\nLo demás no cambia. ¿Continuar?`)) return;
+  // Correderas: las hembras y machos sueltos que se suman se juntan con los que ya había en el
+  // stock inicial y forman juegos (confirmado por el usuario: si no, quedaban separados).
+  const vig = id => inicialFechaMap[id] && (!resetF || inicialFechaMap[id] > resetF);
+  const iniDe = id => vig(id) ? Number(inicialMap[id])||0 : 0;
+  const lineaDe = it => { let l = lineas.find(x=>x.r.itemId===it.id);
+    if(!l){ l = {r:{itemId:it.id, nombre:it.nombre, fisico:0}, antes:iniDe(it.id), despues:iniDe(it.id), vigente:vig(it.id), soloJuntar:true}; lineas.push(l); }
+    return l; };
+  const juntados = [];
+  CORR_TIPOS.forEach(t=>{
+    const itH=itemByName(t.hembra), itM=itemByName(t.macho), itJ=itemByName(t.juego); if(!itH||!itM||!itJ) return;
+    if(!lineas.some(l=>l.r.itemId===itH.id || l.r.itemId===itM.id)) return;
+    const lH=lineaDe(itH), lM=lineaDe(itM);
+    const p = Math.floor(Math.min(lH.despues, lM.despues)); if(p<=0) return;
+    const lJ=lineaDe(itJ);
+    lH.despues=fmtNum(lH.despues-p); lM.despues=fmtNum(lM.despues-p); lJ.despues=fmtNum(lJ.despues+p);
+    juntados.push(`🔗 ${t.etiqueta}: ${p} hembra(s) + ${p} macho(s) sueltos → ${p} juego(s)`);
+  });
+  if(!confirm(`Sumar al STOCK INICIAL de ${a.modulo}:\n\n${lineas.slice(0,15).map(l=>`• ${l.r.nombre}: ${fmtNum(l.antes)} ${l.soloJuntar?'→':'+ '+fmtNum(l.r.fisico)+' ='} ${fmtNum(l.despues)}`).join('\n')}${lineas.length>15?'\n… y '+(lineas.length-15)+' más':''}${juntados.length?'\n\n'+juntados.join('\n'):''}\n\nLo demás no cambia. ¿Continuar?`)) return;
   if(!(await pedirPinAdmin('sumar el complemento al stock inicial'))) return;
   try{
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
@@ -1617,11 +1639,12 @@ async function sumarComplementoInicial(id, a){
       const it = CATALOGO.find(i=>i.id===l.r.itemId); if(!it) continue;
       const d = {modulo:a.modulo, itemId:it.id, cantidad:l.despues, fecha: l.vigente ? inicialFechaMap[it.id] : fechaBase, creadoPor, origen:'complemento', complementoId:id};
       if(esHoja(it)){ const cortAntes = l.vigente ? Number(inicialCortadoMap[it.id])||0 : 0; d.cortado = fmtNum(cortAntes + (Number(l.r.fisicoCortado)||0)); }
-      await registrarCambioInicial(it, d, 'Complemento del conteo');
+      if(l.soloJuntar) d.origen='complementoJuntarCorrederas';
+      await registrarCambioInicial(it, d, l.soloJuntar?'Complemento: juntar correderas':'Complemento del conteo');
       await db.collection('inicial').doc(inicialKey(a.modulo, it.id)).set(d);
     }
     await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor});
-    alert(`✅ Listo. Se sumaron ${lineas.length} artículo(s) al stock inicial de ${a.modulo}.`);
+    alert(`✅ Listo. Se sumaron ${res.length} artículo(s) al stock inicial de ${a.modulo}.${juntados.length?'\n\n'+juntados.join('\n'):''}`);
     if(current==='hist') renderHist();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -2028,6 +2051,9 @@ const MODELOS = [
   {nombre:'King 5 Cajones con Espejo', fam:'King', cajones:5, espejos:1, maxDisponible:true},
   {nombre:'King 2 Espejos', fam:'King', cajones:0, espejos:2, maxDisponible:true},
 ];
+// Confirmado por el usuario: los modelos Max existen para todas las familias (todo el modelo se
+// vuelve Max), también los de espejo (existe el espejo Max).
+MODELOS.forEach(m=>{ m.maxDisponible = true; });
 function modeloOptionsHtml(){
   const porFam = {};
   MODELOS.forEach(m=>{ (porFam[m.fam]=porFam[m.fam]||[]).push(m); });
@@ -2058,7 +2084,7 @@ function piezasCajoneraMax(add, colorCaj, unidades){
   add('Entrepaño Max corto', 2*unidades, '27×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Entrepaño Max largo', 2*unidades, '40×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Respaldo Max', 1*unidades, '20×58 cm', colorCaj, 'ok', 'Cajonera Max');
-  add('Zóclo Max', 4*unidades, '12×58 cm', colorCaj, 'ok', 'Cajonera Max');
+  add('Zóclo Max', 4*unidades, '12×58 cm', colorCaj, 'ok', 'Cajonera Max: 4 zóclos de 12×58 (confirmado por el usuario; la entrepañera Max lleva 2)');
   add('Fondo de cajonera (MDF 3mm)', unidades, '55×122 cm', '—', 'ok', '1 por cajonera Max (misma regla que cualquier cajonera)');
   add('Melamina (cajonera Max)', unidades, '—', colorCaj, 'ok', 'Confirmado: 1 hoja de melamina por cajonera Max, misma melamina que el resto de los muebles (no es un artículo de catálogo aparte)');
 }
@@ -2109,14 +2135,14 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
       if(!maxOn) add('Pared',2,'191×40 cm',estructuraColor,'ok','2 paredes de la entrepañera/cajonera base');
       add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Maletero chico (mide igual que una Pared, 191×40 cm) — con o sin cajones');
     }
-    if(fam==='Central'){ if(!maxOn) add('Pared',2,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
-    if(fam==='Doble'){ if(!maxOn) add('Pared',4,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',1,'40×244 cm',estructuraColor,'ok'); }
+    if(fam==='Central'){ if(!maxOn) add('Pared',2,'191×40 cm',estructuraColor,'ok'); add('Maletero grande',1,'40×244 cm',estructuraColor,'ok'); }
+    if(fam==='Doble'){ if(!maxOn) add('Pared',4,'191×40 cm',estructuraColor,'ok'); add('Maletero grande',1,'40×244 cm',estructuraColor,'ok'); }
     if(fam==='Doble Especial'){
       if(!maxOn) add('Pared',4,'191×40 cm',estructuraColor,'ok','Confirmado: Doble Especial tiene la misma estructura que Doble; solo cambia en herrajes (4 tubos/4 bridas en vez de 2/2)');
-      add('Maletero normal',1,'40×244 cm',estructuraColor,'ok');
+      add('Maletero grande',1,'40×244 cm',estructuraColor,'ok');
       if(especial3m) add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Variante a 3 metros: se agrega 1 maletero chico extra (una pared), confirmado por el usuario');
     }
-    if(fam==='Triple'){ if(!maxOn) add('Pared',6,'191×40 cm',estructuraColor,'ok'); add('Maletero normal',2,'40×244 cm',estructuraColor,'ok'); }
+    if(fam==='Triple'){ if(!maxOn) add('Pared',6,'191×40 cm',estructuraColor,'ok'); add('Maletero grande',2,'40×244 cm',estructuraColor,'ok'); }
     if(fam==='King'){
       if(!maxOn) add('Pared',4,'191×40 cm',estructuraColor,'ok');
       if(maxOn){
@@ -2126,14 +2152,18 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
         // tampoco se suman aquí: las aportan las 2 unidades de cajonera/entrepañera Max
         // (2 "Pared Max" por unidad = 4 en total), así que sumarlas de las dos formas
         // duplicaría el material — mismo principio que en las combinaciones "por muebles".
-        add('Maletero normal (Max)',1,'40×244 cm',estructuraColor,'ok','Max sustituye el maletero chico (191×40) por uno normal (244×40)');
+        add('Maletero grande',1,'40×244 cm',estructuraColor,'ok','Modelo Max: el maletero chico se cambia por maletero grande (confirmado por el usuario)');
         add('Maletero grande',1,'40×244 cm',estructuraColor,'ok','El maletero grande del King se queda igual en la variante Max (no se sustituye)');
-        maxNota = 'King Max: las 4 "Pared" las aportan las 2 unidades de cajonera/entrepañera Max (no se suman aparte). El maletero chico se sustituyó por uno normal (244×40); el maletero grande se queda igual.';
+        maxNota = 'King Max: las 4 "Pared" las aportan las 2 unidades de cajonera/entrepañera Max (no se suman aparte). El maletero chico se cambió por maletero grande: quedan 2 maleteros grandes.';
       } else {
         add('Maletero chico',1,'191×40 cm',estructuraColor,'ok','Confirmado: la medida del maletero chico es la misma que una Pared (191×40 cm); se agrupa con las paredes para el cálculo de hojas');
         add('Maletero grande',1,'40×244 cm',estructuraColor,'ok','Confirmado: mismo tamaño que el maletero normal (rendimiento: 3 por hoja)');
       }
     }
+
+    // Confirmado por el usuario: si el modelo lleva muebles Max (cajonera o entrepañera Max), TODO
+    // maletero chico (191×40) se cambia por maletero grande (40×244). Ej.: chico + grande → 2 grandes.
+    if(maxOn) piezas.forEach(p=>{ if(p.nombre==='Maletero chico'){ p.nombre='Maletero grande'; p.dim='40×244 cm'; p.nota='Modelo Max: el maletero chico se cambia por maletero grande (confirmado por el usuario)'; } });
 
     // Cargadores 10×40 (confirmado por el usuario): Lateral 1, Doble 0, Doble Especial 1 (2 si es a
     // 3 metros), Triple 1, King 3, Central 2. Van en el color de la estructura y se descuentan
@@ -2182,7 +2212,8 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
           if(maxOn) piezasCajoneraMax(add, colorCaj, mueblesCajonera);
           else add('Entrepaño', CAJONERA_ENTREPANOS[cajones], '40×52 cm', colorCaj, 'ok', 'Cajonera de '+cajones+' cajones ('+mueblesCajonera+' mueble(s)). Color de cajonera independiente del frente.');
         }
-        if(espejos>0) add('Entrepaño', espejos*5, '52×40 cm', colorCaj, 'ok', espejos+' espejo(s) = '+espejos+' mueble(s) tipo "cajonera de espejo" (5 entrepaños cada uno, confirmado por el usuario)');
+        if(espejos>0 && maxOn) piezasEspejoMax(add, colorCaj, espejos);
+        else if(espejos>0) add('Entrepaño', espejos*5, '52×40 cm', colorCaj, 'ok', espejos+' espejo(s) = '+espejos+' mueble(s) tipo "cajonera de espejo" (5 entrepaños cada uno, confirmado por el usuario)');
         if(restantes>0){
           if(maxOn) piezasEntrepaneraMax(add, estructuraColor, restantes);
           else add('Entrepaño', restantes*5, '52×40 cm', estructuraColor, 'ok', restantes+' mueble(s) restante(s) = entrepañera(s) (confirmado: los muebles no usados por cajonera/espejo son entrepañeras)');
@@ -2228,8 +2259,9 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     add('Espejo',espejos,'—','—','ok','1 "Espejos closet" por espejo (confirmado por el usuario, incluido King: "el espejo es espejo de clóset... aplica para todas las variantes de los modelos")');
     // Frente del espejo (confirmado por el usuario): 1 zóclo 16×52 + 1 zóclo 18×52 + 2 marcos
     // 10×160 + 2 marcos 10×35, todo del COLOR DEL FRENTE; se descuenta de esa melamina.
-    piezasFrenteEspejo(add, espejos, color);
-  } else {
+    piezasFrenteEspejo(add, espejos, color, maxOn);
+  } else if(!maxOn){
+    // Confirmado por el usuario: los modelos Max NO llevan zóclos de 10×52 (solo sus zóclos Max).
     add('Zóclo normal',2,'10×52 cm',colorZoclo,'ok', cajones>0?'Color del frente (zóclos de cajonera dependen del color de frente, confirmado por el usuario)':'');
   }
 
@@ -2298,7 +2330,7 @@ function fraccionPiezaFrenteEspejo(dim){
 const PIEZAS_AUDIT = [
   {key:'pared',       tipo:'mel', nombre:'Pared',                    dim:'191×40 cm',   label:'Pared (o maletero chico)', rinde:'3 por hoja (junto con 3 entrepaños)'},
   {key:'entrepano',   tipo:'mel', nombre:'Entrepaño',                dim:'52×40 cm',    label:'Entrepaño',                rinde:'Van con las paredes (3+3); los que sobren, 14 por hoja'},
-  {key:'maletero',    tipo:'mel', nombre:'Maletero grande',          dim:'40×244 cm',   label:'Maletero (normal o grande)', rinde:'3 por hoja'},
+  {key:'maletero',    tipo:'mel', nombre:'Maletero grande',          dim:'40×244 cm',   label:'Maletero grande', rinde:'3 por hoja'},
   {key:'frente',      tipo:'mel', nombre:'Frente',                   dim:'18×54 cm',    label:'Frente de cajón',          rinde:'24 por hoja'},
   {key:'frentemax',   tipo:'mel', nombre:'Frente Max',               dim:'60×20 cm',    label:'Frente de cajón Max',      rinde:'24 por hoja'},
   {key:'pchica',      tipo:'mel', nombre:'Pieza chica de cajón',     dim:'33×16.5 cm',  label:'Pieza chica de cajón',     rinde:'49 por hoja'},
@@ -2317,6 +2349,9 @@ const PIEZAS_AUDIT = [
   {key:'espzoclo18',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'18×52 cm',    label:'Zóclo de espejo 18×52',    rinde:'Parte del frente de espejo (5 frentes por hoja)'},
   {key:'espmarco160', tipo:'mel', nombre:'Pieza de frente de espejo',dim:'10×160 cm',   label:'Marco de espejo largo 10×160', rinde:'Parte del frente de espejo (5 frentes por hoja)'},
   {key:'espmarco35',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'10×35 cm',    label:'Marco de espejo corto 10×35',  rinde:'Parte del frente de espejo (5 frentes por hoja)'},
+  {key:'espzoclo16max',tipo:'mel', nombre:'Pieza de frente de espejo',dim:'16×58 cm',    label:'Zóclo de espejo Max 16×58',  rinde:'Parte del frente de espejo Max (por área)'},
+  {key:'espzoclo18max',tipo:'mel', nombre:'Pieza de frente de espejo',dim:'18×58 cm',    label:'Zóclo de espejo Max 18×58',  rinde:'Parte del frente de espejo Max (por área)'},
+  {key:'espmarco160max',tipo:'mel',nombre:'Pieza de frente de espejo',dim:'13×160 cm',   label:'Marco de espejo Max largo 13×160', rinde:'Parte del frente de espejo Max (por área)'},
   {key:'fondocajon',  tipo:'mdf', nombre:'Fondo de cajón (MDF 3mm)',     dim:'49.4×33 cm',  label:'Fondo de cajón (MDF 3mm)',     rinde:'14 por hoja de MDF 3mm'},
   {key:'fondocajonera',tipo:'mdf',nombre:'Fondo de cajonera (MDF 3mm)',  dim:'55×122 cm',   label:'Fondo de cajonera (MDF 3mm)',  rinde:'4 por hoja de MDF 3mm'},
   {key:'fondomax',    tipo:'mdf', nombre:'Fondo de cajón (MDF 5mm, Max)',dim:'55.5×37.9 cm',label:'Fondo de cajón Max (MDF 5mm)', rinde:'12 por hoja de MDF 5mm'}
@@ -2343,7 +2378,8 @@ const ARMADO_TIPOS = {
   puerta_zapatera: 'Puerta de zapatera (172×30)'
   // Las correderas sueltas ahora se cuentan en Herrajes → "(sin pareja)".
 };
-const ARMADO_ES_ESPEJO = t => t==='cajonera_espejo' || t==='puerta_espejo' || t==='puerta_zapatera'; // (sin variante Normal/Max)
+const ARMADO_ES_ESPEJO = t => t==='cajonera_espejo' || t==='puerta_espejo' || t==='puerta_zapatera';
+const ARMADO_SIN_VARIANTE = t => t==='puerta_zapatera'; // espejo sí tiene Normal/Max
 const ARMADO_CORREDERA = {hembra:'Hembra (la que va en la cajonera)', macho:'Macho (la que va en el cajón)'};
 const ARMADO_CAJONERAS = {'1':'De 1 cajón','3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
 const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
@@ -2374,13 +2410,15 @@ function piezasDeArmado(a){
     // Confirmado por el usuario: la cajonera de espejo lleva los zóclos de espejo (16×52 y 18×52).
     // Cada pieza del frente de espejo vale su parte de 1/5 de hoja (ver fraccionPiezaFrenteEspejo).
     const cz = a.colorFrente || a.color;
-    add('Pared', 2, '191×40 cm', a.color); add('Entrepaño', 5, '52×40 cm', a.color);
-    add('Pieza de frente de espejo', 1, '16×52 cm', cz); add('Pieza de frente de espejo', 1, '18×52 cm', cz);
+    if(esMax){ add('Pared Max', 2, '40×185 cm', a.color); add('Entrepaño Max largo', 5, '40×58 cm', a.color); add('Melamina (espejo Max)', 1, '—', a.color);
+      add('Pieza de frente de espejo', 1, '16×58 cm', cz); add('Pieza de frente de espejo', 1, '18×58 cm', cz); }
+    else { add('Pared', 2, '191×40 cm', a.color); add('Entrepaño', 5, '52×40 cm', a.color);
+      add('Pieza de frente de espejo', 1, '16×52 cm', cz); add('Pieza de frente de espejo', 1, '18×52 cm', cz); }
     if(!a.sinFondo) add('Fondo de cajonera (MDF 3mm)', 1, '55×122 cm', '—');
   } else if(a.tipo==='puerta_espejo'){
     // Puerta de espejo: solo los marcos (2 de 10×160 y 2 de 10×35) + su espejo; bisagras (1.5) y
     // jaladera (1) se eligen por separado (confirmado por el usuario).
-    add('Pieza de frente de espejo', 2, '10×160 cm', a.color); add('Pieza de frente de espejo', 2, '10×35 cm', a.color);
+    add('Pieza de frente de espejo', 2, esMax?'13×160 cm':'10×160 cm', a.color); add('Pieza de frente de espejo', 2, '10×35 cm', a.color);
     if(!a.sinEspejo) add('Espejo', 1, '—', '—');
     if(!a.sinJaladera) add('Jaladera (por espejo)', 1, '—', a.color);
     if(!a.sinBisagras) add('Bisagra (por espejo)', 1.5, '—', '—');
@@ -2419,9 +2457,9 @@ function describirArmado(a){
   let d;
   if(a.tipo==='corredera') d = 'Corredera suelta · '+(a.variante==='macho'?'macho':'hembra');
   else if(a.tipo==='cajonera') d = 'Cajonera sin cajones '+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (frentes y zóclos '+a.colorFrente+')':'');
-  else if(a.tipo==='cajonera_espejo') d = 'Cajonera de espejo (sin puerta) · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (zóclos '+a.colorFrente+')':'')+(a.sinFondo?' · sin fondo':'');
+  else if(a.tipo==='cajonera_espejo') d = 'Cajonera de espejo'+(a.variante==='max'?' Max':'')+' (sin puerta) · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (zóclos '+a.colorFrente+')':'')+(a.sinFondo?' · sin fondo':'');
   else if(a.tipo==='puerta_zapatera') d = 'Puerta de zapatera · '+a.color+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':' · con bisagras y jaladera')));
-  else if(a.tipo==='puerta_espejo') d = 'Puerta de espejo · '+a.color+(a.sinEspejo?' · sin espejo':'')+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':'')));
+  else if(a.tipo==='puerta_espejo') d = 'Puerta de espejo'+(a.variante==='max'?' Max':'')+' · '+a.color+(a.sinEspejo?' · sin espejo':'')+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':'')));
   else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro;
   else d = ARMADO_TIPOS[a.tipo]+(a.variante==='max'?' Max':'')+' · '+a.color;
   if(a.sinHerrajes) d += ' · sin herrajes';
@@ -2453,11 +2491,28 @@ function piezasPuertitaCajonera(add, color, claveMedida, tipoEtiqueta){
 
 const ESPEJOS_POR_HOJA = 5; // frentes de espejo completos por hoja 122×244 con sierra de 5 mm (confirmado por el usuario)
 // Frente de un espejo (confirmado por el usuario): 2 zóclos y 4 marcos, del color del frente.
-function piezasFrenteEspejo(add, n, colorFrente){
+function piezasFrenteEspejo(add, n, colorFrente, max){
+  if(max){
+    // Espejo Max (confirmado por el usuario): zóclos de 16×58 y 18×58; en la puerta los marcos
+    // largos van a 13×160 y los cortos son iguales (10×35). Se descuenta por área, en la misma
+    // proporción que el frente normal (1 hoja = 5 frentes normales).
+    add('Zóclo especial',n,'16×58 cm',colorFrente,'ok','Espejo Max: 1 por espejo, color del frente');
+    add('Zóclo especial',n,'18×58 cm',colorFrente,'ok','Espejo Max: 1 por espejo, color del frente');
+    add('Marco de espejo',2*n,'13×160 cm',colorFrente,'ok','Espejo Max: marcos largos de 13×160, color del frente');
+    add('Marco de espejo',2*n,'10×35 cm',colorFrente,'ok','Espejo Max: marcos cortos iguales al espejo normal');
+    return;
+  }
   add('Zóclo especial',n,'16×52 cm',colorFrente,'ok','Frente de espejo: 1 por espejo, color del frente');
   add('Zóclo especial',n,'18×52 cm',colorFrente,'ok','Frente de espejo: 1 por espejo, color del frente');
   add('Marco de espejo',2*n,'10×160 cm',colorFrente,'ok','Frente de espejo: 2 por espejo, color del frente. Todo el frente se descuenta junto: 1 hoja = frentes de 5 espejos (0.20 hojas por espejo)');
   add('Marco de espejo',2*n,'10×35 cm',colorFrente,'ok','Frente de espejo: 2 por espejo, color del frente');
+}
+// Mueble de espejo Max (confirmado por el usuario): 2 paredes Max de 40×185 y 5 entrepaños Max de
+// 40×58, igual que una entrepañera Max; sale de 1 hoja como los demás muebles Max.
+function piezasEspejoMax(add, color, n){
+  add('Pared Max', 2*n, '40×185 cm', color, 'ok', 'Espejo Max (confirmado por el usuario)');
+  add('Entrepaño Max largo', 5*n, '40×58 cm', color, 'ok', 'Espejo Max');
+  add('Melamina (espejo Max)', n, '—', color, 'ok', '1 hoja por mueble de espejo Max, igual que la entrepañera Max');
 }
 function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, extra){
   const piezas = [];
@@ -2483,6 +2538,15 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     if(MUEBLES_CAJONERA[cajones]) add('Fondo de cajonera (MDF 3mm)',MUEBLES_CAJONERA[cajones],'55×122 cm','—','ok','1 fondo de cajonera por mueble ocupado (confirmado por el usuario), aparte del fondo de cada cajón');
     else add('Fondo de cajonera (MDF 3mm)','Pendiente','—','—','pendiente','Cantidad de muebles que ocupa la cajonera de '+cajones+' cajones no confirmada; no se inventa');
     if(conPuerta) piezasPuertitaCajonera(add, color, (cajones===3||cajones===5)?String(cajones):null, 'cajonera de '+cajones+' cajones');
+  } else if(tipo==='cajonera_espejo_max'){
+    piezasEspejoMax(add, color, 1);
+    add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Igual que el espejo normal');
+    piezasFrenteEspejo(add, 1, color, true);
+    add('Espejo',1,'—','—','ok','1 "Espejos closet"');
+    add('Jaladera (por espejo)',1,'—',color,'ok');
+    add('Bisagra (por espejo)',1.5,'—','—','ok');
+  } else if(tipo==='entrepanera_max'){
+    piezasEntrepaneraMax(add, color, 1);
   } else if(tipo==='cajonera_max'){
     // Confirmado por el usuario: receta completa de la Cajonera Max (ver piezasCajoneraMax /
     // piezasCajonesMax). Como adicional cuenta como 1 sola unidad. Confirmado: la Cajonera Max
@@ -2580,12 +2644,10 @@ function piezasFijasDeFamilia(base){
 // tenía su propio maletero normal aparte (p.ej. Doble Especial a 3 metros), el chico sube a
 // "grande" en vez de duplicar el normal.
 function sustituirMaleteroPorMax(piezasFijas){
-  const yaTeniaNormal = piezasFijas.some(p=>p.nombre==='Maletero normal');
+  // Confirmado por el usuario: con muebles Max, todo maletero chico se cambia por maletero grande.
   return piezasFijas.map(p=>{
     if(p.nombre!=='Maletero chico') return p;
-    return yaTeniaNormal
-      ? Object.assign({}, p, {nombre:'Maletero grande', dim:'40×244 cm', nota:'Ya había un maletero normal en la familia; el chico se sube a grande en vez de duplicar el normal (confirmado por el usuario)'})
-      : Object.assign({}, p, {nombre:'Maletero normal (Max)', dim:'40×244 cm', nota:'Max sustituye el maletero chico (191×40) por uno normal (244×40)'});
+    return Object.assign({}, p, {nombre:'Maletero grande', dim:'40×244 cm', nota:'Modelo con muebles Max: el maletero chico se cambia por maletero grande (confirmado por el usuario)'});
   });
 }
 
@@ -2596,17 +2658,19 @@ function sustituirMaleteroPorMax(piezasFijas){
 function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt){
   const estructuraColor = todoColor ? color : 'Blanco';
   const colorCaj = todoColor ? color : (colorCajonera || estructuraColor);
-  const base = buildDespiece(fam, 0, 0, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
+  // La base solo aporta maleteros, cargadores y herrajes; las piezas de cada mueble (normal o Max)
+  // las pone cada mueble elegido, así que la base se pide sin Max para no duplicar nada.
+  const base = buildDespiece(fam, 0, 0, color, todoColor, false, colorCajonera, especial3m, correderaExt);
   let piezasFijas = piezasFijasDeFamilia(base);
 
-  const numMueblesMax = muebles.filter(m=>m.value==='cajonera_max').length;
-  if(numMueblesMax>0) piezasFijas = sustituirMaleteroPorMax(piezasFijas);
+  const numMueblesMax = muebles.filter(m=>m.value==='cajonera_max' || m.value==='entrepanera_max' || m.value==='cajonera_espejo_max').length;
+  if(numMueblesMax>0 || maxOn) piezasFijas = sustituirMaleteroPorMax(piezasFijas);
 
   const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, colorCaj, correderaExt));
   // Confirmado por el usuario: los zóclos de una cajonera dependen del color del FRENTE, no
   // del color de la cajonera. Se corrige aquí (una sola vez, sobre lo que aportó cada mueble)
   // en vez de duplicar esta regla dentro de cada tipo de mueble en buildAdicionalPiezas.
-  const hayCajonera = muebles.some(m=>m.value!=='entrepanera');
+  const hayCajonera = muebles.some(m=>m.value!=='entrepanera' && m.value!=='entrepanera_max');
   if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = color; });
   // El frente del espejo (zóclos especiales y marcos) va del color del FRENTE, no de la cajonera.
   piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo especial' || p.nombre==='Marco de espejo') p.colorDestino = color; });
@@ -2674,7 +2738,7 @@ function piezasAConsumo(piezas, color){
   const melaminaMaxPorColor = {};
   piezas.forEach(p=>{
     if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
-    if(p.nombre==='Melamina (cajonera Max)' || p.nombre==='Melamina (entrepañera Max)'){
+    if(p.nombre==='Melamina (cajonera Max)' || p.nombre==='Melamina (entrepañera Max)' || p.nombre==='Melamina (espejo Max)'){
       melaminaMaxPorColor[p.colorDestino] = (melaminaMaxPorColor[p.colorDestino]||0) + p.cantidad;
     }
   });
@@ -2740,13 +2804,13 @@ function piezasAConsumo(piezas, color){
   // Frente de espejo completo (2 marcos 10×160 + 2 marcos 10×35 + zóclos 16×52 y 18×52): se cortan
   // juntos; con sierra de 5 mm, 1 hoja da para los frentes de 5 espejos (confirmado por el usuario)
   // → 0.20 hojas por espejo, en el color del frente. Se cuenta un espejo por cada 2 marcos largos.
-  const espejosPorColor = {};
+  // Cada pieza del frente (normal o Max) vale su parte según su área: el frente normal completo da
+  // exactamente 0.20 hojas; el Max, con piezas más grandes, un poco más.
   piezas.forEach(p=>{
-    if(p.estado!=='ok' || typeof p.cantidad!=='number' || p.nombre!=='Marco de espejo' || !/160/.test(String(p.dim))) return;
+    if(p.estado!=='ok' || typeof p.cantidad!=='number' || (p.nombre!=='Marco de espejo' && p.nombre!=='Zóclo especial')) return;
     if(!p.colorDestino || p.colorDestino==='—') return;
-    espejosPorColor[p.colorDestino] = (espejosPorColor[p.colorDestino]||0) + p.cantidad/2;
+    addConsumo('Melamina '+p.colorDestino, p.cantidad*fraccionPiezaFrenteEspejo(p.dim));
   });
-  Object.keys(espejosPorColor).forEach(c=>addConsumo('Melamina '+c, espejosPorColor[c]/ESPEJOS_POR_HOJA));
   // Piezas sueltas de frente de espejo (conteo/garantía) y cargadores 10×40
   piezas.forEach(p=>{
     if(p.estado!=='ok' || typeof p.cantidad!=='number' || !p.colorDestino || p.colorDestino==='—') return;
@@ -2933,7 +2997,7 @@ function renderDSelector(){
           </select>
           ${m.value==='cajonera_otra'?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="dMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
-      ${dFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
+
       ${dFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="d-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
     `;
   } else {
@@ -2946,9 +3010,8 @@ function renderDespMaxToggle(){
   const m = MODELOS.find(x=>x.nombre===$('#d-modelo').value);
   const wrap = document.getElementById('d-max-wrap');
   if(!wrap) return;
-  if(m.maxDisponible) wrap.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="d-max" style="width:auto"> Es variante Max (sustituye componentes, no los suma)</label>`;
-  else if(m.especial3mDisponible) wrap.innerHTML = `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="d-especial3m" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`;
-  else wrap.innerHTML = '';
+  wrap.innerHTML = (m.maxDisponible ? `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="d-max" style="width:auto"> Es versión Max (cajoneras y entrepañeras Max; el maletero chico pasa a grande)</label>` : '')
+    + (m.especial3mDisponible ? `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:4px"><input type="checkbox" id="d-especial3m" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>` : '');
 }
 
 function calcDespiece(){
@@ -2958,7 +3021,7 @@ function calcDespiece(){
   const correderaExt = document.getElementById('d-corredera-ext') ? document.getElementById('d-corredera-ext').checked : false;
   let piezasModelo, maxNota, titulo, notaModelo=null;
   if(dModoComp){
-    const maxOn = dFamiliaComp==='King' && document.getElementById('d-max-comp') ? document.getElementById('d-max-comp').checked : false;
+    const maxOn = false; // en combinación, lo Max lo definen los muebles elegidos
     const especial3m = dFamiliaComp==='Doble Especial' && document.getElementById('d-especial3m-comp') ? document.getElementById('d-especial3m-comp').checked : false;
     const incompletos = dMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length) return alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".');
@@ -2998,7 +3061,7 @@ function calcDespiece(){
 // ===== Capa 4: Instalaciones / Descuentos =====
 let instLog = [];
 function renderInst(){
-  const op = (k, ic, t, sub) => `<button class="tipobtn ${instSub===k?'on':''}" onclick="instSub='${k}';instPreview=null;renderInst()"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
+  const op = (k, ic, t, sub) => `<button class="tipobtn ${instSub===k?'on':''}" onclick="instSub='${k}';instRegreso=false;instPreview=null;renderInst()"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
   $('#main').innerHTML = `
     <div class="card">
       <div style="font-size:17px;font-weight:800;margin-bottom:10px">🔧 ¿Qué se instaló?</div>
@@ -3006,8 +3069,9 @@ function renderInst(){
         ${op('mueble','🗄️','Clóset','Un modelo o muebles')}
         ${op('puertas','🚪','Puertas','Puertas corredizas')}
       </div>
-      <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';renderInst()">📅 Ver instalaciones anteriores</button>
-      ${esSoloLectura()?'':`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="irA('sob')">🧩 Regresó material sin instalar → Sobrantes</button>`}
+      <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=false;renderInst()">📅 Ver instalaciones anteriores</button>
+      ${esSoloLectura()?'':`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=true;renderInst()">↩️ Regresó un modelo completo → vuelve al inventario</button>
+      <button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="irA('sob')">🧩 Regresaron piezas sueltas sin instalar → Sobrantes</button>`}
     </div>
     <div id="inst-body"></div>`;
   if(instSub==='mueble') renderInstMueble();
@@ -3029,14 +3093,55 @@ async function renderInstHistorial(){
   const porDia = {};
   instLog.forEach(x=>{ (porDia[x.fechaDia] = porDia[x.fechaDia]||[]).push(x); });
   const dias = Object.keys(porDia).sort((a,b)=>b.localeCompare(a));
-  $('#inst-body').innerHTML = dias.map(dia=>`
+  const puede = !esSoloLectura();
+  const colReg = x => { const r = regresoDeInstalacion(x.id);
+    if(r) return `<span class="tag pos" style="border-color:var(--ok)">↩️ Regresó</span>${r.estado==='pendiente'?' '+badgeEstado('pendiente'):''}`;
+    if(!puede || x.estado==='rechazado') return '';
+    if(x.estado==='pendiente') return '<span class="hint" style="margin:0">Aún sin aprobar</span>';
+    return `<button class="btn small" style="background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="regresarInstalacion('${x.id}')">↩️ Regresó completo</button>`; };
+  const aviso = instRegreso ? `<div class="card" style="border:2px solid #1f9d55"><strong>↩️ Regresó un modelo completo</strong>
+    <p class="hint" style="margin-top:4px">Busca la instalación que regresó sin instalarse y toca <strong>"↩️ Regresó completo"</strong>. Todo su material (melamina, cargadores, herrajes…) vuelve al inventario; la melamina regresa como <strong>material cortado</strong>. No va a merma ni a sobrantes.</p>
+    <p class="hint" style="margin:4px 0 0">Si solo regresaron algunas piezas, usa 🧩 Sobrantes.</p></div>` : '';
+  $('#inst-body').innerHTML = aviso + dias.map(dia=>`
     <div class="card">
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
       <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td>${x.descripcion}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.descripcion}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
     </div>`).join('');
+}
+
+// ===== Regreso de un modelo completo (confirmado por el usuario) =====
+// Un modelo que se registró como instalado pero regresó completo sin instalarse: NO va a merma ni a
+// sobrantes, regresa al inventario tal cual (la melamina como material cortado, lo demás a su artículo).
+function regresoDeInstalacion(logId){
+  const ms = movs.filter(m=>m.motivo==='regresoInstalacion' && m.instalacionId===logId && m.estado!=='rechazado');
+  if(!ms.length) return null;
+  return {estado: ms.some(m=>m.estado==='pendiente') ? 'pendiente' : 'aprobado'};
+}
+async function regresarInstalacion(logId){
+  const x = instLog.find(l=>l.id===logId); if(!x) return;
+  if(regresoDeInstalacion(logId)) return alert('Esta instalación ya se regresó al inventario.');
+  const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
+  if(!cons.length) return alert('Esta instalación no tiene material registrado.');
+  const lista = cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `• ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n');
+  const motivo = prompt(`↩️ REGRESÓ COMPLETO SIN INSTALAR\n${x.descripcion} (${x.fechaDia})\n\nVuelve al inventario:\n${lista}\n\n¿Por qué regresó? (opcional)`, '');
+  if(motivo===null) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    const nota = 'Regresó sin instalar · '+x.descripcion+(motivo.trim()?' · '+motivo.trim():'');
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', instalacionId:logId, cantidad:fmtNum(Number(c.cantidad)), nota, fecha, estado, loteId, creadoPor});
+    }
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y regresa al inventario.</small>' : '✅ Regresó al inventario.');
+    renderInstHistorial();
+  }catch(e){ alert('Error: '+e.message); }
+}
+function detalleRegresoInstAprob(items, logs){
+  const m = items.find(x=>x.motivo==='regresoInstalacion'); if(!m) return '';
+  const l = logs.find(x=>x.id===m.instalacionId);
+  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.nota||'')}</div><div class="hint" style="margin:2px 0 0">Todo vuelve al inventario (la melamina como cortado).</div></div>`;
 }
 
 let iFamSel = null; // familia elegida (para no mostrar todos los modelos juntos)
@@ -3093,7 +3198,7 @@ function renderISelector(){
           </select>
           ${m.value==='cajonera_otra'?`<input type="number" min="0" placeholder="Cantidad de cajones" value="${m.cajones||''}" oninput="iMueblesComp[${i}].cajones=Number(this.value)">`:'<div></div>'}
         </div>`).join('')}
-      ${iFamiliaComp==='King'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-max-comp" style="width:auto"> Es variante Max (maleteros)</label>`:''}
+
       ${iFamiliaComp==='Doble Especial'?`<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="i-especial3m-comp" style="width:auto"> Es variante a 3 metros (maletero chico extra)</label>`:''}
       <label class="hint" style="display:block;margin-top:8px">Color de la cajonera / cajonera de espejo (independiente del frente)</label><select id="i-color-cajonera-comp">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     `;
@@ -3115,9 +3220,8 @@ function renderInstMaxToggle(){
   const wrapCaj = document.getElementById('i-cajcolor-wrap');
   if(!sel || !wrapMax || !wrapCaj) return;
   const m = MODELOS.find(x=>x.nombre===sel.value);
-  if(m.maxDisponible) wrapMax.innerHTML = `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-max" style="width:22px;min-height:22px;flex:0 0 22px"> Es versión <strong>Max</strong></label>`;
-  else if(m.especial3mDisponible) wrapMax.innerHTML = `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-especial3m" style="width:22px;min-height:22px;flex:0 0 22px"> Es de <strong>3 metros</strong> (lleva maletero chico extra)</label>`;
-  else wrapMax.innerHTML = '';
+  wrapMax.innerHTML = (m.maxDisponible ? `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-max" style="width:22px;min-height:22px;flex:0 0 22px"> Es versión <strong>Max</strong></label>` : '')
+    + (m.especial3mDisponible ? `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-especial3m" style="width:22px;min-height:22px;flex:0 0 22px"> Es de <strong>3 metros</strong> (lleva maletero chico extra)</label>` : '');
   wrapCaj.innerHTML = (m.cajones>0 || m.espejos>0)
     ? `<label class="hint" style="display:block;margin-top:10px">Color de la cajonera${m.espejos>0?' y del mueble de espejo':''}</label><select id="i-color-cajonera" style="margin-top:4px">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>`
     : '';
@@ -3144,7 +3248,7 @@ function previewInst(){
   const correderaExt = document.getElementById('i-corredera-ext') ? document.getElementById('i-corredera-ext').checked : false;
   let piezasModelo, maxNota, titulo, notaModelo=null, colorCajonera;
   if(iModoComp){
-    const maxOn = iFamiliaComp==='King' && document.getElementById('i-max-comp') ? document.getElementById('i-max-comp').checked : false;
+    const maxOn = false; // en combinación, lo Max lo definen los muebles elegidos
     const especial3m = iFamiliaComp==='Doble Especial' && document.getElementById('i-especial3m-comp') ? document.getElementById('i-especial3m-comp').checked : false;
     const incompletos = iMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length){ alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".'); return; }
@@ -4566,7 +4670,7 @@ async function renderAprobaciones(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
-        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}
+        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
@@ -5140,7 +5244,8 @@ async function renderSob(){
   $('#main').innerHTML = `<div class="card">
       <div style="font-size:17px;font-weight:800">🧩 Sobrantes · ${modulo()}</div>
       <p class="hint">Material que regresó sin instalarse. Está <strong>fuera del inventario</strong> hasta que se transforme; entonces regresa lo que salió de él (como material cortado). En las auditorías no se cuenta.</p>
-      ${puede?`<button class="btn" style="width:100%;margin-top:6px" onclick="iniciarSobrante()">+ Mandar material a sobrantes</button>`:''}
+      ${puede?`<button class="btn" style="width:100%;margin-top:6px" onclick="iniciarSobrante()">+ Mandar material a sobrantes</button>
+      <button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=true;setView('inst')">↩️ ¿Regresó un modelo completo? Ese vuelve al inventario</button>`:''}
       ${totHtml?`<p class="hint" style="margin:10px 0 4px"><strong>Apartado ahora:</strong></p><div class="movlist">${totHtml}</div>`:''}
       <div class="subtabs" style="margin:10px 0 0"><button class="${sobTab==='abiertos'?'active':''}" onclick="sobTab='abiertos';sobTransf=null;renderSob()">Apartados (${abiertos.length})</button><button class="${sobTab==='cerrados'?'active':''}" onclick="sobTab='cerrados';sobTransf=null;renderSob()">Terminados (${cerrados.length})</button></div>
     </div>${cuerpo}`;
