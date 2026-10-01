@@ -545,7 +545,7 @@ async function editInicial(itemId){
 
 function setView(v){
   current=v;
-  if(esSoloLectura() && ['mov','inst','trasp','pend','mas'].includes(v)){
+  if(esSoloLectura() && ['mov','inst','trasp','pend','mas','pzenc'].includes(v)){
     document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
     $('#main').innerHTML = `<div class="card">Tu cuenta (${ROL_LABELS[miPerfil.rol]||miPerfil.rol}) no captura en esta sección.</div>`; return;
   }
@@ -561,6 +561,7 @@ function setView(v){
   if(v==='todos'){ todosCache=null; renderTodos(); }
   if(v==='pend') renderPend();
   if(v==='tubos') renderTubos();
+  if(v==='pzenc') renderPzEnc();
   if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; instRegresoLibre=false; renderInst(); }
@@ -856,6 +857,7 @@ function etiquetaTipoMov(m){
   if(m.motivo==='deSobrante') return 'Sobrante transformado';
   if(m.motivo==='regresoMerma') return 'Merma (regresó sin instalar)';
   if(m.motivo==='regresoInstalacion') return 'Regresó de instalación';
+  if(m.motivo==='piezasEncontradas') return 'Piezas encontradas';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
 function stockHojaTxt(f, unidad){
@@ -897,6 +899,7 @@ function renderMov(){
   <div class="card">
     <div class="paso">1</div><strong>¿Qué quieres anotar?</strong>
     <div class="tipos" style="margin-top:10px">${tiposBtns}</div>
+    <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="irA('pzenc')">🧩 Encontré piezas cortadas que no estaban en el inventario</button>
   </div>
   <div class="card">
     <div class="paso">2</div><strong>¿De qué material?</strong>
@@ -2605,8 +2608,12 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
   const colorFrente = extra && extra.colorFrente;
   if(colorFrente && colorFrente!==color && String(tipo).startsWith('cajonera'))
     piezas.forEach(p=>{ if(PIEZAS_COLOR_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
+  // Zapatera (confirmado por el usuario): los zóclos y la puerta van del color del frente.
+  if(colorFrente && colorFrente!==color && tipo==='zapatera')
+    piezas.forEach(p=>{ if(PIEZAS_ZAPATERA_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
   return piezas;
 }
+const PIEZAS_ZAPATERA_FRENTE = ['Zóclo zapatera','Puerta de zapatera','Jaladera (zapatera)'];
 const PIEZAS_COLOR_FRENTE = ['Zóclo normal','Zóclo Max','Zóclo especial','Marco de espejo','Frente','Frente Max','Puertita de cajonera'];
 
 // Traduce el valor del selector "por muebles" (MUEBLE_TIPO_OPCIONES) a buildAdicionalPiezas
@@ -2673,7 +2680,7 @@ function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, 
   const hayCajonera = muebles.some(m=>m.value!=='entrepanera' && m.value!=='entrepanera_max');
   if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = color; });
   // El frente del espejo (zóclos especiales y marcos) va del color del FRENTE, no de la cajonera.
-  piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo especial' || p.nombre==='Marco de espejo') p.colorDestino = color; });
+  piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo especial' || p.nombre==='Marco de espejo' || PIEZAS_ZAPATERA_FRENTE.includes(p.nombre)) p.colorDestino = color; });
 
   return {piezas: piezasFijas.concat(piezasMuebles), maxNota: base.maxNota};
 }
@@ -2876,7 +2883,7 @@ function renderAdicBox(prefix){
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
       <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}</td>
-      <td>${a.color}${a.colorFrente?'<div class="hint" style="margin:0">frentes y zóclos: '+a.colorFrente+'</div>':''}</td>
+      <td>${a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
   box.innerHTML = `<div class="card">
@@ -2908,9 +2915,9 @@ function toggleAdicionalCajones(prefix){
       <div class="chips" style="margin-top:4px" id="${prefix}-adic-cant-wrap">${[1,2,3].map(n=>`<button type="button" class="chip ${n===1?'on':''}" data-n="${n}" onclick="this.parentNode.querySelectorAll('.chip').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${n}</button>`).join('')}</div>
       <p class="hint">Se descuenta solo la parte de la hoja que usan las repisas, no la hoja completa.</p>`;
   }
-  if(String(sel.value).startsWith('cajonera')){
+  if(String(sel.value).startsWith('cajonera') || sel.value==='zapatera'){
     const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
-    html += `<label class="hint" style="display:block;margin-top:8px">Color de frentes y zóclos</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
+    html += `<label class="hint" style="display:block;margin-top:8px">${sel.value==='zapatera'?'Color del frente (zóclos y puerta)':'Color de frentes y zóclos'}</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
   }
   const labelPuerta = ADIC_CON_PUERTA_LABEL[sel.value];
   if(labelPuerta){
@@ -2935,7 +2942,7 @@ function agregarAdicional(prefix){
   const conPuerta = !!(puertaEl && puertaEl.checked);
   const nuevo = {tipo, cajones, color, conPuerta};
   const cf = document.getElementById(prefix+'-adic-colorfrente');
-  if(cf && String(tipo).startsWith('cajonera') && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
+  if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera') && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
   if(tipo==='repisa'){
     const largo = Number(document.getElementById(prefix+'-adic-largo').value);
     const fondo = Number(document.getElementById(prefix+'-adic-fondo').value);
@@ -3194,6 +3201,7 @@ function renderInstMueble(){
     <div class="paso">1</div><strong>¿Qué modelo ${reg?'regresó':'se instaló'}?</strong>
     <div id="i-selector-wrap" style="margin-top:10px"></div>
     <div id="i-max-wrap"></div>
+    <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> Las cajoneras llevan <strong>corredera de extensión</strong> (también las de los extras; la Max siempre la lleva)</label>
     <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="iModoComp=!iModoComp;renderInstMueble()">${iModoComp?'← Elegir de la lista de modelos':'¿No está el modelo? Ármalo mueble por mueble'}</button>
   </div>
   <div class="card">
@@ -3208,7 +3216,6 @@ function renderInstMueble(){
     <summary><span class="paso">3</span><strong>¿Lleva algo extra?</strong> <span class="hint" style="margin:0 0 0 6px">(opcional)</span></summary>
     <p class="hint">Cajoneras, zapateras, repisas u otros muebles que se agregaron aparte del modelo.</p>
     <div id="i-adic-box" class="subcard"></div>
-    <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> Las cajoneras llevan corredera de extensión</label>
   </details>
   <div class="card">
     <div class="paso">4</div><strong>${reg?'Datos del regreso':'Datos de la instalación'}</strong>
@@ -4744,7 +4751,7 @@ async function renderAprobaciones(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
-        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}
+        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}${(()=>{ const m=items.find(x=>x.motivo==='piezasEncontradas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>✂️ Piezas cortadas encontradas</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Se suman al material cortado.</div></div>`:''; })()}
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
@@ -5421,6 +5428,93 @@ async function confirmarTransformacion(){
   }catch(e){ alert('Error: '+e.message); }
 }
 
+// ===== Piezas cortadas encontradas (confirmado por el usuario) =====
+// Material cortado que no estaba en el inventario (sobrante que nunca se contó). El coordinador
+// captura las piezas (mismas que el conteo) y la app las convierte a hojas con los rendimientos del
+// despiece; se SUMAN al material cortado de su color. Como cualquier captura, Dirección lo aprueba.
+let pzGrupo = null, pzVals = {}, pzNota = '';
+function pzPool(){
+  const pool = [];
+  Object.keys(pzVals).forEach(g=>{ const c = pzVals[g]||{};
+    PIEZAS_AUDIT.filter(p=>c[p.key]>0).forEach(p=>pool.push({nombre:p.nombre, cantidad:c[p.key], dim:p.dim, colorDestino:g, estado:'ok', label:p.label, grupo:g})); });
+  return pool;
+}
+function pzConsumo(){
+  const pool = pzPool(), porColor = {}, out = {};
+  pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
+  Object.keys(porColor).forEach(c=>piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; }));
+  return Object.keys(out).filter(k=>out[k]>0.00049).map(k=>({itemId:k, cantidad:fmtNum(out[k])}));
+}
+function pzResumenHtml(){
+  const pool = pzPool(), cons = pzConsumo();
+  if(!pool.length) return '<p class="hint">Todavía no capturas piezas.</p>';
+  return `<div class="hint" style="margin:0 0 6px">${pool.map(p=>`${p.cantidad} × ${p.label} · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).join('<br>')}</div>
+    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<div class="movitem"><span class="invname">${it.nombre}</span><strong class="pos">+${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>`;
+}
+function setPz(g, key, val){
+  const n = val==='' ? 0 : Number(val);
+  pzVals[g] = pzVals[g]||{};
+  if(!(n>0)) delete pzVals[g][key]; else pzVals[g][key] = n;
+  if(!Object.keys(pzVals[g]).length) delete pzVals[g];
+  const r = document.getElementById('pz-resumen'); if(r) r.innerHTML = pzResumenHtml();
+}
+function sumarPz(g, key){
+  const p = PIEZAS_AUDIT.find(x=>x.key===key); if(!p) return;
+  const actual = ((pzVals[g]||{})[key])||0;
+  const v = prompt(`➕ ¿Cuántas piezas más de ${p.label}?\n\nLlevas ${actual}. Lo que escribas se SUMA.`);
+  if(v===null || String(v).trim()==='') return;
+  const n = Number(v); if(!isFinite(n)) return alert('Escribe solo el número.');
+  setPz(g, key, String(actual+n)); renderPzEnc();
+}
+function renderPzEnc(){
+  if(esSoloLectura()){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  if(!pzGrupo) pzGrupo = MEL_COLORES[0];
+  const esMDF = pzGrupo===AUD_GRUPO_MDF;
+  const lista = PIEZAS_AUDIT.filter(p=>p.tipo===(esMDF?'mdf':'mel'));
+  const counts = pzVals[pzGrupo]||{};
+  const opciones = MEL_COLORES.map(c=>{ const n=Object.keys(pzVals[c]||{}).length; return `<option value="${c}" ${c===pzGrupo?'selected':''}>Melamina ${c}${n?' ✓'+n:''}</option>`; }).join('')
+    + (()=>{ const n=Object.keys(pzVals[AUD_GRUPO_MDF]||{}).length; return `<option value="${AUD_GRUPO_MDF}" ${esMDF?'selected':''}>MDF (fondos de cajón/cajonera)${n?' ✓'+n:''}</option>`; })();
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #0e8a8a">
+      <div style="font-size:17px;font-weight:800">✂️ Piezas encontradas · ${modulo()}</div>
+      <p class="hint">Piezas ya cortadas que <strong>no estaban en el inventario</strong> (sobrante que nunca se contó). La app las convierte a hojas con los mismos rendimientos del despiece y las <strong>SUMA</strong> al material cortado de su color.</p>
+      <p class="hint" style="margin:4px 0 0">No es para lo que regresó de una instalación (eso va en ↩️ Regresó un modelo completo o en 🧩 Sobrantes).</p>
+    </div>
+    <div class="card">
+      <div class="paso">1</div><strong>¿De qué color?</strong>
+      <select onchange="pzGrupo=this.value;renderPzEnc()" style="margin-top:8px">${opciones}</select>
+      <p class="hint" style="margin-top:6px">Puedes capturar varios colores: cambia el color y sigue; lo de cada color se guarda.</p>
+    </div>
+    <div class="card">
+      <div class="paso">2</div><strong>¿Cuántas piezas de cada una?</strong>
+      <div class="wrap-x" style="margin-top:8px"><table><tr><th>Pieza</th><th>Cantidad</th></tr>
+        ${lista.map(p=>`<tr><td>${p.label}<div class="tag">${p.dim}</div></td>
+          <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="numeric" style="min-width:70px" placeholder="—" value="${counts[p.key]??''}" oninput="setPz('${pzGrupo}','${p.key}',this.value)"><button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="sumarPz('${pzGrupo}','${p.key}')">➕</button></div></td></tr>`).join('')}
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="paso">3</div><strong>Esto se suma al inventario</strong>
+      <div id="pz-resumen" style="margin-top:8px">${pzResumenHtml()}</div>
+      <input id="pz-nota" placeholder="¿Dónde estaban? (opcional)" value="${String(pzNota).replace(/"/g,'&quot;')}" oninput="pzNota=this.value" style="margin-top:10px">
+      <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="guardarPzEnc()">✅ Sumar al inventario</button>
+    </div>`;
+}
+async function guardarPzEnc(){
+  const pool = pzPool(), cons = pzConsumo();
+  if(!pool.length || !cons.length) return alert('Primero escribe cuántas piezas encontraste.');
+  const detalle = pool.map(p=>`${p.cantidad} × ${p.label} (${p.dim}) · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`);
+  if(!confirm(`✂️ Sumar piezas encontradas a ${modulo()}:\n\n${detalle.join('\n')}\n\nEquivale a:\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre} (cortado)`; }).join('\n')}\n\n¿Guardar?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    const nota = 'Piezas encontradas'+(pzNota.trim()?' · '+pzNota.trim():'');
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'piezasEncontradas', cantidad:c.cantidad, nota, piezasDetalle:detalle, fecha, estado, loteId, creadoPor});
+    }
+    pzVals = {}; pzNota = '';
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Piezas sumadas al inventario.');
+    renderPzEnc(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
+
 // ===== Menú "Más" del coordinador =====
 function renderMas(){
   const t = (ic, tit, sub, js, color) => `<button class="tile" style="--tc:${color}" onclick="${js}"><span class="tile-ic">${ic}</span><span class="tile-t">${tit}</span><span class="tile-s">${sub}</span></button>`;
@@ -5433,6 +5527,7 @@ function renderMas(){
       ${t('📜','Historial','Entradas y salidas por fecha',"irA('movhist')",'#6b7280')}
       ${t('📐','Despiece','Piezas de cada modelo',"irA('desp')",'#2c46b8')}
       ${t('🧩','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#0e8a8a')}
+      ${t('✂️','Piezas encontradas','Piezas cortadas que no estaban en el inventario',"irA('pzenc')",'#0e8a8a')}
     </div>`;
 }
 
@@ -5507,6 +5602,8 @@ function describirLote(ms){
   if(tipos.includes('instalacion')) return 'Instalación';
   if(tipos.includes('garantia')) return 'Garantía';
   if(ms.some(m=>m.motivo==='deSobrante')) return 'Sobrante transformado';
+  if(ms.some(m=>m.motivo==='piezasEncontradas')) return 'Piezas cortadas encontradas';
+  if(ms.some(m=>m.motivo==='regresoInstalacion')) return 'Regreso de modelo completo';
   if(ms.some(m=>m.motivo==='regresoMerma')) return 'Merma de material que regresó';
   if(tipos.includes('sobrante')) return 'Material a sobrantes';
   if(tipos.includes('devolucion')) return 'Regreso de garantía';
