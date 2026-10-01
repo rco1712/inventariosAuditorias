@@ -2565,7 +2565,9 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     add('Pieza chica de cajón',4*2,'33×16.5 cm',color,'ok');
     add('Pieza grande de cajón',4*2,'46.4×16.5 cm',color,'ok');
     add('Fondo de cajón (MDF 3mm)',4,'49.4×33 cm','—','ok');
-    add('Juego de corredera',4,'—','—','ok','1 por cajón');
+    // Confirmado por el usuario: la Emma puede llevar corredera normal o de extensión.
+    if(correderaExt) add('Correderas de extensión',4,'—','—','ok','1 por cajón (Emma con corredera de extensión)');
+    else add('Juego de corredera',4,'—','—','ok','1 por cajón');
     // Confirmado por el usuario: los cajones de la cajonera Emma NO llevan jaladera.
     add('Fondo de cajonera (MDF 3mm)',1,'55×122 cm','—','ok','Emma ocupa 1 mueble = 1 fondo de cajonera (confirmado por el usuario)');
     // Confirmado por el usuario: la puertita de la cajonera Emma es la misma que la de la
@@ -2624,7 +2626,8 @@ function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
   if(value==='cajonera_3') return buildAdicionalPiezas('cajonera', 3, color, correderaExt);
   if(value==='cajonera_5') return buildAdicionalPiezas('cajonera', 5, color, correderaExt);
   if(value==='cajonera_otra') return buildAdicionalPiezas('cajonera', cajonesManual, color, correderaExt);
-  return buildAdicionalPiezas(value, cajonesManual, color); // entrepanera, cajonera_emma, cajonera_espejo, cajonera_max
+  if(value==='cajonera_emma') return buildAdicionalPiezas('cajonera_emma', 4, color, correderaExt);
+  return buildAdicionalPiezas(value, cajonesManual, color); // entrepanera, cajonera_espejo, cajonera_max
 }
 
 // ===== Composición "por muebles" (combinaciones) =====
@@ -2882,7 +2885,7 @@ function renderAdicBox(prefix){
   if(!box) return;
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
-      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}</td>
+      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
       <td>${a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
@@ -2904,8 +2907,10 @@ function toggleAdicionalCajones(prefix){
   const wrap = document.getElementById(prefix+'-adic-cajones-wrap');
   if(!sel || !wrap) return;
   let html = (sel.value==='cajonera')
-    ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">`
-    : (sel.value==='cajonera_max' ? `<p class="hint" style="margin-top:8px">La Cajonera Max siempre lleva 4 cajones (confirmado; no se captura cantidad).</p>` : '');
+    ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">
+       <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="${prefix}-adic-ext" style="width:auto"> Este extra lleva corredera de extensión</label>`
+    : (sel.value==='cajonera_max' ? `<p class="hint" style="margin-top:8px">La Cajonera Max siempre lleva 4 cajones (confirmado; no se captura cantidad).</p>`
+      : (sel.value==='cajonera_emma' ? `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="${prefix}-adic-ext" style="width:auto"> Este extra lleva corredera de extensión</label>` : ''));
   if(sel.value==='repisa'){
     html = `<div class="grid2" style="margin-top:8px">
         <div><label class="hint">Largo (cm)</label><input type="number" min="1" inputmode="decimal" id="${prefix}-adic-largo" placeholder="ej. 90" style="margin-top:4px"></div>
@@ -2941,6 +2946,7 @@ function agregarAdicional(prefix){
   const puertaEl = document.getElementById(prefix+'-adic-puerta');
   const conPuerta = !!(puertaEl && puertaEl.checked);
   const nuevo = {tipo, cajones, color, conPuerta};
+  const extEl = document.getElementById(prefix+'-adic-ext'); if((tipo==='cajonera' || tipo==='cajonera_emma') && extEl && extEl.checked) nuevo.ext = true;
   const cf = document.getElementById(prefix+'-adic-colorfrente');
   if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera') && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
   if(tipo==='repisa'){
@@ -2977,7 +2983,7 @@ function renderDesp(){
       <input type="checkbox" id="d-todocolor" style="width:auto" onchange="syncTodoColor('d')"> Cliente pidió "todo de un solo color"
     </label>
     <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <input type="checkbox" id="d-corredera-ext" style="width:auto"> Usar corredera de extensión (sustituye la corredera normal en las cajoneras; no aplica a Cajonera Max, que siempre lleva extensión)
+      <input type="checkbox" id="d-corredera-ext" style="width:auto"> Las cajoneras del modelo llevan corredera de extensión (los adicionales se marcan aparte; la Cajonera Max siempre lleva extensión)
     </label>
     <button class="btn" style="margin-top:10px" onclick="calcDespiece()">Calcular despiece</button>
   </div>
@@ -3043,7 +3049,7 @@ function calcDespiece(){
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modelo.nombre+(especial3m?' · a 3 metros':''); notaModelo = modelo.nota;
   }
-  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta, a));
+  const piezasAdic = dAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, !!a.ext, a.conPuerta, a)); // cada extra con su propia corredera
   const piezas = piezasModelo.concat(piezasAdic);
   const consumo = piezasAConsumo(piezas, color);
 
@@ -3201,7 +3207,7 @@ function renderInstMueble(){
     <div class="paso">1</div><strong>¿Qué modelo ${reg?'regresó':'se instaló'}?</strong>
     <div id="i-selector-wrap" style="margin-top:10px"></div>
     <div id="i-max-wrap"></div>
-    <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> Las cajoneras llevan <strong>corredera de extensión</strong> (también las de los extras; la Max siempre la lleva)</label>
+    <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> <span>Las cajoneras <strong>del modelo</strong> llevan corredera de extensión <span class="hint" style="margin:0">(los extras se marcan aparte; la Max siempre la lleva)</span></span></label>
     <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="iModoComp=!iModoComp;renderInstMueble()">${iModoComp?'← Elegir de la lista de modelos':'¿No está el modelo? Ármalo mueble por mueble'}</button>
   </div>
   <div class="card">
@@ -3315,7 +3321,7 @@ function previewInst(){
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = modeloSel.nombre+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
   }
-  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, correderaExt, a.conPuerta, a));
+  const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, !!a.ext, a.conPuerta, a)); // cada extra con su propia corredera
   const piezas = piezasModelo.concat(piezasAdic);
   const pendientes = piezas.filter(p=>p.estado==='pendiente');
   const consumo = piezasAConsumo(piezas, color);
