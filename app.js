@@ -2246,7 +2246,9 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
   // Zóclos: si el modelo lleva cajonera, sus zóclos dependen del color del FRENTE (confirmado
   // por el usuario: "los zóclos dependen del frente del color"), no del color de la cajonera
   // ni de la estructura. Sin cajonera, se quedan con el color de estructura de siempre.
-  const colorZoclo = cajones>0 ? color : estructuraColor;
+  // Confirmado por el usuario: los zóclos SIEMPRE van del color del frente (también en modelos sin
+  // cajones, como el Lateral Sencillo), aunque la estructura sea de otro color.
+  const colorZoclo = color;
 
   // Espejos: el espejo ocupa un "mueble" completo (mismas 2 paredes + 5 entrepaños que una
   // entrepañera — ya contabilizado arriba en paredes/entrepaños, no se vuelve a sumar aquí),
@@ -2265,7 +2267,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     piezasFrenteEspejo(add, espejos, color, maxOn);
   } else if(!maxOn){
     // Confirmado por el usuario: los modelos Max NO llevan zóclos de 10×52 (solo sus zóclos Max).
-    add('Zóclo normal',2,'10×52 cm',colorZoclo,'ok', cajones>0?'Color del frente (zóclos de cajonera dependen del color de frente, confirmado por el usuario)':'');
+    add('Zóclo normal',2,'10×52 cm',colorZoclo,'ok', 'Color del frente (confirmado por el usuario)');
   }
 
   // Fondo de cajonera: confirmado por el usuario — "cada mueble que sea cajonera de 1, de 3,
@@ -2293,7 +2295,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
   else if(fam==='King'){ add('Tubo',5,'—','—','ok'); add('Juego de bridas',5,'—','—','ok'); }
 
   // Igual que los zóclos normales: si el modelo lleva cajonera, los zóclos Max van del color del frente.
-  if(cajones>0) piezas.forEach(p=>{ if(p.nombre==='Zóclo Max') p.colorDestino = color; });
+  piezas.forEach(p=>{ if(p.nombre==='Zóclo Max') p.colorDestino = color; });
   return {piezas, maxNota};
 }
 
@@ -2611,6 +2613,8 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
   if(colorFrente && colorFrente!==color && String(tipo).startsWith('cajonera'))
     piezas.forEach(p=>{ if(PIEZAS_COLOR_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
   // Zapatera (confirmado por el usuario): los zóclos y la puerta van del color del frente.
+  if(colorFrente && colorFrente!==color && String(tipo).startsWith('entrepanera'))
+    piezas.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = colorFrente; });
   if(colorFrente && colorFrente!==color && tipo==='zapatera')
     piezas.forEach(p=>{ if(PIEZAS_ZAPATERA_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
   return piezas;
@@ -2680,8 +2684,7 @@ function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, 
   // Confirmado por el usuario: los zóclos de una cajonera dependen del color del FRENTE, no
   // del color de la cajonera. Se corrige aquí (una sola vez, sobre lo que aportó cada mueble)
   // en vez de duplicar esta regla dentro de cada tipo de mueble en buildAdicionalPiezas.
-  const hayCajonera = muebles.some(m=>m.value!=='entrepanera' && m.value!=='entrepanera_max');
-  if(hayCajonera) piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = color; });
+  piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = color; });
   // El frente del espejo (zóclos especiales y marcos) va del color del FRENTE, no de la cajonera.
   piezasMuebles.forEach(p=>{ if(p.nombre==='Zóclo especial' || p.nombre==='Marco de espejo' || PIEZAS_ZAPATERA_FRENTE.includes(p.nombre)) p.colorDestino = color; });
 
@@ -2920,9 +2923,9 @@ function toggleAdicionalCajones(prefix){
       <div class="chips" style="margin-top:4px" id="${prefix}-adic-cant-wrap">${[1,2,3].map(n=>`<button type="button" class="chip ${n===1?'on':''}" data-n="${n}" onclick="this.parentNode.querySelectorAll('.chip').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${n}</button>`).join('')}</div>
       <p class="hint">Se descuenta solo la parte de la hoja que usan las repisas, no la hoja completa.</p>`;
   }
-  if(String(sel.value).startsWith('cajonera') || sel.value==='zapatera'){
+  if(String(sel.value).startsWith('cajonera') || sel.value==='zapatera' || String(sel.value).startsWith('entrepanera')){
     const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
-    html += `<label class="hint" style="display:block;margin-top:8px">${sel.value==='zapatera'?'Color del frente (zóclos y puerta)':'Color de frentes y zóclos'}</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
+    html += `<label class="hint" style="display:block;margin-top:8px">${sel.value==='zapatera'?'Color del frente (zóclos y puerta)':(String(sel.value).startsWith('entrepanera')?'Color de los zóclos':'Color de frentes y zóclos')}</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
   }
   const labelPuerta = ADIC_CON_PUERTA_LABEL[sel.value];
   if(labelPuerta){
@@ -2948,7 +2951,7 @@ function agregarAdicional(prefix){
   const nuevo = {tipo, cajones, color, conPuerta};
   const extEl = document.getElementById(prefix+'-adic-ext'); if((tipo==='cajonera' || tipo==='cajonera_emma') && extEl && extEl.checked) nuevo.ext = true;
   const cf = document.getElementById(prefix+'-adic-colorfrente');
-  if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera') && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
+  if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera' || String(tipo).startsWith('entrepanera')) && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
   if(tipo==='repisa'){
     const largo = Number(document.getElementById(prefix+'-adic-largo').value);
     const fondo = Number(document.getElementById(prefix+'-adic-fondo').value);
@@ -3212,7 +3215,7 @@ function renderInstMueble(){
   </div>
   <div class="card">
     <div class="paso">2</div><strong>¿De qué color?</strong>
-    <label class="hint" style="display:block;margin-top:10px">Color de los frentes</label>
+ <label class="hint" id="i-color-label" style="display:block;margin-top:10px">Color del frente (frentes de cajón y zóclos)</label>
     <select id="i-color" style="margin-top:4px" onchange="syncTodoColor('i')">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     <div id="i-cajcolor-wrap"></div>
     <label class="row" style="margin-top:12px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-todocolor" style="width:22px;min-height:22px;flex:0 0 22px" onchange="syncTodoColor('i')"> El cliente pidió todo del mismo color (también el interior)</label>
@@ -3437,6 +3440,7 @@ function consumoGarantiaDetalle(lineas){
       const lista = (medidas[l.color] = medidas[l.color]||[]);
       if(l.pModo==='completas'){
         r.cortes.forEach(c=>lista.push({ancho:c.ancho, alto:c.alto, cantidad:c.cantidad*n}));
+        if(r.zoclos) pool.push({nombre:'Zóclo normal', cantidad:r.zoclos*n, dim:'10×52 cm', colorDestino:l.color, estado:'ok'});
         if(l.pHerrajes){
           const h = TIPOS_PUERTA_HERRAJES[l.pTipo];
           [['Rieles',h.riel],['Sistemas',h.sistema],['Bastidores',h.bastidor],[l.pJaladera==='plana'?'Jaladera plana':'Jaladeras',h.jaladera]].forEach(([nom,q])=>{
@@ -3801,6 +3805,7 @@ function componentesRetorno(lineas){
         if(quiere && q>0) quiere[c.pieza]-=q;
         addMedida((PUERTA_PIEZA_LBL[c.pieza]||'Pieza').replace(/\(e?s\)/g,''), l.color, c.ancho, c.alto, q);
       });
+      if(l.pModo==='completas' && r.zoclos) addPieza({nombre:'Zóclo normal', cantidad:r.zoclos*n, dim:'10×52 cm', colorDestino:l.color, estado:'ok'}, ' (de las puertas)');
       if(l.pModo==='completas' && l.pHerrajes){
         const h = TIPOS_PUERTA_HERRAJES[l.pTipo];
         [['Rieles',h.riel],['Sistemas',h.sistema],['Bastidores',h.bastidor],[l.pJaladera==='plana'?'Jaladera plana':'Jaladeras',h.jaladera]].forEach(([nom,q])=>{
@@ -4241,7 +4246,11 @@ function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
   // estándar de 122×244 que el resto del inventario). Se acomodan todas las piezas de este corte
   // juntas (puertas, marcos, fijos, etc.) para aprovechar el sobrante entre ellas, y el resultado
   // es el número real de hojas completas que se van a cortar para esta instalación.
-  return {info:piezas, cortes};
+  // Confirmado por el usuario: "Con cubo al centro" lleva además 1 zóclo de 10×52 del color de
+  // las puertas. Se descuenta proporcional (48 por hoja), aparte del acomodo de las puertas.
+  const zoclos = tipo==='Con cubo al centro' ? 1 : 0;
+  if(zoclos) add('Zóclo', '1 de 10×52 cm', 'Del color de las puertas (confirmado por el usuario)');
+  return {info:piezas, cortes, zoclos};
 }
 
 function calcPuerta(){
@@ -4258,7 +4267,7 @@ function calcPuerta(){
   const cortes = calc.cortes; // [{pieza,ancho,alto,cantidad}] para calcular hojas de melamina
 
   const empaque = hojasParaCortesCombinado(cortes);
-  const hojasMelamina = empaque.costo;
+  const hojasMelamina = fmtNum(empaque.costo + (calc.zoclos||0)/piezasPorHojaIndividual(10, 52, 122, 244));
   if(empaque.noCaben>0) add('Aviso de corte', empaque.noCaben+' pieza(s) no caben en una hoja completa (122×244) en ninguna orientación', 'Revisa las medidas capturadas; esas piezas no se incluyeron en el cálculo de melamina');
 
   // Herrajes (confirmado por el usuario): riel/sistema/bastidor/jaladera según el tipo de puerta.
