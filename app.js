@@ -3100,7 +3100,8 @@ async function renderInstHistorial(){
   instLog.forEach(x=>{ (porDia[x.fechaDia] = porDia[x.fechaDia]||[]).push(x); });
   const dias = Object.keys(porDia).sort((a,b)=>b.localeCompare(a));
   const puede = !esSoloLectura();
-  const colReg = x => { const r = regresoDeInstalacion(x.id);
+  const colReg = x => colRegBase(x) + (esAdmin() ? ` <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap;margin-top:4px" onclick="borrarInstalacionError('${x.id}')">🗑️ Se capturó por error</button>` : '');
+  const colRegBase = x => { const r = regresoDeInstalacion(x.id);
     if(r) return `<span class="tag pos" style="border-color:var(--ok)">↩️ Regresó</span>${r.estado==='pendiente'?' '+badgeEstado('pendiente'):''}`;
     if(!puede || x.estado==='rechazado') return '';
     if(x.estado==='pendiente') return '<span class="hint" style="margin:0">Aún sin aprobar</span>';
@@ -3119,6 +3120,22 @@ async function renderInstHistorial(){
 // ===== Regreso de un modelo completo (confirmado por el usuario) =====
 // Un modelo que se registró como instalado pero regresó completo sin instalarse: NO va a merma ni a
 // sobrantes, regresa al inventario tal cual (la melamina como material cortado, lo demás a su artículo).
+// Dirección puede borrar una instalación que se capturó por error (p. ej. un regreso que se anotó
+// como instalación): se borran sus movimientos y el material vuelve a como estaba. Pide PIN.
+async function borrarInstalacionError(logId){
+  if(!esAdmin()) return;
+  const x = instLog.find(l=>l.id===logId); if(!x) return;
+  const ms = movs.filter(m=>m.loteId===logId || (m.motivo==='regresoInstalacion' && m.instalacionId===logId));
+  if(!confirm(`🗑️ Borrar esta instalación capturada por error:\n\n${x.descripcion} (${x.fechaDia})\n\nSe borran sus ${ms.length} movimiento(s) y el material que descontó vuelve al inventario, como si nunca se hubiera capturado. ¿Continuar?`)) return;
+  if(!(await pedirPinAdmin('borrar esta instalación'))) return;
+  try{
+    for(const m of ms) await db.collection('movimientos').doc(m.id).delete();
+    await db.collection('instalacionesLog').doc(logId).delete();
+    movs = movs.filter(m=>!ms.includes(m));
+    toast('🗑️ Instalación borrada. El material volvió al inventario.');
+    renderInstHistorial();
+  }catch(e){ alert('Error: '+e.message); }
+}
 function regresoDeInstalacion(logId){
   const ms = movs.filter(m=>m.motivo==='regresoInstalacion' && m.instalacionId===logId && m.estado!=='rechazado');
   if(!ms.length) return null;
@@ -4707,8 +4724,9 @@ async function renderAprobaciones(){
   movsSueltosPendientes.forEach(m=>{ const key=m.loteId||m.id; (lotes[key]=lotes[key]||[]).push(m); });
   const loteIds = Object.keys(lotes).sort((a,b)=>(lotes[b][0].fecha||'').localeCompare(lotes[a][0].fecha||''));
 
+  const cortesHoy = cortesHoyHtml(todosMovs, null);
   if(logsPendientes.length===0 && loteIds.length===0){
-    $('#main').innerHTML = '<div class="card">No hay nada pendiente de aprobación. 🎉</div>';
+    $('#main').innerHTML = '<div class="card">No hay nada pendiente de aprobación. 🎉</div>' + cortesHoy;
     return;
   }
 
@@ -4716,6 +4734,7 @@ async function renderAprobaciones(){
   let html = `<div class="card"><strong>Aprobaciones</strong><p class="hint">Lo que capturan los coordinadores queda aquí hasta que lo apruebes o rechaces. Los traspasos entre módulos no requieren aprobación (se aplican de inmediato).</p>
     ${totalPend>1?`<button class="btn" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="aprobarTodo()">✅ Aprobar todo (${totalPend})</button><p class="hint" style="margin:6px 0 0">Revisa la lista de abajo antes de aprobar todo junto.</p>`:''}</div>`;
 
+  html += cortesHoy;
   if(loteIds.length>0){
     html += `<div class="card"><h3>Entradas, salidas y garantías pendientes (${loteIds.length})</h3></div>`;
     html += loteIds.map(key=>{
@@ -5420,6 +5439,23 @@ function renderMas(){
 // ===== Corregir antes de que se apruebe (confirmado por el usuario) =====
 // Lo que sigue "pendiente" lo puede borrar quien lo anotó (o Dirección) para volverlo a capturar bien.
 // Ya aprobado no se puede borrar: se corrige con una auditoría.
+// Corte del día (confirmado por el usuario): el corte NO necesita aprobación, se aplica directo; por
+// eso no salía en pendientes/aprobaciones y parecía que no se había capturado. Se muestra aparte.
+function cortesHoyHtml(lista, soloModulo){
+  const hoy = fechaHoyLocal();
+  const local = iso => new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const cs = lista.filter(m=>m.tipo==='corte' && m.estado!=='rechazado' && m.fecha && local(m.fecha)===hoy && (!soloModulo || m.modulo===soloModulo));
+  const porMod = {}; cs.forEach(m=>{ const k=m.modulo||''; (porMod[k]=porMod[k]||{}); porMod[k][m.itemNombre] = (porMod[k][m.itemNombre]||0) + (Number(m.cantidad)||0); });
+  const sinCorte = soloModulo===modulo() ? cortesPendientes() : [];
+  if(!cs.length && !sinCorte.length) return '';
+  const bloques = Object.keys(porMod).map(k=>`<div class="hint" style="margin:6px 0 0">${soloModulo?'':`<strong>${k}</strong><br>`}${Object.keys(porMod[k]).map(n=>`✂️ ${fmtNum(porMod[k][n])} hoja(s) ${n}`).join('<br>')}</div>`).join('');
+  return `<div class="card" style="border:1px solid var(--line)">
+    <strong>✂️ Hojas cortadas hoy</strong> <span class="tag pos" style="border-color:var(--ok)">Ya aplicado</span>
+    <p class="hint" style="margin:4px 0 0">El corte no necesita aprobación: se suma al cortado en cuanto se guarda.</p>
+    ${bloques || '<p class="hint" style="margin:6px 0 0">Hoy no se ha registrado ningún corte.</p>'}
+    ${sinCorte.length?`<p class="neg" style="margin:8px 0 0">⚠️ Usado sin corte anotado: ${sinCorte.map(x=>fmtNum(x.f.autoCortes)+' de '+x.it.nombre).join(', ')}. Falta registrarlo en el Cierre del turno (paso 1).</p>`:''}
+  </div>`;
+}
 function renderPend(){
   const lotes = {};
   movs.filter(m=>m.estado==='pendiente').forEach(m=>{ const k=m.loteId||m.id; (lotes[k]=lotes[k]||[]).push(m); });
@@ -5427,6 +5463,7 @@ function renderPend(){
   const keys = Object.keys(lotes).sort((a,b)=>(lotes[b][0].fecha||'').localeCompare(lotes[a][0].fecha||''));
   $('#main').innerHTML = `<div class="card"><strong>⏳ Pendientes de aprobar · ${modulo()}</strong>
       <p class="hint">Si anotaste algo mal y todavía no se aprueba, bórralo aquí y vuelve a capturarlo bien. Lo ya aprobado no se puede borrar.</p></div>
+    ${cortesHoyHtml(movs, modulo())}
     ${keys.length ? keys.map(k=>{ const ms=lotes[k]; const puede = esAdmin() || !ms[0].creadoPor || ms[0].creadoPor===yo;
       return `<div class="card">
         <div class="row" style="justify-content:space-between"><strong>${describirLote(ms)}</strong><span class="tag">${new Date(ms[0].fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span></div>
