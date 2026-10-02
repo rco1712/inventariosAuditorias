@@ -189,7 +189,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v103';
+const APP_VERSION = 'v105';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -910,6 +910,7 @@ function etiquetaTipoMov(m){
   if(m.motivo==='regresoMerma') return 'Merma (regresó sin instalar)';
   if(m.motivo==='regresoInstalacion') return 'Regresó de instalación';
   if(m.motivo==='cambioModelo') return 'Cambio de modelo (regresa)';
+  if(m.motivo==='regresoPiezasInst') return 'Regresó de instalación (ya descontado)';
   if(m.motivo==='piezasEncontradas') return 'Piezas encontradas';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
@@ -5523,10 +5524,14 @@ async function guardarTubos(){
 // tocan). Cuando se transforma, se anotan las piezas EXACTAS que salieron y esas regresan al
 // inventario como material cortado. Lo que ya no se aprovecha queda como merma del sobrante.
 let sobrantesCache = [], sobTab = 'abiertos', sobTransf = null, sobPreview = null, sobNota = '';
+// "Ya se descontó en una instalación registrada" (confirmado por el usuario): las piezas regresaron de
+// una instalación que ya descontó su material. Se registra que regresaron (suman) y en el mismo lote
+// salen a sobrantes/merma, así el inventario no se descuenta dos veces.
+let sobYaDesc = false;
 const SOB_TIPOS = ['puertas','pieza','medida','armado'];
 function iniciarSobrante(){
   if(garSub!=='sobrante'){ garLineasGuardadas = garLineas; }
-  garLineas = []; garPreview = null; sobPreview = null; sobNota = ''; garSub = 'sobrante';
+  garLineas = []; garPreview = null; sobPreview = null; sobNota = ''; sobYaDesc = false; garSub = 'sobrante';
   if(!SOB_TIPOS.includes(garTipo)) garTipo = 'puertas';
   renderGar(); window.scrollTo(0,0);
 }
@@ -5559,6 +5564,7 @@ function renderSobranteNuevo(lista, campos){
     <div class="card">
       <div class="paso">3</div><strong>¿De dónde viene?</strong>
       <input id="sob-nota" placeholder="Ej. Puertas del cliente Pérez, no las quiso" value="${String(sobNota).replace(/"/g,'&quot;')}" oninput="sobNota=this.value" style="margin-top:8px">
+      <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:12px;border:1px solid ${sobYaDesc?'#0e8a8a':'var(--line)'};background:${sobYaDesc?'rgba(14,138,138,.12)':'transparent'}"><input type="checkbox" style="width:auto;margin-top:3px" ${sobYaDesc?'checked':''} onchange="sobYaDesc=this.checked;renderGar()"><span><strong>Ya se descontó en una instalación registrada</strong><br><span class="hint" style="margin:0">Márcalo si estas piezas salieron para una instalación que ya está capturada (por ejemplo, puertas que no quedaron y se rehicieron). Así no se descuentan otra vez.</span></span></label>
       <button class="btn" style="margin-top:12px;width:100%;min-height:50px" onclick="previewSobrante()">Revisar material</button>
     </div>
     <div id="sob-result"></div>`;
@@ -5574,7 +5580,8 @@ function pintarPreviewSobrante(){
   const el = document.getElementById('sob-result'); if(!el) return;
   sobPreview = consumoSobrante(garLineas); if(!sobPreview.length){ el.innerHTML=''; return; }
   el.innerHTML = `<div class="card" id="sob-prev">
-    <div style="font-size:16px;font-weight:800">📋 Esto sale del inventario</div>
+    <div style="font-size:16px;font-weight:800">${sobYaDesc?'📋 Esto ya se había descontado':'📋 Esto sale del inventario'}</div>
+    ${sobYaDesc?'<p class="hint" style="margin:4px 0 0">Ya salió con la instalación: el inventario <strong>no cambia</strong>, solo queda registrado a dónde se fue.</p>':''}
     <div class="movlist" style="margin-top:8px">${sobPreview.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<div class="movitem"><span class="invname">${it.nombre}</span><strong>${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>
     <p class="hint" style="margin-top:10px">¿Qué se hace con esto?</p>
     <button class="btn" style="width:100%;min-height:54px;margin-top:6px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="confirmarSobrante('sobrante')">🧩 Sobrantes: se va a aprovechar</button>
@@ -5590,14 +5597,16 @@ async function confirmarSobrante(destino){
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
     const id = cryptoId();
+    const yaDesc = sobYaDesc, fechaReg = new Date(Date.parse(fecha)-1).toISOString(); // el regreso va 1 ms antes, para que se sume antes de salir
     for(const c of sobPreview){ const it=CATALOGO.find(i=>i.id===c.itemId);
+      if(yaDesc) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.itemId, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoPiezasInst', cantidad:c.cantidad, nota:'Regresó de una instalación ya registrada'+(nota?' · '+nota:''), fecha:fechaReg, estado, loteId:id, sobranteId:id, creadoPor});
       if(aMerma) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.itemId, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'regresoMerma', cantidad:c.cantidad, nota:'Regresó sin instalar y no sirve'+(nota?' · '+nota:''), fecha, estado, loteId:id, sobranteId:id, creadoPor});
       else await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.itemId, itemNombre:it.nombre, tipo:'sobrante', cantidad:c.cantidad, nota:'A sobrantes'+(nota?' · '+nota:''), fecha, estado, loteId:id, sobranteId:id, creadoPor}); }
     const restante = {}; if(!aMerma) sobPreview.forEach(c=>{ restante[c.itemId] = c.cantidad; });
-    const doc = {modulo:mod, fecha, nota, lineas:garLineas.map(describirLineaGar), lineasData:JSON.parse(JSON.stringify(garLineas)), material:sobPreview, restante, estado: aMerma?'cerrado':'abierto', transformaciones:[], creadoPor};
+    const doc = {modulo:mod, fecha, nota, ...(yaDesc?{yaDescontado:true}:{}), lineas:garLineas.map(describirLineaGar), lineasData:JSON.parse(JSON.stringify(garLineas)), material:sobPreview, restante, estado: aMerma?'cerrado':'abierto', transformaciones:[], creadoPor};
     if(aMerma){ doc.directoMerma = true; doc.cerradoEn = fecha; doc.mermaFinal = sobPreview.map(c=>({itemId:c.itemId, cantidad:c.cantidad})); }
     await db.collection('sobrantes').doc(id).set(doc);
-    const pend = estado==='pendiente' ? '<br><small>Dirección lo aprueba para que salga del inventario.</small>' : '';
+    const pend = estado==='pendiente' ? (yaDesc?'<br><small>Dirección lo aprueba.</small>':'<br><small>Dirección lo aprueba para que salga del inventario.</small>') : '';
     toast((aMerma ? '🗑️ Registrado como merma.' : '🧩 Mandado a sobrantes.')+pend);
     salirSobrante(); sobTab = aMerma ? 'cerrados' : 'abiertos'; renderSob();
   }catch(e){ alert('Error: '+e.message); }
@@ -5740,6 +5749,36 @@ async function confirmarTransformacion(){
 // captura las piezas (mismas que el conteo) y la app las convierte a hojas con los rendimientos del
 // despiece; se SUMAN al material cortado de su color. Como cualquier captura, Dirección lo aprueba.
 let pzGrupo = null, pzVals = {}, pzNota = '';
+// Piezas de puertas encontradas (confirmado por el usuario): pared falsa, puerta, marco, fijo, extensión
+// de fijo… se capturan con su medida y se convierten a hojas igual que en garantías (acomodo en hoja 122×244).
+let pzMedidas = []; // {nombre, ancho, alto, cantidad, color}
+const PZ_MEDIDA_NOMBRES = {'Pared falsa':[60,244], 'Puerta':['',''], 'Marco':['',''], 'Fijo':['',''], 'Extensión de fijo':[60,''], 'Otra pieza':['','']};
+let pzMedForm = {nombre:'Pared falsa', ancho:'60', alto:'244', cantidad:'1'};
+function pzMedidasHtml(){
+  const f = pzMedForm, mias = pzMedidas.map((m,i)=>({...m,i})).filter(m=>m.color===pzGrupo);
+  return `<div class="card">
+      <div class="paso">2b</div><strong>🚪 Piezas de puertas (con medida)</strong>
+      <p class="hint" style="margin-top:4px">Pared falsa, puerta, marco, fijo, extensión de fijo… Escribe el ancho y el alto en cm.</p>
+      <select style="margin-top:8px" onchange="pzMedForm.nombre=this.value; const d=PZ_MEDIDA_NOMBRES[this.value]||['','']; pzMedForm.ancho=String(d[0]); pzMedForm.alto=String(d[1]); renderPzEnc()">${Object.keys(PZ_MEDIDA_NOMBRES).map(n=>`<option ${n===f.nombre?'selected':''}>${n}</option>`).join('')}</select>
+      <div class="grid2" style="margin-top:8px">
+        <div><label class="hint">Ancho (cm)</label><input id="pzm-ancho" type="number" inputmode="decimal" value="${f.ancho}" oninput="pzMedForm.ancho=this.value" style="margin-top:4px"></div>
+        <div><label class="hint">Alto (cm)</label><input id="pzm-alto" type="number" inputmode="decimal" value="${f.alto}" oninput="pzMedForm.alto=this.value" style="margin-top:4px"></div>
+      </div>
+      <label class="hint" style="display:block;margin-top:8px">¿Cuántas?</label><input id="pzm-cant" type="number" inputmode="numeric" min="1" value="${f.cantidad}" oninput="pzMedForm.cantidad=this.value" style="margin-top:4px">
+      <button class="btn small" style="margin-top:10px;width:100%" onclick="agregarPzMedida()">➕ Agregar pieza de ${pzGrupo}</button>
+      ${mias.length?`<div class="movlist" style="margin-top:10px">${mias.map(m=>`<div class="movitem" style="padding:8px 10px"><span>${m.cantidad} × ${m.nombre} de ${fmtNum(m.ancho)}×${fmtNum(m.alto)} cm</span><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzMedidas.splice(${m.i},1);renderPzEnc()">✖</button></div>`).join('')}</div>`:''}
+    </div>`;
+}
+function agregarPzMedida(){
+  const a = Number(pzMedForm.ancho), h = Number(pzMedForm.alto), n = Math.round(Number(pzMedForm.cantidad)||0);
+  if(!(a>0) || !(h>0)) return alert('Escribe el ancho y el alto de la pieza en centímetros.');
+  if(Math.min(a,h)>122 || Math.max(a,h)>244) return alert('La pieza es más grande que una hoja (122×244). Revisa las medidas.');
+  if(!(n>0)) return alert('Escribe cuántas piezas son.');
+  pzMedidas.push({nombre:pzMedForm.nombre, ancho:a, alto:h, cantidad:n, color:pzGrupo});
+  pzMedForm.cantidad = '1';
+  renderPzEnc();
+}
+function pzMedidasDetalle(){ return pzMedidas.map(m=>`${m.cantidad} × ${m.nombre} de ${fmtNum(m.ancho)}×${fmtNum(m.alto)} cm · ${m.color}`); }
 function pzPool(){
   const pool = [];
   Object.keys(pzVals).forEach(g=>{ const c = pzVals[g]||{};
@@ -5750,12 +5789,14 @@ function pzConsumo(){
   const pool = pzPool(), porColor = {}, out = {};
   pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
   Object.keys(porColor).forEach(c=>piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; }));
+  const medPorColor = {}; pzMedidas.forEach(m=>{ (medPorColor[m.color]=medPorColor[m.color]||[]).push({ancho:m.ancho, alto:m.alto, cantidad:m.cantidad}); });
+  Object.keys(medPorColor).forEach(c=>{ const r = hojasParaCortesCombinado(medPorColor[c], 122, 244); const it = itemByName('Melamina '+c); if(it && r.costo>0) out[it.id]=(out[it.id]||0)+r.costo; });
   return Object.keys(out).filter(k=>out[k]>0.00049).map(k=>({itemId:k, cantidad:fmtNum(out[k])}));
 }
 function pzResumenHtml(){
   const pool = pzPool(), cons = pzConsumo();
-  if(!pool.length) return '<p class="hint">Todavía no capturas piezas.</p>';
-  return `<div class="hint" style="margin:0 0 6px">${pool.map(p=>`${p.cantidad} × ${p.label} · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).join('<br>')}</div>
+  if(!pool.length && !pzMedidas.length) return '<p class="hint">Todavía no capturas piezas.</p>';
+  return `<div class="hint" style="margin:0 0 6px">${pool.map(p=>`${p.cantidad} × ${p.label} · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle()).join('<br>')}</div>
     <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<div class="movitem"><span class="invname">${it.nombre}</span><strong class="pos">+${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>`;
 }
 function setPz(g, key, val){
@@ -5779,7 +5820,7 @@ function renderPzEnc(){
   const esMDF = pzGrupo===AUD_GRUPO_MDF;
   const lista = PIEZAS_AUDIT.filter(p=>p.tipo===(esMDF?'mdf':'mel'));
   const counts = pzVals[pzGrupo]||{};
-  const opciones = MEL_COLORES.map(c=>{ const n=Object.keys(pzVals[c]||{}).length; return `<option value="${c}" ${c===pzGrupo?'selected':''}>Melamina ${c}${n?' ✓'+n:''}</option>`; }).join('')
+  const opciones = MEL_COLORES.map(c=>{ const n=Object.keys(pzVals[c]||{}).length + pzMedidas.filter(m=>m.color===c).length; return `<option value="${c}" ${c===pzGrupo?'selected':''}>Melamina ${c}${n?' ✓'+n:''}</option>`; }).join('')
     + (()=>{ const n=Object.keys(pzVals[AUD_GRUPO_MDF]||{}).length; return `<option value="${AUD_GRUPO_MDF}" ${esMDF?'selected':''}>MDF (fondos de cajón/cajonera)${n?' ✓'+n:''}</option>`; })();
   $('#main').innerHTML = `<div class="card" style="border:2px solid #0e8a8a">
       <div style="font-size:17px;font-weight:800">✂️ Piezas encontradas · ${modulo()}</div>
@@ -5795,6 +5836,7 @@ function renderPzEnc(){
       <div class="paso">2</div><strong>¿Cuántas piezas de cada una?</strong>
       ${listaPiezasHtml('pz')}
     </div>
+    ${esMDF?'':pzMedidasHtml()}
     <div class="card">
       <div class="paso">3</div><strong>Esto se suma al inventario</strong>
       <div id="pz-resumen" style="margin-top:8px">${pzResumenHtml()}</div>
@@ -5804,8 +5846,8 @@ function renderPzEnc(){
 }
 async function guardarPzEnc(){
   const pool = pzPool(), cons = pzConsumo();
-  if(!pool.length || !cons.length) return alert('Primero escribe cuántas piezas encontraste.');
-  const detalle = pool.map(p=>`${p.cantidad} × ${p.label} (${p.dim}) · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`);
+  if((!pool.length && !pzMedidas.length) || !cons.length) return alert('Primero escribe cuántas piezas encontraste.');
+  const detalle = pool.map(p=>`${p.cantidad} × ${p.label} (${p.dim}) · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle());
   if(!confirm(`✂️ Sumar piezas encontradas a ${modulo()}:\n\n${detalle.join('\n')}\n\nEquivale a:\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre} (cortado)`; }).join('\n')}\n\n¿Guardar?`)) return;
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
@@ -5813,7 +5855,7 @@ async function guardarPzEnc(){
     for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'piezasEncontradas', cantidad:c.cantidad, nota, piezasDetalle:detalle, fecha, estado, loteId, creadoPor});
     }
-    pzVals = {}; pzNota = '';
+    pzVals = {}; pzNota = ''; pzMedidas = [];
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Piezas sumadas al inventario.');
     renderPzEnc(); window.scrollTo(0,0);
   }catch(e){ alert('Error: '+e.message); }
