@@ -189,7 +189,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v105';
+const APP_VERSION = 'v106';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -953,7 +953,7 @@ function renderMov(){
   <div class="card">
     <div class="paso">1</div><strong>¿Qué quieres anotar?</strong>
     <div class="tipos" style="margin-top:10px">${tiposBtns}</div>
-    <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="irA('pzenc')">🧩 Encontré piezas cortadas que no estaban en el inventario</button>
+    <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');irA('pzenc')">🧩 Encontré piezas cortadas que no estaban en el inventario</button>
   </div>
   <div class="card">
     <div class="paso">2</div><strong>¿De qué material?</strong>
@@ -965,7 +965,8 @@ function renderMov(){
     ${ayuda?`<p class="hint">${ayuda}</p>`:''}
     ${movCat==='Herrajes'||movBuscar?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint">¿Qué se dañó?</label>
-      <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value;renderMov()"><option value="completas" ${movLado==='completas'?'selected':''}>Hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>Material ya cortado o armado</option></select></div>` : ''}
+      <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value;renderMov()"><option value="completas" ${movLado==='completas'?'selected':''}>Hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>Material ya cortado o armado</option></select>
+      ${movLado==='cortado'?`<button class="btn" style="margin-top:10px;width:100%;min-height:50px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="pzSetModo('merma');irA('pzenc')">✂️ Contar las piezas dañadas (entrepaños, zóclos, paredes…)</button><p class="hint" style="margin:6px 0 0">La app convierte las piezas a hojas. O escribe abajo las hojas directo si ya las sabes.</p>`:''}</div>` : ''}
     <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
     <div class="movlist" id="mv-lista"></div>
     ${movTipo==='merma'?fotoPickerHtml('merma','Foto de lo dañado (opcional)'):''}
@@ -5058,7 +5059,7 @@ async function renderAprobaciones(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
-        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}${(()=>{ const m=items.find(x=>x.motivo==='piezasEncontradas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>✂️ Piezas cortadas encontradas</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Se suman al material cortado.</div></div>`:''; })()}
+        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}${(()=>{ const m=items.find(x=>x.motivo==='piezasEncontradas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>✂️ Piezas cortadas encontradas</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Se suman al material cortado.</div></div>`:''; })()}${(()=>{ const m=items.find(x=>x.motivo==='mermaPiezas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(224,121,26,.10);border:1px solid rgba(224,121,26,.4)"><strong>⚠️ Piezas dañadas (merma)</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Salen del material cortado.</div></div>`:''; })()}
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
@@ -5749,6 +5750,10 @@ async function confirmarTransformacion(){
 // captura las piezas (mismas que el conteo) y la app las convierte a hojas con los rendimientos del
 // despiece; se SUMAN al material cortado de su color. Como cualquier captura, Dirección lo aprueba.
 let pzGrupo = null, pzVals = {}, pzNota = '';
+// La misma pantalla de piezas sirve para dos cosas (confirmado por el usuario): 'enc' = piezas encontradas
+// (SUMAN al cortado) y 'merma' = piezas dañadas (SALEN del cortado como merma).
+let pzModo = 'enc';
+function pzSetModo(m){ if(pzModo!==m){ pzVals = {}; pzMedidas = []; pzNota = ''; } pzModo = m; }
 // Piezas de puertas encontradas (confirmado por el usuario): pared falsa, puerta, marco, fijo, extensión
 // de fijo… se capturan con su medida y se convierten a hojas igual que en garantías (acomodo en hoja 122×244).
 let pzMedidas = []; // {nombre, ancho, alto, cantidad, color}
@@ -5797,7 +5802,8 @@ function pzResumenHtml(){
   const pool = pzPool(), cons = pzConsumo();
   if(!pool.length && !pzMedidas.length) return '<p class="hint">Todavía no capturas piezas.</p>';
   return `<div class="hint" style="margin:0 0 6px">${pool.map(p=>`${p.cantidad} × ${p.label} · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle()).join('<br>')}</div>
-    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<div class="movitem"><span class="invname">${it.nombre}</span><strong class="pos">+${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>`;
+    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const f=calcFormula(it.id); const m=pzModo==='merma';
+      return `<div class="movitem"><span><span class="invname">${it.nombre}</span>${m?`<span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.cortado)} ya cortadas</span>`:''}</span><strong class="${m?'neg':'pos'}">${m?'−':'+'}${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>`;
 }
 function setPz(g, key, val){
   const n = val==='' ? 0 : Number(val);
@@ -5822,32 +5828,39 @@ function renderPzEnc(){
   const counts = pzVals[pzGrupo]||{};
   const opciones = MEL_COLORES.map(c=>{ const n=Object.keys(pzVals[c]||{}).length + pzMedidas.filter(m=>m.color===c).length; return `<option value="${c}" ${c===pzGrupo?'selected':''}>Melamina ${c}${n?' ✓'+n:''}</option>`; }).join('')
     + (()=>{ const n=Object.keys(pzVals[AUD_GRUPO_MDF]||{}).length; return `<option value="${AUD_GRUPO_MDF}" ${esMDF?'selected':''}>MDF (fondos de cajón/cajonera)${n?' ✓'+n:''}</option>`; })();
-  $('#main').innerHTML = `<div class="card" style="border:2px solid #0e8a8a">
+  const esMerma = pzModo==='merma';
+  $('#main').innerHTML = (esMerma ? `<div class="card" style="border:2px solid #e0791a">
+      <div style="font-size:17px;font-weight:800">⚠️ Merma de piezas cortadas · ${modulo()}</div>
+      <p class="hint">Piezas ya cortadas que <strong>se dañaron</strong> y ya no sirven. La app las convierte a hojas con los mismos rendimientos del despiece y las <strong>SACA</strong> del material cortado de su color como merma.</p>
+      <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');irA('mov')">Cancelar</button>
+    </div>` : `<div class="card" style="border:2px solid #0e8a8a">
       <div style="font-size:17px;font-weight:800">✂️ Piezas encontradas · ${modulo()}</div>
       <p class="hint">Piezas ya cortadas que <strong>no estaban en el inventario</strong> (sobrante que nunca se contó). La app las convierte a hojas con los mismos rendimientos del despiece y las <strong>SUMA</strong> al material cortado de su color.</p>
       <p class="hint" style="margin:4px 0 0">No es para lo que regresó de una instalación (eso va en ↩️ Regresó un modelo completo o en 🧩 Sobrantes).</p>
-    </div>
+    </div>`) + `
     <div class="card">
       <div class="paso">1</div><strong>¿De qué color?</strong>
       <select onchange="pzGrupo=this.value;renderPzEnc()" style="margin-top:8px">${opciones}</select>
       <p class="hint" style="margin-top:6px">Puedes capturar varios colores: cambia el color y sigue; lo de cada color se guarda.</p>
     </div>
     <div class="card">
-      <div class="paso">2</div><strong>¿Cuántas piezas de cada una?</strong>
+      <div class="paso">2</div><strong>¿Cuántas piezas ${esMerma?'dañadas ':''}de cada una?</strong>
       ${listaPiezasHtml('pz')}
     </div>
     ${esMDF?'':pzMedidasHtml()}
     <div class="card">
-      <div class="paso">3</div><strong>Esto se suma al inventario</strong>
+      <div class="paso">3</div><strong>${esMerma?'Esto sale del inventario como merma':'Esto se suma al inventario'}</strong>
       <div id="pz-resumen" style="margin-top:8px">${pzResumenHtml()}</div>
-      <input id="pz-nota" placeholder="¿Dónde estaban? (opcional)" value="${String(pzNota).replace(/"/g,'&quot;')}" oninput="pzNota=this.value" style="margin-top:10px">
-      <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="guardarPzEnc()">✅ Sumar al inventario</button>
+      <input id="pz-nota" placeholder="${esMerma?'¿Qué pasó? (opcional)':'¿Dónde estaban? (opcional)'}" value="${String(pzNota).replace(/"/g,'&quot;')}" oninput="pzNota=this.value" style="margin-top:10px">
+      ${esMerma?fotoPickerHtml('merma','Foto de lo dañado (opcional)'):''}
+      <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:${esMerma?'linear-gradient(135deg,#e0791a,#c0620f)':'linear-gradient(135deg,#0e8a8a,#0b6f6f)'}" onclick="guardarPzEnc()">${esMerma?'⚠️ Registrar merma':'✅ Sumar al inventario'}</button>
     </div>`;
 }
 async function guardarPzEnc(){
   const pool = pzPool(), cons = pzConsumo();
   if((!pool.length && !pzMedidas.length) || !cons.length) return alert('Primero escribe cuántas piezas encontraste.');
   const detalle = pool.map(p=>`${p.cantidad} × ${p.label} (${p.dim}) · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle());
+  if(pzModo==='merma') return guardarMermaPiezas(cons, detalle);
   if(!confirm(`✂️ Sumar piezas encontradas a ${modulo()}:\n\n${detalle.join('\n')}\n\nEquivale a:\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre} (cortado)`; }).join('\n')}\n\n¿Guardar?`)) return;
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
@@ -5858,6 +5871,24 @@ async function guardarPzEnc(){
     pzVals = {}; pzNota = ''; pzMedidas = [];
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Piezas sumadas al inventario.');
     renderPzEnc(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+async function guardarMermaPiezas(cons, detalle){
+  for(const c of cons){ const f=calcFormula(c.itemId); const it=CATALOGO.find(i=>i.id===c.itemId);
+    if(c.cantidad > f.cortado + 1e-9) return alert(`No alcanza: de ${it.nombre} hay ${fmtNum(f.cortado)} hojas ya cortadas y las piezas equivalen a ${fmtNum(c.cantidad)}.\n\nRevisa las piezas. No se guardó nada.`); }
+  if(!confirm(`⚠️ Merma de piezas cortadas en ${modulo()}:\n\n${detalle.join('\n')}\n\nEquivale a:\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `− ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre} (de cortado)`; }).join('\n')}\n\n¿Guardar?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    const nota = 'Merma de piezas'+(pzNota.trim()?' · '+pzNota.trim():'');
+    const fotos = (fotosTmp.merma||[]).length;
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'mermaPiezas', cantidad:c.cantidad, nota, piezasDetalle:detalle, fecha, estado, loteId, creadoPor, ...(fotos?{fotos, fotosRef:loteId}:{})});
+    }
+    if(fotos) await guardarFotos('merma', 'merma', loteId, modulo());
+    pzVals = {}; pzNota = ''; pzMedidas = []; pzModo = 'enc';
+    toast(estado==='pendiente' ? '✅ Merma guardada.<br><small>Dirección la aprueba y se descuenta.</small>' : '⚠️ Merma registrada.');
+    irA('mov'); window.scrollTo(0,0);
   }catch(e){ alert('Error: '+e.message); }
 }
 
@@ -6114,7 +6145,7 @@ function renderMas(){
       ${t('📜','Historial','Entradas y salidas por fecha',"irA('movhist')",'#6b7280')}
       ${t('📐','Despiece','Piezas de cada modelo',"irA('desp')",'#2c46b8')}
       ${t('🧩','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#0e8a8a')}
-      ${t('✂️','Piezas encontradas','Piezas cortadas que no estaban en el inventario',"irA('pzenc')",'#0e8a8a')}
+      ${t('✂️','Piezas encontradas','Piezas cortadas que no estaban en el inventario',"pzSetModo('enc');irA('pzenc')",'#0e8a8a')}
     </div>`;
 }
 
