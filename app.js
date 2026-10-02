@@ -39,6 +39,7 @@ function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // Dirección (o traspasos, que siempre son inmediatos) se guarda ya "aprobado".
 function estadoNuevoMovimiento(){ return esAdmin() ? 'aprobado' : 'pendiente'; }
 let instSub = 'mueble', instRegreso = false, instRegresoLibre = false;
+let instCambio = null; // cambio de modelo de una instalación ya registrada {logId, desc, fechaDia, categoria, estado, consumo}
 let instPreview = null; // {piezas, consumo:[{itemId,cantidad}], bloqueado, motivosBloqueo:[]}
 // Adicionales: muebles extra que se agregan a un modelo (cajonera, entrepañera, cajonera de
 // espejo, zapatera, repisa), sin contar como uno de los muebles fijos del modelo elegido.
@@ -188,7 +189,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v102';
+const APP_VERSION = 'v103';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -613,7 +614,7 @@ function setView(v){
   if(v==='valinst') renderValInst();
   if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
-  if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; instRegresoLibre=false; renderInst(); }
+  if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; instRegresoLibre=false; renderInst(); } else instCambio=null;
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
 }
 
@@ -908,6 +909,7 @@ function etiquetaTipoMov(m){
   if(m.motivo==='deSobrante') return 'Sobrante transformado';
   if(m.motivo==='regresoMerma') return 'Merma (regresó sin instalar)';
   if(m.motivo==='regresoInstalacion') return 'Regresó de instalación';
+  if(m.motivo==='cambioModelo') return 'Cambio de modelo (regresa)';
   if(m.motivo==='piezasEncontradas') return 'Piezas encontradas';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
@@ -3238,7 +3240,7 @@ function calcDespiece(){
 let instLog = [];
 function renderInst(){
   const op = (k, ic, t, sub) => `<button class="tipobtn ${instSub===k?'on':''}" onclick="instSub='${k}';instRegreso=false;instRegresoLibre=false;instPreview=null;renderInst()"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
-  $('#main').innerHTML = `
+  $('#main').innerHTML = instCambio ? avisoCambioHtml()+'<div id="inst-body"></div>' : `
     <div class="card">
       <div style="font-size:17px;font-weight:800;margin-bottom:10px">🔧 ¿Qué se instaló?</div>
       <div class="tipos">
@@ -3253,6 +3255,7 @@ function renderInst(){
   if(instSub==='mueble') renderInstMueble();
   else if(instSub==='puertas') renderInstPuertas();
   else renderInstHistorial();
+  if(instCambio){ const f=document.getElementById(instSub==='puertas'?'p-fecha':'i-fecha'); if(f){ f.value=instCambio.fechaDia; f.disabled=true; } }
 }
 
 async function cargarInstLog(){
@@ -3276,7 +3279,10 @@ async function renderInstHistorial(){
   instLog.forEach(x=>{ (porDia[x.fechaDia] = porDia[x.fechaDia]||[]).push(x); });
   const dias = Object.keys(porDia).sort((a,b)=>b.localeCompare(a));
   const puede = !esSoloLectura();
-  const colReg = x => colRegBase(x) + (esAdmin() ? ` <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap;margin-top:4px" onclick="borrarInstalacionError('${x.id}')">🗑️ Se capturó por error</button>` : '');
+  const btnCambio = x => puedeCambiarModelo(x) ? ` <button class="btn small" style="background:transparent;color:#3E5CDE;border:1px solid var(--line);box-shadow:none;white-space:nowrap;margin-top:4px" onclick="iniciarCambioModelo('${x.id}')">✏️ Cambiar modelo</button>` : '';
+  const colReg = x => { if(x.cambiadaPor) return '<span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambiada · no cuenta</span>';
+    const pc = cambioDeInstalacion(x.id); if(pc) return '<span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo esperando aprobación</span>';
+    return colRegBase(x) + btnCambio(x) + (esAdmin() ? ` <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap;margin-top:4px" onclick="borrarInstalacionError('${x.id}')">🗑️ Se capturó por error</button>` : ''); };
   const colRegBase = x => { const r = regresoDeInstalacion(x.id);
     if(r) return `<span class="tag pos" style="border-color:var(--ok)">↩️ Regresó</span>${r.estado==='pendiente'?' '+badgeEstado('pendiente'):''}`;
     if(!puede || x.estado==='rechazado') return '';
@@ -3286,19 +3292,19 @@ async function renderInstHistorial(){
   if(esAdmin()) await cargarValoresInst();
   const regresadas = regresadasDe(movs);
   const semanaDe = {}; instLog.forEach(x=>{ const k=sabadoDe(x.fechaDia||diaLocal(x.fecha)); (semanaDe[k]=semanaDe[k]||[]).push(x); });
-  const cabSemana = dia => { const sab = sabadoDe(dia); const xs = semanaDe[sab]||[]; const vale = xs.filter(x=>x.estado!=='rechazado' && !regresadas.has(x.id));
+  const cabSemana = dia => { const sab = sabadoDe(dia); const xs = semanaDe[sab]||[]; const vale = xs.filter(x=>instCuenta(x, regresadas));
     return `<div class="card" style="border-left:6px solid #e3b341;padding:12px 14px"><strong>📅 Semana ${fCorta(sab)} – ${fCorta(finSemana(sab))}</strong>
-      <div class="hint" style="margin:4px 0 0">🔧 <strong>${vale.length}</strong> instalación(es)${xs.length-vale.length?` · ${xs.length-vale.length} no cuentan (regresaron o rechazadas)`:''}${esAdmin()?` · ⭐ Valor: <strong>${fmtNum(xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0))}</strong>`:''}</div></div>`; };
+      <div class="hint" style="margin:4px 0 0">🔧 <strong>${vale.length}</strong> instalación(es)${xs.length-vale.length?` · ${xs.length-vale.length} no cuentan (regresaron, se cambiaron o se rechazaron)`:''}${esAdmin()?` · ⭐ Valor: <strong>${fmtNum(xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0))}</strong>`:''}</div></div>`; };
   let ultimaSemana = null;
   const tagValor = x => { if(!esAdmin()) return ''; const v = valorInstalacion(x, regresadas);
-    if(regresadas.has(x.id) || x.estado==='rechazado') return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>';
+    if(!instCuenta(x, regresadas)) return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>';
     return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)}</span>`; };
   $('#inst-body').innerHTML = aviso + dias.map(dia=>{ const sab=sabadoDe(dia); const cab = sab!==ultimaSemana ? cabSemana(dia) : ''; ultimaSemana = sab; return cab + `
     <div class="card">
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
       <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.descripcion} ${tagValor(x)}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
     </div>`; }).join('');
 }
@@ -3317,10 +3323,104 @@ async function borrarInstalacionError(logId){
   try{
     for(const m of ms) await db.collection('movimientos').doc(m.id).delete();
     await db.collection('instalacionesLog').doc(logId).delete();
+    if(x.cambioDe){ try{ await db.collection('instalacionesLog').doc(x.cambioDe).update({cambiadaPor:null}); }catch(e){} }
     movs = movs.filter(m=>!ms.includes(m));
     toast('🗑️ Instalación borrada. El material volvió al inventario.');
     renderInstHistorial();
   }catch(e){ alert('Error: '+e.message); }
+}
+// ===== Cambio de modelo (confirmado por el usuario) =====
+// A veces en el domicilio se instala otro modelo distinto al capturado. Desde el historial se elige el
+// modelo real: si la instalación aún no estaba aprobada, se reemplaza; si ya estaba aprobada, solo se
+// mueve la DIFERENCIA de material (lo que el nuevo no usa regresa al inventario —las hojas como
+// cortado— y lo que lleva de más se descuenta). La original deja de contar cuando se aprueba el cambio.
+// Se puede cambiar hasta 7 días después de la fecha de instalación.
+const DIAS_CAMBIO_MODELO = 7;
+function diffConsumo(orig, nuevo){
+  const m = {}; (orig||[]).forEach(c=>{ m[c.itemId]=(m[c.itemId]||0)-(Number(c.cantidad)||0); }); (nuevo||[]).forEach(c=>{ m[c.itemId]=(m[c.itemId]||0)+(Number(c.cantidad)||0); });
+  const regresa=[], descuenta=[]; let iguales=0;
+  Object.keys(m).forEach(id=>{ if(!CATALOGO.find(i=>i.id===id)) return; const v=Math.round(m[id]*1e6)/1e6; if(v<0) regresa.push({itemId:id, cantidad:-v}); else if(v>0) descuenta.push({itemId:id, cantidad:v}); else iguales++; });
+  return {regresa, descuenta, iguales};
+}
+function consumoAValidar(consumo){ return (instCambio && instCambio.estado!=='pendiente') ? diffConsumo(instCambio.consumo, consumo).descuenta : consumo; }
+function cambioDeInstalacion(logId){ return (instLog||[]).find(l=>l.cambioDe===logId && l.estado==='pendiente'); }
+function puedeCambiarModelo(x){
+  if(esSoloLectura() || x.estado==='rechazado' || x.cambiadaPor || (x.cambioDe && x.estado==='pendiente') || regresoDeInstalacion(x.id) || cambioDeInstalacion(x.id)) return false;
+  const dias = Math.round((new Date(fechaHoyLocal()+'T12:00:00') - new Date((x.fechaDia||diaLocal(x.fecha))+'T12:00:00'))/86400000);
+  return dias <= DIAS_CAMBIO_MODELO;
+}
+function iniciarCambioModelo(id){
+  const x = (instLog||[]).find(l=>l.id===id); if(!x) return;
+  instCambio = {logId:x.id, desc:x.descripcion, fechaDia:x.fechaDia, categoria:x.categoria, estado:x.estado, consumo:(x.consumo||[]).map(c=>({...c}))};
+  instSub = x.categoria==='Puerta' ? 'puertas' : 'mueble'; instRegreso=false; instRegresoLibre=false; instPreview=null; puertaPreview=null; iAdicionales=[];
+  renderInst(); window.scrollTo(0,0);
+}
+function cancelarCambioModelo(){ instCambio=null; instPreview=null; puertaPreview=null; instSub='historial'; renderInst(); window.scrollTo(0,0); }
+function avisoCambioHtml(){
+  const c = instCambio;
+  return `<div class="card" style="border:2px solid #3E5CDE;background:rgba(62,92,222,.12)"><div style="font-size:16px;font-weight:800">✏️ Cambiando el modelo de una instalación</div>
+    <p class="hint" style="margin:6px 0 0">Se registró: <strong>${c.desc}</strong> (${fCorta(c.fechaDia)})</p>
+    <p class="hint" style="margin:4px 0 0">Elige abajo ${c.categoria==='Puerta'?'las puertas que':'el modelo que'} <strong>de verdad se instaló</strong>, con su color${c.categoria==='Puerta'?' y medidas':' y sus extras'}. La fecha se queda igual.</p>
+    <button class="btn small" style="margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="cancelarCambioModelo()">Cancelar cambio</button></div>`;
+}
+function cambioPreviewHtml(consumo, accion){
+  const c = instCambio; const li = arr => arr.length ? arr.map(x=>{ const it=CATALOGO.find(i=>i.id===x.itemId); return `<li>${fmtNum(x.cantidad)} ${it.unidad} ${it.nombre}</li>`; }).join('') : '<li>Nada</li>';
+  let cuerpo;
+  if(c.estado==='pendiente'){
+    cuerpo = `<p class="hint" style="margin:8px 0 0">La instalación original todavía no está aprobada: <strong>se reemplaza por esta</strong> y Dirección aprueba el modelo nuevo. Nada se mueve del inventario hasta que se apruebe.</p>`;
+  } else {
+    const d = diffConsumo(c.consumo, consumo);
+    cuerpo = `<div style="margin-top:12px;font-weight:800;color:#1f9d55">↩️ Regresa al inventario</div><ul style="margin:4px 0 0 18px;padding:0">${li(d.regresa.map(x=>({...x})))}</ul>
+      ${d.regresa.some(x=>esHoja(CATALOGO.find(i=>i.id===x.itemId)))?'<p class="hint" style="margin:2px 0 0">Las hojas regresan como material cortado.</p>':''}
+      <div style="margin-top:12px;font-weight:800;color:#e0791a">📤 Se descuenta además</div><ul style="margin:4px 0 0 18px;padding:0">${li(d.descuenta)}</ul>
+      <p class="hint" style="margin:10px 0 0">✔️ ${d.iguales} artículo(s) son iguales en los dos modelos: no se mueven.</p>
+      ${estadoNuevoMovimiento()==='pendiente'?'<p class="hint" style="margin:4px 0 0">⏳ Dirección tiene que aprobar el cambio. Mientras tanto todo sigue como estaba.</p>':''}`;
+  }
+  return `<div class="card" style="border:2px solid #3E5CDE"><div style="font-size:16px;font-weight:800">✏️ Revisa el cambio</div>
+    <div class="movlist" style="margin-top:8px"><div class="movitem" style="padding:8px 10px"><span>Antes</span><strong style="text-decoration:line-through;opacity:.7;text-align:right">${c.desc.split(' · ').slice(0,2).join(' · ')}</strong></div></div>
+    ${cuerpo}
+    <p class="hint" style="margin:4px 0 0">⭐ La instalación vale lo del modelo nuevo, en la misma semana.</p>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px" onclick="${accion}">✅ Guardar cambio de modelo</button></div>`;
+}
+async function guardarCambioModelo(n){
+  const c = instCambio; if(!c) return;
+  await cargarInstLog();
+  const L = (instLog||[]).find(l=>l.id===c.logId);
+  if(!L || L.estado==='rechazado' || L.cambiadaPor) { alert('Esa instalación ya no se puede cambiar (se borró, se rechazó o ya se cambió).'); cancelarCambioModelo(); return; }
+  const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo(), newId = cryptoId();
+  const antes = L.descripcion.split(' · ')[0];
+  const nota = 'Cambio de modelo · antes: '+antes+(n.nota?' · '+n.nota:'');
+  const mov = (it, tipo, cantidad, extra) => db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo, cantidad:Number(cantidad), nota:`${n.desc} · ${nota}`, fecha, estado, loteId:newId, creadoPor, ...(extra||{})});
+  try{
+    if(L.estado==='pendiente'){
+      for(const x of n.consumo){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
+      const viejos = movs.filter(m=>m.loteId===L.id);
+      for(const x of n.consumo) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad);
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion});
+      for(const m of viejos) await db.collection('movimientos').doc(m.id).delete();
+      await db.collection('instalacionesLog').doc(L.id).delete();
+      movs = movs.filter(m=>!viejos.includes(m));
+    } else {
+      const d = diffConsumo(L.consumo, n.consumo);
+      for(const x of d.descuenta){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
+      for(const x of d.regresa) await mov(CATALOGO.find(i=>i.id===x.itemId), 'devolucion', x.cantidad, {motivo:'cambioModelo', instalacionId:L.id, cambioModelo:true});
+      for(const x of d.descuenta) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad, {cambioModelo:true});
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, consumo:n.consumo, fecha, estado, creadoPor,
+        cambioDe:L.id, cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta}});
+      if(estado==='aprobado') await db.collection('instalacionesLog').doc(L.id).update({cambiadaPor:newId});
+    }
+    toast(estado==='pendiente' ? '✅ Cambio de modelo guardado.<br><small>Dirección lo tiene que aprobar.</small>' : '✅ Modelo cambiado.');
+    instCambio=null; instPreview=null; puertaPreview=null; iAdicionales=[]; instLog=null; instSub='historial';
+    await cargarInstLog(); renderInst(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
+function detalleCambioAprob(l){
+  const li = arr => (arr||[]).length ? arr.map(x=>{ const it=CATALOGO.find(i=>i.id===x.itemId); return `<li>${fmtNum(x.cantidad)} ${it?it.unidad:''} ${it?it.nombre:x.itemId}</li>`; }).join('') : '<li>Nada</li>';
+  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(62,92,222,.10);border:1px solid rgba(62,92,222,.4)"><strong>✏️ Cambio de modelo</strong>
+    <div class="hint" style="margin:4px 0 0">Antes: <span style="text-decoration:line-through">${l.cambio.deDesc}</span><br>Ahora: <strong>${l.descripcion}</strong></div>
+    <div style="margin-top:8px;font-weight:700;color:#1f9d55">↩️ Regresa al inventario</div><ul style="margin:2px 0 0 18px;padding:0">${li(l.cambio.regresa)}</ul>
+    <div style="margin-top:6px;font-weight:700;color:#e0791a">📤 Se descuenta además</div><ul style="margin:2px 0 0 18px;padding:0">${li(l.cambio.descuenta)}</ul>
+    <div class="hint" style="margin:6px 0 0">Al aprobar, la instalación original deja de contar y cuenta esta.</div></div>`;
 }
 function regresoDeInstalacion(logId){
   const ms = movs.filter(m=>m.motivo==='regresoInstalacion' && m.instalacionId===logId && m.estado!=='rechazado');
@@ -3501,12 +3601,12 @@ function previewInst(){
   const pendientes = piezas.filter(p=>p.estado==='pendiente');
   const consumo = piezasAConsumo(piezas, color);
 
-  // Validar existencias de cada artículo a consumir
+  // Validar existencias de cada artículo a consumir (en un cambio de modelo ya aprobado, solo lo que se descuenta de más)
   const faltantes = [];
-  consumo.forEach(c=>{
+  consumoAValidar(consumo).forEach(c=>{
     const f = calcFormula(c.itemId);
     if(f.final - c.cantidad < 0){
-      faltantes.push({nombre:CATALOGO.find(i=>i.id===c.itemId).nombre, disponible:f.final, requerido:c.cantidad});
+      faltantes.push({itemId:c.itemId, nombre:CATALOGO.find(i=>i.id===c.itemId).nombre, disponible:f.final, requerido:c.cantidad});
     }
   });
 
@@ -3516,11 +3616,11 @@ function previewInst(){
   instPreview = {modeloNombre:titulo,modeloKey,esMax,extras:extrasN,color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
 
   let html = `<div class="card" id="i-preview-card">
-    <div style="font-size:16px;font-weight:800">${instRegresoLibre?'↩️ Esto regresa al inventario':'📋 Esto se va a descontar'}</div>
+    <div style="font-size:16px;font-weight:800">${instRegresoLibre?'↩️ Esto regresa al inventario':(instCambio?'📋 Material del modelo que se instaló':'📋 Esto se va a descontar')}</div>
     <p class="hint" style="margin-top:4px"><strong>${titulo}</strong> · ${color}${colorCajonera?' · cajonera '+colorCajonera:''}${iAdicionales.length?' · + '+iAdicionales.length+' extra(s)':''}</p>
     ${notaModelo? `<div class="warn">${notaModelo}</div>`:''}
     ${maxNota? `<div class="warn">${maxNota}</div>`:''}
-    <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = !instRegresoLibre && f.final-c.cantidad<0;
+    <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = !instRegresoLibre && faltantes.some(x=>x.itemId===c.itemId);
       return `<div class="movitem" style="${insuf?'border-color:var(--bad)':''}"><span style="min-width:0"><span class="invname">${CATALOGO.find(i=>i.id===c.itemId).nombre}</span><span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.final)} ${item2unidad(c.itemId)}</span></span>
         <strong class="${insuf?'neg':''}" style="font-size:17px;white-space:nowrap">${fmtNum(c.cantidad)} ${item2unidad(c.itemId)}</strong></div>`;
     }).join('')}</div>
@@ -3539,7 +3639,7 @@ function previewInst(){
     html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoLibre()">↩️ Regresar al inventario</button></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
-    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarInst()">✅ Confirmar instalación</button></div>`;
+    html += instCambio ? cambioPreviewHtml(consumo, 'confirmarInst()') : `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarInst()">✅ Confirmar instalación</button></div>`;
   }
   $('#i-result').innerHTML = html;
   const pc = document.getElementById('i-preview-card'); if(pc && pc.scrollIntoView) pc.scrollIntoView({behavior:'smooth', block:'start'});
@@ -4100,6 +4200,7 @@ function avisoAutoCorteHtml(consumo){
 async function confirmarInst(){
   if(!instPreview || instPreview.bloqueado) return;
   const nota = ($('#i-nota').value||'').trim();
+  if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, consumo:instPreview.consumo});
   const fechaDia = $('#i-fecha').value || new Date().toISOString().slice(0,10);
   const mod = modulo();
   const desc = `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`;
@@ -4472,10 +4573,10 @@ function calcPuerta(){
   if(hojasMelamina>0) consumo.push({itemId: itemByName('Melamina '+color).id, cantidad: hojasMelamina});
 
   const faltantes = [];
-  consumo.forEach(c=>{
+  consumoAValidar(consumo).forEach(c=>{
     const f = calcFormula(c.itemId);
     if(f.final - c.cantidad < 0){
-      faltantes.push({nombre:CATALOGO.find(i=>i.id===c.itemId).nombre, disponible:f.final, requerido:c.cantidad});
+      faltantes.push({itemId:c.itemId, nombre:CATALOGO.find(i=>i.id===c.itemId).nombre, disponible:f.final, requerido:c.cantidad});
     }
   });
   const bloqueado = !instRegresoLibre && faltantes.length>0; // un regreso suma, no necesita existencia
@@ -4487,7 +4588,7 @@ function calcPuerta(){
     </table></div>
     <div class="hint">Melamina de 15mm (color ${color}): todas las piezas de este corte se acomodan juntas en hojas de 122×244 cm, aprovechando el sobrante entre puertas/marcos/fijos. Se van a cortar <strong>${empaque.hojas} hoja(s) física(s)</strong> del almacén, pero solo se descuenta <strong>${hojasMelamina}</strong> del inventario (lo que realmente ocupan las piezas; el resto queda como sobrante disponible para otro corte).</div>
     <div class="wrap-x" style="margin-top:8px"><table><tr><th>${instRegresoLibre?'↩️ Regresa al inventario':'Material/herraje a descontar'}</th><th>Cantidad</th><th>Disponible</th></tr>
-    ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = !instRegresoLibre && f.final-c.cantidad<0;
+    ${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = !instRegresoLibre && faltantes.some(x=>x.itemId===c.itemId);
       return `<tr><td>${CATALOGO.find(i=>i.id===c.itemId).nombre}</td><td class="${insuf?'neg':''}">${c.cantidad} ${item2unidad(c.itemId)}</td><td>${fmtNum(f.final)}</td></tr>`;
     }).join('')}
     </table></div>
@@ -4501,7 +4602,7 @@ function calcPuerta(){
     html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoPuerta()">↩️ Regresar puertas al inventario</button></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
-    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="registrarPuerta('${tipo}',${alto},${ancho})">✅ Confirmar instalación de puertas</button></div>`;
+    html += instCambio ? cambioPreviewHtml(consumo, `registrarPuerta('${tipo}',${alto},${ancho})`) : `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="registrarPuerta('${tipo}',${alto},${ancho})">✅ Confirmar instalación de puertas</button></div>`;
   }
   $('#p-result').innerHTML = html;
 }
@@ -4534,6 +4635,7 @@ async function registrarPuerta(tipo, alto, ancho){
   const nota = ($('#p-nota').value||'').trim();
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
   const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${ancho}×${alto} cm (ancho×alto)`;
+  if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo});
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
     for(const c of puertaPreview.consumo){
@@ -4930,7 +5032,7 @@ async function renderAprobaciones(){
   const logsPendientes = todosLogs.filter(l=>l.estado==='pendiente').sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
   // Movimientos pendientes que NO son de una instalación (esos ya se muestran agrupados arriba
   // por su instalacionesLog) — se agrupan por loteId (una sola captura de Entradas/Salidas).
-  const movsSueltosPendientes = todosMovs.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion');
+  const movsSueltosPendientes = todosMovs.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo);
   const lotes = {};
   movsSueltosPendientes.forEach(m=>{ const key=m.loteId||m.id; (lotes[key]=lotes[key]||[]).push(m); });
   const loteIds = Object.keys(lotes).sort((a,b)=>(lotes[b][0].fecha||'').localeCompare(lotes[a][0].fecha||''));
@@ -4975,9 +5077,9 @@ async function renderAprobaciones(){
           <div><strong>${l.modulo}</strong><div class="tag">${l.categoria}</div><div class="tag">${l.fechaDia}</div>${l.creadoPor?`<div class="tag">${l.creadoPor}</div>`:''}</div>
         </div>
         <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>
-        <div class="wrap-x"><table><tr><th>Artículo</th><th>Cant.</th></tr>
+        ${l.cambio ? detalleCambioAprob(l) : `<div class="wrap-x"><table><tr><th>Artículo</th><th>Cant.</th></tr>
         ${(l.consumo||[]).map(c=>`<tr><td>${CATALOGO.find(i=>i.id===c.itemId)?.nombre||c.itemId}</td><td>${fmtNum(c.cantidad)}</td></tr>`).join('')}
-        </table></div>
+        </table></div>`}
         <div class="row" style="justify-content:flex-end;margin-top:8px">
           <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarInstalacion('${l.id}')">Rechazar</button>
           <button class="btn small" onclick="aprobarInstalacion('${l.id}')">Aprobar</button>
@@ -5038,11 +5140,11 @@ async function aprobarTodo(){
   try{
     const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
     const logs = snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.estado==='pendiente');
-    const lotes = [...new Set(snapMov.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').map(m=>m.loteId||m.id))];
+    const lotes = [...new Set(snapMov.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).map(m=>m.loteId||m.id))];
     const porMod = {}; logs.forEach(l=>porMod[l.modulo]=(porMod[l.modulo]||0)+1);
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').forEach(m=>{ porMod[m.modulo]=porMod[m.modulo]||0; });
     if(!confirm(`¿Aprobar TODO lo pendiente?\n\n• ${lotes.length} captura(s) de entradas, salidas, garantías, pedidos…\n• ${logs.length} instalación(es)\n\nMódulos: ${Object.keys(porMod).join(', ')}\n\nTodo se sumará o descontará del inventario.`)) return;
-    for(const l of logs){ await db.collection('instalacionesLog').doc(l.id).update({estado:'aprobado'}); await cambiarEstadoLote(l.id,'aprobado'); }
+    for(const l of logs){ await db.collection('instalacionesLog').doc(l.id).update({estado:'aprobado'}); await cambiarEstadoLote(l.id,'aprobado'); if(l.cambioDe) await db.collection('instalacionesLog').doc(l.cambioDe).update({cambiadaPor:l.id}); }
     for(const k of lotes) await cambiarEstadoLote(k,'aprobado');
     toast(`✅ Se aprobaron ${lotes.length+logs.length} captura(s).`);
     renderAprobaciones();
@@ -5052,6 +5154,7 @@ async function aprobarInstalacion(logId){
   try{
     await db.collection('instalacionesLog').doc(logId).update({estado:'aprobado'});
     await cambiarEstadoLote(logId,'aprobado');
+    try{ const d = await db.collection('instalacionesLog').doc(logId).get(); const l = d && d.data && d.data(); if(l && l.cambioDe) await db.collection('instalacionesLog').doc(l.cambioDe).update({cambiadaPor:logId}); }catch(e){}
     renderAprobaciones();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -5752,8 +5855,13 @@ function grupoValor(clave){
 }
 function valorDe(grupo){ const v = valoresInst && valoresInst[grupo]; return (v!==undefined && v!==null && v!=='') ? Number(v)||0 : (VALORES_DEFAULT[grupo]||0); }
 function valorExtra(){ const v = valoresInst && valoresInst._extra; return (v!==undefined && v!==null && v!=='') ? Number(v)||0 : VALOR_EXTRA_DEFAULT; }
+// Cuenta como instalación: no rechazada, no regresó completa, no se cambió por otro modelo (aprobado),
+// y si es un cambio de modelo, ya está aprobado (mientras tanto sigue contando la original).
+function instCuenta(log, regresadas){
+  return log.estado!=='rechazado' && !(regresadas && regresadas.has(log.id)) && !log.cambiadaPor && !(log.cambioDe && log.estado==='pendiente');
+}
 function valorInstalacion(log, regresadas){
-  if(log.estado==='rechazado' || (regresadas && regresadas.has(log.id))) return 0;
+  if(!instCuenta(log, regresadas)) return 0;
   return valorDe(grupoValor(claveInstalacion(log))) + (Number(log.extras)||0)*valorExtra();
 }
 function regresadasDe(movsList){ return new Set(movsList.filter(m=>m.motivo==='regresoInstalacion' && m.instalacionId && m.estado!=='rechazado').map(m=>m.instalacionId)); }
@@ -5803,7 +5911,7 @@ async function repInstalacionesSemana(){
   const hoy = fechaHoyLocal(), sab = sabadoDe(hoy);
   const sabP = (()=>{ const d=new Date(sab+'T12:00:00'); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); })();
   const sem = (desde, hasta) => { const xs = instLog.filter(x=>{ const f=x.fechaDia||diaLocal(x.fecha); return f>=desde && f<=hasta && x.estado!=='rechazado'; });
-    const vale = xs.filter(x=>!regresadas.has(x.id)); return {n:vale.length, reg:xs.length-vale.length, valor:xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0)}; };
+    const vale = xs.filter(x=>instCuenta(x, regresadas)); return {n:vale.length, reg:xs.length-vale.length, valor:xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0)}; };
   const a = sem(sab, hoy), b = sem(sabP, finSemana(sabP));
   const fila = (t, r, rango) => `<div class="movitem" style="padding:8px 10px"><span>${t}<span class="hint" style="display:block;margin:0">${rango}</span></span><strong>${fmtNum(r.valor)}</strong></div>`;
   el.innerHTML = `<strong>🔧 Instalaciones de ${modulo()}</strong>
@@ -5854,7 +5962,7 @@ function datosModuloResumen(R, mod, rg){
   const regresadas = regresadasDe(R.movs);
   const instR = R.inst.filter(x=>x.modulo===mod && x.estado!=='rechazado' && enRango(x.fechaDia||diaLocal(x.fecha)));
   return {
-    inst: instR.filter(x=>!regresadas.has(x.id)).length,
+    inst: instR.filter(x=>instCuenta(x, regresadas)).length,
     instReg: instR.filter(x=>regresadas.has(x.id)).length,
     valor: instR.reduce((s,x)=>s+valorInstalacion(x, regresadas),0),
     gar: R.gar.filter(x=>x.modulo===mod && x.estado!=='rechazado' && enRango(x.fechaDia||diaLocal(x.fecha))).length,
