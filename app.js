@@ -13,6 +13,9 @@ let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={
 let auditCat=null, auditCapturas={};
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='seguimiento', audAuditor='', audPaso=0, audHechas={};
+// Contar a ciegas (confirmado por el usuario): oculta el teórico mientras se cuenta; se puede prender o
+// apagar en cualquier momento. Por default prendido. El resultado siempre muestra teórico vs. físico.
+let audOcultarTeo = true;
 // Armados contados (cajoneras sin cajones, cajones completos, cuadros de cajón)
 let auditArmados=[], auditArmadoForm={tipo:'cajonera', variante:'3', color:'Blanco', colorCuadro:'Blanco', ext:false, puertitas:false, puertitasSinJal:false, sinFondo:false, sinHerrajes:false, colorFrente:'', cantidad:''};
 let moduloActual = localStorage.getItem('am_modulo') || null;
@@ -121,6 +124,12 @@ const CORR_SUELTA_ITEM = {'Corredera hembra':'Corredera hembra (sin pareja)', 'C
 const CORR_TIPOS = [
   {suf:'', juego:'Juego de corredera', hembra:'Corredera hembra (sin pareja)', macho:'Corredera macho (sin pareja)', etiqueta:'Corredera normal'},
   {suf:' (extensión)', juego:'Correderas de extensión', hembra:'Corredera ext. hembra (sin pareja)', macho:'Corredera ext. macho (sin pareja)', etiqueta:'Corredera de extensión'}];
+// Correderas del inventario actual por tipo: {etiqueta, juegos, hembras, machos} (solo tipos con algo).
+function correderasHoy(){
+  return CORR_TIPOS.map(t=>{ const v = n=>{ const it=itemByName(n); return it ? calcFormula(it.id).final : 0; };
+    return {etiqueta:t.etiqueta, juegos:v(t.juego), hembras:v(t.hembra), machos:v(t.macho)}; })
+    .filter(b=>Math.abs(b.juegos)>0.005 || Math.abs(b.hembras)>0.005 || Math.abs(b.machos)>0.005);
+}
 function esCorrSuelta(it){ return !!it && /\(sin pareja\)$/.test(it.nombre); }
 function modulo(){return moduloActual;}
 // Búsqueda sin acentos ni mayúsculas ("correde" encuentra "Juego de corredera").
@@ -175,6 +184,43 @@ function ajustarNavSticky(){
 }
 window.addEventListener('resize', ajustarNavSticky);
 try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky); document.addEventListener('DOMContentLoaded', ()=>{ const h=document.querySelector('header'); if(h) ro.observe(h); }); const h0=document.querySelector('header'); if(h0) ro.observe(h0); } }catch(e){}
+// ===== Versión de la app (confirmado por el usuario) =====
+// Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
+// un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
+// para que Dirección vea quién trae una versión vieja.
+const APP_VERSION = 'v101';
+const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
+let versionServidor = null;
+async function revisarVersion(){
+  try{
+    const r = await fetch('sw.js?ts='+Date.now(), {cache:'no-store'}); if(!r.ok) return;
+    const m = (await r.text()).match(/auditoriamodulos-(v\d+)/); if(!m) return;
+    versionServidor = m[1];
+    if(numVersion(versionServidor) > numVersion(APP_VERSION)) mostrarAvisoVersion();
+  }catch(e){}
+}
+function mostrarAvisoVersion(){
+  if(document.getElementById('ver-banner')) return;
+  const b = document.createElement('div'); b.id='ver-banner';
+  b.style.cssText='position:fixed;left:12px;right:12px;bottom:14px;z-index:9998;background:#1f9d55;color:#fff;border-radius:14px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.35);font-weight:700';
+  b.innerHTML = `<span style="flex:1">🔄 Hay una versión nueva de la app (${versionServidor}). Tú tienes la ${APP_VERSION}.</span><button class="btn small" style="background:#fff;color:#1f9d55;box-shadow:none" onclick="actualizarApp()">Actualizar</button>`;
+  document.body.appendChild(b);
+}
+async function actualizarApp(){
+  try{ if(typeof guardarBorradorAud==='function' && current==='aud') guardarBorradorAud(); }catch(e){}
+  try{ const regs = navigator.serviceWorker ? await navigator.serviceWorker.getRegistrations() : []; for(const r of regs) await r.unregister(); }catch(e){}
+  try{ if(window.caches){ const ks = await caches.keys(); for(const k of ks) await caches.delete(k); } }catch(e){}
+  location.reload();
+}
+async function registrarVersionUsuario(){
+  try{
+    const email = getCurrentUserEmail ? getCurrentUserEmail() : ''; if(!email || esSoloLectura()) return;
+    await db.collection('versiones').doc(email).set({email, modulo: (miPerfil&&miPerfil.modulo) || modulo() || '', rol:(miPerfil&&miPerfil.rol)||'', version:APP_VERSION, fecha:new Date().toISOString()});
+  }catch(e){}
+}
+setInterval(revisarVersion, 10*60*1000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') revisarVersion(); });
+
 async function init(){
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.onclick=()=>setView(b.dataset.v));
   document.getElementById('logoutBtn').onclick = doLogout;
@@ -200,6 +246,7 @@ async function init(){
   await loadStock();
   setView('home');
   abrirAccesoDirecto();
+  revisarVersion(); registrarVersionUsuario();
   // Pide al teléfono que NO borre los datos guardados de la app (importante para lo anotado sin internet).
   try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
 }
@@ -562,6 +609,8 @@ function setView(v){
   if(v==='pend') renderPend();
   if(v==='tubos') renderTubos();
   if(v==='pzenc') renderPzEnc();
+  if(v==='resumen'){ resumenCache=null; renderResumen(); }
+  if(v==='valinst') renderValInst();
   if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
   if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; instRegresoLibre=false; renderInst(); }
@@ -788,6 +837,7 @@ function renderHome(){
     t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
     t('📋','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
     t('🧩','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#0e8a8a');
+    t('📈','Resumen semanal','Cómo va cada módulo',"irA('resumen')",'#6b4bd6');
   }
   if(esAdministracion()){
     const enCaminoT = pedidos.filter(pedidoEnCamino).length;
@@ -817,7 +867,8 @@ function renderHome(){
     ${stockBajoHtml()}
     ${avisoInstalarHtml()}
     <div id="home-apr"></div>
-    <div class="tiles">${tiles.join('')}</div>`;
+    <div class="tiles">${tiles.join('')}</div>
+    <p class="hint" style="text-align:center;margin:14px 0 4px">Versión ${APP_VERSION}${versionServidor && numVersion(versionServidor)>numVersion(APP_VERSION)?` · <a href="#" onclick="actualizarApp();return false;">hay una nueva (${versionServidor})</a>`:' · ✅ al día'}</p>`;
   if(esAdmin()) contarAprobacionesPendientes();
   if(esAdministracion()){
     const porAprobar = []; pedidos.forEach(p=>recepcionesDe(p).forEach((r,idx)=>{ if(estadoRecepcion(r)==='pendiente') porAprobar.push(p.modulo); }));
@@ -1173,6 +1224,7 @@ function renderAud(){
   } else {
     const items = itemsSeccionAud(sec.k);
     const eq = piezasAuditAHojas();
+    const sinTeo = ciego || (audOcultarTeo && audTipo!=='conteo');
     const catHoja = items.length>0 && esHoja(items[0]);
     const faltan = faltanSeccionAud(sec.k).length;
     cuerpo = `<div class="card">
@@ -1181,10 +1233,10 @@ function renderAud(){
     ${sec.k==='Herrajes'?'<p class="hint">🔩 <strong>Correderas:</strong> en "Juego de corredera" van los juegos completos (hembra + macho juntos). Las <strong>hembras y machos sueltos</strong> van en sus renglones "(sin pareja)", normal o de extensión. La app los junta con los de cajoneras y cajones armados y forma juegos donde hay pareja.</p>':''}
     <p class="hint">Escribe cuánto hay de cada uno; si no hay, pon <strong>0</strong>. Si después aparece más, toca <strong>➕</strong> y se suma a lo que ya llevas.</p>
     ${comp?'<p class="hint" style="font-weight:700;color:var(--brand)">➕ Escribe SOLO lo que te faltó contar. Lo demás déjalo vacío.</p>':`<p class="hint" style="font-weight:700;${faltan?'color:#b3742c':'color:var(--ok)'}" id="aud-faltan">${faltan?`Faltan ${faltan} de ${items.length} por contar`:'✓ Todo contado en esta sección'}</p>`}
-    <div class="wrap-x"><table><tr><th>Artículo</th>${ciego?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
+    <div class="wrap-x"><table><tr><th>Artículo</th>${sinTeo?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id); const v=auditCapturas[it.id];
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
-        return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${ciego?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
+        return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${sinTeo?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
           <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="decimal" style="min-width:70px" placeholder="—" value="${v??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value);actualizarFaltanAud()">
           <button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" title="Sumar" onclick="sumarAud('${it.id}')">➕</button></div>${extra}</td></tr>`;
       }).join('')}
@@ -1202,6 +1254,7 @@ function renderAud(){
       <select id="aud-tipo" onchange="audTipo=this.value;renderAud()" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option></select>
       <input id="aud-auditor" placeholder="Nombre de quien cuenta" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
+    ${ciego||audTipo==='conteo'?'':`<button class="btn small" style="margin-top:8px;width:100%;${audOcultarTeo?'background:linear-gradient(135deg,#6b4bd6,#5338b8)':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="audOcultarTeo=!audOcultarTeo;guardarBorradorAud();renderAud()">${audOcultarTeo?'🙈 Contando a ciegas · toca para ver el teórico':'👁️ Viendo el teórico · toca para contar a ciegas'}</button>`}
     ${ciego?'':`<p class="hint" style="margin-top:6px">${comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
     ${comp?'':`<div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>`}
     <p class="hint" style="margin:4px 0 0;${comp?'display:none':''}">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas. Puedes pasar a cualquier sección; lo pendiente se marca con ⏳.</p>
@@ -1228,7 +1281,7 @@ function claveBorradorAud(){ return 'borradorAud_'+modulo(); }
 function guardarBorradorAud(){
   try{
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
-    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, fecha:new Date().toISOString()}));
+    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
     else localStorage.removeItem(claveBorradorAud());
   }catch(e){}
 }
@@ -1244,7 +1297,7 @@ function recuperarBorradorAud(){
     if(hayAhora) return;
     const b = JSON.parse(raw);
     auditCapturas = b.auditCapturas||{}; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
-    audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo;
+    audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
     toast('↩️ Se recuperó lo que ya habías contado.');
   }catch(e){}
 }
@@ -1346,6 +1399,7 @@ function renderAudArmadosHtml(){
     <p class="hint">Cajoneras armadas sin cajones, cajones completos, cuadros de cajón, cajoneras de espejo, puertas de espejo y puertas de zapatera (las correderas sueltas se cuentan en 🔩 Herrajes). Las cajoneras traen la corredera <strong>hembra</strong> y los cajones la <strong>macho</strong>: solo se cuenta un juego cuando hay pareja.</p>
     <label class="hint">¿Qué encontraste?</label>
     <select style="margin-top:4px" onchange="${set('tipo')}">${Object.keys(ARMADO_TIPOS).map(k=>`<option value="${k}" ${k===f.tipo?'selected':''}>${ARMADO_TIPOS[k]}</option>`).join('')}</select>
+    ${(()=>{ const fa=familiaArmado(f); return `<div style="margin-top:6px;padding:6px 10px;border-left:5px solid ${fa.c};border-radius:8px;color:${fa.c};font-weight:700">${fa.ic} ${fa.t}</div>`; })()}
     <div class="grid2" style="margin-top:10px">
       ${ARMADO_SIN_VARIANTE(f.tipo)?'':`<div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>`}
       ${esCorr?'':`<div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>`}
@@ -1378,7 +1432,7 @@ function renderAudArmadosHtml(){
   <div class="card">
     <h3>Armados capturados (${auditArmados.length})</h3>
     ${auditArmados.length? `<div class="wrap-x"><table><tr><th>Descripción</th><th>Cant.</th><th></th></tr>
-      ${auditArmados.map((a,i)=>`<tr><td>${describirArmado(a)}</td><td>${a.cantidad}</td><td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="quitarArmado(${i})">Quitar</button></td></tr>`).join('')}
+      ${auditArmados.map((a,i)=>{ const f=familiaArmado(a); return `<tr style="box-shadow:inset 5px 0 0 ${f.c}"><td style="padding-left:12px"><span style="color:${f.c};font-weight:700">${f.ic} ${describirArmado(a)}</span></td><td><strong>${a.cantidad}</strong></td><td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="quitarArmado(${i})">Quitar</button></td></tr>`; }).join('')}
     </table></div>` : '<p class="hint">Todavía no has agregado armados.</p>'}
   </div>
   ${resumenCardHtml()}`;
@@ -1412,6 +1466,107 @@ function vaciarConteoAud(){
   if(!confirm('¿Borrar TODO lo que llevas capturado en este conteo?\n\n(Hojas, herrajes, piezas cortadas y armados. No se toca el inventario.)')) return;
   auditCapturas={}; auditPiezas={}; auditArmados=[]; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
 }
+// ===== Lista de piezas para contar (confirmado por el usuario): agrupada por familia, con color por
+// familia (dibujo, nombre y franja), dibujo de la forma de la pieza, buscador, ✓ en lo contado y
+// botones +1 / +5. La usan el conteo de la auditoría y "Piezas encontradas".
+const FAMILIAS_PIEZA = [
+  {k:'est', t:'Estructura', ic:'🧱', c:'#5b8def', keys:['maletero','pared','entrepano','cargador','zoclo']},
+  {k:'caj', t:'Cajones', ic:'🗄️', c:'#e3b341', keys:['frente','pgrande','pchica','fondocajon','fondocajonera']},
+  {k:'max', t:'MAX', ic:'⭐', c:'#b07cf2', keys:['paredmax','entmaxlargo','entmaxcorto','respaldomax','frentemax','puertitamax','pgrandemax','pchicamax','zoclomax','espzoclo18max','espzoclo16max','espmarco160max','fondomax']},
+  {k:'zap', t:'Zapatera', ic:'👟', c:'#3fbf74', keys:['puertazap','entzap','zoclozap12','zoclozap']},
+  {k:'esp', t:'Espejo', ic:'🪞', c:'#35c2d0', keys:['espmarco160','espzoclo18','espzoclo16','espmarco35']},
+  {k:'pta', t:'Puertitas', ic:'🚪', c:'#f08a3c', keys:['puertita5','puertita3']}
+];
+// Color de un armado según su familia (mismos colores que las piezas).
+function familiaArmado(a){
+  const F = k => FAMILIAS_PIEZA.find(f=>f.k===k);
+  if(a.variante==='max') return F('max');
+  if(a.tipo==='cajonera_espejo' || a.tipo==='puerta_espejo') return F('esp');
+  if(a.tipo==='puerta_zapatera') return F('zap');
+  return F('caj');
+}
+function familiaDePieza(key){ return FAMILIAS_PIEZA.find(f=>f.keys.includes(key)) || FAMILIAS_PIEZA[0]; }
+let piezasAbiertas = {}, piezasBuscar = '';
+function dibujoPiezaSvg(dim, color){
+  const m = String(dim).match(/([\d.]+)\s*×\s*([\d.]+)/); if(!m) return '';
+  let a = Number(m[1]), b = Number(m[2]); const L = Math.max(a,b), C = Math.min(a,b);
+  // Forma real (proporción) y tamaño relativo: las piezas grandes se ven más grandes que las chicas.
+  const W = 64, H = 32;
+  let w = 16 + 48*Math.sqrt(L/244), h = w*C/L;
+  if(h > H){ w = w*H/h; h = H; }
+  h = Math.max(3, h);
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="flex:0 0 ${W}px" aria-hidden="true"><rect x="${(W-w)/2}" y="${(H-h)/2}" width="${w}" height="${h}" rx="2" fill="${color}" fill-opacity=".85" stroke="${color}"/></svg>`;
+}
+// ctx: 'aud' (auditoría) o 'pz' (piezas encontradas)
+function piezasCtx(ctx){
+  return ctx==='aud'
+    ? {grupo:auditPiezaGrupo, counts:auditPiezas[auditPiezaGrupo]||{}, set:(k,v)=>{ setAuditPieza(auditPiezaGrupo,k,v); guardarBorradorAud(); }}
+    : {grupo:pzGrupo, counts:pzVals[pzGrupo]||{}, set:(k,v)=>setPz(pzGrupo,k,v)};
+}
+function listaPiezasHtml(ctx){
+  const {grupo, counts} = piezasCtx(ctx);
+  const esMDF = grupo===AUD_GRUPO_MDF;
+  const lista = PIEZAS_AUDIT.filter(p=>p.tipo===(esMDF?'mdf':'mel'));
+  const area = p=>{ const m=String(p.dim).match(/([\d.]+)\s*×\s*([\d.]+)/); return m?Number(m[1])*Number(m[2]):0; };
+  const bloques = FAMILIAS_PIEZA.map(f=>{
+    const ps = lista.filter(p=>familiaDePieza(p.key).k===f.k).sort((x,y)=>area(y)-area(x));
+    if(!ps.length) return '';
+    const n = ps.filter(p=>counts[p.key]>0).length;
+    const abierto = !!piezasBuscar || (piezasAbiertas[f.k]!==undefined ? piezasAbiertas[f.k] : (f.k==='est' || n>0));
+    return `<div class="pz-grupo" data-fam="${f.k}" style="margin-top:10px;border-left:5px solid ${f.c};border-radius:10px;background:rgba(127,127,127,.06)">
+      <button type="button" onclick="piezasAbiertas['${f.k}']=${abierto?'false':'true'};rerenderPiezas('${ctx}')" style="all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:10px 12px">
+        <span style="font-size:18px">${f.ic}</span><strong style="color:${f.c};font-size:16px;flex:1">${f.t}</strong>
+        <span id="pzcnt-${ctx}-${f.k}" class="tag" style="${n?`color:${f.c};border-color:${f.c}`:''}">${n?n+' ✓':ps.length+' piezas'}</span><span class="hint" style="margin:0">${abierto?'▲':'▼'}</span>
+      </button>
+      ${abierto?`<div style="padding:0 8px 8px">${ps.map(p=>filaPiezaHtml(ctx, p, f, counts[p.key])).join('')}</div>`:''}
+    </div>`; }).join('');
+  const leyenda = FAMILIAS_PIEZA.filter(f=>lista.some(p=>familiaDePieza(p.key).k===f.k)).map(f=>`<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 8px 2px 0;font-size:12px"><span style="width:10px;height:10px;border-radius:3px;background:${f.c};display:inline-block"></span>${f.t}</span>`).join('');
+  return `<input type="search" placeholder="🔍 Buscar pieza (ej. max, zap, 52)" value="${String(piezasBuscar).replace(/"/g,'&quot;')}" oninput="piezasBuscar=this.value;filtrarPiezas('${ctx}')" style="margin-top:8px">
+    <div class="hint" style="margin:6px 0 0">${leyenda}</div>
+    <div id="pz-lista-${ctx}">${bloques}</div>`;
+}
+function filaPiezaHtml(ctx, p, f, v){
+  const on = v>0;
+  return `<div class="pz-fila" data-txt="${(p.label+' '+p.dim+' '+f.t).toLowerCase().replace(/"/g,'')}" id="pzf-${ctx}-${p.key}" style="display:flex;align-items:center;gap:8px;padding:8px 6px;margin-top:6px;border-radius:10px;${on?`background:${f.c}22;`:''}">
+    ${dibujoPiezaSvg(p.dim, f.c)}
+    <div style="flex:1;min-width:0"><div class="pz-nombre" style="color:${f.c};font-weight:700;line-height:1.2">${on?'✓ ':''}${p.label}</div><span class="tag" style="color:#fff">${p.dim}</span></div>
+    <input type="number" min="0" inputmode="numeric" placeholder="—" value="${v??''}" style="width:64px;min-width:64px;text-align:center" oninput="piezaCambio('${ctx}','${p.key}',this.value)">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <button class="btn small" style="padding:4px 8px;min-height:0" onclick="piezaSumar('${ctx}','${p.key}',1)">+1</button>
+      <button class="btn small" style="padding:4px 8px;min-height:0;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="piezaSumar('${ctx}','${p.key}',5)">+5</button>
+    </div>
+  </div>`;
+}
+function piezaCambio(ctx, key, val){
+  piezasCtx(ctx).set(key, val);
+  marcarFilaPieza(ctx, key);
+}
+function piezaSumar(ctx, key, n){
+  const c = piezasCtx(ctx); const actual = Number(c.counts[key])||0;
+  c.set(key, String(actual+n));
+  const row = document.getElementById('pzf-'+ctx+'-'+key); if(row){ const inp=row.querySelector('input'); if(inp) inp.value = actual+n; }
+  marcarFilaPieza(ctx, key);
+}
+function marcarFilaPieza(ctx, key){
+  const {counts} = piezasCtx(ctx); const f = familiaDePieza(key); const p = PIEZAS_AUDIT.find(x=>x.key===key);
+  const row = document.getElementById('pzf-'+ctx+'-'+key); if(!row || !p) return;
+  const on = counts[key]>0;
+  row.style.background = on ? f.c+'22' : '';
+  const nm = row.querySelector('.pz-nombre'); if(nm) nm.textContent = (on?'✓ ':'')+p.label;
+  const tag = document.getElementById('pzcnt-'+ctx+'-'+f.k);
+  if(tag){ const n = f.keys.filter(k=>counts[k]>0).length; tag.textContent = n ? n+' ✓' : f.keys.filter(k=>PIEZAS_AUDIT.find(x=>x.key===k&&x.tipo===p.tipo)).length+' piezas'; tag.style.color = n?f.c:''; tag.style.borderColor = n?f.c:''; }
+}
+function filtrarPiezas(ctx){
+  const q = piezasBuscar.trim().toLowerCase();
+  // al buscar se abren todos los grupos; se redibuja solo la lista (sin perder el cursor del buscador)
+  const el = document.getElementById('pz-lista-'+ctx); if(!el) return;
+  const tmp = document.createElement('div'); tmp.innerHTML = listaPiezasHtml(ctx);
+  el.innerHTML = tmp.querySelector('#pz-lista-'+ctx).innerHTML;
+  el.querySelectorAll('.pz-fila').forEach(r=>{ r.style.display = !q || r.dataset.txt.includes(q) ? 'flex' : 'none'; });
+  el.querySelectorAll('.pz-grupo').forEach(g=>{ const vis=[...g.querySelectorAll('.pz-fila')].some(r=>r.style.display!=='none'); g.style.display = (!q || vis) ? '' : 'none'; });
+}
+function rerenderPiezas(ctx){ if(ctx==='aud') renderAud(); else renderPzEnc(); if(piezasBuscar) filtrarPiezas(ctx); }
+
 function renderAudPiezasHtml(){
   if(!auditPiezaGrupo) auditPiezaGrupo = MEL_COLORES[0];
   const esMDF = auditPiezaGrupo===AUD_GRUPO_MDF;
@@ -1427,14 +1582,8 @@ function renderAudPiezasHtml(){
     <p class="hint">Cuenta las piezas que ya están cortadas y sueltas en el módulo. La app las convierte a hojas con los mismos rendimientos del despiece y las suma al conteo físico de esa hoja.</p>
     <p class="hint">🧩 <strong>No cuentes</strong> lo que está apartado en <strong>Sobrantes</strong>: eso ya está fuera del inventario hasta que se transforme.</p>
     <label class="hint">Color / material</label>
-    <select onchange="auditPiezaGrupo=this.value;renderAud()" style="margin-top:4px">${opciones}</select>
-    <div class="wrap-x" style="margin-top:10px"><table><tr><th>Pieza</th><th>Rinde</th><th>Cantidad</th></tr>
-      ${lista.map(p=>`<tr>
-        <td>${p.label}<div class="tag">${p.dim}</div></td>
-        <td class="hint" style="margin:0">${p.rinde}</td>
-        <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="numeric" style="min-width:70px" value="${counts[p.key]??''}" oninput="setAuditPieza('${auditPiezaGrupo}','${p.key}',this.value)"><button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="sumarPiezaAud('${auditPiezaGrupo}','${p.key}')">➕</button></div></td>
-      </tr>`).join('')}
-    </table></div>
+    <select onchange="auditPiezaGrupo=this.value;renderAud()" style="margin-top:4px;font-weight:700">${opciones}</select>
+    ${listaPiezasHtml('aud')}
   </div>
   ${resumenCardHtml()}`;
 }
@@ -2327,6 +2476,10 @@ const CARGADORES_POR_HOJA = 69;
 // (ESPEJOS_POR_HOJA). Cada pieza suelta vale su parte de ese 1/5 según su área, así que contar
 // las 6 piezas de un frente da exactamente 0.20 hojas, igual que al instalarlo.
 const FRENTE_ESPEJO_PIEZAS = {'10×160 cm':2, '10×35 cm':2, '16×52 cm':1, '18×52 cm':1};
+// Piezas sueltas de muebles Max (paredes, entrepaños y respaldo): la entrepañera Max completa
+// (2 paredes 40×185 + 5 entrepaños 40×58) sale de 1 hoja; cada pieza suelta vale su parte por área.
+const AREA_ENTREPANERA_MAX = 2*40*185 + 5*40*58;
+function fraccionPiezaMax(dim){ const m=String(dim).match(/([\d.]+)\s*×\s*([\d.]+)/); return m ? Number(m[1])*Number(m[2])/AREA_ENTREPANERA_MAX : 0; }
 function fraccionPiezaFrenteEspejo(dim){
   const area = d => { const m=String(d).match(/([\d.]+)\s*×\s*([\d.]+)/); return m ? Number(m[1])*Number(m[2]) : 0; };
   const total = Object.keys(FRENTE_ESPEJO_PIEZAS).reduce((s,d)=>s+area(d)*FRENTE_ESPEJO_PIEZAS[d],0);
@@ -2348,6 +2501,12 @@ const PIEZAS_AUDIT = [
   {key:'puertitamax', tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['max'].dim, label:'Puertita de cajonera Max',         rinde:PUERTITA_CAJONERA['max'].porHoja+' por hoja'},
   {key:'puertazap',   tipo:'mel', nombre:'Puerta de zapatera',       dim:'172×30 cm',   label:'Puerta de zapatera',       rinde:'Corte combinado (igual que en despiece)'},
   {key:'zoclo',       tipo:'mel', nombre:'Zóclo normal',             dim:'10×52 cm',    label:'Zóclo 10×52',              rinde:'48 por hoja'},
+  {key:'zoclomax',    tipo:'mel', nombre:'Zóclo Max',                dim:'12×58 cm',    label:'Zóclo Max 12×58',          rinde:'Por área (proporcional)'},
+  {key:'paredmax',    tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×185 cm',   label:'Pared Max 40×185',         rinde:'Por área: 1 entrepañera Max = 1 hoja'},
+  {key:'entmaxlargo', tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×58 cm',    label:'Entrepaño Max largo 40×58',rinde:'Por área: 1 entrepañera Max = 1 hoja'},
+  {key:'entmaxcorto', tipo:'mel', nombre:'Pieza Max suelta',         dim:'27×58 cm',    label:'Entrepaño Max corto 27×58',rinde:'Por área: 1 entrepañera Max = 1 hoja'},
+  {key:'respaldomax', tipo:'mel', nombre:'Pieza Max suelta',         dim:'20×58 cm',    label:'Respaldo Max 20×58',       rinde:'Por área: 1 entrepañera Max = 1 hoja'},
+  {key:'zoclozap12',  tipo:'mel', nombre:'Zóclo zapatera',           dim:'12×27 cm',    label:'Zóclo de zapatera 12×27 (con puerta)', rinde:'Por área (proporcional)'},
   {key:'zoclozap',    tipo:'mel', nombre:'Zóclo zapatera',           dim:'10×27 cm',    label:'Zóclo de zapatera 10×27',  rinde:'108 por hoja'},
   {key:'cargador',    tipo:'mel', nombre:'Cargador',                 dim:'10×40 cm',    label:'Cargador 10×40',           rinde:CARGADORES_POR_HOJA+' por hoja (sierra de 5 mm)'},
   {key:'espzoclo16',  tipo:'mel', nombre:'Pieza de frente de espejo',dim:'16×52 cm',    label:'Zóclo de espejo 16×52',    rinde:'Parte del frente de espejo (5 frentes por hoja)'},
@@ -2828,6 +2987,7 @@ function piezasAConsumo(piezas, color){
   piezas.forEach(p=>{
     if(p.estado!=='ok' || typeof p.cantidad!=='number' || !p.colorDestino || p.colorDestino==='—') return;
     if(p.nombre==='Pieza de frente de espejo') addConsumo('Melamina '+p.colorDestino, p.cantidad*fraccionPiezaFrenteEspejo(p.dim));
+    if(p.nombre==='Pieza Max suelta') addConsumo('Melamina '+p.colorDestino, p.cantidad*fraccionPiezaMax(p.dim));
     if(p.nombre==='Cargador') addConsumo('Melamina '+p.colorDestino, p.cantidad/CARGADORES_POR_HOJA);
   });
   piezas.forEach(p=>{
@@ -3123,14 +3283,24 @@ async function renderInstHistorial(){
     if(x.estado==='pendiente') return '<span class="hint" style="margin:0">Aún sin aprobar</span>';
     return `<button class="btn small" style="background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="regresarInstalacion('${x.id}')">↩️ Regresó completo</button>`; };
   const aviso = avisoReg;
-  $('#inst-body').innerHTML = aviso + dias.map(dia=>`
+  if(esAdmin()) await cargarValoresInst();
+  const regresadas = regresadasDe(movs);
+  const semanaDe = {}; instLog.forEach(x=>{ const k=sabadoDe(x.fechaDia||diaLocal(x.fecha)); (semanaDe[k]=semanaDe[k]||[]).push(x); });
+  const cabSemana = dia => { const sab = sabadoDe(dia); const xs = semanaDe[sab]||[]; const vale = xs.filter(x=>x.estado!=='rechazado' && !regresadas.has(x.id));
+    return `<div class="card" style="border-left:6px solid #e3b341;padding:12px 14px"><strong>📅 Semana ${fCorta(sab)} – ${fCorta(finSemana(sab))}</strong>
+      <div class="hint" style="margin:4px 0 0">🔧 <strong>${vale.length}</strong> instalación(es)${xs.length-vale.length?` · ${xs.length-vale.length} no cuentan (regresaron o rechazadas)`:''}${esAdmin()?` · ⭐ Valor: <strong>${fmtNum(xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0))}</strong>`:''}</div></div>`; };
+  let ultimaSemana = null;
+  const tagValor = x => { if(!esAdmin()) return ''; const v = valorInstalacion(x, regresadas);
+    if(regresadas.has(x.id) || x.estado==='rechazado') return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>';
+    return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)}</span>`; };
+  $('#inst-body').innerHTML = aviso + dias.map(dia=>{ const sab=sabadoDe(dia); const cab = sab!==ultimaSemana ? cabSemana(dia) : ''; ultimaSemana = sab; return cab + `
     <div class="card">
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
       <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.descripcion}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.descripcion} ${tagValor(x)}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
-    </div>`).join('');
+    </div>`; }).join('');
 }
 
 // ===== Regreso de un modelo completo (confirmado por el usuario) =====
@@ -3304,7 +3474,7 @@ function previewInst(){
   const color = $('#i-color').value;
   const todoColor = $('#i-todocolor').checked;
   const correderaExt = document.getElementById('i-corredera-ext') ? document.getElementById('i-corredera-ext').checked : false;
-  let piezasModelo, maxNota, titulo, notaModelo=null, colorCajonera;
+  let piezasModelo, maxNota, titulo, notaModelo=null, colorCajonera, modeloKey=null, esMax=false;
   if(iModoComp){
     const maxOn = false; // en combinación, lo Max lo definen los muebles elegidos
     const especial3m = iFamiliaComp==='Doble Especial' && document.getElementById('i-especial3m-comp') ? document.getElementById('i-especial3m-comp').checked : false;
@@ -3314,6 +3484,7 @@ function previewInst(){
     const r = buildComposicion(iFamiliaComp, iMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = iFamiliaComp+' — combinación: '+iMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ')+(especial3m?' · a 3 metros':'');
+    modeloKey = 'Combinación '+iFamiliaComp; esMax = iMueblesComp.some(m=>/_max$/.test(m.value));
   } else {
     const modeloSel = MODELOS.find(x=>x.nombre===$('#i-modelo').value);
     const fam = modeloSel.fam, cajones = modeloSel.cajones, espejos = modeloSel.espejos;
@@ -3322,7 +3493,8 @@ function previewInst(){
     colorCajonera = (cajones>0 || espejos>0) && document.getElementById('i-color-cajonera') ? document.getElementById('i-color-cajonera').value : null;
     const r = buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
-    titulo = modeloSel.nombre+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
+    titulo = modeloSel.nombre+(maxOn?' Max':'')+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
+    modeloKey = modeloSel.nombre; esMax = maxOn;
   }
   const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, !!a.ext, a.conPuerta, a)); // cada extra con su propia corredera
   const piezas = piezasModelo.concat(piezasAdic);
@@ -3340,7 +3512,8 @@ function previewInst(){
 
   const bloqueadoPorReceta = pendientes.length>0;
   const bloqueadoPorStock = !instRegresoLibre && faltantes.length>0; // un regreso suma, no necesita existencia
-  instPreview = {modeloNombre:titulo,color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
+  const extrasN = iAdicionales.reduce((t,a)=>t+(a.tipo==='repisa'?((Number(a.cantidad)||1)):1),0); // cada extra vale aparte (repisa: por pieza)
+  instPreview = {modeloNombre:titulo,modeloKey,esMax,extras:extrasN,color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
 
   let html = `<div class="card" id="i-preview-card">
     <div style="font-size:16px;font-weight:800">${instRegresoLibre?'↩️ Esto regresa al inventario':'📋 Esto se va a descontar'}</div>
@@ -3588,8 +3761,8 @@ function renderGar(){
       </details>
     </div>
     <div class="card">
-      <div class="paso">2</div><strong>¿Qué sirve y qué es merma?</strong>
-      <p class="hint">La app separa lo que regresó en sus piezas y herrajes. Marca cada uno: <strong>✅ Sirve</strong> regresa al inventario; <strong>🗑️ Merma</strong> solo queda anotado.</p>
+      <div class="paso">2</div><strong>¿Qué sirve, qué va a sobrantes y qué es merma?</strong>
+      <p class="hint">La app separa lo que regresó en sus piezas y herrajes. Marca cada uno: <strong>✅ Sirve</strong> regresa al inventario; <strong>🧩 Sobrante</strong> (solo melamina/MDF) se aparta para aprovecharse después; <strong>🗑️ Merma</strong> solo queda anotado.</p>
       <button class="btn" style="width:100%;min-height:50px" onclick="separarRetornoGar()">Separar en piezas</button>
     </div>
     <div id="g-result"></div>`;
@@ -3728,6 +3901,7 @@ async function renderGarHistorial(){
         <div class="row" style="justify-content:space-between"><strong>↩️ Regresó el ${new Date(r.fecha).toLocaleDateString('es-MX')}</strong>${r.loteId && (r.devuelto||[]).length?badgeEstado(estadoLote(r.loteId, r.estado)):''}</div>
         ${(r.sirve||[]).length?`<div class="hint" style="margin:4px 0 0"><strong>✅ Sirvió (regresó al inventario):</strong><br>${r.sirve.join('<br>')}</div>`:''}
         ${(r.merma||[]).length?`<div class="hint" style="margin:4px 0 0"><strong>🗑️ Merma:</strong><br>${r.merma.join('<br>')}</div>`:''}
+        ${(r.sobrante||[]).length?`<div class="hint" style="margin:4px 0 0"><strong>🧩 A sobrantes:</strong><br>${r.sobrante.join('<br>')}</div>`:''}
         ${r.fotos?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;margin:4px 0" onclick="verFotos('${r.loteId}',${r.fotos},'Lo que regresó')">📷 Ver fotos (${r.fotos})</button>`:''}
         ${(r.devuelto||[]).length?`<details><summary class="hint">Lo que se sumó al inventario</summary><div class="hint">${r.devuelto.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `${it?it.nombre:c.itemId}: +${fmtNum(c.cantidad)} ${it?it.unidad:''}${it&&esHoja(it)?' (cortado)':''}`; }).join('<br>')}</div></details>`:''}
       </div>` : (puede ? `<button class="btn" style="margin-top:10px;width:100%;background:linear-gradient(135deg,#e0791a,#c2650f)" onclick="iniciarRetornoGarId('${l.id}')">↩️ Registrar lo que regresó</button>` : '<p class="hint" style="margin-top:8px">Todavía no se registra lo que regresó.</p>');
@@ -3828,26 +4002,27 @@ function renderRetornoComps(){
   const el = document.getElementById('g-result'); if(!el || !garRet || !garRet.comps) return;
   const comps = garRet.comps;
   const filas = comps.map((c,i)=>{
-    const sirve = c.estado==='sirve';
-    return `<div class="movitem" style="flex-direction:column;align-items:stretch;gap:8px;${sirve?'border-color:var(--ok)':''}">
+    const sirve = c.estado==='sirve', sob = c.estado==='sobrante';
+    return `<div class="movitem" style="flex-direction:column;align-items:stretch;gap:8px;${sirve?'border-color:var(--ok)':(sob?'border-color:#0e8a8a':'')}">
       <div><span class="invname">${fmtNum(c.n)} × ${c.label}</span><span class="hint" style="display:block;margin:2px 0 0">${c.kind==='hoja'?'Melamina / MDF':'Herraje'}</span></div>
-      <div class="chips"><button class="chip ${sirve?'on':''}" onclick="retMarcar(${i},'sirve')">✅ Sirve</button><button class="chip ${!sirve?'on':''}" onclick="retMarcar(${i},'merma')">🗑️ Merma</button></div>
+      <div class="chips"><button class="chip ${sirve?'on':''}" onclick="retMarcar(${i},'sirve')">✅ Sirve</button>${c.kind==='hoja'?`<button class="chip ${sob?'on':''}" onclick="retMarcar(${i},'sobrante')">🧩 Sobrante</button>`:''}<button class="chip ${c.estado==='merma'?'on':''}" onclick="retMarcar(${i},'merma')">🗑️ Merma</button></div>
+      ${sob?'<p class="hint" style="margin:0">Se aparta en 🧩 Sobrantes para aprovecharla después; cuando se transforme, las piezas que salgan regresan al inventario.</p>':''}
       ${sirve && c.n>1 ? `<label class="hint">¿Cuántas sirven? (de ${fmtNum(c.n)})<input type="number" min="0" max="${c.n}" inputmode="numeric" value="${c.sirven}" style="margin-top:4px" oninput="garRet.comps[${i}].sirven=Math.min(${c.n},Math.max(0,Number(this.value)||0))"></label>` : ''}
     </div>`;
   }).join('');
   el.innerHTML = `<div class="card" id="g-ret-card">
     <div style="font-size:16px;font-weight:800">🔍 Revisa cada pieza</div>
-    <p class="hint">Por defecto la melamina queda como merma y los herrajes como que sirven. Cámbialo si no es así.</p>
+    <p class="hint">Por defecto la melamina queda como merma y los herrajes como que sirven. Cámbialo si no es así. <strong>✅ Sirve</strong> regresa al inventario, <strong>🧩 Sobrante</strong> se aparta para aprovecharse después y <strong>🗑️ Merma</strong> solo se anota.</p>
     <div class="movlist">${filas}</div>
     ${fotoPickerHtml('ret','Foto de lo que regresó (opcional)')}
     <button class="btn" style="margin-top:12px;width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRetornoGar()">✅ Guardar lo que regresó</button>
   </div>`;
 }
 // Convierte lo que sirve a artículos del inventario: [{itemId, cantidad}]
-function devolucionDeComps(comps){
+function devolucionDeComps(comps, estadoBuscado){
   const out = {}, pool = [], medidas = {};
   comps.forEach(c=>{
-    const k = c.estado==='sirve' ? Math.min(c.n, Number(c.sirven)||0) : 0; if(!(k>0)) return;
+    const k = (estadoBuscado||'sirve')==='sirve' ? (c.estado==='sirve' ? Math.min(c.n, Number(c.sirven)||0) : 0) : (c.estado===estadoBuscado ? c.n : 0); if(!(k>0)) return;
     if(c.kind==='item') out[c.itemId] = (out[c.itemId]||0) + k;
     else {
       (c.pool||[]).forEach(p=>pool.push({...p, cantidad:k}));
@@ -3868,13 +4043,16 @@ async function confirmarRetornoGar(){
   if(!garRet || !garRet.comps) return;
   const log = garRet.log, comps = garRet.comps;
   const devuelto = devolucionDeComps(comps);
-  const sirve = [], merma = [];
+  const aSobrante = devolucionDeComps(comps, 'sobrante').filter(d=>esHojaId(d.itemId));
+  const sirve = [], merma = [], sobr = [];
   comps.forEach(c=>{
+    if(c.estado==='sobrante'){ sobr.push(`${fmtNum(c.n)} × ${c.label}`); return; }
     const k = c.estado==='sirve' ? Math.min(c.n, Number(c.sirven)||0) : 0;
     if(k>0) sirve.push(`${fmtNum(k)} × ${c.label}`);
     if(c.n-k>0) merma.push(`${fmtNum(c.n-k)} × ${c.label}`);
   });
   const resumen = (devuelto.length ? 'Regresa al inventario:\n'+devuelto.map(d=>{ const it=CATALOGO.find(i=>i.id===d.itemId); return `• +${fmtNum(d.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (cortado)':''}`; }).join('\n') : 'Nada regresa al inventario.')
+    + (sobr.length ? '\n\nSe aparta en Sobrantes:\n'+sobr.map(x=>'• '+x).join('\n') : '')
     + (merma.length ? '\n\nMerma (solo se anota):\n'+merma.map(x=>'• '+x).join('\n') : '');
   if(!confirm(resumen+'\n\n¿Guardar?')) return;
   try{
@@ -3888,8 +4066,17 @@ async function confirmarRetornoGar(){
       await db.collection('movimientos').doc(cryptoId()).set({modulo:log.modulo||modulo(), itemId:d.itemId, itemNombre:it.nombre, tipo:'devolucion', cantidad:d.cantidad, nota, fecha, estado, loteId, garantiaId:log.id, creadoPor});
     }
     const nFotosRet = await guardarFotos('ret', 'retorno', loteId, log.modulo||modulo());
-    await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, devuelto, estado, loteId, creadoPor, fotos:nFotosRet||0}});
-    toast(devuelto.length && estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar para que sume al inventario.</small>' : '✅ Guardado lo que regresó.');
+    // Confirmado por el usuario: lo que regresa de una garantía también puede ir a Sobrantes. Esa
+    // melamina ya había salido del inventario con la garantía, así que solo se aparta (no se descuenta
+    // otra vez); cuando se transforme, las piezas que salgan regresan al inventario.
+    let sobranteId = null;
+    if(aSobrante.length){
+      sobranteId = cryptoId();
+      const restante = {}; aSobrante.forEach(c=>{ restante[c.itemId] = c.cantidad; });
+      await db.collection('sobrantes').doc(sobranteId).set({modulo:log.modulo||modulo(), fecha, nota:nota+' (regresó de garantía)', lineas:sobr, lineasData:[], material:aSobrante, restante, estado:'abierto', transformaciones:[], creadoPor, deGarantia:log.id});
+    }
+    await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, sobrante:sobr, sobranteId, devuelto, estado, loteId, creadoPor, fotos:nFotosRet||0}});
+    toast((devuelto.length && estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar para que sume al inventario.</small>' : '✅ Guardado lo que regresó.')+(sobranteId?'<br><small>🧩 Lo de sobrante quedó apartado en Sobrantes.</small>':''));
     salirRetornoGar(); garSub='regreso'; renderGar(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
@@ -3931,7 +4118,7 @@ async function confirmarInst(){
     }
     // Registro consolidado para el historial por día del módulo
     await db.collection('instalacionesLog').doc(logId).set({
-      modulo:mod, categoria:'Mueble', descripcion:desc, nota, fechaDia,
+      modulo:mod, categoria:'Mueble', descripcion:desc, nota, fechaDia, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0,
       consumo:instPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
     toast(estado==='pendiente'
@@ -4362,7 +4549,7 @@ async function registrarPuerta(tipo, alto, ancho){
     }
     await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,nota,fechaDia,fecha:new Date().toISOString(),estado});
     await db.collection('instalacionesLog').doc(logId).set({
-      modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia,
+      modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia, modeloKey:'Puerta '+tipo,
       consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
     toast(estado==='pendiente'
@@ -4625,6 +4812,8 @@ function renderRep(){
     </div>`;
   }
 
+  html += `<div class="card" id="rep-inst"><strong>🔧 Instalaciones de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`;
+  setTimeout(repInstalacionesSemana, 0);
   html += `<div class="card row" style="justify-content:space-between">
       <div><strong>📜 Historial de entradas y salidas</strong><p class="hint" style="margin:2px 0 0">Cuándo llegó material, cuándo salió y quién lo anotó, con totales por fechas.</p></div>
       <button class="btn small" onclick="irA('movhist')">Ver historial</button>
@@ -4699,13 +4888,13 @@ function renderRep(){
     </table></div>
   </div>`;
 
-  // Correderas (de la última auditoría que las contó): juegos totales y medias sin pareja
-  const audCorr = auditorias.find(x=>x.correderas && x.correderas.length);
-  html += `<div class="card"><h3>🔩 Correderas (juegos y desfasadas)</h3>
-    ${audCorr ? `<p class="hint">Según la auditoría del ${new Date(audCorr.fecha).toLocaleDateString('es-MX')} (${audCorr.auditor||''}).</p>
-    <div class="wrap-x"><table><tr><th>Tipo</th><th>Juegos totales</th><th>Hembras sin macho</th><th>Machos sin hembra</th></tr>
-    ${audCorr.correderas.map(b=>`<tr><td>${b.etiqueta}</td><td><strong>${fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares)}</strong></td><td class="${b.hembrasSinPareja?'neg':''}">${fmtNum(b.hembrasSinPareja)}</td><td class="${b.machosSinPareja?'neg':''}">${fmtNum(b.machosSinPareja)}</td></tr>`).join('')}
-    </table></div>` : '<p class="hint">Todavía no hay una auditoría que haya contado cajoneras, cajones o correderas sueltas.</p>'}
+  // Correderas del inventario actual: juegos completos y medias sin pareja
+  const corrHoyRep = correderasHoy();
+  html += `<div class="card"><h3>🔩 Correderas (juegos y sin pareja)</h3>
+    ${corrHoyRep.length ? `<p class="hint">Inventario de hoy. Si hay hembras y machos sueltos del mismo tipo, júntalos en Inventario → Herrajes → "Armar juegos".</p>
+    <div class="wrap-x"><table><tr><th>Tipo</th><th>Juegos completos</th><th>Hembras sin macho</th><th>Machos sin hembra</th></tr>
+    ${corrHoyRep.map(b=>`<tr><td>${b.etiqueta}</td><td><strong>${fmtNum(b.juegos)}</strong></td><td class="${b.hembras?'neg':''}">${fmtNum(b.hembras)}</td><td class="${b.machos?'neg':''}">${fmtNum(b.machos)}</td></tr>`).join('')}
+    </table></div>` : '<p class="hint">No hay correderas en el inventario.</p>'}
   </div>`;
 
   html += `<div class="card"><h3>Última auditoría vs. teórico</h3>`;
@@ -5501,10 +5690,7 @@ function renderPzEnc(){
     </div>
     <div class="card">
       <div class="paso">2</div><strong>¿Cuántas piezas de cada una?</strong>
-      <div class="wrap-x" style="margin-top:8px"><table><tr><th>Pieza</th><th>Cantidad</th></tr>
-        ${lista.map(p=>`<tr><td>${p.label}<div class="tag">${p.dim}</div></td>
-          <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="numeric" style="min-width:70px" placeholder="—" value="${counts[p.key]??''}" oninput="setPz('${pzGrupo}','${p.key}',this.value)"><button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="sumarPz('${pzGrupo}','${p.key}')">➕</button></div></td></tr>`).join('')}
-      </table></div>
+      ${listaPiezasHtml('pz')}
     </div>
     <div class="card">
       <div class="paso">3</div><strong>Esto se suma al inventario</strong>
@@ -5528,6 +5714,242 @@ async function guardarPzEnc(){
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Piezas sumadas al inventario.');
     renderPzEnc(); window.scrollTo(0,0);
   }catch(e){ alert('Error: '+e.message); }
+}
+
+// ===== Valor de las instalaciones (confirmado por el usuario) =====
+// Cada modelo tiene su valor (lo captura Dirección). Una instalación que regresó completa ya no vale;
+// las garantías no restan. La semana de instalaciones va de SÁBADO a VIERNES.
+let valoresInst = null; // {clave:{n, max}}
+// Meta semanal de cada módulo (confirmado por el usuario): 96 por semana; Saltillo y Guadalajara 72.
+const METAS_DEFAULT = {Saltillo:72, Guadalajara:72};
+let metasInst = {};
+function metaModulo(m){ return Number(metasInst[m]) || METAS_DEFAULT[m] || 96; }
+async function cargarValoresInst(){
+  if(valoresInst) return valoresInst;
+  try{ const d = await db.collection('config').doc('valoresInstalacion').get(); const x = (d && d.data && d.data()) || {}; valoresInst = x.valores || {}; metasInst = x.metas || {}; }catch(e){ valoresInst = {}; }
+  return valoresInst;
+}
+function claveInstalacion(log){
+  if(log.modeloKey) return log.modeloKey;
+  const nom = String(log.descripcion||'').split(' · ')[0];
+  if(log.categoria==='Puerta') return nom; // "Puerta Normal"
+  if(/ — combinación/.test(nom)) return 'Combinación '+nom.split(' — ')[0];
+  return nom.replace(/ Max$/,'');
+}
+function esMaxInstalacion(log){ return log.esMax!==undefined ? !!log.esMax : / Max( ·|$)/.test(String(log.descripcion||'').split(' · ')[0]+' ·'); }
+// Valor de una instalación: 0 si se rechazó o regresó completa. regresadas = Set de ids que regresaron.
+// Valor (confirmado por el usuario): cuenta el MODELO (familia o tipo de puerta), sin importar si
+// lleva cajonera normal, Emma o Max. Cada extra (zapatera, repisa —por pieza—, entrepañera, espejo,
+// cajonera) suma 0.5. Lateral/Central/Doble/Doble Especial/King 1, Triple 2; puertas normal, con pared
+// falsa y con 2 paredes falsas 2, con cubos a los lados 3, con cubo al centro 5.
+const VALORES_DEFAULT = {Lateral:1, Central:1, Doble:1, 'Doble Especial':1, King:1, Triple:2,
+  'Puerta Normal':2, 'Puerta Con pared falsa':2, 'Puerta Con dos paredes falsas':2, 'Puerta Con cubos a los lados':3, 'Puerta Con cubo al centro':5};
+const VALOR_EXTRA_DEFAULT = 0.5;
+function grupoValor(clave){
+  if(/^Puerta /.test(clave)) return clave;
+  if(/^Combinación /.test(clave)) return clave.replace(/^Combinación /,'');
+  const m = MODELOS.find(x=>x.nombre===clave); return m ? m.fam : clave;
+}
+function valorDe(grupo){ const v = valoresInst && valoresInst[grupo]; return (v!==undefined && v!==null && v!=='') ? Number(v)||0 : (VALORES_DEFAULT[grupo]||0); }
+function valorExtra(){ const v = valoresInst && valoresInst._extra; return (v!==undefined && v!==null && v!=='') ? Number(v)||0 : VALOR_EXTRA_DEFAULT; }
+function valorInstalacion(log, regresadas){
+  if(log.estado==='rechazado' || (regresadas && regresadas.has(log.id))) return 0;
+  return valorDe(grupoValor(claveInstalacion(log))) + (Number(log.extras)||0)*valorExtra();
+}
+function regresadasDe(movsList){ return new Set(movsList.filter(m=>m.motivo==='regresoInstalacion' && m.instalacionId && m.estado!=='rechazado').map(m=>m.instalacionId)); }
+// Semana sábado → viernes: devuelve el sábado (YYYY-MM-DD) de la semana de esa fecha.
+function sabadoDe(ymd){ const d = new Date(ymd+'T12:00:00'); d.setDate(d.getDate() - ((d.getDay()+1)%7)); return d.toISOString().slice(0,10); }
+function finSemana(sab){ const d = new Date(sab+'T12:00:00'); d.setDate(d.getDate()+6); return d.toISOString().slice(0,10); }
+const fCorta = ymd => new Date(ymd+'T12:00:00').toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'});
+function gruposValorInst(){
+  return [...new Set(MODELOS.map(m=>m.fam))].concat(Object.keys(TIPOS_PUERTA).map(t=>'Puerta '+t));
+}
+let valEdit = null;
+async function renderValInst(){
+  if(!esAdmin()){ $('#main').innerHTML='<div class="card">Solo Dirección.</div>'; return; }
+  await cargarValoresInst();
+  if(!valEdit){ valEdit = {}; gruposValorInst().forEach(g=>valEdit[g]=valorDe(g)); valEdit._extra = valorExtra(); }
+  const fila = (k, txt) => `<div class="movitem" style="padding:8px 10px;gap:8px"><span style="flex:1;min-width:0">${txt}</span><input type="number" min="0" step="0.5" inputmode="decimal" value="${valEdit[k]}" style="width:80px;min-width:80px;text-align:center" oninput="valEdit['${k}']=this.value===''?0:Number(this.value)"></div>`;
+  const fams = [...new Set(MODELOS.map(m=>m.fam))];
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">⭐ Valor de cada modelo</div>
+      <p class="hint">Cuenta el modelo, sin importar si lleva cajonera normal, Emma o Max. Cada extra (zapatera, repisa, entrepañera, espejo o cajonera) suma aparte; las repisas cuentan por pieza. Semana de sábado a viernes. Una instalación que regresó completa no cuenta; las garantías no restan.</p>
+      <p class="hint" style="margin:0">Ejemplo: Lateral + 1 zapatera + 1 repisa = 1 + 0.5 + 0.5 = <strong>2</strong>.</p>
+    </div>
+    <div class="card"><strong>🗄️ Muebles</strong><div class="movlist" style="margin-top:8px">${fams.map(f=>fila(f, f+' <span class="hint" style="margin:0">(todas sus versiones)</span>')).join('')}</div></div>
+    <div class="card"><strong>🚪 Puertas corredizas</strong><div class="movlist" style="margin-top:8px">${Object.keys(TIPOS_PUERTA).map(t=>fila('Puerta '+t, t)).join('')}</div></div>
+    <div class="card"><strong>➕ Extras</strong><div class="movlist" style="margin-top:8px">${fila('_extra','Cada extra <span class="hint" style="margin:0">(zapatera, repisa, entrepañera, espejo, cajonera)</span>')}</div></div>
+    <details class="card"><summary><strong>🎯 Meta semanal por módulo</strong> <span class="hint" style="margin:0">(sábado a viernes)</span></summary>
+      <p class="hint">Valor de instalaciones que cada módulo tiene que hacer por semana para estar en el rango óptimo.</p>
+      <div class="movlist" style="margin-top:8px">${MODULOS.map(m=>`<div class="movitem" style="padding:8px 10px"><span style="flex:1">${m.nombre}</span><input id="meta-${m.nombre}" type="number" min="0" inputmode="decimal" value="${metaModulo(m.nombre)}" style="width:80px;min-width:80px;text-align:center"></div>`).join('')}</div>
+    </details>
+    <div class="card"><button class="btn" style="width:100%;min-height:52px" onclick="guardarValInst()">✅ Guardar valores</button></div>`;
+}
+async function guardarValInst(){
+  try{
+    const limpio = {}; Object.keys(valEdit||{}).forEach(k=>{ limpio[k] = Number(valEdit[k])||0; });
+    const metas = {}; MODULOS.forEach(m=>{ const el=document.getElementById('meta-'+m.nombre); const v=el?Number(el.value):0; if(v>0) metas[m.nombre]=v; });
+    await db.collection('config').doc('valoresInstalacion').set({modulo:'_global', valores:limpio, metas, fecha:new Date().toISOString()});
+    valoresInst = limpio; metasInst = metas; valEdit = null; resumenCache = null;
+    toast('✅ Valores guardados.'); setView('resumen');
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+// Tarjeta en Reportes: instalaciones de esta semana y la pasada (sábado a viernes) del módulo.
+async function repInstalacionesSemana(){
+  const el = document.getElementById('rep-inst'); if(!el) return;
+  await cargarInstLog(); await cargarValoresInst();
+  const regresadas = regresadasDe(movs);
+  const hoy = fechaHoyLocal(), sab = sabadoDe(hoy);
+  const sabP = (()=>{ const d=new Date(sab+'T12:00:00'); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); })();
+  const sem = (desde, hasta) => { const xs = instLog.filter(x=>{ const f=x.fechaDia||diaLocal(x.fecha); return f>=desde && f<=hasta && x.estado!=='rechazado'; });
+    const vale = xs.filter(x=>!regresadas.has(x.id)); return {n:vale.length, reg:xs.length-vale.length, valor:xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0)}; };
+  const a = sem(sab, hoy), b = sem(sabP, finSemana(sabP));
+  const fila = (t, r, rango) => `<div class="movitem" style="padding:8px 10px"><span>${t}<span class="hint" style="display:block;margin:0">${rango}</span></span><strong>${fmtNum(r.valor)}</strong></div>`;
+  el.innerHTML = `<strong>🔧 Instalaciones de ${modulo()}</strong>
+    <p class="hint" style="margin:4px 0 0">Semana de sábado a viernes. El desglose está en Instalaciones.</p>
+    <div class="movlist" style="margin-top:8px">${fila('Esta semana', a, fCorta(sab)+' – hoy')}${fila('Semana pasada', b, fCorta(sabP)+' – '+fCorta(finSemana(sabP)))}</div>
+    ${esAdmin()?`<button class="btn small" style="margin-top:8px;background:transparent;color:#b38a1e;border:1px solid var(--line);box-shadow:none" onclick="valEdit=null;irA('valinst')">⭐ Valor de cada modelo</button>`:''}`;
+}
+
+// ===== Resumen semanal para Dirección (confirmado por el usuario) =====
+// Lo más importante de los 5 módulos en una pantalla: lo que pasó en el periodo (instalaciones,
+// garantías, cortes, melamina usada, mermas, cierres del turno) y lo que hay que atender HOY
+// (cortes sin registrar, pendientes, faltantes, stock bajo, versión vieja de la app).
+let resumenCache = null, resumenPeriodo = 'semana';
+function rangoResumen(){
+  const hoy = new Date(); const d0 = new Date(hoy); d0.setHours(0,0,0,0);
+  const ymd = d => new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  // Semana de sábado a viernes (confirmado por el usuario).
+  if(resumenPeriodo==='semana'){ const sab=sabadoDe(ymd(d0)); return {desde:sab, hasta:ymd(d0), txt:'Esta semana (desde el sábado)'}; }
+  if(resumenPeriodo==='pasada'){ const sab0=new Date(sabadoDe(ymd(d0))+'T12:00:00'); sab0.setDate(sab0.getDate()-7); const sab=sab0.toISOString().slice(0,10); return {desde:sab, hasta:finSemana(sab), txt:'Semana pasada (sábado a viernes)'}; }
+  const ini=new Date(d0); ini.setDate(d0.getDate()-6); return {desde:ymd(ini), hasta:ymd(d0), txt:'Últimos 7 días'};
+}
+async function cargarResumen(){
+  await cargarValoresInst();
+  const [inv, mv, il, gl, du, au, ve] = await Promise.all([inventarioTodos(), ...['movimientos','instalacionesLog','garantiasLog','deudasAuditoria','auditorias','versiones'].map(c=>db.collection(c).get().catch(()=>({docs:[]})))]);
+  const L = snap => snap.docs.map(d=>({id:d.id, ...d.data()}));
+  return {inv, movs:L(mv), inst:L(il), gar:L(gl), deudas:L(du), auds:L(au), versiones:L(ve)};
+}
+function diaLocal(iso){ return iso ? new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10) : ''; }
+function diasLaborables(desde, hasta){
+  const out=[]; const hoy=fechaHoyLocal(); let d=new Date(desde+'T12:00:00');
+  while(true){ const s=d.toISOString().slice(0,10); if(s>hasta || s>hoy) break; if(d.getDay()!==0) out.push(s); d.setDate(d.getDate()+1); }
+  return out;
+}
+function datosModuloResumen(R, mod, rg){
+  const enRango = f => f && f>=rg.desde && f<=rg.hasta;
+  const ms = R.movs.filter(m=>m.modulo===mod && m.estado!=='rechazado');
+  const msR = ms.filter(m=>enRango(diaLocal(m.fecha)));
+  const esHojaMel = id => /^melamina_/.test(id), esHojaId2 = id => esHojaId(id);
+  const sum = (arr, fn) => arr.reduce((s,m)=>s+(fn(m)?(Number(m.cantidad)||0):0),0);
+  const res = R.inv.res[mod]||{}, mins = R.inv.mins[mod]||{};
+  const sinCorte = CATALOGO.filter(it=>esHoja(it)).reduce((s,it)=>s+((res[it.id]||{}).autoCortes||0),0);
+  const bajos = CATALOGO.filter(it=>Number(mins[it.id])>0 && res[it.id] && res[it.id].final < Number(mins[it.id])-1e-9).length;
+  const lab = diasLaborables(rg.desde, rg.hasta);
+  const diasCierre = new Set(ms.filter(m=>m.cierreTurno).map(m=>diaLocal(m.fecha)));
+  const sinCierre = lab.filter(d=>d!==fechaHoyLocal() && !diasCierre.has(d));
+  const pendLotes = new Set(R.movs.filter(m=>m.modulo===mod && m.estado==='pendiente').map(m=>m.loteId||m.id)).size;
+  const auds = R.auds.filter(a=>a.modulo===mod && !a.complemento).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const regresadas = regresadasDe(R.movs);
+  const instR = R.inst.filter(x=>x.modulo===mod && x.estado!=='rechazado' && enRango(x.fechaDia||diaLocal(x.fecha)));
+  return {
+    inst: instR.filter(x=>!regresadas.has(x.id)).length,
+    instReg: instR.filter(x=>regresadas.has(x.id)).length,
+    valor: instR.reduce((s,x)=>s+valorInstalacion(x, regresadas),0),
+    gar: R.gar.filter(x=>x.modulo===mod && x.estado!=='rechazado' && enRango(x.fechaDia||diaLocal(x.fecha))).length,
+    cortes: sum(msR, m=>m.tipo==='corte'),
+    melUsada: sum(msR, m=>(m.tipo==='instalacion'||m.tipo==='garantia') && esHojaMel(m.itemId)),
+    mermaHojas: sum(msR, m=>m.tipo==='merma' && esHojaId2(m.itemId)),
+    mermasOtras: msR.filter(m=>m.tipo==='merma' && !esHojaId2(m.itemId)).length,
+    cierres: lab.length - sinCierre.length, laborables: lab.length, sinCierre,
+    sinCorte, pendLotes, bajos,
+    deudas: R.deudas.filter(d=>d.modulo===mod && d.estado!=='saldada').length,
+    ultAud: auds[0] ? auds[0].fecha : null
+  };
+}
+// Ranking de instalaciones por módulo contra su meta semanal (confirmado por el usuario).
+function rankingInstHtml(D, rg){
+  const dias = Math.round((new Date(rg.hasta+'T12:00:00') - new Date(rg.desde+'T12:00:00'))/86400000)+1;
+  const semanaCompleta = dias>=7;
+  const filas = MODULOS.map(m=>({m:m.nombre, valor:D[m.nombre].valor, n:D[m.nombre].inst, meta:metaModulo(m.nombre)}))
+    .map(x=>({...x, pct: x.meta ? x.valor/x.meta*100 : 0})).sort((a,b)=>b.valor-a.valor || b.n-a.n);
+  const medalla = i => ['🥇','🥈','🥉'][i] || `${i+1}.`;
+  const color = p => p>=100 ? '#1f9d55' : (p>=75 ? '#e3b341' : '#e0453f');
+  return `<div class="card">
+    <div class="row" style="justify-content:space-between"><strong>🏆 Instalaciones por módulo</strong><span class="hint" style="margin:0">${rg.txt}</span></div>
+    <p class="hint" style="margin:4px 0 0">Meta por semana: 96 · Saltillo y Guadalajara: 72.${semanaCompleta?'':' <strong>La semana va en curso.</strong>'}</p>
+    <div class="movlist" style="margin-top:8px">
+    ${filas.map((x,i)=>`<div class="movitem" style="padding:10px 12px;gap:8px;border-left:5px solid ${color(x.pct)}">
+      <span style="flex:1;min-width:0;font-weight:800;font-size:16px">${medalla(i)} ${x.m}</span>
+      <span style="white-space:nowrap;text-align:right"><strong style="font-size:20px">${fmtNum(x.valor)}</strong><span class="hint" style="margin:0"> / ${fmtNum(x.meta)}</span>
+        <span style="display:block;font-size:13px;font-weight:700;color:${color(x.pct)}">${x.pct>=100?'✅ En rango':(semanaCompleta?`Faltaron ${fmtNum(x.meta-x.valor)}`:`Faltan ${fmtNum(x.meta-x.valor)}`)}</span></span>
+    </div>`).join('')}
+    </div></div>`;
+}
+async function renderResumen(){
+  if(!esAdmin()){ $('#main').innerHTML='<div class="card">Esta vista es para Dirección.</div>'; return; }
+  if(!resumenCache){ $('#main').innerHTML='<div class="card hint">Calculando el resumen de los 5 módulos…</div>';
+    try{ resumenCache = await cargarResumen(); }catch(e){ $('#main').innerHTML='<div class="card">No se pudo calcular: '+e.message+'</div>'; return; } }
+  const R = resumenCache, rg = rangoResumen();
+  const D = {}; MODULOS.forEach(m=>{ D[m.nombre] = datosModuloResumen(R, m.nombre, rg); });
+  const tot = k => MODULOS.reduce((s,m)=>s+(D[m.nombre][k]||0),0);
+  const tile = (ic, n, t, c) => `<div style="flex:1 1 45%;min-width:140px;background:rgba(127,127,127,.08);border-radius:14px;padding:12px;border-left:5px solid ${c}"><div style="font-size:22px;font-weight:800">${ic} ${n}</div><div class="hint" style="margin:2px 0 0">${t}</div></div>`;
+  // Lo que hay que atender
+  const alertas = [];
+  MODULOS.forEach(m=>{ const d=D[m.nombre];
+    if(d.sinCorte>0.005) alertas.push(`✂️ <strong>${m.nombre}</strong>: ${fmtNum(d.sinCorte)} hoja(s) usadas sin corte registrado`);
+    if(d.sinCierre.length) alertas.push(`📝 <strong>${m.nombre}</strong>: sin cierre del turno ${d.sinCierre.length} día(s) (${d.sinCierre.map(x=>new Date(x+'T12:00:00').toLocaleDateString('es-MX',{weekday:'short',day:'numeric'})).join(', ')})`);
+    if(d.pendLotes) alertas.push(`⏳ <strong>${m.nombre}</strong>: ${d.pendLotes} captura(s) esperando tu aprobación`);
+    if(d.bajos) alertas.push(`⚠️ <strong>${m.nombre}</strong>: ${d.bajos} artículo(s) debajo del mínimo`);
+    if(d.deudas) alertas.push(`🔻 <strong>${m.nombre}</strong>: ${d.deudas} faltante(s) de auditoría sin saldar`);
+  });
+  const viejas = R.versiones.filter(v=>numVersion(v.version) < numVersion(versionServidor||APP_VERSION));
+  if(viejas.length) alertas.push(`📱 ${viejas.length} usuario(s) con versión vieja de la app: ${viejas.map(v=>`${(v.email||'').split('@')[0]} (${v.version})`).join(', ')}`);
+  const fila = (ic, t, v, mal) => `<div class="movitem" style="padding:8px 10px"><span>${ic} ${t}</span><strong class="${mal?'neg':''}">${v}</strong></div>`;
+  const cardMod = m => { const d=D[m.nombre]; const malos = (d.sinCorte>0.005) + (d.sinCierre.length>0) + (d.pendLotes>0) + (d.bajos>0) + (d.deudas>0);
+    return `<div class="card" style="border-left:6px solid ${malos?'#e0453f':'#1f9d55'}">
+      <div class="row" style="justify-content:space-between"><strong style="font-size:17px">📍 ${m.nombre}</strong><span class="tag" style="${malos?'color:var(--bad);border-color:var(--bad)':'color:var(--ok);border-color:var(--ok)'}">${malos?malos+' por atender':'✓ Todo en orden'}</span></div>
+      <div class="movlist" style="margin-top:8px">
+        ${fila('🔧','Instalaciones', `${fmtNum(d.valor)} <span class="hint" style="margin:0">/ ${fmtNum(metaModulo(m.nombre))}</span>`)}
+        ${fila('🛡️','Garantías', d.gar)}
+        ${fila('✂️','Hojas cortadas', fmtNum(d.cortes))}
+        ${fila('🪵','Melamina usada (instal. y garantías)', fmtNum(d.melUsada)+' hojas')}
+        ${fila('🗑️','Mermas', fmtNum(d.mermaHojas)+' hojas'+(d.mermasOtras?` + ${d.mermasOtras} otras`:''), d.mermaHojas>0)}
+        ${fila('📝','Cierres del turno', `${d.cierres} de ${d.laborables} días`, d.sinCierre.length>0)}
+        ${fila('✂️','Hojas sin corte registrado (hoy)', fmtNum(d.sinCorte), d.sinCorte>0.005)}
+        ${fila('⏳','Por aprobar (hoy)', d.pendLotes, d.pendLotes>0)}
+        ${fila('🔻','Faltantes sin saldar', d.deudas, d.deudas>0)}
+        ${fila('⚠️','Debajo del mínimo', d.bajos, d.bajos>0)}
+        ${fila('📋','Última auditoría', d.ultAud ? new Date(d.ultAud).toLocaleDateString('es-MX',{day:'numeric',month:'short'}) : 'Ninguna')}
+      </div></div>`; };
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">📈 Resumen · 5 módulos</div>
+      <div class="chips" style="margin-top:8px">${[['semana','Esta semana'],['pasada','Semana pasada'],['7d','Últimos 7 días']].map(([k,t])=>`<button class="chip ${k===resumenPeriodo?'on':''}" onclick="resumenPeriodo='${k}';renderResumen()">${t}</button>`).join('')}</div>
+      <p class="hint" style="margin:6px 0 0">${rg.txt}: ${new Date(rg.desde+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short'})} al ${new Date(rg.hasta+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short'})}. Lo marcado "hoy" es como está en este momento.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+        ${tile('🔧', fmtNum(tot('valor')), 'Instalaciones', '#3E5CDE')}
+        ${tile('🛡️', tot('gar'), 'Garantías', '#b3742c')}
+        ${tile('✂️', fmtNum(tot('cortes')), 'Hojas cortadas', '#0e8a8a')}
+        ${tile('🗑️', fmtNum(tot('mermaHojas')), 'Hojas en merma', '#e0453f')}
+      </div>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="resumenCache=null;renderResumen()">🔄 Actualizar</button>
+        <button class="btn small" style="background:transparent;color:#b38a1e;border:1px solid var(--line);box-shadow:none" onclick="valEdit=null;irA('valinst')">⭐ Valor de cada modelo</button>
+      </div>
+      
+    </div>
+    ${rankingInstHtml(D, rg)}
+    <div class="card" style="border:2px solid ${alertas.length?'#e0453f':'#1f9d55'}">
+      <strong>${alertas.length?'🚨 Por atender ('+alertas.length+')':'✅ Nada por atender'}</strong>
+      ${alertas.length?`<div class="movlist" style="margin-top:8px">${alertas.map(a=>`<div class="movitem" style="padding:8px 10px"><span>${a}</span></div>`).join('')}</div>`:'<p class="hint" style="margin:4px 0 0">Todos los módulos están al día.</p>'}
+    </div>
+    ${MODULOS.map(cardMod).join('')}
+    <div class="card"><strong>📱 Versión de la app por usuario</strong>
+      <p class="hint" style="margin:4px 0 0">La más nueva es la ${versionServidor||APP_VERSION}. Si alguien trae una vieja, que abra la app y toque "Actualizar".</p>
+      <div class="movlist" style="margin-top:8px">${R.versiones.sort((a,b)=>(a.modulo||'').localeCompare(b.modulo||'')).map(v=>{ const vieja = numVersion(v.version) < numVersion(versionServidor||APP_VERSION);
+        return `<div class="movitem" style="padding:8px 10px"><span>${(v.email||'').split('@')[0]}<span class="hint" style="display:block;margin:0">${v.modulo||'—'} · ${v.fecha?new Date(v.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'}):''}</span></span><strong class="${vieja?'neg':'pos'}">${v.version}${vieja?' ⚠️':' ✓'}</strong></div>`; }).join('') || '<p class="hint">Todavía nadie ha abierto la versión nueva.</p>'}</div>
+    </div>`;
 }
 
 // ===== Menú "Más" del coordinador =====
@@ -6083,7 +6505,7 @@ async function generarReporteDiarioPDF(modo){
   doc.text(`Por: ${correo}`, marginL, y); y+=8;
 
   // Recuadro de resumen
-  const catsResumen = soloSinCortar ? ['Melamina'] : ['Melamina','MDF'];
+  const catsResumen = ['Melamina','MDF'];
   const resumenHojas = catsResumen.map(cat=>{
     const t = CATALOGO.filter(i=>i.cat===cat).reduce((s,it)=>{ const f=calcFormula(it.id); s.c+=f.completas; s.k+=f.cortado; s.t+=f.final; s.a+=f.autoCortes; return s; },{c:0,k:0,t:0,a:0});
     return {cat, ...t};
@@ -6113,7 +6535,7 @@ async function generarReporteDiarioPDF(modo){
     y += 6;
   }
 
-  const cats = soloSinCortar ? ['Melamina'] : [...new Set(CATALOGO.map(i=>i.cat))];
+  const cats = soloSinCortar ? ['Melamina','MDF'] : [...new Set(CATALOGO.map(i=>i.cat))];
   cats.forEach(cat=>{
     const items = CATALOGO.filter(i=>i.cat===cat);
     const catHoja = items.length>0 && esHoja(items[0]);
@@ -6169,22 +6591,41 @@ async function generarReporteDiarioPDF(modo){
       doc.text(String(fmtNum(calcFormula(it.id).completas)), colX(1)+1.5, y+4);
       y += 5.5;
     });
+    // MDF sin cortar (confirmado por el usuario): total de MDF de 3 y de 5 mm, igual que la melamina.
+    const itemsMdf = CATALOGO.filter(i=>i.cat==='MDF');
+    if(itemsMdf.length){
+      if(y > pageH-50){ doc.addPage(); y=15; } else { y += 10; }
+      const totMdf = itemsMdf.reduce((s,it)=>s+calcFormula(it.id).completas,0);
+      doc.setFontSize(12); doc.setFont(undefined,'bold'); doc.text('MDF sin cortar', marginL, y); y+=4;
+      doc.setFillColor(238,242,255); doc.rect(marginL, y, 182, 9, 'F');
+      doc.setFontSize(11); doc.text(`Total: ${fmtNum(totMdf)} hojas de MDF sin cortar`, marginL+2, y+6);
+      doc.setFont(undefined,'normal'); y += 14;
+      cols = [ {label:'MDF', w:120}, {label:'Hojas sin cortar', w:62} ];
+      drawHeaderRow(); doc.setFontSize(9);
+      itemsMdf.forEach((it,idx)=>{
+        if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tableW(), 5.5, 'F'); }
+        doc.text(it.nombre, colX(0)+1.5, y+4);
+        doc.text(String(fmtNum(calcFormula(it.id).completas)), colX(1)+1.5, y+4);
+        y += 5.5;
+      });
+    }
   }
 
-  // Correderas según la última auditoría que las contó (juegos totales y medias desfasadas)
-  const audCorrPdf = !soloSinCortar ? auditorias.find(x=>x.correderas && x.correderas.length) : null;
-  if(audCorrPdf){
+  // Correderas del inventario ACTUAL (confirmado por el usuario: antes salía la foto de la última
+  // auditoría y no cambiaba al armar juegos). Juegos completos y medias sin pareja de hoy.
+  const corrHoy = !soloSinCortar ? correderasHoy() : [];
+  if(corrHoy.length){
     if(y > pageH-50){ doc.addPage(); y=15; } else { y += 10; }
     doc.setFontSize(12); doc.setFont(undefined,'bold');
-    doc.text('Correderas (según auditoría del '+new Date(audCorrPdf.fecha).toLocaleDateString('es-MX')+')', marginL, y); y+=6;
+    doc.text('Correderas (inventario de hoy)', marginL, y); y+=6;
     doc.setFont(undefined,'normal');
-    cols = [ {label:'Tipo', w:62}, {label:'Juegos totales', w:40}, {label:'Hembras sin macho', w:40}, {label:'Machos sin hembra', w:40} ];
+    cols = [ {label:'Tipo', w:62}, {label:'Juegos completos', w:40}, {label:'Hembras sin macho', w:40}, {label:'Machos sin hembra', w:40} ];
     drawHeaderRow(); doc.setFontSize(9);
-    audCorrPdf.correderas.forEach(bc=>{
+    corrHoy.forEach(bc=>{
       doc.text(bc.etiqueta, colX(0)+1.5, y+4);
-      doc.text(String(fmtNum(bc.totalJuegos!==undefined?bc.totalJuegos:bc.pares)), colX(1)+1.5, y+4);
-      doc.text(String(fmtNum(bc.hembrasSinPareja)), colX(2)+1.5, y+4);
-      doc.text(String(fmtNum(bc.machosSinPareja)), colX(3)+1.5, y+4);
+      doc.text(String(fmtNum(bc.juegos)), colX(1)+1.5, y+4);
+      doc.text(String(fmtNum(bc.hembras)), colX(2)+1.5, y+4);
+      doc.text(String(fmtNum(bc.machos)), colX(3)+1.5, y+4);
       y += 5.5;
     });
   }

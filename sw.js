@@ -1,6 +1,6 @@
 // Service worker: cachea el "app shell" para que la app abra y funcione sin internet.
 // Los datos van por src/db.js (IndexedDB + sync a Supabase), no por aquí.
-const CACHE = 'auditoriamodulos-v95';
+const CACHE = 'auditoriamodulos-v101';
 const APP_SHELL = [
   './',
   './index.html',
@@ -27,7 +27,9 @@ self.addEventListener('install', (event) => {
   // fallo (p. ej. mala señal) cancele la actualización completa.
   event.waitUntil(
     caches.open(CACHE).then((cache) => Promise.all([
-      cache.addAll(APP_SHELL.filter((u) => !u.startsWith('http'))),
+      // cache:'reload' = siempre del servidor (no del caché del navegador), para que una versión nueva
+      // nunca se guarde con un app.js viejo.
+      cache.addAll(APP_SHELL.filter((u) => !u.startsWith('http')).map((u) => new Request(u, { cache: 'reload' }))),
       ...APP_SHELL.filter((u) => u.startsWith('http')).map((u) => cache.add(u).catch(() => {}))
     ])).then(() => self.skipWaiting())
   );
