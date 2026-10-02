@@ -188,7 +188,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v101';
+const APP_VERSION = 'v102';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3569,7 +3569,7 @@ function describirLineaGar(l){
   if(l.tipo==='armado') return `${l.cantidad} × ${describirArmado({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, colorFrente:l.colorFrente, ext:l.ext, cantidad:l.cantidad})}`;
   if(l.tipo==='item'){ const it=CATALOGO.find(i=>i.id===l.itemId); return `${l.cantidad} ${it?it.unidad:''} de ${it?it.nombre:l.itemId}`; }
   if(l.tipo==='puertas'){
-    const base = `puertas "${l.pTipo}" (hueco ${fmtNum(l.pAlto)} alto × ${fmtNum(l.pAncho)} ancho) · ${l.color}`;
+    const base = `puertas "${l.pTipo}" (hueco ${fmtNum(l.pAncho)} ancho × ${fmtNum(l.pAlto)} alto) · ${l.color}`;
     if(l.pModo==='completas') return `${l.cantidad} × Juego completo de ${base} · ${l.pHerrajes?'con herrajes'+(l.pJaladera==='plana'?' (jaladera plana)':''):'sin herrajes'}`;
     const partes = Object.keys(PUERTA_PIEZA_LBL).filter(k=>(l.pPiezas||{})[k]>0).map(k=>`${l.pPiezas[k]} ${PUERTA_PIEZA_LBL[k].toLowerCase()}`);
     return `${partes.join(' + ')} de ${base}`;
@@ -3688,8 +3688,8 @@ function renderGar(){
     campos = `<label class="hint">Tipo de puerta</label>
       <select style="margin-top:4px" onchange="garForm.pTipo=this.value;renderGar()">${Object.keys(TIPOS_PUERTA).map(t=>`<option ${t===f.pTipo?'selected':''}>${t}</option>`).join('')}</select>
       <div class="grid2" style="margin-top:10px">
-        <div><label class="hint">Alto del hueco (cm)</label><input type="number" inputmode="decimal" style="margin-top:4px" value="${f.pAlto}" onchange="garForm.pAlto=this.value;renderGar()" placeholder="ej. 240"></div>
         <div><label class="hint">Ancho del hueco (cm)</label><input type="number" inputmode="decimal" style="margin-top:4px" value="${f.pAncho}" onchange="garForm.pAncho=this.value;renderGar()" placeholder="ej. 180"></div>
+        <div><label class="hint">Alto del hueco (cm)</label><input type="number" inputmode="decimal" style="margin-top:4px" value="${f.pAlto}" onchange="garForm.pAlto=this.value;renderGar()" placeholder="ej. 240"></div>
       </div>
       <label class="hint" style="display:block;margin-top:10px">Color</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select>
       <label class="hint" style="display:block;margin-top:12px">¿Qué se va a dar?</label>
@@ -3702,7 +3702,7 @@ function renderGar(){
       : (disp ? `<p class="hint">Escribe cuántas de cada pieza (por ejemplo, 1 puerta y 1 fijo):</p>
         <div class="movlist">${Object.keys(disp).map(k=>`<label class="movitem"><span style="min-width:0"><span class="invname">${PUERTA_PIEZA_LBL[k]}</span><span class="hint" style="display:block;margin:2px 0 0">${fmtNum(disp[k].ancho)}×${fmtNum(disp[k].alto)} cm · el juego lleva ${disp[k].n}</span></span>
           <input type="number" min="0" max="${disp[k].n}" inputmode="numeric" value="${f.pPiezas[k]||''}" oninput="garForm.pPiezas['${k}']=Number(this.value)" placeholder="—"></label>`).join('')}</div>`
-        : '<p class="hint">Escribe primero el alto y el ancho del hueco para ver las piezas.</p>')}
+        : '<p class="hint">Escribe primero el ancho y el alto del hueco para ver las piezas.</p>')}
       ${disp && f.pModo==='completas' ? `<p class="hint" style="margin-top:10px"><strong>Medidas calculadas:</strong><br>${medidasTxt}</p>` : ''}`;
   } else if(garTipo==='pieza'){
     const p = PIEZAS_AUDIT.find(x=>x.key===f.pieza) || PIEZAS_AUDIT[0];
@@ -3807,7 +3807,7 @@ function agregarLineaGar(){
   }
   else if(garTipo==='puertas'){
     const al = Number(f.pAlto), an = Number(f.pAncho);
-    if(!al || !an) return alert('Escribe el alto y el ancho del hueco en centímetros.');
+    if(!al || !an) return alert('Escribe el ancho y el alto del hueco en centímetros.');
     if(f.pModo==='piezas'){
       const disp = piezasDisponiblesPuerta(f.pTipo, al, an);
       const pp = {}; let total = 0;
@@ -4164,8 +4164,8 @@ function renderInstPuertas(){
   <div class="card">
     <div class="paso">2</div><strong>Medidas del hueco</strong>
     <div class="grid2" style="margin-top:10px">
-      <div><label class="hint">Alto total (cm)</label><input id="p-alto" type="number" inputmode="decimal" placeholder="ej. 240" style="margin-top:4px"></div>
       <div><label class="hint">Ancho total (cm)</label><input id="p-ancho" type="number" inputmode="decimal" placeholder="ej. 180" style="margin-top:4px"></div>
+      <div><label class="hint">Alto total (cm)</label><input id="p-alto" type="number" inputmode="decimal" placeholder="ej. 240" style="margin-top:4px"></div>
     </div>
   </div>
   <div class="card">
@@ -4513,7 +4513,7 @@ async function confirmarRegresoPuerta(){
   if(!pp || !pp.regreso || !instRegresoLibre) return;
   if(pp.color!==$('#p-color').value || pp.tipo!==$('#p-tipo').value || pp.alto!==Number($('#p-alto').value) || pp.ancho!==Number($('#p-ancho').value)) return alert('Vuelve a tocar "Revisar material": los datos cambiaron.');
   const nota = ($('#p-nota').value||'').trim();
-  const desc = `Puerta ${pp.tipo} · ${pp.color} · ${pp.alto}×${pp.ancho} cm${pp.conHerrajes?'':' · sin herrajes'}`;
+  const desc = `Puerta ${pp.tipo} · ${pp.color} · ${pp.ancho}×${pp.alto} cm (ancho×alto)${pp.conHerrajes?'':' · sin herrajes'}`;
   const cons = pp.consumo.filter(c=>Number(c.cantidad)>0);
   if(!confirm(`↩️ Regresar al inventario:\n${desc}\n\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n')}\n\n¿Continuar?`)) return;
   try{
@@ -4533,7 +4533,7 @@ async function registrarPuerta(tipo, alto, ancho){
   }
   const nota = ($('#p-nota').value||'').trim();
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
-  const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${alto}×${ancho} cm`;
+  const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${ancho}×${alto} cm (ancho×alto)`;
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
     for(const c of puertaPreview.consumo){
@@ -5179,7 +5179,7 @@ async function guardarCierre(){
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
     const loteC = cryptoId(), loteS = cryptoId();
     for(const c of cortes) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.it.id, itemNombre:c.it.nombre, tipo:'corte', cantidad:c.q, nota:'Cierre del turno'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteC, creadoPor, cierreTurno:true});
-    const estado = estadoNuevoMovimiento();
+    const estado = 'aprobado'; // Cierre del turno entra directo, sin aprobación (confirmado por el usuario)
     for(const x of salidas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'salida', cantidad:x.q, nota:`Cierre del turno: había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)}`+(nota?' · '+nota:''), fecha, estado, loteId:loteS, creadoPor, cierreTurno:true, conteoCierre:{esperado:x.esp, contado:x.hay}});
     if(!cortes.length && !salidas.length) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:'_cierre', itemNombre:'Cierre sin movimiento', tipo:'nota', cantidad:0, nota:'Cierre del turno sin movimiento'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:cryptoId(), creadoPor, cierreTurno:true});
     cierreVals = {}; cierreBuscar = '';
