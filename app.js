@@ -189,7 +189,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v108';
+const APP_VERSION = 'v110';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -912,6 +912,8 @@ function etiquetaTipoMov(m){
   if(m.motivo==='regresoInstalacion') return 'Regresó de instalación';
   if(m.motivo==='cambioModelo') return 'Cambio de modelo (regresa)';
   if(m.motivo==='regresoPiezasInst') return 'Regresó de instalación (ya descontado)';
+  if(m.motivo==='regresoSobrante') return 'A sobrantes (regresó de instalación)';
+  if(m.motivo==='deudaAparecio') return 'Apareció (faltante de auditoría)';
   if(m.motivo==='piezasEncontradas') return 'Piezas encontradas';
   return (TIPO_LABEL[m.tipo]||m.tipo) + (m.tipo==='merma' && m.lado==='cortado' ? ' (de cortado)' : '');
 }
@@ -2132,11 +2134,11 @@ function renderDeudasHtml(){
       <td>${d.itemNombre}<div class="tag">${etiquetaLado(d.lado)}</div></td>
       <td class="neg"><strong>${fmtNum(d.cantidad)}</strong> ${d.unidad||''}</td>
       <td>${new Date(d.fechaAuditoria).toLocaleDateString('es-MX')}<div class="hint" style="margin:2px 0 0">${d.auditor||''}</div></td>
-      <td>${conBoton && esAdmin() ? `<button class="btn small" onclick="saldarDeuda('${d.id}')">Saldar</button>` : (d.estado==='saldada' ? `<div class="hint" style="margin:0">${d.notaSaldo||'Saldada'}<br>${d.fechaSaldo?new Date(d.fechaSaldo).toLocaleDateString('es-MX'):''}</div>` : '')}</td>
+      <td>${conBoton && esAdmin() ? `<button class="btn small" onclick="saldarDeuda('${d.id}')">Saldar</button><button class="btn small" style="margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="saldarDeuda('${d.id}',true)">📥 Apareció: sumar</button>` : (d.estado==='saldada' ? `<div class="hint" style="margin:0">${d.notaSaldo||'Saldada'}<br>${d.fechaSaldo?new Date(d.fechaSaldo).toLocaleDateString('es-MX'):''}</div>` : '')}</td>
     </tr>`).join('');
   return `<div class="card">
       <strong>Faltantes de auditoría (deuda) · ${modulo()}</strong>
-      <p class="hint">Cuando una auditoría se aplica, el inventario queda igual a lo contado, pero lo que faltó se guarda aquí para darle seguimiento (a quién se cobra, si apareció, etc.). Saldar una deuda solo la cierra: si el material aparece, regístralo como Entrada.</p>
+      <p class="hint">Cuando una auditoría se aplica, el inventario queda igual a lo contado, pero lo que faltó se guarda aquí para darle seguimiento (a quién se cobra, si apareció, etc.). <strong>Saldar</strong> solo la cierra (sin sumar material). Si el material <strong>apareció</strong>, usa <strong>📥 Apareció: sumar</strong>: regresa al inventario (al mismo lado del que faltó) y cierra la deuda.</p>
     </div>
     ${secciones.length ? secciones.map(cat=>`<div class="card"><h3>${cat} · pendiente</h3>
       <div class="wrap-x"><table><tr><th>Artículo</th><th>Lado</th><th>Total pendiente</th></tr>
@@ -2145,9 +2147,25 @@ function renderDeudasHtml(){
     ${pend.length?`<div class="card"><h3>Detalle pendiente (${pend.length})</h3><div class="wrap-x"><table><tr><th>Artículo</th><th>Faltó</th><th>Auditoría</th><th></th></tr>${filas(pend,true)}</table></div></div>`:''}
     ${sald.length?`<div class="card"><h3>Saldadas (${sald.length})</h3><div class="wrap-x"><table><tr><th>Artículo</th><th>Faltó</th><th>Auditoría</th><th>Cierre</th></tr>${filas(sald,false)}</table></div></div>`:''}`;
 }
-async function saldarDeuda(id){
+async function saldarDeuda(id, sumar){
   if(!esAdmin()) return alert('Solo Dirección puede saldar una deuda.');
   const d = deudas.find(x=>x.id===id); if(!d) return;
+  if(sumar){
+    // Confirmado por el usuario: el material faltante apareció → se suma al inventario en el MISMO lado
+    // del que faltó (hojas completas o cortado) y la deuda se cierra, sin cargarle nada al coordinador.
+    const it = CATALOGO.find(i=>i.id===d.itemId); if(!it) return alert('No se encontró el artículo.');
+    const nota = prompt(`📥 Apareció el material:\n\n+ ${fmtNum(d.cantidad)} ${d.unidad||''} de ${d.itemNombre}${esHoja(it)?' ('+etiquetaLado(d.lado)+')':''} vuelve al inventario y la deuda se cierra.\n\n¿Dónde apareció? (opcional)`, '');
+    if(nota===null) return;
+    try{
+      const q = Number(d.cantidad)||0, hoja = esHoja(it), corto = d.lado==='cortado';
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:d.modulo||modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'ajuste', motivo:'deudaAparecio', cantidad:q,
+        ...(hoja?{completasDelta:corto?0:q, cortadoDelta:corto?q:0}:{}), nota:`Apareció material faltante de la auditoría del ${new Date(d.fechaAuditoria||d.creado).toLocaleDateString('es-MX')}`+(nota.trim()?' · '+nota.trim():''),
+        fecha:new Date().toISOString(), estado:'aprobado', deudaId:id, creadoPor:getCurrentUserEmail?getCurrentUserEmail():''});
+      await db.collection('deudasAuditoria').doc(id).update({estado:'saldada', notaSaldo:'Apareció el material (se sumó al inventario)'+(nota.trim()?' · '+nota.trim():''), fechaSaldo:new Date().toISOString(), saldadaPor:getCurrentUserEmail?getCurrentUserEmail():'', sumadoAlInventario:true});
+      toast('📥 Material sumado al inventario y deuda cerrada.');
+    }catch(e){ alert('Error: '+e.message); }
+    return;
+  }
   const nota = prompt(`Saldar deuda: ${fmtNum(d.cantidad)} ${d.unidad||''} de ${d.itemNombre} (${etiquetaLado(d.lado)}).\n\n¿Cómo se saldó? (ej. "Se descontó al responsable", "Apareció el material", "Se autorizó como merma")`, '');
   if(nota===null) return;
   try{
@@ -3328,6 +3346,7 @@ async function renderInstHistorial(){
       ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
     </div>`; }).join('');
+  if(regVolver && regInstSel){ regVolver = false; mostrarRegresoInst(); }
 }
 
 // ===== Regreso de un modelo completo (confirmado por el usuario) =====
@@ -3448,48 +3467,105 @@ function regresoDeInstalacion(logId){
   if(!ms.length) return null;
   return {estado: ms.some(m=>m.estado==='pendiente') ? 'pendiente' : 'aprobado'};
 }
-// Al regresar completo se pregunta si la melamina/MDF sirve (confirmado por el usuario): si viene
-// mojada o dañada, en el mismo registro regresa y sale como MERMA (de cortado); los herrajes vuelven
-// al inventario. En los dos casos la instalación deja de contar.
-let regInstSel = null;
+// Regresó completo (confirmado por el usuario): se elige qué se va a MERMA y cuánto, artículo por
+// artículo — melamina, MDF y también herrajes. Todo lo demás vuelve al inventario. Para la melamina/MDF
+// se pueden contar las piezas dañadas y la app las convierte a hojas. La instalación deja de contar.
+let regInstSel = null, regMerma = {}, regVolver = false, regMotivo = '';
+// regSob[itemId] = true → lo que no es merma de esa melamina/MDF va a 🧩 Sobrantes (apartado) en vez del inventario.
+let regSob = {};
 function regresarInstalacion(logId){
   const x = instLog.find(l=>l.id===logId); if(!x) return;
   if(regresoDeInstalacion(logId)) return alert('Esta instalación ya se regresó al inventario.');
   const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
   if(!cons.length) return alert('Esta instalación no tiene material registrado.');
-  regInstSel = logId;
+  regInstSel = logId; regMerma = {}; regSob = {}; regMotivo = '';
+  mostrarRegresoInst();
+}
+function regCons(){ const x = (instLog||[]).find(l=>l.id===regInstSel); return x ? (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId)) : []; }
+function regTodo(tipo){ // 'nada' | 'hojas' | 'todo' | 'sob'
+  regCons().forEach(c=>{ const h = esHojaId(c.itemId);
+    if(tipo==='nada'){ delete regMerma[c.itemId]; delete regSob[c.itemId]; }
+    else if(tipo==='sob'){ if(h){ regSob[c.itemId] = true; delete regMerma[c.itemId]; } }
+    else if(tipo==='todo' || (tipo==='hojas' && h)){ regMerma[c.itemId] = Number(c.cantidad); delete regSob[c.itemId]; } });
+  mostrarRegresoInst();
+}
+function regPiezas(itemId){
+  const it = CATALOGO.find(i=>i.id===itemId); if(!it) return;
+  regMotivo = (document.getElementById('reg-motivo')||{}).value||regMotivo;
+  pzSetModo('reg'); pzVals = {}; pzMedidas = [];
+  pzGrupo = it.cat==='MDF' ? AUD_GRUPO_MDF : it.nombre.replace(/^Melamina /,'');
+  regPzItem = itemId; setView('pzenc'); window.scrollTo(0,0);
+}
+let regPzItem = null;
+function usarPiezasRegreso(){
+  const cons = pzConsumo(); const c = regCons().find(z=>z.itemId===regPzItem);
+  const q = (cons.find(z=>z.itemId===regPzItem)||{}).cantidad || 0;
+  if(!(q>0)) return alert('Cuenta primero las piezas dañadas de este material.');
+  if(c && q > Number(c.cantidad)+1e-9) return alert(`Las piezas equivalen a ${fmtNum(q)} hojas y el modelo solo llevaba ${fmtNum(c.cantidad)}. Revisa las piezas.`);
+  regMerma[regPzItem] = q; volverRegreso();
+}
+function volverRegreso(){ pzSetModo('enc'); regPzItem = null; regVolver = true; instSub='historial'; setView('inst'); }
+function mostrarRegresoInst(){
+  const x = (instLog||[]).find(l=>l.id===regInstSel); if(!x) return;
+  const cons = regCons(); const body = document.getElementById('inst-body'); if(!body) return;
+  const fila = c => { const it=CATALOGO.find(i=>i.id===c.itemId), h=esHoja(it), q=Number(c.cantidad), m=Number(regMerma[c.itemId])||0;
+    return `<div class="movitem" style="padding:10px 12px;align-items:flex-start;${m>0?'border-color:var(--bad);':''}"><span style="min-width:0;flex:1"><span class="invname">${it.nombre}</span>
+        <span class="hint" style="display:block;margin:2px 0 0">Regresan ${fmtNum(q)} ${it.unidad}${m>0?` · <strong class="neg">${fmtNum(m)} a merma</strong>`:''}${q-m>0.0005?(regSob[c.itemId]?` · <strong style="color:#0e8a8a">${fmtNum(q-m)} a sobrantes</strong>`:` · ${fmtNum(q-m)} al inventario`):''}</span>
+        <span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+          <button class="btn small" style="padding:4px 10px;min-height:0;${m>=q-1e-9?'':'background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none'}" onclick="regMerma['${c.itemId}']=${q};mostrarRegresoInst()">Todo a merma</button>
+          ${m>0||regSob[c.itemId]?`<button class="btn small" style="padding:4px 10px;min-height:0;background:transparent;color:var(--ok);border:1px solid var(--line);box-shadow:none" onclick="delete regMerma['${c.itemId}'];delete regSob['${c.itemId}'];mostrarRegresoInst()">Sirve todo</button>`:''}
+          ${h?`<button class="btn small" style="padding:4px 10px;min-height:0;${regSob[c.itemId]?'background:#0e8a8a':'background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none'}" onclick="if(regSob['${c.itemId}']) delete regSob['${c.itemId}']; else regSob['${c.itemId}']=true; mostrarRegresoInst()">🧩 ${m>0?'El resto a sobrantes':'A sobrantes'}</button>`:''}
+          ${h?`<button class="btn small" style="padding:4px 10px;min-height:0;background:transparent;color:#e0791a;border:1px solid var(--line);box-shadow:none" onclick="regPiezas('${c.itemId}')">✂️ Contar piezas dañadas</button>`:''}
+        </span></span>
+      <input type="number" min="0" max="${q}" step="${h?'0.01':'1'}" inputmode="decimal" placeholder="—" value="${m?fmtNum(m):''}" style="width:72px;min-width:72px;text-align:center" title="Cuánto a merma" oninput="const v=Number(this.value)||0; if(v>${q}){ this.value=${q}; } if(v>0) regMerma['${c.itemId}']=Math.min(v,${q}); else delete regMerma['${c.itemId}'];" onchange="mostrarRegresoInst()"></div>`; };
   const hojas = cons.filter(c=>esHojaId(c.itemId)), otros = cons.filter(c=>!esHojaId(c.itemId));
-  const li = arr => arr.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<li>${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}</li>`; }).join('');
-  $('#inst-body').innerHTML = `<div class="card" style="border:2px solid #1f9d55">
+  const nM = Object.keys(regMerma).filter(k=>regMerma[k]>0).length, nS = cons.filter(c=>regSob[c.itemId] && Number(c.cantidad)-(Number(regMerma[c.itemId])||0)>0.0005).length;
+  body.innerHTML = `<div class="card" style="border:2px solid #1f9d55">
     <div style="font-size:16px;font-weight:800">↩️ Regresó completo sin instalar</div>
     <p class="hint" style="margin:6px 0 0"><strong>${x.descripcion}</strong> (${fCorta(x.fechaDia)}). Esta instalación ya no va a contar.</p>
-    ${hojas.length?`<div style="margin-top:10px;font-weight:700">🪵 Melamina / MDF</div><ul style="margin:4px 0 0 18px;padding:0">${li(hojas)}</ul>`:''}
-    ${otros.length?`<div style="margin-top:8px;font-weight:700">🔩 Herrajes (siempre vuelven al inventario)</div><ul style="margin:4px 0 0 18px;padding:0">${li(otros)}</ul>`:''}
-    <input id="reg-motivo" placeholder="¿Por qué regresó? (opcional)" style="margin-top:10px">
-    ${hojas.length?`<p class="hint" style="margin:10px 0 0">¿Cómo viene la melamina / MDF?</p>
-    <button class="btn" style="width:100%;min-height:54px;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoInst(false)">✅ Sirve: vuelve al inventario (como cortado)</button>
-    <button class="btn" style="width:100%;min-height:54px;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="confirmarRegresoInst(true)">🗑️ Mojada o dañada: va a merma</button>`
-    :`<button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoInst(false)">↩️ Regresar al inventario</button>`}
-    <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="regInstSel=null;renderInstHistorial()">Cancelar</button>
+    <p class="hint" style="margin:6px 0 0">Todo vuelve al inventario <strong>menos lo que marques como merma</strong> (mojado, roto, dañado). En la casilla de la derecha va cuánto se va a merma.</p>
+    <p class="hint" style="margin:4px 0 0">🧩 <strong>A sobrantes</strong>: la melamina/MDF queda apartada para cortarla en otras piezas; en Sobrantes se anota en qué se transformó.</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn small" style="background:transparent;color:var(--ok);border:1px solid var(--line);box-shadow:none" onclick="regTodo('nada')">✅ Todo sirve</button>
+      ${hojas.length?`<button class="btn small" style="background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="regTodo('sob')">🧩 Toda la melamina/MDF a sobrantes</button>`:''}
+      ${hojas.length?`<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="regTodo('hojas')">🪵 Toda la melamina/MDF a merma</button>`:''}
+      <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="regTodo('todo')">🗑️ Todo a merma</button>
+    </div>
+    ${hojas.length?`<div style="margin-top:12px;font-weight:700">🪵 Melamina / MDF</div><div class="movlist" style="margin-top:6px">${hojas.map(fila).join('')}</div>`:''}
+    ${otros.length?`<div style="margin-top:12px;font-weight:700">🔩 Herrajes</div><div class="movlist" style="margin-top:6px">${otros.map(fila).join('')}</div>`:''}
+    <input id="reg-motivo" placeholder="¿Por qué regresó? (opcional)" value="${String(regMotivo).replace(/"/g,'&quot;')}" oninput="regMotivo=this.value" style="margin-top:12px">
+    <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoInst()">${nM||nS?`↩️ Regresar${nM?` · ${nM} con merma`:''}${nS?` · ${nS} a sobrantes`:''}`:'↩️ Regresar todo al inventario'}</button>
+    <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="regInstSel=null;regMerma={};regSob={};renderInstHistorial()">Cancelar</button>
   </div>`;
   window.scrollTo(0,0);
 }
-async function confirmarRegresoInst(aMerma){
+async function confirmarRegresoInst(){
   const logId = regInstSel; const x = instLog.find(l=>l.id===logId); if(!x) return;
   if(regresoDeInstalacion(logId)) return alert('Esta instalación ya se regresó al inventario.');
-  const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
-  const motivo = (document.getElementById('reg-motivo')||{}).value||'';
-  if(aMerma && !confirm('🗑️ La melamina / MDF de este modelo se va a MERMA (no regresa al inventario).\nLos herrajes sí vuelven al inventario.\n\n¿Continuar?')) return;
+  const cons = regCons();
+  const motivo = (document.getElementById('reg-motivo')||{}).value||regMotivo||'';
+  const merm = cons.filter(c=>Number(regMerma[c.itemId])>0).map(c=>({c, q:Math.min(Number(regMerma[c.itemId]), Number(c.cantidad))}));
+  const sobs = cons.filter(c=>regSob[c.itemId] && esHojaId(c.itemId)).map(c=>{ const m=merm.find(z=>z.c===c); return {c, q:Number(c.cantidad)-(m?m.q:0)}; }).filter(z=>z.q>0.0005);
+  const txt = '↩️ Regresó sin instalar: '+x.descripcion+'\n\n'+cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const m=merm.find(z=>z.c===c), sb=sobs.find(z=>z.c===c); const resto=Number(c.cantidad)-(m?m.q:0);
+    return `• ${it.nombre}: ${[m?`${fmtNum(m.q)} a MERMA`:'', resto>0.0005?`${fmtNum(resto)} ${sb?'a SOBRANTES':'al inventario'}`:''].filter(Boolean).join(', ')}`; }).join('\n')+'\n\n¿Guardar?';
+  if(!confirm(txt)) return;
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
     const fechaM = new Date(Date.parse(fecha)+1).toISOString(); // la merma va 1 ms después del regreso
     const nota = 'Regresó sin instalar · '+x.descripcion+(motivo.trim()?' · '+motivo.trim():'');
     for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', instalacionId:logId, cantidad:Number(c.cantidad), nota, fecha, estado, loteId, creadoPor});
-      if(aMerma && esHoja(it)) await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'regresoMerma', instalacionId:logId, cantidad:Number(c.cantidad), nota:'No sirve (mojado/dañado) · '+nota, fecha:fechaM, estado, loteId, creadoPor});
+      const m = merm.find(z=>z.c===c);
+      if(m) await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', ...(esHoja(it)?{lado:'cortado'}:{}), motivo:'regresoMerma', instalacionId:logId, cantidad:m.q, nota:'Dañado (no sirve) · '+nota, fecha:fechaM, estado, loteId, creadoPor});
+      const sb = sobs.find(z=>z.c===c);
+      if(sb) await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'regresoSobrante', instalacionId:logId, cantidad:sb.q, nota:'A sobrantes · '+nota, fecha:fechaM, estado, loteId, sobranteId:loteId, creadoPor});
     }
-    regInstSel = null;
-    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : (aMerma?'🗑️ Registrado: la melamina se fue a merma y los herrajes regresaron.':'✅ Regresó al inventario.'));
+    if(sobs.length){ // el sobrante usa el mismo id que el lote, así se aprueba junto con el regreso
+      const material = sobs.map(z=>({itemId:z.c.itemId, cantidad:fmtNum(z.q)})); const restante = {}; material.forEach(mm=>{ restante[mm.itemId]=mm.cantidad; });
+      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, nota:(motivo.trim()||'')+' (regresó de instalación)', lineas:[x.descripcion+' · regresó sin instalar'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId});
+    }
+    regInstSel = null; regMerma = {}; regSob = {}; regMotivo = '';
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : (sobs.length?'✅ Regresó; la melamina quedó apartada en 🧩 Sobrantes.':(merm.length?'✅ Regresó; lo dañado quedó como merma.':'✅ Regresó al inventario.')));
     renderInstHistorial();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -3513,7 +3589,7 @@ async function confirmarRegresoLibre(){
 function detalleRegresoInstAprob(items, logs){
   const m = items.find(x=>x.motivo==='regresoInstalacion'); if(!m) return '';
   const l = logs.find(x=>x.id===m.instalacionId);
-  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.modeloRegreso?m.modeloRegreso+' · elegido a mano (sin instalación registrada)':(m.nota||''))}</div><div class="hint" style="margin:2px 0 0">${items.some(x=>x.motivo==='regresoMerma')?'🗑️ La melamina / MDF venía mojada o dañada: se va a <strong>merma</strong>. Los herrajes vuelven al inventario.':'Todo vuelve al inventario (la melamina como cortado).'}</div></div>`;
+  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.modeloRegreso?m.modeloRegreso+' · elegido a mano (sin instalación registrada)':(m.nota||''))}</div><div class="hint" style="margin:2px 0 0">${items.some(x=>x.motivo==='regresoMerma'||x.motivo==='regresoSobrante') ? [items.some(x=>x.motivo==='regresoMerma')?'🗑️ A <strong>merma</strong> (dañado): '+items.filter(x=>x.motivo==='regresoMerma').map(x=>fmtNum(x.cantidad)+' '+x.itemNombre).join(', ')+'.':'', items.some(x=>x.motivo==='regresoSobrante')?'🧩 A <strong>sobrantes</strong> (para cortarse en otras piezas): '+items.filter(x=>x.motivo==='regresoSobrante').map(x=>fmtNum(x.cantidad)+' '+x.itemNombre).join(', ')+'.':'', 'Lo demás vuelve al inventario.'].filter(Boolean).join('<br>') : 'Todo vuelve al inventario (la melamina como cortado).'}</div></div>`;
 }
 
 let iFamSel = null; // familia elegida (para no mostrar todos los modelos juntos)
@@ -5848,8 +5924,8 @@ function pzResumenHtml(){
   const pool = pzPool(), cons = pzConsumo();
   if(!pool.length && !pzMedidas.length) return '<p class="hint">Todavía no capturas piezas.</p>';
   return `<div class="hint" style="margin:0 0 6px">${pool.map(p=>`${p.cantidad} × ${p.label} · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle()).join('<br>')}</div>
-    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const f=calcFormula(it.id); const m=pzModo==='merma', rc=pzModo==='recon';
-      return `<div class="movitem"><span><span class="invname">${it.nombre}</span>${m?`<span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.cortado)} ya cortadas</span>`:''}</span><strong class="${rc?'':(m?'neg':'pos')}">${rc?'= ':(m?'−':'+')}${fmtNum(c.cantidad)} ${it.unidad}${rc?' en piezas':''}</strong></div>`; }).join('')}</div>`;
+    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const f=calcFormula(it.id); const m=pzModo==='merma'||pzModo==='reg', rc=pzModo==='recon';
+      return `<div class="movitem"><span><span class="invname">${it.nombre}</span>${pzModo==='merma'?`<span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.cortado)} ya cortadas</span>`:''}</span><strong class="${rc?'':(m?'neg':'pos')}">${rc?'= ':(m?'−':'+')}${fmtNum(c.cantidad)} ${it.unidad}${rc?' en piezas':''}</strong></div>`; }).join('')}</div>`;
 }
 function setPz(g, key, val){
   const n = val==='' ? 0 : Number(val);
@@ -5874,8 +5950,13 @@ function renderPzEnc(){
   const counts = pzVals[pzGrupo]||{};
   const opciones = MEL_COLORES.map(c=>{ const n=Object.keys(pzVals[c]||{}).length + pzMedidas.filter(m=>m.color===c).length; return `<option value="${c}" ${c===pzGrupo?'selected':''}>Melamina ${c}${n?' ✓'+n:''}</option>`; }).join('')
     + (()=>{ const n=Object.keys(pzVals[AUD_GRUPO_MDF]||{}).length; return `<option value="${AUD_GRUPO_MDF}" ${esMDF?'selected':''}>MDF (fondos de cajón/cajonera)${n?' ✓'+n:''}</option>`; })();
-  const esMerma = pzModo==='merma';
-  $('#main').innerHTML = (esMerma ? `<div class="card" style="border:2px solid #e0791a">
+  const esMerma = pzModo==='merma', esReg = pzModo==='reg';
+  if(esReg){ const it=CATALOGO.find(i=>i.id===regPzItem); if(it){ pzGrupo = it.cat==='MDF' ? AUD_GRUPO_MDF : it.nombre.replace(/^Melamina /,''); } }
+  $('#main').innerHTML = (esReg ? `<div class="card" style="border:2px solid #e0791a">
+      <div style="font-size:17px;font-weight:800">✂️ Piezas dañadas del regreso</div>
+      <p class="hint">Cuenta solo las piezas de <strong>${(CATALOGO.find(i=>i.id===regPzItem)||{}).nombre||''}</strong> que vienen dañadas. La app las convierte a hojas y eso se va a merma; lo demás regresa al inventario.</p>
+      <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="volverRegreso()">Cancelar</button>
+    </div>` : esMerma ? `<div class="card" style="border:2px solid #e0791a">
       <div style="font-size:17px;font-weight:800">⚠️ Merma de piezas cortadas · ${modulo()}</div>
       <p class="hint">Piezas ya cortadas que <strong>se dañaron</strong> y ya no sirven. La app las convierte a hojas con los mismos rendimientos del despiece y las <strong>SACA</strong> del material cortado de su color como merma.</p>
       <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');irA('mov')">Cancelar</button>
@@ -5884,7 +5965,7 @@ function renderPzEnc(){
       <p class="hint">Piezas ya cortadas que <strong>no estaban en el inventario</strong> (sobrante que nunca se contó). La app las convierte a hojas con los mismos rendimientos del despiece y las <strong>SUMA</strong> al material cortado de su color.</p>
       <p class="hint" style="margin:4px 0 0">No es para lo que regresó de una instalación (eso va en ↩️ Regresó un modelo completo o en 🧩 Sobrantes).</p>
     </div>`) + `
-    <div class="card">
+    <div class="card" style="${esReg?'display:none':''}">
       <div class="paso">1</div><strong>¿De qué color?</strong>
       <select onchange="pzGrupo=this.value;renderPzEnc()" style="margin-top:8px">${opciones}</select>
       <p class="hint" style="margin-top:6px">Puedes capturar varios colores: cambia el color y sigue; lo de cada color se guarda.</p>
@@ -5895,11 +5976,11 @@ function renderPzEnc(){
     </div>
     ${esMDF?'':pzMedidasHtml()}
     <div class="card">
-      <div class="paso">3</div><strong>${esMerma?'Esto sale del inventario como merma':'Esto se suma al inventario'}</strong>
+      <div class="paso">3</div><strong>${esMerma||esReg?'Esto se va a merma':'Esto se suma al inventario'}</strong>
       <div id="pz-resumen" style="margin-top:8px">${pzResumenHtml()}</div>
       <input id="pz-nota" placeholder="${esMerma?'¿Qué pasó? (opcional)':'¿Dónde estaban? (opcional)'}" value="${String(pzNota).replace(/"/g,'&quot;')}" oninput="pzNota=this.value" style="margin-top:10px">
       ${esMerma?fotoPickerHtml('merma','Foto de lo dañado (opcional)'):''}
-      <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:${esMerma?'linear-gradient(135deg,#e0791a,#c0620f)':'linear-gradient(135deg,#0e8a8a,#0b6f6f)'}" onclick="guardarPzEnc()">${esMerma?'⚠️ Registrar merma':'✅ Sumar al inventario'}</button>
+      ${esReg?`<button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="usarPiezasRegreso()">✅ Usar estas piezas como merma</button>`:`<button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:${esMerma?'linear-gradient(135deg,#e0791a,#c0620f)':'linear-gradient(135deg,#0e8a8a,#0b6f6f)'}" onclick="guardarPzEnc()">${esMerma?'⚠️ Registrar merma':'✅ Sumar al inventario'}</button>`}
     </div>`;
 }
 async function guardarPzEnc(){
