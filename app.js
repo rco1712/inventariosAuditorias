@@ -189,7 +189,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v110';
+const APP_VERSION = 'v112';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -593,7 +593,7 @@ async function editInicial(itemId){
 
 function setView(v){
   current=v;
-  if(esSoloLectura() && ['mov','inst','trasp','pend','mas','pzenc'].includes(v)){
+  if(esSoloLectura() && ['mov','inst','trasp','pend','mas','pzenc','gas'].includes(v)){
     document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
     $('#main').innerHTML = `<div class="card">Tu cuenta (${ROL_LABELS[miPerfil.rol]||miPerfil.rol}) no captura en esta sección.</div>`; return;
   }
@@ -611,6 +611,7 @@ function setView(v){
   if(v==='tubos') renderTubos();
   if(v==='pzenc') renderPzEnc();
   if(v==='recon') renderRecon();
+  if(v==='gas'){ gasCache=null; renderGas(); }
   if(v==='resumen'){ resumenCache=null; renderResumen(); }
   if(v==='valinst') renderValInst();
   if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
@@ -829,6 +830,7 @@ function renderHome(){
     t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
     t('🛡️','Garantía','Material que se da en garantía',"irA('gar')",'#b3742c');
     t('♻️','Tubos ahorrados','Tubos que regresan los instaladores',"irA('tubos')",'#1f9d55');
+    t('⛽','Gasolina','Cargas y presupuesto de la semana',"irA('gas')",'#e0791a');
     const enCamino = pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p)).length;
     t('🚚','Por llegar', enCamino ? `${enCamino} pedido(s) en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'#0e8a8a');
   }
@@ -5039,6 +5041,8 @@ function renderRep(){
   }
 
   html += `<div class="card" id="rep-inst"><strong>🔧 Instalaciones de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`;
+  html += `<div class="card" id="rep-gas"><strong>⛽ Gasolina de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`;
+  setTimeout(repGasolinaSemana, 0);
   setTimeout(repInstalacionesSemana, 0);
   html += `<div class="card row" style="justify-content:space-between">
       <div><strong>📜 Historial de entradas y salidas</strong><p class="hint" style="margin:2px 0 0">Cuándo llegó material, cuándo salió y quién lo anotó, con totales por fechas.</p></div>
@@ -5783,7 +5787,7 @@ async function sobranteAMerma(id){
 function iniciarTransformacion(id){
   const x = sobrantesCache.find(s=>s.id===id); if(!x) return;
   const colores = Object.keys(x.restante||{}).map(k=>CATALOGO.find(i=>i.id===k)).filter(it=>it && it.cat==='Melamina').map(it=>it.nombre.replace('Melamina ',''));
-  sobTransf = {id, color: colores[0]||'Blanco', piezas:{}, medidas:[], mAncho:'', mAlto:'', mCant:''};
+  sobTransf = {id, color: colores[0]||'Blanco', piezas:{}, medidas:[], mAncho:'', mAlto:'', mCant:'', pTipo:'Normal', pAncho:'', pAlto:'', pCortes:null};
   renderSob(); window.scrollTo(0,0);
 }
 function piezasTransformacion(){
@@ -5799,7 +5803,7 @@ function piezasTransformacion(){
 function descPiezasTransformacion(){
   const t = sobTransf;
   return Object.keys(t.piezas).filter(k=>Number(t.piezas[k])>0).map(k=>{ const p=PIEZAS_AUDIT.find(x=>x.key===k); return `${t.piezas[k]} ${p.label}`; })
-    .concat(t.medidas.map(m=>`${m.cantidad} pieza(s) de ${fmtNum(m.ancho)}×${fmtNum(m.alto)}`));
+    .concat(t.medidas.map(m=>`${m.cantidad} ${m.label?m.label.toLowerCase()+'(s)':'pieza(s)'} de ${fmtNum(m.ancho)}×${fmtNum(m.alto)}`));
 }
 function transformacionHtml(){
   const t = sobTransf; const x = sobrantesCache.find(s=>s.id===t.id); if(!x){ sobTransf=null; return ''; }
@@ -5818,15 +5822,27 @@ function transformacionHtml(){
       <div class="wrap-x" style="margin-top:10px"><table><tr><th>Pieza</th><th>Cantidad</th></tr>
         ${lista.map(p=>`<tr><td>${p.label}<div class="tag">${p.dim}</div></td><td><input type="number" min="0" inputmode="numeric" style="min-width:70px" value="${t.piezas[p.key]||''}" onchange="sobTransf.piezas['${p.key}']=Number(this.value)||0;renderSob()"></td></tr>`).join('')}
       </table></div>
-      <details style="margin-top:10px"><summary class="hint"><strong>+ Pieza a medida</strong></summary>
+      <details style="margin-top:10px"><summary class="hint"><strong>+ Otra pieza a medida (ancho × alto)</strong></summary>
         <div class="grid2" style="margin-top:8px">
           <div><label class="hint">Ancho (cm)</label><input type="number" inputmode="decimal" value="${t.mAncho}" oninput="sobTransf.mAncho=this.value"></div>
           <div><label class="hint">Alto (cm)</label><input type="number" inputmode="decimal" value="${t.mAlto}" oninput="sobTransf.mAlto=this.value"></div>
           <div><label class="hint">¿Cuántas?</label><input type="number" inputmode="numeric" value="${t.mCant}" oninput="sobTransf.mCant=this.value"></div>
         </div>
         <button class="btn small" style="margin-top:8px" onclick="agregarMedidaTransf()">Agregar</button>
-        ${t.medidas.length?`<p class="hint">${t.medidas.map((m,i)=>`${m.cantidad} de ${fmtNum(m.ancho)}×${fmtNum(m.alto)} <a href="#" onclick="sobTransf.medidas.splice(${i},1);renderSob();return false;">quitar</a>`).join(' · ')}</p>`:''}
       </details>
+      <div style="margin-top:12px;padding:10px 12px;border-radius:12px;border:1px solid var(--line)">
+        <strong>🚪 Puertas (por la medida del hueco)</strong>
+        <p class="hint" style="margin:4px 0 0">Elige el tipo y la medida del hueco; la app calcula las puertas, marcos y fijos. Deja solo las piezas que sacaste.</p>
+        <select style="margin-top:8px" onchange="sobTransf.pTipo=this.value;sobTransf.pCortes=null;renderSob()">${Object.keys(TIPOS_PUERTA).map(k=>`<option ${k===t.pTipo?'selected':''}>${k}</option>`).join('')}</select>
+        <div class="grid2" style="margin-top:8px">
+          <div><label class="hint">Ancho del hueco (cm)</label><input type="number" inputmode="decimal" value="${t.pAncho}" oninput="sobTransf.pAncho=this.value"></div>
+          <div><label class="hint">Alto del hueco (cm)</label><input type="number" inputmode="decimal" value="${t.pAlto}" oninput="sobTransf.pAlto=this.value"></div>
+        </div>
+        <button class="btn small" style="margin-top:8px" onclick="calcPuertaTransf()">Calcular piezas</button>
+        ${t.pCortes?`<div class="movlist" style="margin-top:8px">${t.pCortes.map((c,i)=>`<label class="movitem" style="padding:8px 10px"><span>${PIEZA_PUERTA_LABEL[c.pieza]||c.pieza}<span class="tag" style="margin-left:6px">${fmtNum(c.ancho)}×${fmtNum(c.alto)}</span></span><input type="number" min="0" max="${c.max}" inputmode="numeric" value="${c.cantidad}" style="width:64px;min-width:64px;text-align:center" oninput="sobTransf.pCortes[${i}].cantidad=Math.max(0,Math.min(${c.max},Number(this.value)||0))"></label>`).join('')}</div>
+          <button class="btn" style="margin-top:8px;width:100%;background:linear-gradient(135deg,#0e8a8a,#0b6f6f)" onclick="agregarPuertaTransf()">➕ Agregar estas piezas</button>`:''}
+      </div>
+      ${t.medidas.length?`<div style="margin-top:10px"><strong>Piezas a medida anotadas</strong><div class="movlist" style="margin-top:6px">${t.medidas.map((m,i)=>`<div class="movitem" style="padding:8px 10px"><span>${m.cantidad} × ${m.label||'Pieza'} de ${fmtNum(m.ancho)}×${fmtNum(m.alto)}</span><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="sobTransf.medidas.splice(${i},1);renderSob()">✖</button></div>`).join('')}</div></div>`:''}
     </div>
     <div class="card">
       <strong>Equivale a</strong>
@@ -5836,6 +5852,22 @@ function transformacionHtml(){
         <button class="btn" onclick="confirmarTransformacion()">✅ Guardar</button>
       </div>
     </div>`;
+}
+const PIEZA_PUERTA_LABEL = {puerta:'Puerta', marco:'Marco', fijo:'Fijo', paredFalsa:'Pared falsa', extFijo:'Extensión de fijo'};
+function calcPuertaTransf(){
+  const t = sobTransf; const an = Number(t.pAncho), al = Number(t.pAlto);
+  if(!(an>0) || !(al>0)) return alert('Escribe el ancho y el alto del hueco en centímetros.');
+  const r = calcularPuerta(t.pTipo, al, an, false);
+  t.pCortes = (r.cortes||[]).filter(c=>c.cantidad>0).map(c=>({pieza:c.pieza, ancho:fmtNum(c.ancho), alto:fmtNum(c.alto), cantidad:c.cantidad, max:c.cantidad}));
+  renderSob();
+}
+function agregarPuertaTransf(){
+  const t = sobTransf; if(!t.pCortes) return;
+  const sel = t.pCortes.filter(c=>c.cantidad>0);
+  if(!sel.length) return alert('Deja al menos una pieza con cantidad.');
+  for(const c of sel){ if(piezasPorHojaIndividual(c.ancho, c.alto, 122, 244)<1) return alert(`${PIEZA_PUERTA_LABEL[c.pieza]||c.pieza} de ${c.ancho}×${c.alto} no cabe en una hoja de 122×244 cm.`); }
+  sel.forEach(c=>t.medidas.push({ancho:c.ancho, alto:c.alto, cantidad:c.cantidad, label:PIEZA_PUERTA_LABEL[c.pieza]||'Pieza'}));
+  t.pCortes = null; renderSob();
 }
 function agregarMedidaTransf(){
   const t = sobTransf; const an=Number(t.mAncho), al=Number(t.mAlto), n=Number(t.mCant)||1;
@@ -6238,6 +6270,152 @@ async function repInstalacionesSemana(){
     ${esAdmin()?`<button class="btn small" style="margin-top:8px;background:transparent;color:#b38a1e;border:1px solid var(--line);box-shadow:none" onclick="valEdit=null;irA('valinst')">⭐ Valor de cada modelo</button>`:''}`;
 }
 
+// ===== Gasolina (confirmado por el usuario) =====
+// Cada módulo tiene un presupuesto semanal (sábado a viernes, se reinicia cada semana) que captura
+// Dirección. Los coordinadores registran cada carga: día, carro, instalador y cuánto en pesos (con foto
+// del ticket opcional); se descuenta del presupuesto al momento (no requiere aprobación). Los carros y
+// los instaladores de cada módulo los da de alta Dirección; el coordinador solo los elige.
+let gasConfig = null, gasCache = null, gasSemana = 'esta', gasEditCfg = false, gasForm = {fecha:'', carro:'', instalador:'', monto:'', nota:''};
+const fmtPesos = n => '$'+(Number(n)||0).toLocaleString('es-MX',{minimumFractionDigits:0, maximumFractionDigits:2});
+async function cargarGasConfig(){
+  if(gasConfig) return gasConfig;
+  try{ const d = await db.collection('config').doc('gasolina').get(); const x = (d && d.data && d.data()) || {}; gasConfig = {presupuestos:x.presupuestos||{}, carros:x.carros||{}, instaladores:x.instaladores||{}}; }
+  catch(e){ gasConfig = {presupuestos:{}, carros:{}, instaladores:{}}; }
+  return gasConfig;
+}
+function gasRango(cual){
+  const hoy = fechaHoyLocal(), sab = sabadoDe(hoy);
+  if(cual==='pasada'){ const d=new Date(sab+'T12:00:00'); d.setDate(d.getDate()-7); const s0=d.toISOString().slice(0,10); return {desde:s0, hasta:finSemana(s0), txt:'Semana pasada'}; }
+  return {desde:sab, hasta:finSemana(sab), txt:'Esta semana'};
+}
+async function cargarGas(){
+  if(gasCache) return gasCache;
+  try{ const snap = await db.collection('gasolina').get(); gasCache = snap.docs.map(d=>({id:d.id, ...d.data()})).filter(g=>g.estado!=='borrado'); }catch(e){ gasCache = []; }
+  return gasCache;
+}
+function gasDeModulo(mod, rg, lista){ return (lista||[]).filter(g=>g.modulo===mod && g.fechaDia>=rg.desde && g.fechaDia<=rg.hasta); }
+async function renderGas(){
+  await cargarGasConfig(); await cargarGas();
+  const mod = modulo(), cfg = gasConfig;
+  if(gasEditCfg && esAdmin()) return renderGasConfig();
+  const rg = gasRango(gasSemana), lista = gasDeModulo(mod, rg, gasCache).sort((a,b)=>(b.fechaDia||'').localeCompare(a.fechaDia||'')||(b.fecha||'').localeCompare(a.fecha||''));
+  const pres = Number(cfg.presupuestos[mod])||0, gastado = lista.reduce((s,g)=>s+(Number(g.monto)||0),0), queda = pres - gastado;
+  const pct = pres ? Math.min(100, gastado/pres*100) : 0, col = !pres ? '#888' : (gastado>pres ? '#e0453f' : (pct>=80 ? '#e3b341' : '#1f9d55'));
+  const carros = cfg.carros[mod]||[], inst = cfg.instaladores[mod]||[];
+  if(!gasForm.fecha) gasForm.fecha = fechaHoyLocal();
+  const puede = !esSoloLectura();
+  const porCarro = {}, porInst = {}; lista.forEach(g=>{ porCarro[g.carro]=(porCarro[g.carro]||0)+(Number(g.monto)||0); porInst[g.instalador]=(porInst[g.instalador]||0)+(Number(g.monto)||0); });
+  const tablaTot = (o) => Object.keys(o).sort((a,b)=>o[b]-o[a]).map(k=>`<div class="movitem" style="padding:6px 10px"><span>${k||'—'}</span><strong>${fmtPesos(o[k])}</strong></div>`).join('');
+  const porDia = {}; lista.forEach(g=>{ (porDia[g.fechaDia]=porDia[g.fechaDia]||[]).push(g); });
+  $('#main').innerHTML = `<div class="card" style="border-left:6px solid ${col}">
+      <div class="row" style="justify-content:space-between"><div style="font-size:17px;font-weight:800">⛽ Gasolina · ${mod}</div>${esAdmin()?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="gasEditCfg=true;renderGas()">⚙️ Presupuestos, carros e instaladores</button>`:''}</div>
+      <div class="chips" style="margin-top:8px">${[['esta','Esta semana'],['pasada','Semana pasada']].map(([k,t])=>`<button class="chip ${k===gasSemana?'on':''}" onclick="gasSemana='${k}';renderGas()">${t}</button>`).join('')}</div>
+      <p class="hint" style="margin:6px 0 0">${rg.txt}: ${fCorta(rg.desde)} – ${fCorta(rg.hasta)} (sábado a viernes)</p>
+      ${pres ? `<div class="row" style="justify-content:space-between;margin-top:10px;align-items:flex-end"><span class="hint" style="margin:0">Gastado</span><span><strong style="font-size:22px">${fmtPesos(gastado)}</strong><span class="hint" style="margin:0"> de ${fmtPesos(pres)}</span></span></div>
+        <div style="height:12px;border-radius:6px;background:rgba(127,127,127,.25);margin-top:6px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${col}"></div></div>
+        <div style="margin-top:8px;font-weight:800;font-size:16px;color:${col}">${queda>=0?`Quedan ${fmtPesos(queda)}`:`⚠️ Se pasó por ${fmtPesos(-queda)}`}</div>`
+      : `<p class="hint" style="margin-top:8px">Gastado: <strong>${fmtPesos(gastado)}</strong>. ${esAdmin()?'Todavía no capturas el presupuesto semanal de este módulo (toca ⚙️).':'Dirección todavía no captura el presupuesto semanal.'}</p>`}
+    </div>
+    ${puede && gasSemana==='esta' ? (carros.length && inst.length ? `<div class="card">
+      <strong>➕ Registrar carga de gasolina</strong>
+      <div class="grid2" style="margin-top:8px">
+        <div><label class="hint">Día</label><input id="gas-fecha" type="date" value="${gasForm.fecha}" max="${fechaHoyLocal()}" oninput="gasForm.fecha=this.value" style="margin-top:4px"></div>
+        <div><label class="hint">¿Cuánto? (pesos)</label><input id="gas-monto" type="number" min="0" step="0.01" inputmode="decimal" placeholder="$" value="${gasForm.monto}" oninput="gasForm.monto=this.value" style="margin-top:4px"></div>
+      </div>
+      <label class="hint" style="display:block;margin-top:8px">Carro</label><select id="gas-carro" onchange="gasForm.carro=this.value" style="margin-top:4px"><option value="">— Elige el carro —</option>${carros.map(c=>`<option ${c===gasForm.carro?'selected':''}>${c}</option>`).join('')}</select>
+      <label class="hint" style="display:block;margin-top:8px">Instalador</label><select id="gas-inst" onchange="gasForm.instalador=this.value" style="margin-top:4px"><option value="">— ¿Quién la cargó? —</option>${inst.map(c=>`<option ${c===gasForm.instalador?'selected':''}>${c}</option>`).join('')}</select>
+      <input id="gas-nota" placeholder="Nota (opcional)" value="${String(gasForm.nota).replace(/"/g,'&quot;')}" oninput="gasForm.nota=this.value" style="margin-top:8px">
+      ${fotoPickerHtml('gas','Foto del ticket (opcional)')}
+      <button class="btn" style="width:100%;min-height:54px;margin-top:12px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="guardarGas()">⛽ Guardar carga</button>
+    </div>` : `<div class="card aviso"><strong>Faltan datos</strong><p class="hint" style="margin:4px 0 0">${esAdmin()?'Da de alta los carros y los instaladores de '+mod+' en ⚙️ para poder registrar cargas.':'Dirección todavía no da de alta los carros y los instaladores de este módulo.'}</p></div>`) : ''}
+    ${lista.length ? `<div class="card"><strong>Por carro</strong><div class="movlist" style="margin-top:6px">${tablaTot(porCarro)}</div>
+      <strong style="display:block;margin-top:10px">Por instalador</strong><div class="movlist" style="margin-top:6px">${tablaTot(porInst)}</div></div>
+      <div class="card"><strong>Cargas (${lista.length})</strong>
+      ${Object.keys(porDia).sort((a,b)=>b.localeCompare(a)).map(d=>`<div style="margin-top:10px;font-weight:700">${new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'short'})} · ${fmtPesos(porDia[d].reduce((s,g)=>s+(Number(g.monto)||0),0))}</div>
+        <div class="movlist" style="margin-top:4px">${porDia[d].map(g=>`<div class="movitem" style="padding:8px 10px;align-items:flex-start"><span style="min-width:0;flex:1"><strong>${g.carro}</strong> · ${g.instalador}${g.nota?`<span class="hint" style="display:block;margin:2px 0 0">${g.nota}</span>`:''}<span class="hint" style="display:block;margin:2px 0 0">${(g.creadoPor||'').split('@')[0]}${g.fotos?` · <a href="#" onclick="verFotos('${g.id}',${g.fotos},'Ticket de gasolina');return false;">📷 ticket</a>`:''}</span></span>
+          <span style="text-align:right"><strong style="font-size:16px">${fmtPesos(g.monto)}</strong>${esAdmin()?`<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarGas('${g.id}')">🗑️</button>`:''}</span></div>`).join('')}</div>`).join('')}
+      </div>` : `<div class="card hint">No hay cargas registradas ${gasSemana==='esta'?'esta semana':'la semana pasada'}.</div>`}`;
+}
+async function guardarGas(){
+  const f = gasForm, monto = Number(f.monto);
+  if(!f.fecha) return alert('Elige el día.');
+  if(f.fecha > fechaHoyLocal()) return alert('El día no puede ser después de hoy.');
+  if(!f.carro) return alert('Elige el carro.');
+  if(!f.instalador) return alert('Elige el instalador.');
+  if(!(monto>0)) return alert('Escribe cuánto se echó de gasolina (en pesos).');
+  const mod = modulo(), rg = gasRango('esta');
+  const pres = Number(gasConfig.presupuestos[mod])||0, gastado = gasDeModulo(mod, rg, gasCache).reduce((s,g)=>s+(Number(g.monto)||0),0);
+  const pasa = pres && f.fecha>=rg.desde && gastado + monto > pres;
+  if(!confirm(`⛽ Carga de gasolina · ${mod}\n\n${new Date(f.fecha+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}\nCarro: ${f.carro}\nInstalador: ${f.instalador}\nMonto: ${fmtPesos(monto)}${pres&&!pasa?`\n\nQuedarían ${fmtPesos(pres-gastado-monto)} del presupuesto de la semana.`:''}${pasa?`\n\n⚠️ Con esta carga se pasa del presupuesto por ${fmtPesos(gastado+monto-pres)}.`:''}\n\n¿Guardar?`)) return;
+  try{
+    const id = cryptoId(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    const nf = await guardarFotos('gas', 'gasolina', id, mod);
+    await db.collection('gasolina').doc(id).set({modulo:mod, fechaDia:f.fecha, fecha:new Date().toISOString(), carro:f.carro, instalador:f.instalador, monto, nota:(f.nota||'').trim(), creadoPor, ...(nf?{fotos:nf}:{})});
+    gasForm = {fecha:f.fecha, carro:'', instalador:'', monto:'', nota:''}; gasCache = null;
+    toast('⛽ Carga guardada.'); renderGas(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function borrarGas(id){
+  if(!esAdmin()) return;
+  const g = (gasCache||[]).find(x=>x.id===id); if(!g) return;
+  if(!confirm(`🗑️ Borrar la carga de ${fmtPesos(g.monto)} (${g.carro} · ${g.instalador}, ${g.fechaDia})?\n\nEl monto regresa al presupuesto de la semana.`)) return;
+  try{ await db.collection('gasolina').doc(id).update({estado:'borrado', borradoPor:getCurrentUserEmail?getCurrentUserEmail():'', borradoEn:new Date().toISOString()}); gasCache=null; renderGas(); }catch(e){ alert('Error: '+e.message); }
+}
+let gasCfgEdit = null;
+function renderGasConfig(){
+  if(!gasCfgEdit) gasCfgEdit = JSON.parse(JSON.stringify(gasConfig));
+  const c = gasCfgEdit;
+  const lista = (tipo, mod) => (c[tipo][mod]||[]).map((n,i)=>`<span class="tag" style="display:inline-flex;align-items:center;gap:6px;margin:3px 4px 0 0">${n}<a href="#" style="color:var(--bad);text-decoration:none" onclick="gasCfgEdit['${tipo}']['${mod}'].splice(${i},1);renderGasConfig();return false;">✖</a></span>`).join('');
+  $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:800">⚙️ Gasolina: presupuestos, carros e instaladores</div>
+      <p class="hint">El presupuesto es por semana (sábado a viernes) y se reinicia cada semana. Los coordinadores eligen el carro y el instalador de estas listas.</p></div>
+    ${MODULOS.map(m=>{ const mod=m.nombre; return `<div class="card"><strong>📍 ${mod}</strong>
+      <label class="hint" style="display:block;margin-top:8px">Presupuesto semanal (pesos)</label>
+      <input type="number" min="0" inputmode="decimal" value="${c.presupuestos[mod]??''}" placeholder="$" oninput="gasCfgEdit.presupuestos['${mod}']=this.value===''?undefined:Number(this.value)" style="margin-top:4px">
+      <label class="hint" style="display:block;margin-top:10px">🚗 Carros</label><div>${lista('carros',mod)||'<span class="hint">Ninguno</span>'}</div>
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap"><input id="gc-carro-${mod}" placeholder="Ej. Nissan blanca ABC-123" style="flex:1"><button class="btn small" onclick="gasCfgAgregar('carros','${mod}')">Agregar</button></div>
+      <label class="hint" style="display:block;margin-top:10px">👷 Instaladores</label><div>${lista('instaladores',mod)||'<span class="hint">Ninguno</span>'}</div>
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap"><input id="gc-instaladores-${mod}" placeholder="Nombre del instalador" style="flex:1"><button class="btn small" onclick="gasCfgAgregar('instaladores','${mod}')">Agregar</button></div>
+    </div>`; }).join('')}
+    <div class="card"><button class="btn" style="width:100%;min-height:52px" onclick="guardarGasConfig()">✅ Guardar</button>
+      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="gasCfgEdit=null;gasEditCfg=false;renderGas()">Cancelar</button></div>`;
+}
+function gasCfgAgregar(tipo, mod){
+  const el = document.getElementById('gc-'+(tipo==='carros'?'carro':'instaladores')+'-'+mod); const v = (el&&el.value||'').trim(); if(!v) return;
+  const arr = (gasCfgEdit[tipo][mod] = gasCfgEdit[tipo][mod]||[]); if(!arr.includes(v)) arr.push(v);
+  renderGasConfig();
+}
+async function guardarGasConfig(){
+  try{
+    const c = gasCfgEdit; const pres = {}; Object.keys(c.presupuestos).forEach(k=>{ const v=Number(c.presupuestos[k]); if(v>0) pres[k]=v; });
+    await db.collection('config').doc('gasolina').set({modulo:'_global', presupuestos:pres, carros:c.carros, instaladores:c.instaladores, fecha:new Date().toISOString()});
+    gasConfig = {presupuestos:pres, carros:c.carros, instaladores:c.instaladores}; gasCfgEdit = null; gasEditCfg = false; resumenCache = null;
+    toast('✅ Guardado.'); renderGas();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function repGasolinaSemana(){
+  const el = document.getElementById('rep-gas'); if(!el) return;
+  await cargarGasConfig(); gasCache = null; await cargarGas();
+  const mod = modulo(), pres = Number(gasConfig.presupuestos[mod])||0;
+  const fila = cual => { const rg=gasRango(cual), g=gasDeModulo(mod, rg, gasCache).reduce((s,x)=>s+(Number(x.monto)||0),0); const pasa = pres && g>pres;
+    return `<div class="movitem" style="padding:8px 10px"><span>${rg.txt}<span class="hint" style="display:block;margin:0">${fCorta(rg.desde)} – ${fCorta(rg.hasta)}</span></span><strong class="${pasa?'neg':''}">${fmtPesos(g)}${pres?`<span class="hint" style="margin:0"> / ${fmtPesos(pres)}</span>`:''}</strong></div>`; };
+  el.innerHTML = `<strong>⛽ Gasolina de ${mod}</strong><p class="hint" style="margin:4px 0 0">Semana de sábado a viernes.</p>
+    <div class="movlist" style="margin-top:8px">${fila('esta')}${fila('pasada')}</div>
+    <button class="btn small" style="margin-top:8px;background:transparent;color:#e0791a;border:1px solid var(--line);box-shadow:none" onclick="irA('gas')">⛽ Ver cargas</button>`;
+}
+function gasResumenHtml(R, rg){
+  const cfg = gasConfig||{presupuestos:{}};
+  const filas = MODULOS.map(m=>{ const xs=(R.gas||[]).filter(g=>g.modulo===m.nombre && g.estado!=='borrado' && g.fechaDia>=rg.desde && g.fechaDia<=rg.hasta);
+    return {m:m.nombre, gasto:xs.reduce((s,g)=>s+(Number(g.monto)||0),0), n:xs.length, pres:Number(cfg.presupuestos[m.nombre])||0}; }).sort((a,b)=>b.gasto-a.gasto);
+  const total = filas.reduce((s,x)=>s+x.gasto,0);
+  if(!total && !filas.some(x=>x.pres)) return '';
+  const col = x => !x.pres ? '#888' : (x.gasto>x.pres ? '#e0453f' : (x.gasto/x.pres>=0.8 ? '#e3b341' : '#1f9d55'));
+  return `<div class="card"><div class="row" style="justify-content:space-between"><strong>⛽ Gasolina por módulo</strong><span class="hint" style="margin:0">${rg.txt}</span></div>
+    <p class="hint" style="margin:4px 0 0">Total: <strong>${fmtPesos(total)}</strong>. Ordenado de quien gasta más a quien gasta menos.</p>
+    <div class="movlist" style="margin-top:8px">${filas.map((x,i)=>`<div class="movitem" style="padding:10px 12px;border-left:5px solid ${col(x)}"><span style="flex:1;font-weight:800">${i+1}. ${x.m}<span class="hint" style="display:block;margin:2px 0 0;font-weight:400">${x.n} carga(s)</span></span>
+      <span style="text-align:right"><strong style="font-size:18px">${fmtPesos(x.gasto)}</strong>${x.pres?`<span class="hint" style="margin:0"> / ${fmtPesos(x.pres)}</span><span style="display:block;font-size:13px;font-weight:700;color:${col(x)}">${x.gasto>x.pres?`Se pasó ${fmtPesos(x.gasto-x.pres)}`:`Quedan ${fmtPesos(x.pres-x.gasto)}`}</span>`:''}</span></div>`).join('')}</div>
+  </div>`;
+}
+
 // ===== Resumen semanal para Dirección (confirmado por el usuario) =====
 // Lo más importante de los 5 módulos en una pantalla: lo que pasó en el periodo (instalaciones,
 // garantías, cortes, melamina usada, mermas, cierres del turno) y lo que hay que atender HOY
@@ -6253,9 +6431,10 @@ function rangoResumen(){
 }
 async function cargarResumen(){
   await cargarValoresInst();
-  const [inv, mv, il, gl, du, au, ve] = await Promise.all([inventarioTodos(), ...['movimientos','instalacionesLog','garantiasLog','deudasAuditoria','auditorias','versiones'].map(c=>db.collection(c).get().catch(()=>({docs:[]})))]);
+  await cargarGasConfig();
+  const [inv, mv, il, gl, du, au, ve, ga] = await Promise.all([inventarioTodos(), ...['movimientos','instalacionesLog','garantiasLog','deudasAuditoria','auditorias','versiones','gasolina'].map(c=>db.collection(c).get().catch(()=>({docs:[]})))]);
   const L = snap => snap.docs.map(d=>({id:d.id, ...d.data()}));
-  return {inv, movs:L(mv), inst:L(il), gar:L(gl), deudas:L(du), auds:L(au), versiones:L(ve)};
+  return {inv, movs:L(mv), inst:L(il), gar:L(gl), deudas:L(du), auds:L(au), versiones:L(ve), gas:L(ga)};
 }
 function diaLocal(iso){ return iso ? new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10) : ''; }
 function diasLaborables(desde, hasta){
@@ -6366,6 +6545,7 @@ async function renderResumen(){
       
     </div>
     ${rankingInstHtml(D, rg)}
+    ${gasResumenHtml(R, rg)}
     <div class="card" style="border:2px solid ${alertas.length?'#e0453f':'#1f9d55'}">
       <strong>${alertas.length?'🚨 Por atender ('+alertas.length+')':'✅ Nada por atender'}</strong>
       ${alertas.length?`<div class="movlist" style="margin-top:8px">${alertas.map(a=>`<div class="movitem" style="padding:8px 10px"><span>${a}</span></div>`).join('')}</div>`:'<p class="hint" style="margin:4px 0 0">Todos los módulos están al día.</p>'}
