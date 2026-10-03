@@ -189,7 +189,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v106';
+const APP_VERSION = 'v108';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -610,6 +610,7 @@ function setView(v){
   if(v==='pend') renderPend();
   if(v==='tubos') renderTubos();
   if(v==='pzenc') renderPzEnc();
+  if(v==='recon') renderRecon();
   if(v==='resumen'){ resumenCache=null; renderResumen(); }
   if(v==='valinst') renderValInst();
   if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
@@ -1569,7 +1570,7 @@ function filtrarPiezas(ctx){
   el.querySelectorAll('.pz-fila').forEach(r=>{ r.style.display = !q || r.dataset.txt.includes(q) ? 'flex' : 'none'; });
   el.querySelectorAll('.pz-grupo').forEach(g=>{ const vis=[...g.querySelectorAll('.pz-fila')].some(r=>r.style.display!=='none'); g.style.display = (!q || vis) ? '' : 'none'; });
 }
-function rerenderPiezas(ctx){ if(ctx==='aud') renderAud(); else renderPzEnc(); if(piezasBuscar) filtrarPiezas(ctx); }
+function rerenderPiezas(ctx){ if(ctx==='aud') renderAud(); else if(pzModo==='recon') renderRecon(); else renderPzEnc(); if(piezasBuscar) filtrarPiezas(ctx); }
 
 function renderAudPiezasHtml(){
   if(!auditPiezaGrupo) auditPiezaGrupo = MEL_COLORES[0];
@@ -1885,8 +1886,10 @@ function renderHist(){
       <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
         <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 Reporte PDF</button>
         ${!a.aplicada && esAdmin() ? (a.complemento ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="sumarComplementoUI('${a.id}')">➕ Sumar al stock inicial</button>` : a.conteoInicial ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="usarConteoComoInicialUI('${a.id}')">✅ Usar como stock inicial</button>` : `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>`) : ''}
+        ${esAdmin() && !a.conteoInicial && !a.complemento ? `<button class="btn small" style="background:transparent;color:#6b4bd6;border:1px solid var(--line);box-shadow:none" onclick="iniciarReconteo('${a.id}')">🔍 Volver a contar un material</button>` : ''}
         ${esAdmin() ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarAuditoria('${a.id}')">🗑️ Borrar</button>` : ''}
       </div>
+      ${(a.reconteos||[]).length ? `<div style="margin-top:8px">${a.reconteos.map(rc=>`<p class="hint" style="margin:2px 0">🔍 Reconteo de ${rc.cat} (${new Date(rc.fecha).toLocaleString()}): ${rc.ok?'<span class="pos">✅ coincidió con la auditoría</span>':`<span class="neg">⚠️ no coincidió</span>${rc.corrigio?' · <strong>auditoría corregida</strong>':''}`}</p>`).join('')}</div>` : ''}
       ${a.conteoInicial||a.complemento ? resumenHojasConteoHtml(a) : ''}
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
@@ -1949,7 +1952,7 @@ async function generarReporteAuditoriaPDF(a){
   doc.text(`${res.length} artículo(s) revisados · ${conDif.length} con diferencia`, marginL+2, y+6);
   doc.setFont(undefined,'normal'); doc.setFontSize(9);
   doc.text(`Faltan: ${faltan} artículo(s) · Sobran: ${sobran} artículo(s) · Cuadran: ${res.length-conDif.length}`, marginL+2, y+11.5);
-  doc.text('Teórico = lo que decía el inventario ese día. Diferencia = Físico − Teórico ( − falta, + sobra ).', marginL+2, y+15.5);
+  doc.text('Teórico = lo que decía el inventario ese día. Diferencia = Físico - Teórico (- falta, + sobra). En hojas: T = teórico, F = físico.', marginL+2, y+15.5);
   y += 23;
 
   const cats = [...new Set(CATALOGO.map(i=>i.cat))].filter(c=>res.some(r=>r.cat===c));
@@ -1958,7 +1961,7 @@ async function generarReporteAuditoriaPDF(a){
     const filas = res.filter(r=>r.cat===cat);
     const hoja = filas.some(r=>r.teoricoCompletas!==undefined);
     cols = hoja
-      ? [{label:'Artículo',w:62},{label:'Teórico',w:20},{label:'Físico',w:20},{label:'Diferencia',w:24},{label:'Dif. completas',w:28},{label:'Dif. cortado',w:28}]
+      ? [{label:'Artículo',w:42},{label:'Completas T',w:20},{label:'Completas F',w:20},{label:'Cortado T',w:18},{label:'Cortado F',w:18},{label:'Total T',w:18},{label:'Total F',w:18},{label:'Diferencia',w:28}]
       : [{label:'Artículo',w:92},{label:'Teórico',w:30},{label:'Físico',w:30},{label:'Diferencia',w:30}];
     if(y > pageH-30){ doc.addPage(); y=15; }
     doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text(cat, marginL, y+4); doc.setFont(undefined,'normal'); y+=7;
@@ -1969,14 +1972,18 @@ async function generarReporteAuditoriaPDF(a){
       if(Math.abs(d)>0.005){ doc.setFillColor(d<0?253:232, d<0?236:247, d<0?236:238); doc.rect(marginL, y, tw(), 5, 'F'); }
       else if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tw(), 5, 'F'); }
       let nom = r.nombre + (r.capturado===false && Math.abs(Number(r.teorico))>0.005 ? ' (no contado)' : '');
-      const maxLen = hoja ? 36 : 55; if(nom.length>maxLen) nom = nom.slice(0,maxLen-2)+'…';
-      const vals = [nom, fmtNum(r.teorico), fmtNum(r.fisico), sgn(d)];
-      if(hoja) vals.push(r.teoricoCompletas!==undefined ? sgn(Number(r.diffCompletas)||0) : '', r.teoricoCompletas!==undefined ? sgn(Number(r.diffCortado)||0) : '');
+      const maxLen = hoja ? 24 : 55; if(nom.length>maxLen) nom = nom.slice(0,maxLen-2)+'…';
+      const lados = r.teoricoCompletas!==undefined;
+      const vals = hoja
+        ? [nom, lados?fmtNum(r.teoricoCompletas):'', lados?fmtNum(r.fisicoCompletas):'', lados?fmtNum(r.teoricoCortado):'', lados?fmtNum(r.fisicoCortado):'', fmtNum(r.teorico), fmtNum(r.fisico), sgn(d)]
+        : [nom, fmtNum(r.teorico), fmtNum(r.fisico), sgn(d)];
+      const colDif = hoja ? 7 : 3;
       vals.forEach((v,i)=>{
-        const esDif = i>=3 && typeof v==='string' && v!=='' && v!=='0';
+        const esDif = i===colDif && typeof v==='string' && v!=='' && v!=='0';
+        if(hoja && lados && (i===2 || i===4)){ const t=Number(i===2?r.teoricoCompletas:r.teoricoCortado), fv=Number(i===2?r.fisicoCompletas:r.fisicoCortado); if(Math.abs(fv-t)>0.005) doc.setFont(undefined,'bold'); }
         if(esDif) doc.setTextColor(v.startsWith('-')?200:31, v.startsWith('-')?40:130, v.startsWith('-')?40:70);
         doc.text(String(v), colX(i)+1.5, y+3.6);
-        doc.setTextColor(0,0,0);
+        doc.setTextColor(0,0,0); doc.setFont(undefined,'normal');
       });
       y += 5;
     });
@@ -1991,6 +1998,18 @@ async function generarReporteAuditoriaPDF(a){
     header(); doc.setFontSize(9);
     a.correderas.forEach(b=>{ [b.etiqueta, fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares), fmtNum(b.hembrasSinPareja), fmtNum(b.machosSinPareja)].forEach((v,i)=>doc.text(String(v), colX(i)+1.5, y+4)); y+=5.5; });
     y += 6;
+  }
+  // Reconteos de verificación
+  if((a.reconteos||[]).length){
+    if(y > pageH-40){ doc.addPage(); y=15; }
+    doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text('Reconteos de verificación', marginL, y+4); doc.setFont(undefined,'normal'); y+=8; doc.setFontSize(9);
+    a.reconteos.forEach(rc=>{
+      if(y > pageH-20){ doc.addPage(); y=15; }
+      doc.setFont(undefined,'bold'); doc.text(`${rc.cat} · ${new Date(rc.fecha).toLocaleString('es-MX')} · ${rc.ok?'Coincidió con la auditoría':'No coincidió'}${rc.corrigio?' · auditoría corregida':''}`, marginL+2, y); doc.setFont(undefined,'normal'); y+=5;
+      (rc.filas||[]).forEach(f=>{ if(y > pageH-12){ doc.addPage(); y=15; } doc.text(`• ${f.nombre}: auditoría ${fmtNum(f.fisAud)} · movimientos ${sgn(Number(f.mov)||0)} · debería ${fmtNum(f.esperado)} · reconteo ${fmtNum(f.reconteo)} · dif. ${sgn(Number(f.dif)||0)}`, marginL+4, y); y+=5; });
+      y+=2;
+    });
+    y += 4;
   }
   // Detalle de lo que se contó en piezas y armados
   const detalle = [...(a.piezasContadas||[]).map(p=>`${fmtNum(p.cantidad)} × ${p.pieza} (${p.grupo})`), ...(a.armadosContados||[]).map(x=>`${fmtNum(x.cantidad)} × ${x.descripcion}`)];
@@ -3429,21 +3448,48 @@ function regresoDeInstalacion(logId){
   if(!ms.length) return null;
   return {estado: ms.some(m=>m.estado==='pendiente') ? 'pendiente' : 'aprobado'};
 }
-async function regresarInstalacion(logId){
+// Al regresar completo se pregunta si la melamina/MDF sirve (confirmado por el usuario): si viene
+// mojada o dañada, en el mismo registro regresa y sale como MERMA (de cortado); los herrajes vuelven
+// al inventario. En los dos casos la instalación deja de contar.
+let regInstSel = null;
+function regresarInstalacion(logId){
   const x = instLog.find(l=>l.id===logId); if(!x) return;
   if(regresoDeInstalacion(logId)) return alert('Esta instalación ya se regresó al inventario.');
   const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
   if(!cons.length) return alert('Esta instalación no tiene material registrado.');
-  const lista = cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `• ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n');
-  const motivo = prompt(`↩️ REGRESÓ COMPLETO SIN INSTALAR\n${x.descripcion} (${x.fechaDia})\n\nVuelve al inventario:\n${lista}\n\n¿Por qué regresó? (opcional)`, '');
-  if(motivo===null) return;
+  regInstSel = logId;
+  const hojas = cons.filter(c=>esHojaId(c.itemId)), otros = cons.filter(c=>!esHojaId(c.itemId));
+  const li = arr => arr.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `<li>${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}</li>`; }).join('');
+  $('#inst-body').innerHTML = `<div class="card" style="border:2px solid #1f9d55">
+    <div style="font-size:16px;font-weight:800">↩️ Regresó completo sin instalar</div>
+    <p class="hint" style="margin:6px 0 0"><strong>${x.descripcion}</strong> (${fCorta(x.fechaDia)}). Esta instalación ya no va a contar.</p>
+    ${hojas.length?`<div style="margin-top:10px;font-weight:700">🪵 Melamina / MDF</div><ul style="margin:4px 0 0 18px;padding:0">${li(hojas)}</ul>`:''}
+    ${otros.length?`<div style="margin-top:8px;font-weight:700">🔩 Herrajes (siempre vuelven al inventario)</div><ul style="margin:4px 0 0 18px;padding:0">${li(otros)}</ul>`:''}
+    <input id="reg-motivo" placeholder="¿Por qué regresó? (opcional)" style="margin-top:10px">
+    ${hojas.length?`<p class="hint" style="margin:10px 0 0">¿Cómo viene la melamina / MDF?</p>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoInst(false)">✅ Sirve: vuelve al inventario (como cortado)</button>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="confirmarRegresoInst(true)">🗑️ Mojada o dañada: va a merma</button>`
+    :`<button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoInst(false)">↩️ Regresar al inventario</button>`}
+    <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="regInstSel=null;renderInstHistorial()">Cancelar</button>
+  </div>`;
+  window.scrollTo(0,0);
+}
+async function confirmarRegresoInst(aMerma){
+  const logId = regInstSel; const x = instLog.find(l=>l.id===logId); if(!x) return;
+  if(regresoDeInstalacion(logId)) return alert('Esta instalación ya se regresó al inventario.');
+  const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
+  const motivo = (document.getElementById('reg-motivo')||{}).value||'';
+  if(aMerma && !confirm('🗑️ La melamina / MDF de este modelo se va a MERMA (no regresa al inventario).\nLos herrajes sí vuelven al inventario.\n\n¿Continuar?')) return;
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    const fechaM = new Date(Date.parse(fecha)+1).toISOString(); // la merma va 1 ms después del regreso
     const nota = 'Regresó sin instalar · '+x.descripcion+(motivo.trim()?' · '+motivo.trim():'');
     for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', instalacionId:logId, cantidad:fmtNum(Number(c.cantidad)), nota, fecha, estado, loteId, creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', instalacionId:logId, cantidad:Number(c.cantidad), nota, fecha, estado, loteId, creadoPor});
+      if(aMerma && esHoja(it)) await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'regresoMerma', instalacionId:logId, cantidad:Number(c.cantidad), nota:'No sirve (mojado/dañado) · '+nota, fecha:fechaM, estado, loteId, creadoPor});
     }
-    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y regresa al inventario.</small>' : '✅ Regresó al inventario.');
+    regInstSel = null;
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : (aMerma?'🗑️ Registrado: la melamina se fue a merma y los herrajes regresaron.':'✅ Regresó al inventario.'));
     renderInstHistorial();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -3467,7 +3513,7 @@ async function confirmarRegresoLibre(){
 function detalleRegresoInstAprob(items, logs){
   const m = items.find(x=>x.motivo==='regresoInstalacion'); if(!m) return '';
   const l = logs.find(x=>x.id===m.instalacionId);
-  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.modeloRegreso?m.modeloRegreso+' · elegido a mano (sin instalación registrada)':(m.nota||''))}</div><div class="hint" style="margin:2px 0 0">Todo vuelve al inventario (la melamina como cortado).</div></div>`;
+  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.modeloRegreso?m.modeloRegreso+' · elegido a mano (sin instalación registrada)':(m.nota||''))}</div><div class="hint" style="margin:2px 0 0">${items.some(x=>x.motivo==='regresoMerma')?'🗑️ La melamina / MDF venía mojada o dañada: se va a <strong>merma</strong>. Los herrajes vuelven al inventario.':'Todo vuelve al inventario (la melamina como cortado).'}</div></div>`;
 }
 
 let iFamSel = null; // familia elegida (para no mostrar todos los modelos juntos)
@@ -5802,8 +5848,8 @@ function pzResumenHtml(){
   const pool = pzPool(), cons = pzConsumo();
   if(!pool.length && !pzMedidas.length) return '<p class="hint">Todavía no capturas piezas.</p>';
   return `<div class="hint" style="margin:0 0 6px">${pool.map(p=>`${p.cantidad} × ${p.label} · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle()).join('<br>')}</div>
-    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const f=calcFormula(it.id); const m=pzModo==='merma';
-      return `<div class="movitem"><span><span class="invname">${it.nombre}</span>${m?`<span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.cortado)} ya cortadas</span>`:''}</span><strong class="${m?'neg':'pos'}">${m?'−':'+'}${fmtNum(c.cantidad)} ${it.unidad}</strong></div>`; }).join('')}</div>`;
+    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const f=calcFormula(it.id); const m=pzModo==='merma', rc=pzModo==='recon';
+      return `<div class="movitem"><span><span class="invname">${it.nombre}</span>${m?`<span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.cortado)} ya cortadas</span>`:''}</span><strong class="${rc?'':(m?'neg':'pos')}">${rc?'= ':(m?'−':'+')}${fmtNum(c.cantidad)} ${it.unidad}${rc?' en piezas':''}</strong></div>`; }).join('')}</div>`;
 }
 function setPz(g, key, val){
   const n = val==='' ? 0 : Number(val);
@@ -5871,6 +5917,124 @@ async function guardarPzEnc(){
     pzVals = {}; pzNota = ''; pzMedidas = [];
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Piezas sumadas al inventario.');
     renderPzEnc(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+// ===== Reconteo de verificación (confirmado por el usuario) =====
+// Volver a contar SOLO un material de una auditoría (p. ej. el MDF) para saber si el conteo estuvo bien.
+// Se compara contra lo que se contó en la auditoría, sumando lo que se movió desde entonces (lo que dice
+// el inventario ahora − lo que decía el día de la auditoría). No cambia el inventario. Si no coincide,
+// Dirección puede corregir la auditoría (aún sin aplicar) con el reconteo.
+let reconAudId = null, reconCat = 'MDF', reconVals = {}, reconRes = null;
+function iniciarReconteo(audId){
+  reconAudId = audId; reconCat = 'MDF'; reconVals = {}; reconRes = null;
+  pzSetModo('recon'); pzVals = {}; pzMedidas = []; pzGrupo = AUD_GRUPO_MDF; piezasBuscar = '';
+  setView('recon'); window.scrollTo(0,0);
+}
+function reconItems(){ return CATALOGO.filter(i=>i.cat===reconCat && !esCorrSuelta(i)); }
+function reconCambiarCat(c){ reconCat = c; reconVals = {}; reconRes = null; pzVals = {}; pzMedidas = []; pzGrupo = c==='MDF' ? AUD_GRUPO_MDF : MEL_COLORES[0]; renderRecon(); }
+function renderRecon(){
+  if(!esAdmin()){ $('#main').innerHTML='<div class="card">Solo Dirección.</div>'; return; }
+  const a = auditorias.find(x=>x.id===reconAudId);
+  if(!a){ $('#main').innerHTML='<div class="card">No se encontró la auditoría. <button class="btn small" onclick="histTab=\'aud\';setView(\'hist\')">Volver</button></div>'; return; }
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  const items = reconItems(), hoja = items.length && esHoja(items[0]);
+  const fechaA = new Date(a.fecha).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'});
+  const grupoSel = reconCat==='MDF' ? '' : `<label class="hint">Color de las piezas</label><select onchange="pzGrupo=this.value;renderRecon()" style="margin-top:4px;font-weight:700">${MEL_COLORES.map(c=>{ const n=Object.keys(pzVals[c]||{}).length; return `<option value="${c}" ${c===pzGrupo?'selected':''}>Melamina ${c}${n?' ✓'+n:''}</option>`; }).join('')}</select>`;
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #6b4bd6">
+      <div style="font-size:17px;font-weight:800">🔍 Volver a contar un material</div>
+      <p class="hint" style="margin:6px 0 0">Auditoría del <strong>${fechaA}</strong> (${a.auditor||'—'})${a.aplicada?' · ya aplicada':' · sin aplicar'}.</p>
+      <p class="hint" style="margin:4px 0 0">Cuenta otra vez solo este material. La app lo compara con lo que se contó en la auditoría, tomando en cuenta lo que entró o salió desde entonces. <strong>No cambia el inventario.</strong></p>
+      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');histTab='aud';setView('hist')">Cancelar</button>
+    </div>
+    <div class="card"><div class="paso">1</div><strong>¿Qué material?</strong>
+      <select style="margin-top:8px" onchange="reconCambiarCat(this.value)">${cats.map(c=>`<option ${c===reconCat?'selected':''}>${c}</option>`).join('')}</select></div>
+    <div class="card"><div class="paso">2</div><strong>${hoja?'Hojas completas':'¿Cuánto hay?'}</strong>
+      <p class="hint">Escribe solo lo que vuelves a contar. Lo que dejes vacío no se compara.${reconCat==='Herrajes'?' Correderas: cuenta los juegos completos (hembra + macho).':''}</p>
+      <div class="movlist">${items.map(it=>`<label class="movitem"><span class="invname">${it.nombre}</span><input type="number" min="0" inputmode="decimal" placeholder="—" value="${reconVals[it.id]??''}" oninput="reconVals['${it.id}']=this.value"></label>`).join('')}</div></div>
+    ${hoja?`<div class="card"><div class="paso">3</div><strong>✂️ Piezas cortadas${reconCat==='MDF'?' (fondos)':''}</strong>
+      <p class="hint">Cuenta las piezas ya cortadas de este material; la app las convierte a hojas.</p>${grupoSel}
+      ${listaPiezasHtml('pz')}
+      <div id="pz-resumen" style="margin-top:8px">${pzResumenHtml()}</div></div>`:''}
+    <div class="card"><button class="btn" style="width:100%;min-height:54px;font-size:16px;background:linear-gradient(135deg,#6b4bd6,#5338b8)" onclick="compararReconteo()">🔍 Comparar con la auditoría</button></div>
+    <div id="recon-res">${reconRes?reconResHtml(a):''}</div>`;
+}
+function compararReconteo(){
+  const a = auditorias.find(x=>x.id===reconAudId); if(!a) return;
+  const eq = {}; pzConsumo().forEach(c=>{ eq[c.itemId] = Number(c.cantidad)||0; });
+  const filas = reconItems().filter(it=>(reconVals[it.id]!==undefined && reconVals[it.id]!=='') || eq[it.id]).map(it=>{
+    const r = (a.resultados||[]).find(x=>x.itemId===it.id) || {teorico:0, fisico:0};
+    const f = calcFormula(it.id), hoja = esHoja(it);
+    const comp = Number(reconVals[it.id])||0, cort = fmtNum(eq[it.id]||0), total = fmtNum(comp+cort);
+    const mov = a.aplicada ? fmtNum(f.final - Number(r.fisico)) : fmtNum(f.final - Number(r.teorico));
+    const esperado = fmtNum(Number(r.fisico) + mov);
+    const x = {itemId:it.id, nombre:it.nombre, unidad:it.unidad, hoja, teoAud:Number(r.teorico), fisAud:Number(r.fisico), mov, esperado, total, comp, cort, dif:fmtNum(total-esperado)};
+    if(hoja && r.teoricoCompletas!==undefined && !a.aplicada){
+      x.movComp = fmtNum(f.completas - Number(r.teoricoCompletas)); x.movCort = fmtNum(f.cortado - Number(r.teoricoCortado));
+      x.espComp = fmtNum(Number(r.fisicoCompletas) + x.movComp); x.espCort = fmtNum(Number(r.fisicoCortado) + x.movCort);
+      x.difComp = fmtNum(comp - x.espComp); x.difCort = fmtNum(cort - x.espCort);
+    }
+    return x;
+  });
+  if(!filas.length) return alert('Escribe lo que volviste a contar (hojas o piezas).');
+  reconRes = filas;
+  const el = document.getElementById('recon-res'); if(el){ el.innerHTML = reconResHtml(a); el.scrollIntoView({behavior:'smooth', block:'start'}); }
+}
+function reconResHtml(a){
+  const filas = reconRes||[]; const ok = filas.every(x=>Math.abs(x.dif)<0.01);
+  const sg = v => `<span class="${v<0?'neg':(v>0?'pos':'')}">${v>0?'+':''}${fmtNum(v)}</span>`;
+  return `<div class="card" style="border:2px solid ${ok?'#1f9d55':'#e0453f'}">
+    <div style="font-size:16px;font-weight:800">${ok?'✅ La auditoría estuvo bien':'⚠️ El reconteo no coincide con la auditoría'}</div>
+    ${filas.map(x=>`<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.08)">
+      <strong>${x.nombre}</strong>
+      <div class="movlist" style="margin-top:6px">
+        <div class="movitem" style="padding:6px 10px"><span>Se contó en la auditoría</span><strong>${fmtNum(x.fisAud)}</strong></div>
+        <div class="movitem" style="padding:6px 10px"><span>Entró / salió desde entonces</span><strong>${sg(x.mov)}</strong></div>
+        <div class="movitem" style="padding:6px 10px"><span>Debería haber hoy</span><strong>${fmtNum(x.esperado)}</strong></div>
+        <div class="movitem" style="padding:6px 10px"><span>Reconteo de hoy</span><strong>${fmtNum(x.total)}</strong></div>
+        <div class="movitem" style="padding:6px 10px"><span>Diferencia</span><strong>${sg(x.dif)} ${x.unidad}</strong></div>
+      </div>
+      ${x.espComp!==undefined?`<p class="hint" style="margin:6px 0 0">Completas: debería ${fmtNum(x.espComp)} · contaste ${fmtNum(x.comp)} (${sg(x.difComp)})<br>Cortado: debería ${fmtNum(x.espCort)} · contaste ${fmtNum(x.cort)} (${sg(x.difCort)})</p>`:''}
+      <p class="hint" style="margin:6px 0 0">${Math.abs(x.dif)<0.01?'Coincide con la auditoría.':(x.dif>0?`La auditoría contó <strong>${fmtNum(x.dif)} de menos</strong>: el faltante real es menor.`:`La auditoría contó <strong>${fmtNum(-x.dif)} de más</strong>: el faltante real es mayor.`)}</p>
+      ${Math.abs(x.dif)>=0.01?`<p class="hint" style="margin:2px 0 0">Con el reconteo, la diferencia de la auditoría quedaría en <strong>${sg(fmtNum(x.total - x.mov - x.teoAud))}</strong> (antes ${sg(fmtNum(x.fisAud - x.teoAud))}).</p>`:''}
+    </div>`).join('')}
+    <button class="btn" style="width:100%;min-height:50px;margin-top:12px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="guardarReconteo(false)">💾 Guardar el reconteo (no cambia nada)</button>
+    ${!ok && !a.aplicada?`<button class="btn" style="width:100%;min-height:54px;margin-top:8px;background:linear-gradient(135deg,#6b4bd6,#5338b8)" onclick="guardarReconteo(true)">✏️ Corregir la auditoría con este reconteo</button>
+    <p class="hint" style="margin:6px 0 0">Cambia lo contado de estos artículos en la auditoría (todavía sin aplicar), restando lo que se movió desde entonces. El inventario no se toca hasta que apliques la auditoría.</p>`:''}
+    ${!ok && a.aplicada?'<p class="hint" style="margin:8px 0 0">La auditoría ya está aplicada: si el reconteo es el correcto, ajusta con una nueva auditoría de este material.</p>':''}
+  </div>`;
+}
+async function guardarReconteo(corregir){
+  const a = auditorias.find(x=>x.id===reconAudId); if(!a || !reconRes) return;
+  const ok = reconRes.every(x=>Math.abs(x.dif)<0.01);
+  if(corregir && !confirm('✏️ Corregir la auditoría con el reconteo:\n\n'+reconRes.filter(x=>Math.abs(x.dif)>=0.01).map(x=>`• ${x.nombre}: contado ${fmtNum(x.fisAud)} → ${fmtNum(fmtNum(x.total - x.mov))}`).join('\n')+'\n\nEl inventario no cambia hasta que apliques la auditoría. ¿Continuar?')) return;
+  const reg = {fecha:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():'', cat:reconCat, ok, corrigio:!!corregir,
+    filas:reconRes.map(x=>({itemId:x.itemId, nombre:x.nombre, fisAud:x.fisAud, mov:x.mov, esperado:x.esperado, reconteo:x.total, dif:x.dif}))};
+  const upd = {reconteos:[...(a.reconteos||[]), reg]};
+  if(corregir){
+    const res = (a.resultados||[]).map(r=>({...r}));
+    reconRes.forEach(x=>{
+      let r = res.find(z=>z.itemId===x.itemId);
+      if(!r){ const it=CATALOGO.find(i=>i.id===x.itemId); r = {itemId:x.itemId, nombre:it.nombre, cat:it.cat, unidad:it.unidad, teorico:0, fisico:0, diff:0}; res.push(r); }
+      r.fisico = fmtNum(x.total - x.mov); r.diff = fmtNum(r.fisico - Number(r.teorico)); r.capturado = true; r.recontado = true;
+      if(x.espComp!==undefined){
+        r.fisicoCompletas = fmtNum(x.comp - x.movComp); r.fisicoCortado = fmtNum(x.cort - x.movCort);
+        r.diffCompletas = fmtNum(r.fisicoCompletas - Number(r.teoricoCompletas)); r.diffCortado = fmtNum(r.fisicoCortado - Number(r.teoricoCortado));
+        r.hojasCompletas = r.fisicoCompletas; r.hojasEnPiezas = r.fisicoCortado;
+      }
+    });
+    upd.resultados = res; upd.totalDiff = res.filter(r=>Math.abs(Number(r.diff)||0)>0.005).length;
+    // Piezas: lo recontado reemplaza lo que se había contado de ese material
+    const esMat = g => reconCat==='MDF' ? g==='MDF' : (reconCat==='Melamina' ? /^Melamina /.test(g) : false);
+    const nuevas = [];
+    Object.keys(pzVals).forEach(g=>Object.keys(pzVals[g]).forEach(k=>{ const pz=PIEZAS_AUDIT.find(x=>x.key===k); if(pz) nuevas.push({grupo:g===AUD_GRUPO_MDF?'MDF':'Melamina '+g, pieza:pz.label, dim:pz.dim, cantidad:pzVals[g][k], recontado:true}); }));
+    if(nuevas.length || reconCat==='MDF' || reconCat==='Melamina') upd.piezasContadas = (a.piezasContadas||[]).filter(pc=>!esMat(pc.grupo)).concat(nuevas);
+  }
+  try{
+    await db.collection('auditorias').doc(a.id).update(upd);
+    Object.assign(a, upd);
+    toast(corregir ? '✏️ Auditoría corregida con el reconteo.' : '💾 Reconteo guardado.');
+    pzSetModo('enc'); reconRes = null; histTab='aud'; setView('hist');
   }catch(e){ alert('Error: '+e.message); }
 }
 
