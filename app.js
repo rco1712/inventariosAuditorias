@@ -54,8 +54,17 @@ const TIPOS_ADICIONAL = {
   cajonera_max: 'Cajonera Max (4 cajones)',
   entrepanera_max: 'Entrepañera Max',
   zapatera: 'Zapatera',
-  repisa: 'Repisa'
+  repisa: 'Repisa',
+  piso_zoclo: 'Piso y zóclo'
 };
+// Piso y zóclo (confirmado por el usuario): el coordinador elige cuánto de cada pieza y de qué color.
+const PISO_ZOCLO_PIEZAS = [
+  {k:'maleteroG', t:'Maletero grande', nombre:'Maletero grande', dim:'40×244 cm'},
+  {k:'maleteroC', t:'Maletero chico', nombre:'Maletero chico', dim:'191×40 cm'},
+  {k:'marco', t:'Marco 10×244', nombre:'Marco 10×244', dim:'10×244 cm'},
+  {k:'cargador', t:'Cargador 10×40', nombre:'Cargador', dim:'10×40 cm'},
+  {k:'zoclo', t:'Zóclo 10×52', nombre:'Zóclo normal', dim:'10×52 cm'}
+];
 
 // ===== Composición por muebles: en vez de elegir un modelo con nombre, se arma la familia
 // mueble por mueble (entrepañera / cajonera / Emma / espejo / Max), confirmado por el usuario:
@@ -189,7 +198,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v112';
+const APP_VERSION = 'v114';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1868,8 +1877,25 @@ function renderMovHist(){
     <div class="wrap-x" style="margin-top:6px"><table><tr><th>Hora</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Quién</th></tr>
     ${porDia[d].map(m=>`<tr><td>${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemNombre||nom(m.itemId)}</td>
       <td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}${m.estado==='pendiente'?' '+badgeEstado('pendiente'):''}</td>
-      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}</td></tr>`).join('')}
+      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}${esAdmin() && m.tipo==='corte' && m.estado!=='rechazado' ? `<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="borrarCorte('${m.id}')">🗑️ Corte mal capturado</button>` : ''}</td></tr>`).join('')}
     </table></div></div>`).join('')}`;
+}
+// Dirección puede borrar un corte mal capturado (p. ej. pusieron las hojas que TENÍAN en vez de las que
+// CORTARON). El corte solo mueve hojas de "completas" a "cortado"; al borrarlo regresan a completas y
+// después se captura el corte correcto. Pide PIN. No se permite si ya se aplicó una auditoría posterior.
+async function borrarCorte(id){
+  if(!esAdmin()) return;
+  const m = movs.find(x=>x.id===id); if(!m) return;
+  const audDespues = (auditorias||[]).find(a=>a.aplicada && (a.fecha||'') > (m.fecha||''));
+  if(audDespues) return alert(`No se puede borrar: después de este corte ya se aplicó la auditoría del ${new Date(audDespues.fecha).toLocaleDateString('es-MX')}, que dejó las hojas como se contaron.\n\nSi las hojas completas no cuadran, haz una nueva auditoría de Melamina/MDF.`);
+  if(!confirm(`🗑️ Borrar este corte mal capturado:\n\n✂️ ${fmtNum(m.cantidad)} hoja(s) de ${m.itemNombre}\n${new Date(m.fecha).toLocaleString('es-MX')} · ${(m.creadoPor||'').split('@')[0]}\n\nEsas hojas regresan a "completas" (el total no cambia). Después captura el corte correcto en Anotar → Corte del día.\n\n¿Continuar?`)) return;
+  if(!(await pedirPinAdmin('borrar este corte'))) return;
+  try{
+    await db.collection('movimientos').doc(id).delete();
+    movs = movs.filter(x=>x.id!==id);
+    toast('🗑️ Corte borrado. Captura el corte correcto en Anotar → Corte del día.');
+    renderMovHist();
+  }catch(e){ alert('Error: '+e.message); }
 }
 
 function renderHist(){
@@ -2801,6 +2827,8 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
       add('Bisagra (zapatera)',1.5,'—','—','ok','Confirmado por el usuario');
       add('Jaladera (zapatera)',1,'—',color,'ok','Confirmado por el usuario');
     }
+  } else if(tipo==='piso_zoclo'){
+    (extra && extra.pz || []).forEach(r=>{ const d = PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); if(d && r.cantidad>0) add(d.nombre, r.cantidad, d.dim, r.color||color, 'ok', 'Piso y zóclo'); });
   } else if(tipo==='repisa'){
     // Confirmado por el usuario: la repisa lleva su medida (largo × fondo) y pueden ser 1, 2 o 3.
     // Se descuenta el PROPORCIONAL de la hoja (ver piezasAConsumo), no la hoja completa.
@@ -3015,7 +3043,7 @@ function piezasAConsumo(piezas, color){
   // Zóclos (todos: normal, Max, zapatera, de espejo) y marcos de espejo (confirmado por el usuario):
   // proporcional según cuántas piezas de esa medida salen de una hoja de 122×244, en la melamina
   // de su color (p. ej. zóclo 10×52 → 48 por hoja → cada uno = 1/48 de hoja).
-  const PIEZAS_PROPORCIONALES = ['Zóclo normal','Zóclo Max','Zóclo zapatera'];
+  const PIEZAS_PROPORCIONALES = ['Zóclo normal','Zóclo Max','Zóclo zapatera','Marco 10×244'];
   // Frente de espejo completo (2 marcos 10×160 + 2 marcos 10×35 + zóclos 16×52 y 18×52): se cortan
   // juntos; con sierra de 5 mm, 1 hoja da para los frentes de 5 espejos (confirmado por el usuario)
   // → 0.20 hojas por espejo, en el color del frente. Se cuenta un espejo por cada 2 marcos largos.
@@ -3091,17 +3119,17 @@ function renderAdicBox(prefix){
   if(!box) return;
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
-      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
-      <td>${a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
+      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.tipo==='piso_zoclo'?'<div class="hint" style="margin:2px 0 0">'+(a.pz||[]).map(r=>{ const d=PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+' '+r.color; }).join('<br>')+'</div>':''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
+      <td>${a.tipo==='piso_zoclo'?'—':a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
   box.innerHTML = `<div class="card">
     ${prefix==='d'?`<strong>Adicionales</strong>
-    <p class="hint">Cajonera, entrepañera, cajonera de espejo, zapatera o repisa que se agregan aparte del modelo — no cuentan como uno de sus muebles fijos.</p>`:''}
+    <p class="hint">Cajonera, entrepañera, cajonera de espejo, zapatera, repisa o piso y zóclo que se agregan aparte del modelo — no cuentan como uno de sus muebles fijos.</p>`:''}
     ${list.length? `<div class="wrap-x"><table><tr><th>Extra</th><th>Color</th><th></th></tr>${rows}</table></div>` : (prefix==='d'?'<p class="hint">Sin adicionales.</p>':'')}
     <div class="grid2" style="margin-top:8px">
       <div><label class="hint">¿Qué es?</label><select id="${prefix}-adic-tipo" style="margin-top:4px" onchange="toggleAdicionalCajones('${prefix}')">${Object.keys(TIPOS_ADICIONAL).map(k=>`<option value="${k}">${TIPOS_ADICIONAL[k]}</option>`).join('')}</select></div>
-      <div><label class="hint">Color</label><select id="${prefix}-adic-color" style="margin-top:4px" onchange="const f=document.getElementById('${prefix}-adic-colorfrente'); if(f && !f.dataset.tocado) f.value=this.value">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label class="hint">Color</label><select id="${prefix}-adic-color" style="margin-top:4px" onchange="const f=document.getElementById('${prefix}-adic-colorfrente'); if(f && !f.dataset.tocado) f.value=this.value; PISO_ZOCLO_PIEZAS.forEach(d=>{ const s=document.getElementById('${prefix}-pzc-'+d.k); if(s && !s.dataset.tocado) s.value=this.value; })">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
     </div>
     <div id="${prefix}-adic-cajones-wrap"></div>
     <button class="btn small" style="margin-top:10px;width:100%" onclick="agregarAdicional('${prefix}')">+ Agregar este extra</button>
@@ -3125,6 +3153,13 @@ function toggleAdicionalCajones(prefix){
       <label class="hint" style="display:block;margin-top:8px">¿Cuántas repisas?</label>
       <div class="chips" style="margin-top:4px" id="${prefix}-adic-cant-wrap">${[1,2,3].map(n=>`<button type="button" class="chip ${n===1?'on':''}" data-n="${n}" onclick="this.parentNode.querySelectorAll('.chip').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${n}</button>`).join('')}</div>
       <p class="hint">Se descuenta solo la parte de la hoja que usan las repisas, no la hoja completa.</p>`;
+  }
+  if(sel.value==='piso_zoclo'){
+    const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
+    html = `<p class="hint" style="margin-top:8px">Escribe cuánto lleva de cada pieza y de qué color. Lo que dejes vacío no se descuenta.</p>
+      <div class="movlist" style="margin-top:6px">${PISO_ZOCLO_PIEZAS.map(d=>`<div class="movitem" style="padding:8px 10px;gap:8px;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0"><strong>${d.t}</strong><span class="hint" style="display:block;margin:0">${d.dim}</span></span>
+        <input type="number" min="0" inputmode="numeric" id="${prefix}-pz-${d.k}" placeholder="0" style="width:64px;min-width:64px;text-align:center">
+        <select id="${prefix}-pzc-${d.k}" style="width:auto;min-width:110px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select></div>`).join('')}</div>`;
   }
   if(String(sel.value).startsWith('cajonera') || sel.value==='zapatera' || String(sel.value).startsWith('entrepanera')){
     const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
@@ -3155,6 +3190,10 @@ function agregarAdicional(prefix){
   const extEl = document.getElementById(prefix+'-adic-ext'); if((tipo==='cajonera' || tipo==='cajonera_emma') && extEl && extEl.checked) nuevo.ext = true;
   const cf = document.getElementById(prefix+'-adic-colorfrente');
   if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera' || String(tipo).startsWith('entrepanera')) && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
+  if(tipo==='piso_zoclo'){
+    nuevo.pz = PISO_ZOCLO_PIEZAS.map(d=>({k:d.k, cantidad:Math.round(Number((document.getElementById(prefix+'-pz-'+d.k)||{}).value)||0), color:(document.getElementById(prefix+'-pzc-'+d.k)||{}).value||color})).filter(r=>r.cantidad>0);
+    if(!nuevo.pz.length) return alert('Escribe cuánto lleva de al menos una pieza (maletero, marco, cargador o zóclo).');
+  }
   if(tipo==='repisa'){
     const largo = Number(document.getElementById(prefix+'-adic-largo').value);
     const fondo = Number(document.getElementById(prefix+'-adic-fondo').value);
