@@ -198,7 +198,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v115';
+const APP_VERSION = 'v116';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1216,10 +1216,10 @@ function renderAud(){
     cuerpo = renderAudArmadosHtml();
   } else if(sec.k==='__revisar' && parcial){
     const eqP = piezasAuditAHojas(); const lin = [];
-    CATALOGO.forEach(it=>{ if(auditCapturas[it.id]===undefined && !eqP[it.id]) return; const f=calcFormula(it.id); const v=(Number(auditCapturas[it.id])||0)+(Number(eqP[it.id])||0);
+    CATALOGO.forEach(it=>{ if(auditCapturas[it.id]===undefined) return; const f=calcFormula(it.id); const v=(Number(auditCapturas[it.id])||0)+(Number(eqP[it.id])||0);
       lin.push(`${it.nombre}: contado <strong>${fmtNum(f.esHoja && !eqP[it.id] ? (Number(auditCapturas[it.id])||0) : v)}</strong>${f.esHoja?(eqP[it.id]?' (completas + piezas)':' hojas completas (el cortado no se toca)'):' '+(it.unidad||'')}`); });
     cuerpo = `<div class="card"><h3>✅ Revisar auditoría de un material</h3>
-      <p class="hint">Solo se compara lo que contaste; todo lo demás se queda como está. En melamina/MDF: si no cuentas piezas cortadas de ese color, solo se corrigen las <strong>hojas completas</strong> y el cortado no se toca.</p>
+      <p class="hint">Solo se compara lo que <strong>escribiste</strong>; todo lo demás se queda como está (otros colores, herrajes, etc.). En melamina/MDF escribe las hojas completas de ese color (aunque sea <strong>0</strong>) y, si quieres corregir también el cortado, cuenta sus piezas en ✂️ Piezas cortadas. Si no cuentas piezas de ese color, solo se corrigen las <strong>hojas completas</strong>.</p>
       ${lin.length?`<div class="movlist" style="margin-top:8px">${lin.map(x=>`<div class="movitem"><span>${x}</span></div>`).join('')}</div>`:'<p class="neg">Todavía no capturas nada. Ve a la sección del material y escribe lo que contaste.</p>'}
       <button class="btn" style="width:100%;min-height:54px;font-size:16px;margin-top:10px" ${lin.length?'':'disabled'} onclick="saveAudit()">Guardar auditoría</button>
     </div>`;
@@ -1654,7 +1654,7 @@ async function saveAudit(){
     const diff = fmtNum(fisico - f.final);
     if(diff!==0) totalDiff++;
     if(comp && !(fisico>0.0005)) return; // en el complemento solo va lo que se encontró
-    if(parcial && auditCapturas[itemId]===undefined && !eq[itemId]) return; // auditoría de un material: solo lo contado
+    if(parcial && auditCapturas[itemId]===undefined) return; // auditoría de un material: solo lo que se escribió (las piezas/armados solo suman a lo escrito)
     const r = {itemId, nombre:it.nombre, cat:it.cat, unidad:it.unidad, teorico:fmtNum(f.final), fisico, diff, capturado: auditCapturas[itemId]!==undefined || !!eq[itemId]};
     if(hojasEnPiezas){ r.hojasCompletas = hojasCompletas; r.hojasEnPiezas = hojasEnPiezas; }
     if(f.esHoja){
