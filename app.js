@@ -198,7 +198,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v116';
+const APP_VERSION = 'v119';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4510,9 +4510,22 @@ function _mejorEspacioParaPieza(libres, w, h){
   });
   return mejor;
 }
+let _corteVerticalPrimero = false; // lo cambia hojasParaCortesCombinado al probar las dos formas de cortar
 function _colocarPiezaEnLibres(libres, idx, pw, ph){
   const r = libres[idx];
   libres.splice(idx,1);
+  if(_corteVerticalPrimero){
+    // Primero el corte a lo largo: la tira de al lado queda del alto completo (p. ej. junto a una
+    // puerta de 236.5 queda una tira de 244 donde caben los marcos).
+    const der = {x:r.x+pw, y:r.y, w:r.w-pw, h:r.h};
+    const arr = {x:r.x, y:r.y+ph, w:pw, h:r.h-ph};
+    const areaA = Math.max((r.w-pw)*ph, r.w*(r.h-ph)), areaB = Math.max((r.w-pw)*r.h, pw*(r.h-ph));
+    if(areaB>=areaA){
+      if(der.w>0.01 && der.h>0.01) libres.push(der);
+      if(arr.w>0.01 && arr.h>0.01) libres.push(arr);
+      return;
+    }
+  }
   // Método guillotina: divide el rectángulo libre usado en el sobrante a la derecha y arriba de
   // la pieza colocada.
   const derecha = {x:r.x+pw, y:r.y, w:r.w-pw, h:ph};
@@ -4542,12 +4555,26 @@ function piezasPorHojaIndividual(anchoPieza, altoPieza, anchoHoja, altoHoja){
 //     cada pieza ocuparía si se cortara sola (p.ej. si de una hoja salen 12 marcos, 1 marco = 1/12
 //     de hoja), asumiendo que el resto de esa hoja queda como sobrante para otro corte futuro.
 //   - noCaben: piezas que no caben en una hoja completa en ninguna orientación (medida inválida).
+// Se prueban dos órdenes de acomodo y se queda el mejor (menos hojas físicas y, a igual número de
+// hojas, lo que menos se descuenta). El segundo orden pone primero las piezas que ocupan una hoja
+// entera (puertas), para que los marcos aprovechen la tira que queda al lado de cada puerta.
 function hojasParaCortesCombinado(cortes, anchoHoja, altoHoja){
+  let mejor = null;
+  for(const vert of [false, true]) for(const gp of [false, true]){
+    _corteVerticalPrimero = vert;
+    let r; try{ r = _empacarCortes(cortes, anchoHoja, altoHoja, gp); } finally { _corteVerticalPrimero = false; }
+    if(!mejor || r.hojas<mejor.hojas || (r.hojas===mejor.hojas && r.costo<mejor.costo-1e-9)) mejor = r;
+  }
+  return mejor;
+}
+function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
   anchoHoja = anchoHoja || 122; altoHoja = altoHoja || 244;
   let items = [];
   cortes.forEach(c=>{ for(let i=0;i<(c.cantidad||0);i++) items.push({ancho:c.ancho, alto:c.alto}); });
   // Piezas más grandes primero: da mejores resultados con este tipo de acomodo "greedy".
-  items.sort((a,b)=> Math.max(b.ancho,b.alto)-Math.max(a.ancho,a.alto));
+  const tam = x=>Math.max(x.ancho,x.alto);
+  const entera = x=>(x.ancho>0&&x.alto>0&&piezasPorHojaIndividual(x.ancho,x.alto,anchoHoja,altoHoja)<=1)?1:0;
+  items.sort((a,b)=> grandesPrimero ? (entera(b)-entera(a) || tam(b)-tam(a)) : tam(b)-tam(a));
 
   const hojas = []; // cada hoja = {libres:[...], items:[...]}
   let noCaben = 0;
@@ -4573,19 +4600,26 @@ function hojasParaCortesCombinado(cortes, anchoHoja, altoHoja){
   });
 
   let costo = 0;
-  hojas.forEach(hoja=>{
+  const sobrantesHoja = []; // hojas cobradas en proporción: lo que no se usa de ellas
+  hojas.forEach((hoja,hIdx)=>{
     const obligaHojaCompleta = hoja.items.some(it=>piezasPorHojaIndividual(it.ancho,it.alto,anchoHoja,altoHoja)<=1);
     if(obligaHojaCompleta){
       costo += 1;
     } else {
+      let ch = 0;
       hoja.items.forEach(it=>{
         const porHoja = piezasPorHojaIndividual(it.ancho,it.alto,anchoHoja,altoHoja);
-        costo += porHoja>0 ? 1/porHoja : 1;
+        ch += porHoja>0 ? 1/porHoja : 1;
       });
+      costo += ch;
+      const libre = (hoja.libres||[]).reduce((b,r)=> (!b || r.w*r.h > b.w*b.h) ? r : b, null);
+      const usado = Math.min(1, Math.round(ch*1000)/1000);
+      if(usado < 1) sobrantesHoja.push({hoja:hIdx+1, usado, sobra:Math.round((1-usado)*1000)/1000, piezas:hoja.items.length, libre: libre?{w:Math.round(Math.min(libre.w,libre.h)*10)/10, h:Math.round(Math.max(libre.w,libre.h)*10)/10}:null});
     }
   });
 
-  return {hojas: hojas.length, costo: Math.round(costo*1000)/1000, noCaben};
+  sobrantesHoja.forEach((x,i)=>{ x.hoja = hojas.length - sobrantesHoja.length + i + 1; }); // se cuentan al final: son las hojas que se abren de más
+  return {hojas: hojas.length, costo: Math.round(costo*1000)/1000, noCaben, sobrantesHoja};
 }
 
 let puertaPreview = null;
@@ -4764,7 +4798,12 @@ function calcPuerta(){
     }
   });
   const bloqueado = !instRegresoLibre && faltantes.length>0; // un regreso suma, no necesita existencia
-  puertaPreview = {tipo, color, alto, ancho, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr};
+  // Sobrante de la última hoja (confirmado por el usuario): cuando las puertas pasan de 2 hojas y
+  // de la siguiente solo se usa un poco, se ofrece mandar ese pedazo a Sobrantes para hacer piezas.
+  const sobHojas = (!instRegresoLibre && !instCambio) ? (empaque.sobrantesHoja||[]).filter(x=>x.sobra>=0.05) : [];
+  const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:(sobHojas.length===1 ? Math.round((Math.ceil(Number(hojasMelamina)-1e-9)-Number(hojasMelamina))*1000)/1000 : Math.round(sobHojas.reduce((a,x)=>a+x.sobra,0)*1000)/1000), itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
+  const prevSob = puertaPreview && puertaPreview.sobOferta && puertaPreview.tipo===tipo && puertaPreview.alto===alto && puertaPreview.ancho===ancho && puertaPreview.color===color ? puertaPreview.aSob : false;
+  puertaPreview = {tipo, color, alto, ancho, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: sobOferta ? prevSob : false};
 
   let html = `<div class="card"><h3>${tipo} · ${color}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
@@ -4786,9 +4825,25 @@ function calcPuerta(){
     html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoPuerta()">↩️ Regresar puertas al inventario</button></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
+    if(sobOferta) html += `<div class="card" id="p-sob-card"></div>`;
     html += instCambio ? cambioPreviewHtml(consumo, `registrarPuerta('${tipo}',${alto},${ancho})`) : `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="registrarPuerta('${tipo}',${alto},${ancho})">✅ Confirmar instalación de puertas</button></div>`;
   }
   $('#p-result').innerHTML = html;
+  pintarSobPuerta();
+}
+function pintarSobPuerta(){
+  const el = document.getElementById('p-sob-card'); const pp = puertaPreview;
+  if(!el || !pp || !pp.sobOferta) return;
+  const o = pp.sobOferta, on = !!pp.aSob;
+  const det = o.hojas.map(x=>`<li>Hoja ${x.hoja} de ${o.totalHojas}: solo se usa <strong>${Math.round(x.usado*100)}%</strong> (${x.piezas} pieza${x.piezas===1?'':'s'}) → sobra <strong>${fmtNum(x.sobra)} hoja</strong>${x.libre?` · pedazo libre aprox. <strong>${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm</strong>`:''}</li>`).join('');
+  el.style.border = '2px solid #0e8a8a';
+  el.innerHTML = `<div style="font-size:16px;font-weight:800">🧩 ¿Mandar el sobrante a Sobrantes?</div>
+    <ul style="margin:8px 0 6px 18px;padding:0;line-height:1.6">${det}</ul>
+    <p class="hint" style="margin:0 0 10px">Si lo mandas, ese pedazo sale del inventario y queda apartado en <strong>Sobrantes</strong> para convertirlo en piezas (entrepaños, zóclos, puertas…). Si no, se queda en el inventario como <strong>cortado</strong>.</p>
+    <div class="row" style="gap:8px">
+      <button class="btn" style="flex:1;min-height:50px;${on?'background:linear-gradient(135deg,#0e8a8a,#0b6f6f)':'background:transparent;color:inherit;border:1px solid var(--line);box-shadow:none'}" onclick="puertaPreview.aSob=true;pintarSobPuerta()">${on?'✅ ':''}Sí, a sobrantes (${fmtNum(o.cantidad)})</button>
+      <button class="btn" style="flex:1;min-height:50px;${!on?'background:linear-gradient(135deg,#5b6b7f,#46566a)':'background:transparent;color:inherit;border:1px solid var(--line);box-shadow:none'}" onclick="puertaPreview.aSob=false;pintarSobPuerta()">${!on?'✅ ':''}No, se queda cortado</button>
+    </div>`;
 }
 
 // Puertas completas que regresan sin instalación registrada (confirmado por el usuario): mismo
@@ -4838,9 +4893,17 @@ async function registrarPuerta(tipo, alto, ancho){
       modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia, modeloKey:'Puerta '+tipo,
       consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
-    toast(estado==='pendiente'
+    const so = puertaPreview.sobOferta; let conSob = false;
+    if(so && puertaPreview.aSob && so.cantidad>0){
+      const sid = logId+'s', it = CATALOGO.find(i=>i.id===so.itemId), fS = new Date(Date.now()+1).toISOString();
+      const lineas = so.hojas.map(x=>`Sobrante de hoja ${x.hoja} de ${so.totalHojas} del corte de puertas (${fmtNum(x.sobra)} hoja${x.libre?`, pedazo aprox. ${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm`:''})`);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'sobranteCortePuertas', instalacionId:logId, cantidad:so.cantidad, nota:'Sobrante del corte · '+desc, fecha:fS, estado, loteId:sid, sobranteId:sid, creadoPor});
+      await db.collection('sobrantes').doc(sid).set({modulo:modulo(), fecha:fS, nota:'Sobrante del corte de '+desc, lineas, lineasData:[], material:[{itemId:it.id, cantidad:so.cantidad}], restante:{[it.id]:so.cantidad}, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId, deCortePuertas:true});
+      conSob = true;
+    }
+    toast((estado==='pendiente'
       ? '✅ Puertas guardadas.<br><small>Dirección las tiene que aprobar para que se descuenten.</small>'
-      : '✅ Instalación de puertas registrada.');
+      : '✅ Instalación de puertas registrada.') + (conSob?'<br><small>🧩 El sobrante de la hoja quedó en Sobrantes.</small>':''));
     puertaPreview = null;
     renderInstPuertas();
     window.scrollTo(0,0);
@@ -5203,6 +5266,43 @@ function renderRep(){
 // Lo que captura un coordinador (entradas/salidas e instalaciones — los traspasos NO, esos
 // son siempre inmediatos) queda "pendiente" y no afecta el inventario oficial hasta que
 // Dirección lo aprueba o rechaza aquí. Se revisa de TODOS los módulos a la vez.
+// Colores en Aprobaciones (confirmado por el usuario): cada tipo de captura con su propio color
+// para distinguirlas de un vistazo.
+const APROB_CLASES = {
+  inst:   {ic:'🛠️', t:'Instalación',          c:'#2f6fde'},
+  cambio: {ic:'🔄', t:'Cambio de modelo',     c:'#5a4fcf'},
+  entrada:{ic:'📥', t:'Entrada de material',  c:'#1f9d55'},
+  salida: {ic:'📤', t:'Salida de material',   c:'#d64545'},
+  merma:  {ic:'🗑️', t:'Merma',                c:'#e0791a'},
+  sob:    {ic:'🧩', t:'Sobrantes',            c:'#0e8a8a'},
+  regreso:{ic:'↩️', t:'Regreso de instalación',c:'#8e44ad'},
+  gar:    {ic:'🛡️', t:'Garantía',             c:'#c2417a'},
+  corte:  {ic:'✂️', t:'Corte',                c:'#5b6b7f'},
+  ajuste: {ic:'🔧', t:'Ajuste / piezas',      c:'#a0742a'},
+  otro:   {ic:'📋', t:'Otro',                 c:'#7a8594'}
+};
+function claseAprobLote(items, garLogs){
+  const has = f=>items.some(f), mot = x=>has(m=>m.motivo===x), tip = x=>has(m=>m.tipo===x);
+  const k = (()=>{
+    if(tip('garantia') || (garLogs||[]).some(g=>g.id===(items[0].loteId||items[0].id) || (g.retorno&&g.retorno.loteId===(items[0].loteId||items[0].id))) || mot('sobranteGarantia')) return 'gar';
+    if(mot('regresoInstalacion') || mot('regresoPiezasInst')) return 'regreso';
+    if(tip('merma')) return 'merma';
+    if(tip('sobrante') || mot('deSobrante') || mot('regresoSobrante')) return 'sob';
+    if(mot('piezasEncontradas') || tip('ajuste') || mot('deudaAparecio')) return 'ajuste';
+    if(tip('corte')) return 'corte';
+    if(tip('entrada') || has(m=>m.pedidoId)) return 'entrada';
+    if(tip('salida')) return 'salida';
+    if(tip('devolucion')) return 'regreso';
+    return 'otro';
+  })();
+  return Object.assign({k}, APROB_CLASES[k]);
+}
+function aprobCardStyle(cl){ return `border-left:7px solid ${cl.c};background:linear-gradient(90deg, ${cl.c}1f, ${cl.c}06 55%), var(--card, #fff)`; }
+function aprobChip(cl, extra){ return `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:${cl.c};color:#fff;font-weight:800;font-size:13px">${cl.ic} ${cl.t}${extra?' · '+extra:''}</span>`; }
+function aprobLeyendaHtml(clases){
+  const ks = [...new Set(clases)]; if(ks.length<2) return '';
+  return `<div class="card" style="padding:10px 12px"><div class="hint" style="margin:0 0 6px">Colores:</div><div style="display:flex;flex-wrap:wrap;gap:6px">${ks.map(k=>aprobChip(APROB_CLASES[k])).join('')}</div></div>`;
+}
 async function renderAprobaciones(){
   if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Esta sección es solo para Dirección.</div>'; return; }
   $('#main').innerHTML = '<div class="card">Cargando pendientes…</div>';
@@ -5234,12 +5334,16 @@ async function renderAprobaciones(){
     ${totalPend>1?`<button class="btn" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="aprobarTodo()">✅ Aprobar todo (${totalPend})</button><p class="hint" style="margin:6px 0 0">Revisa la lista de abajo antes de aprobar todo junto.</p>`:''}</div>`;
 
   html += cortesHoy;
+  const clasesLote = {}; loteIds.forEach(k=>{ clasesLote[k] = claseAprobLote(lotes[k], garLogs); });
+  html += aprobLeyendaHtml([...loteIds.map(k=>clasesLote[k].k), ...logsPendientes.map(l=>l.cambio?'cambio':'inst')]);
   if(loteIds.length>0){
     html += `<div class="card"><h3>Entradas, salidas y garantías pendientes (${loteIds.length})</h3></div>`;
     html += loteIds.map(key=>{
       const items = lotes[key];
       const m0 = items[0];
-      return `<div class="card">
+      const cl = clasesLote[key];
+      return `<div class="card" style="${aprobCardStyle(cl)}">
+        <div style="margin-bottom:6px">${aprobChip(cl)}</div>
         <div class="row" style="justify-content:space-between">
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
@@ -5258,9 +5362,10 @@ async function renderAprobaciones(){
 
   if(logsPendientes.length>0){
     html += `<div class="card"><h3>Instalaciones pendientes (${logsPendientes.length})</h3></div>`;
-    html += logsPendientes.map(l=>`<div class="card">
+    html += logsPendientes.map(l=>{ const cl = APROB_CLASES[l.cambio?'cambio':'inst']; return `<div class="card" style="${aprobCardStyle(cl)}">
+        <div style="margin-bottom:6px">${aprobChip(cl, l.categoria)}</div>
         <div class="row" style="justify-content:space-between">
-          <div><strong>${l.modulo}</strong><div class="tag">${l.categoria}</div><div class="tag">${l.fechaDia}</div>${l.creadoPor?`<div class="tag">${l.creadoPor}</div>`:''}</div>
+          <div><strong>${l.modulo}</strong><div class="tag">${l.fechaDia}</div>${l.creadoPor?`<div class="tag">${l.creadoPor}</div>`:''}</div>
         </div>
         <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>
         ${l.cambio ? detalleCambioAprob(l) : `<div class="wrap-x"><table><tr><th>Artículo</th><th>Cant.</th></tr>
@@ -5270,7 +5375,7 @@ async function renderAprobaciones(){
           <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="rechazarInstalacion('${l.id}')">Rechazar</button>
           <button class="btn small" onclick="aprobarInstalacion('${l.id}')">Aprobar</button>
         </div>
-      </div>`).join('');
+      </div>`; }).join('');
   }
 
   $('#main').innerHTML = html;
@@ -5309,7 +5414,7 @@ function detalleSobranteAprob(loteId, sobLogs){
 }
 async function cambiarEstadoLote(loteId, nuevoEstado){
   const snap = await db.collection('movimientos').get();
-  const docs = snap.docs.filter(d=>{ const m=d.data(); return (m.loteId||d.id)===loteId && m.estado==='pendiente'; });
+  const docs = snap.docs.filter(d=>{ const m=d.data(); return ((m.loteId||d.id)===loteId || (m.loteId===loteId+'s' && m.motivo==='sobranteCortePuertas')) && m.estado==='pendiente'; });
   const revisadoEn = new Date().toISOString(), revisadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
   for(const d of docs){ await db.collection('movimientos').doc(d.id).update({estado:nuevoEstado, revisadoEn, revisadoPor}); }
 }
@@ -6674,6 +6779,10 @@ async function borrarLotePendiente(loteId){
   if(!confirm(`¿Borrar esta captura?\n\n${describirLote(ms)}:\n${ms.map(m=>`• ${fmtNum(m.cantidad)} ${m.itemNombre}`).join('\n')}\n\nDespués puedes volver a capturarla bien.`)) return;
   try{
     for(const m of ms) await db.collection('movimientos').doc(m.id).delete();
+    // Sobrante del corte de puertas ligado a esa instalación (lote propio: id + 's')
+    try{ const sm = movs.filter(m=>m.loteId===loteId+'s' && m.motivo==='sobranteCortePuertas' && m.estado==='pendiente');
+      for(const m of sm) await db.collection('movimientos').doc(m.id).delete();
+      if(sm.length){ const d = await db.collection('sobrantes').doc(loteId+'s').get(); if(d && d.data) await db.collection('sobrantes').doc(loteId+'s').delete(); } }catch(e){}
     // Registros ligados a esa captura
     try{ const d = await db.collection('instalacionesLog').doc(loteId).get(); if(d && d.data) await db.collection('instalacionesLog').doc(loteId).delete(); }catch(e){}
     try{ const d = await db.collection('garantiasLog').doc(loteId).get(); if(d && d.data) await db.collection('garantiasLog').doc(loteId).delete(); }catch(e){}
