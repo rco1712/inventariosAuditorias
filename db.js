@@ -20,7 +20,8 @@ const COLLECTIONS_V5 = [...COLLECTIONS_V4, 'sobrantes'];
 // v6: versiones (qué versión de la app trae cada usuario).
 const COLLECTIONS_V6 = [...COLLECTIONS_V5, 'versiones'];
 // v7: gasolina (cargas de gasolina por módulo).
-const COLLECTIONS = [...COLLECTIONS_V6, 'gasolina'];
+const COLLECTIONS_V7 = [...COLLECTIONS_V6, 'gasolina'];
+const COLLECTIONS = [...COLLECTIONS_V7, 'cierres'];
 const NO_DESCARGAR = new Set(['fotos']);
 
 const ddb = new Dexie('auditoriamodulos');
@@ -31,7 +32,8 @@ ddb.version(3).stores(storesDe(COLLECTIONS_V3));
 ddb.version(4).stores(storesDe(COLLECTIONS_V4));
 ddb.version(5).stores(storesDe(COLLECTIONS_V5));
 ddb.version(6).stores(storesDe(COLLECTIONS_V6));
-ddb.version(7).stores(storesDe(COLLECTIONS));
+ddb.version(7).stores(storesDe(COLLECTIONS_V7));
+ddb.version(8).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 

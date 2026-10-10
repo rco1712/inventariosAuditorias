@@ -198,7 +198,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v119';
+const APP_VERSION = 'v126';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -356,6 +356,14 @@ async function loadStock(){
     sub(db.collection('config').where('modulo','==',modulo()).onSnapshot(snap=>{
       minimosMap = {}; snap.docs.forEach(d=>{ if(d.id==='minimos_'+modulo()) minimosMap = (d.data().valores)||{}; });
       if(current==='home') renderHome(); if(current==='min') renderMin();
+    }));
+  }catch(e){}
+  try{
+    // Cierres del turno de los módulos (aviso para Dirección, confirmado por el usuario).
+    if(esAdmin()) sub(db.collection('cierres').onSnapshot(snap=>{
+      cierresCache = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+      if(current==='home') renderHome();
+      revisarAvisosNuevos();
     }));
   }catch(e){}
   try{
@@ -634,14 +642,29 @@ let invCat = null, invDetalle = false;
 function cortesPendientes(){
   return CATALOGO.filter(it=>esHoja(it)).map(it=>({it, f:calcFormula(it.id)})).filter(x=>x.f.autoCortes>0);
 }
+// Último corte anotado de una hoja en el módulo actual (para decir desde cuándo se acumula).
+function ultimoCorteTxt(itemId){
+  const c = movs.filter(m=>m.itemId===itemId && m.tipo==='corte' && m.estado!=='rechazado' && (!m.modulo || m.modulo===modulo())).map(m=>m.fecha||'').sort().pop();
+  return c ? 'acumulado desde el último corte anotado ('+new Date(c).toLocaleDateString('es-MX',{day:'numeric',month:'short'})+')' : 'nunca se ha anotado un corte de este color';
+}
 function avisoCortePendienteHtml(lista){
   if(!lista.length || !puedeEscribir() || (miPerfil && (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente'))) return '';
-  return `<div class="card aviso">
-    <div style="font-size:15px;font-weight:800">✂️ Falta registrar el corte de hoy</div>
-    <p style="margin:6px 0 10px;line-height:1.5">Se usaron hojas en instalaciones, pero todavía no se anotó el corte de:</p>
-    <ul style="margin:0 0 10px 18px;padding:0;line-height:1.7">${lista.map(x=>`<li><strong>${fmtNum(x.f.autoCortes)} hoja(s)</strong> de ${x.it.nombre}</li>`).join('')}</ul>
-    <button class="btn" style="width:100%" onclick="irA('mov',{tipo:'corte',cat:'${lista[0].it.cat}'})">Registrar corte ahora</button>
+  return `<div class="warn" style="display:flex;align-items:center;gap:10px;margin:0 0 12px;padding:10px 12px">
+    <div style="flex:1;line-height:1.4">✂️ <strong>Falta contar en el cierre:</strong> ${lista.map(x=>`${fmtNum(x.f.autoCortes)} ${x.it.nombre.replace('Melamina ','')}`).join(' · ')}<br><small>Ya están descontadas del inventario.</small></div>
+    <button class="btn small" style="white-space:nowrap" onclick="irA('cierre')">Contar</button>
   </div>`;
+}
+// Muestra de color y barra completas/cortado en el inventario (confirmado por el usuario).
+const SWATCH_COLOR = {'Blanco':'#f7f7f4','Cenizo':'#b9b2a6','Beige':'#e3d3b5','Durango':'#9b6b43','Gris':'#8d9196','Lino':'#d8cfc0','Bco Mármol':'linear-gradient(135deg,#fafafa,#d4d4d4 55%,#fff)','Neg Mármol':'linear-gradient(135deg,#222,#5a5a5a 55%,#111)','Monarca':'#6e4a2f','Negro':'#1d1d1f','Nogal':'#5a3b26','Polar':'#e8ecef','Rioja':'#8a4b32','Roble':'#b38452','Roble Santana':'#a6784a','Choco':'#4a2e22'};
+function swatchHtml(nombre){
+  const c = String(nombre||'').replace(/^(Melamina|MDF)\s+/,'');
+  const col = SWATCH_COLOR[c]; if(!col || c===nombre) return '';
+  return `<span class="sw" style="background:${col}"></span>`;
+}
+function barraHojasHtml(f){
+  const a = Math.max(0, Number(f.completas)||0), k = Math.max(0, Number(f.cortado)||0), T = a+k;
+  if(T<=0) return '';
+  return `<div class="barra" title="Azul: completas · Rojo: ya cortadas"><i style="width:${a/T*100}%;background:var(--brand)"></i><i style="width:${k/T*100}%;background:var(--accent)"></i></div>`;
 }
 function renderInv(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
@@ -683,8 +706,8 @@ function renderInv(){
     html += `<div class="invlist">${orden.map(({it,f})=>{
       const vacio = Math.abs(f.final)<0.005;
       return `<div class="invitem ${vacio?'vacio':''}">
-        <div style="min-width:0"><div class="invname">${it.nombre}</div>
-          ${catHoja && !vacio ? `<div class="hint" style="margin:2px 0 0">${fmtNum(f.completas)} completas · ${fmtNum(f.cortado)} ya cortadas</div>` : ''}</div>
+        <div style="min-width:0;flex:1"><div class="invname">${swatchHtml(it.nombre)}${it.nombre}</div>
+          ${catHoja && !vacio ? `<div class="hint" style="margin:2px 0 0">${fmtNum(f.completas)} completas · ${fmtNum(f.cortado)} ya cortadas</div>${barraHojasHtml(f)}` : ''}</div>
         <div class="invqty ${f.final<0?'neg':''}">${fmtNum(f.final)}<span>${it.unidad}</span></div>
       </div>`; }).join('')}</div>`;
   } else {
@@ -828,44 +851,80 @@ function irA(v, opts){
   setView(v);
   window.scrollTo(0,0);
 }
+// Iconos de línea para Inicio (diseño serio, confirmado por el usuario).
+const HOME_IC = {
+  entrada:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+  salida:'<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+  traspaso:'<path d="M7 7h13"/><path d="m16 3 4 4-4 4"/><path d="M17 17H4"/><path d="m8 13-4 4 4 4"/>',
+  camion:'<path d="M3 6h11v10H3z"/><path d="M14 9h4l3 3v4h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+  reciclar:'<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>',
+  cajas:'<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+  cierre:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.5h6V4"/><path d="m9 13 2 2 4-4"/>',
+  herramienta:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+  escudo:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  gasolina:'<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M3 21h12"/><path d="M4 10h10"/><path d="M14 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V9l-3-3"/>',
+  aprobar:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  lupa:'<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3"/><path d="M8.5 11h5"/>',
+  mapa:'<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  capas:'<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+  tendencia:'<path d="M3 20h18"/><path d="m4 15 5-5 4 4 7-7"/><path d="M15 7h5v5"/>',
+  reloj:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  barras:'<path d="M5 20V11"/><path d="M12 20V4"/><path d="M19 20v-7"/><path d="M2 20h20"/>',
+  usuarios:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14a6 6 0 0 1 3.5 6"/>',
+  mas:'<path d="M12 5v14M5 12h14"/>',
+  lista:'<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2.5h6V4"/><path d="M9 10h6M9 14h6M9 18h4"/>'
+};
+function homeIcon(k){ return `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${HOME_IC[k]||HOME_IC.cajas}</svg>`; }
+// Secciones de Inicio: cada una con su familia de color; dentro de Material, una etiqueta
+// distingue lo que ENTRA (verde) de lo que SALE (rojo).
+const HOME_SECCIONES = {
+  mat:{t:'Material', c:'#2348b5'},
+  dia:{t:'Trabajo del día', c:'#0d7468'},
+  dir:{t:'Dirección', c:'#4a3b8f'},
+  ped:{t:'Pedidos', c:'#2348b5'}
+};
 function renderHome(){
-  const tiles = [];
-  const t = (icon, titulo, sub, js, color) => tiles.push(`<button class="tile" style="--tc:${color||'var(--brand)'}" onclick="${js}"><span class="tile-ic">${icon}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`);
+  const sec = {mat:[], dia:[], dir:[], ped:[]};
+  const t = (icon, titulo, sub, js, s, badge) => sec[s].push(`<button class="tile" style="--tc:${HOME_SECCIONES[s].c}" onclick="${js}" title="${String(sub).replace(/"/g,'&quot;')}">${badge?`<span class="tile-b ${badge.k}">${badge.t}</span>`:''}<span class="tile-ic">${homeIcon(icon)}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`);
+  const ENTRA = {k:'ent', t:'↓ Entra'}, SALE = {k:'sal', t:'↑ Sale'}, MUEVE = {k:'mov', t:'⇄ Mueve'};
+  let destacado = '';
   if(!esSoloLectura()){
-    t('📥','Llegó material','Anotar hojas, herrajes, etc. que entraron',"irA('mov',{tipo:'entrada'})",'#1f9d55');
-    t('📝','Cierre del turno','Corte de hojas, PVC, cintilla, pegamento…',"irA('cierre')",'#FF6B6A');
-    t('🔧','Instalación','Registrar un clóset o puerta instalada',"irA('inst')",'#3E5CDE');
-    t('🔄','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5');
-    t('📤','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#e0791a');
-    t('🛡️','Garantía','Material que se da en garantía',"irA('gar')",'#b3742c');
-    t('♻️','Tubos ahorrados','Tubos que regresan los instaladores',"irA('tubos')",'#1f9d55');
-    t('⛽','Gasolina','Cargas y presupuesto de la semana',"irA('gas')",'#e0791a');
+    t('entrada','Llegó material','Anotar hojas, herrajes, etc. que entraron',"irA('mov',{tipo:'entrada'})",'mat',ENTRA);
+    t('salida','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'mat',SALE);
+    t('traspaso','Traspaso','Enviar material a otro módulo',"irA('trasp')",'mat',MUEVE);
     const enCamino = pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p)).length;
-    t('🚚','Por llegar', enCamino ? `${enCamino} pedido(s) en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'#0e8a8a');
+    t('camion','Por llegar', enCamino ? `${enCamino} pedido(s) en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'mat', enCamino?{k:'num', t:String(enCamino)}:null);
+    t('reciclar','Tubos ahorrados','Tubos que regresan los instaladores',"irA('tubos')",'mat',ENTRA);
+    t('cierre','Cierre del turno','Corte de hojas, PVC, cintilla, pegamento…',"irA('cierre')",'dia');
+    t('herramienta','Instalación','Registrar un clóset o puerta instalada',"irA('inst')",'dia');
+    t('escudo','Garantía','Material que se da en garantía',"irA('gar')",'dia');
+    t('gasolina','Gasolina','Cargas y presupuesto de la semana',"irA('gas')",'dia');
   }
-  if(modoConteoCoord()) tiles.unshift(`<button class="tile" style="--tc:#E0453F;grid-column:1/-1" onclick="irA('aud')"><span class="tile-ic">📋</span><span class="tile-t">Conteo del almacén</span><span class="tile-s">Dirección abrió el conteo de hoy. Cuenta todo lo que hay.</span></button>`);
-  t('📦','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'#2c46b8');
-  if(esAdmin()){
-    t('✅','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#1f9d55');
-    t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
-    t('📋','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'#b3742c');
-    t('🧩','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#0e8a8a');
-    t('📈','Resumen semanal','Cómo va cada módulo',"irA('resumen')",'#6b4bd6');
-  }
+  if(modoConteoCoord()) destacado = `<button class="tile tile-ancho" style="--tc:#c0392b;grid-column:1/-1" onclick="irA('aud')"><span class="tile-ic">${homeIcon('lista')}</span><span><span class="tile-t">Conteo del almacén</span><span class="tile-s">Dirección abrió el conteo de hoy. Cuenta todo lo que hay.</span></span></button>`;
+  t('cajas','Ver inventario','Cuánto hay de cada cosa',"irA('inv')",'mat');
   if(esAdministracion()){
     const enCaminoT = pedidos.filter(pedidoEnCamino).length;
-    tiles.unshift(`<button class="tile" style="--tc:#0e8a8a" onclick="pedSub='camino';irA('ped')"><span class="tile-ic">🚚</span><span class="tile-t">Pedidos en camino</span><span class="tile-s">${enCaminoT?enCaminoT+' pedido(s) de los 5 módulos':'No hay nada en camino'}</span></button>`,
-      `<button class="tile" style="--tc:#1f9d55" onclick="pedSub='nuevo';irA('ped')"><span class="tile-ic">➕</span><span class="tile-t">Nuevo pedido</span><span class="tile-s">Subir material que va a llegar</span></button>`,
-      `<button class="tile" style="--tc:#b3742c" onclick="pedSub='faltan';irA('ped')"><span class="tile-ic">📋</span><span class="tile-t">Falta por entregar</span><span class="tile-s">Reporte por módulo</span></button>`);
+    t('camion','Pedidos en camino', enCaminoT?enCaminoT+' pedido(s) de los 5 módulos':'No hay nada en camino',"pedSub='camino';irA('ped')",'ped', enCaminoT?{k:'num',t:String(enCaminoT)}:null);
+    t('mas','Nuevo pedido','Subir material que va a llegar',"pedSub='nuevo';irA('ped')",'ped');
+    t('lista','Falta por entregar','Reporte por módulo',"pedSub='faltan';irA('ped')",'ped');
   }
-  if(esSoloLectura()) t('🗺️','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#0e8a8a');
-  if((esAdmin() || esSoloLectura()) && !esAdministracion()) t('🗂️','Historial','Auditorías y faltantes',"irA('hist')",'#6b7280');
-  t('📊','Reportes','Reporte del día en PDF',"irA('rep')",'#3E5CDE');
-  if(esAdmin()) t('👥','Usuarios','Dar de alta al personal',"irA('usr')",'#6b7280');
+  if(esAdmin()){
+    t('aprobar','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'dir');
+    t('lupa','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'dir');
+    t('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'dir');
+    t('capas','Sobrantes','Material que regresó sin instalar',"irA('sob')",'dir');
+    t('tendencia','Resumen semanal','Cómo va cada módulo',"irA('resumen')",'dir');
+  }
+  if(esSoloLectura()) t('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'dir');
+  if((esAdmin() || esSoloLectura()) && !esAdministracion()) t('reloj','Historial','Auditorías y faltantes',"irA('hist')",'dir');
+  t('barras','Reportes','Reporte del día en PDF',"irA('rep')", (esAdmin()||esSoloLectura()) ? 'dir' : 'dia');
+  if(esAdmin()) t('usuarios','Usuarios','Dar de alta al personal',"irA('usr')",'dir');
+  const orden = esAdministracion() ? ['ped','mat','dia','dir'] : ['mat','dia','dir','ped'];
+  const tilesHtml = destacado + orden.filter(k=>sec[k].length).map(k=>`<div class="home-sec" style="--tc:${HOME_SECCIONES[k].c}"><div class="home-sec-t">${HOME_SECCIONES[k].t}</div><div class="tiles">${sec[k].join('')}</div></div>`).join('');
 
   const pend = [];
   const cp = cortesPendientes();
-  if(cp.length && !esSoloLectura()) pend.push(`<div class="pend"><div>✂️ <strong>Falta registrar el corte</strong> de ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}.</div><button class="btn small" onclick="irA('mov',{tipo:'corte',cat:'${cp[0].it.cat}'})">Registrar</button></div>`);
+  if(cp.length && !esSoloLectura()) pend.push(`<div class="pend"><div>✂️ <strong>Corte sin anotar</strong>: ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')} <span class="hint" style="margin:0">(ya descontadas del inventario; solo falta anotarlas)</span>.</div><button class="btn small" onclick="irA('cierre')">Cierre</button></div>`);
   const misPend = movs.filter(m=>m.estado==='pendiente').length;
   if(misPend && esCoordinador()) pend.push(`<div class="pend"><div>⏳ Tienes <strong>${misPend}</strong> movimiento(s) esperando que Dirección los apruebe.</div><button class="btn small" onclick="irA('pend')">Ver / corregir</button></div>`);
   const deudaPend = deudas.filter(d=>d.estado!=='saldada').length;
@@ -876,11 +935,12 @@ function renderHome(){
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${avisosCardHtml()}
+    ${cierresHoyHtml()}
     ${recordatorioCierreHtml()}
     ${stockBajoHtml()}
     ${avisoInstalarHtml()}
     <div id="home-apr"></div>
-    <div class="tiles">${tiles.join('')}</div>
+    ${tilesHtml}
     <p class="hint" style="text-align:center;margin:14px 0 4px">Versión ${APP_VERSION}${versionServidor && numVersion(versionServidor)>numVersion(APP_VERSION)?` · <a href="#" onclick="actualizarApp();return false;">hay una nueva (${versionServidor})</a>`:' · ✅ al día'}</p>`;
   if(esAdmin()) contarAprobacionesPendientes();
   if(esAdministracion()){
@@ -915,6 +975,7 @@ let movCat = null;
 let movTipo='entrada', movLado='completas', movVals={}, movBuscar='';
 const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía', devolucion:'Regresó de garantía', sobrante:'A sobrantes'};
 function etiquetaTipoMov(m){
+  if(m.motivo==='cierreCompletasDeMas') return 'Hojas completas de más (cierre)';
   if(m.motivo==='armarJuegos') return 'Armado de juegos';
   if(m.motivo==='sobranteGarantia') return 'Sobrante de garantía';
   if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
@@ -3397,13 +3458,14 @@ async function renderInstHistorial(){
   let ultimaSemana = null;
   const tagValor = x => { if(!esAdmin()) return ''; const v = valorInstalacion(x, regresadas);
     if(!instCuenta(x, regresadas)) return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>';
-    return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)}</span>`; };
+    const det = valorDetalleTxt(x);
+    return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)}${det?' <span style="font-weight:500">('+det+')</span>':''}</span>`; };
   $('#inst-body').innerHTML = aviso + dias.map(dia=>{ const sab=sabadoDe(dia); const cab = sab!==ultimaSemana ? cabSemana(dia) : ''; ultimaSemana = sab; return cab + `
     <div class="card">
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
       <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${extrasLogHtml(x)} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
     </div>`; }).join('');
   if(regVolver && regInstSel){ regVolver = false; mostrarRegresoInst(); }
@@ -3496,7 +3558,7 @@ async function guardarCambioModelo(n){
       for(const x of n.consumo){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
       const viejos = movs.filter(m=>m.loteId===L.id);
       for(const x of n.consumo) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad);
-      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion});
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion});
       for(const m of viejos) await db.collection('movimientos').doc(m.id).delete();
       await db.collection('instalacionesLog').doc(L.id).delete();
       movs = movs.filter(m=>!viejos.includes(m));
@@ -3505,7 +3567,7 @@ async function guardarCambioModelo(n){
       for(const x of d.descuenta){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
       for(const x of d.regresa) await mov(CATALOGO.find(i=>i.id===x.itemId), 'devolucion', x.cantidad, {motivo:'cambioModelo', instalacionId:L.id, cambioModelo:true});
       for(const x of d.descuenta) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad, {cambioModelo:true});
-      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, consumo:n.consumo, fecha, estado, creadoPor,
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor,
         cambioDe:L.id, cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta}});
       if(estado==='aprobado') await db.collection('instalacionesLog').doc(L.id).update({cambiadaPor:newId});
     }
@@ -3797,11 +3859,11 @@ function previewInst(){
   const bloqueadoPorReceta = pendientes.length>0;
   const bloqueadoPorStock = !instRegresoLibre && faltantes.length>0; // un regreso suma, no necesita existencia
   const extrasN = iAdicionales.reduce((t,a)=>t+(a.tipo==='repisa'?((Number(a.cantidad)||1)):1),0); // cada extra vale aparte (repisa: por pieza)
-  instPreview = {modeloNombre:titulo,modeloKey,esMax,extras:extrasN,color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
+  instPreview = {modeloNombre:titulo,modeloKey,esMax,extras:extrasN,extrasDetalle:iAdicionales.map(describirExtra),color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
 
   let html = `<div class="card" id="i-preview-card">
     <div style="font-size:16px;font-weight:800">${instRegresoLibre?'↩️ Esto regresa al inventario':(instCambio?'📋 Material del modelo que se instaló':'📋 Esto se va a descontar')}</div>
-    <p class="hint" style="margin-top:4px"><strong>${titulo}</strong> · ${color}${colorCajonera?' · cajonera '+colorCajonera:''}${iAdicionales.length?' · + '+iAdicionales.length+' extra(s)':''}</p>
+    <p class="hint" style="margin-top:4px"><strong>${titulo}</strong> · ${color}${colorCajonera?' · cajonera '+colorCajonera:''}${iAdicionales.length?' · ➕ '+iAdicionales.map(describirExtra).join(', '):''}</p>
     ${notaModelo? `<div class="warn">${notaModelo}</div>`:''}
     ${maxNota? `<div class="warn">${maxNota}</div>`:''}
     <div class="movlist">${consumo.map(c=>{ const f=calcFormula(c.itemId); const insuf = !instRegresoLibre && faltantes.some(x=>x.itemId===c.itemId);
@@ -4384,7 +4446,7 @@ function avisoAutoCorteHtml(consumo){
 async function confirmarInst(){
   if(!instPreview || instPreview.bloqueado) return;
   const nota = ($('#i-nota').value||'').trim();
-  if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, consumo:instPreview.consumo});
+  if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[], consumo:instPreview.consumo});
   const fechaDia = $('#i-fecha').value || new Date().toISOString().slice(0,10);
   const mod = modulo();
   const desc = `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`;
@@ -4403,7 +4465,7 @@ async function confirmarInst(){
     }
     // Registro consolidado para el historial por día del módulo
     await db.collection('instalacionesLog').doc(logId).set({
-      modulo:mod, categoria:'Mueble', descripcion:desc, nota, fechaDia, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0,
+      modulo:mod, categoria:'Mueble', descripcion:desc, nota, fechaDia, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[],
       consumo:instPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
     toast(estado==='pendiente'
@@ -5367,7 +5429,7 @@ async function renderAprobaciones(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${l.modulo}</strong><div class="tag">${l.fechaDia}</div>${l.creadoPor?`<div class="tag">${l.creadoPor}</div>`:''}</div>
         </div>
-        <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>
+        <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>${extrasLogHtml(l)}
         ${l.cambio ? detalleCambioAprob(l) : `<div class="wrap-x"><table><tr><th>Artículo</th><th>Cant.</th></tr>
         ${(l.consumo||[]).map(c=>`<tr><td>${CATALOGO.find(i=>i.id===c.itemId)?.nombre||c.itemId}</td><td>${fmtNum(c.cantidad)}</td></tr>`).join('')}
         </table></div>`}
@@ -5497,6 +5559,41 @@ function stockEsperadoCierre(itemId){
   });
   return fmtNum(q);
 }
+// Fórmula como si lo pendiente ya estuviera aprobado (para el conteo de completas del cierre).
+function calcFormulaConPendientes(itemId){
+  const resetFecha = resetMap[modulo()];
+  const doc = inicialMap[itemId]!==undefined ? {cantidad:inicialMap[itemId], cortado:inicialCortadoMap[itemId], fecha:inicialFechaMap[itemId]} : null;
+  const b = lineaBase(resetFecha, doc);
+  const lista = movs.filter(m=>m.itemId===itemId && (!b.desde || m.fecha>b.desde) && m.estado!=='rechazado');
+  return calcularFormula(itemId, b.inicial, b.inicialCortado, lista);
+}
+// Cierre por conteo de completas (confirmado por el usuario): el coordinador escribe cuántas
+// hojas COMPLETAS tiene; la app calcula el corte. Si tiene MÁS de las esperadas no se toca el
+// inventario solo: se manda a Dirección como ajuste por aprobar.
+function corteDesdeConteo(itemId, contadas){
+  const sim = calcFormulaConPendientes(itemId);
+  const esp = fmtNum(sim.completas), deuda = fmtNum(sim.autoCortes||0), c = Number(contadas);
+  const corte = fmtNum(deuda + Math.max(0, esp - c));
+  const deMas = fmtNum(Math.max(0, c - esp));
+  return {esp, deuda, contadas:c, corte, deMas};
+}
+let cierreTodasHojas = false;
+function filaConteoHoja(it){
+  const v = cierreVals[it.id]; const r = corteDesdeConteo(it.id, vacioCierre(v)?0:v);
+  let res = '';
+  if(!vacioCierre(v)){
+    if(r.deMas>0) res = `<span style="color:#b3742c"> → ⚠️ hay ${fmtNum(r.deMas)} de más (se avisa a Dirección)</span>${r.corte>0?`<span class="neg"> · corte ${fmtNum(r.corte)}</span>`:''}`;
+    else if(r.corte>0) res = `<span class="neg"> → se cortaron ${fmtNum(r.corte)}</span>`;
+    else res = '<span class="pos"> → sin corte</span>';
+  }
+  return `<label class="movitem"><span style="min-width:0"><span class="invname">${swatchHtml(it.nombre)}${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0" id="chdif-${it.id}">La app espera: ${fmtNum(r.esp)} completas${res}</span></span>
+    <input type="number" min="0" step="1" inputmode="numeric" placeholder="Hay" value="${vacioCierre(v)?'':v}" oninput="cierreVals['${it.id}']=this.value;refrescarHojaCierre('${it.id}')"></label>`;
+}
+function refrescarHojaCierre(id){
+  const it = CATALOGO.find(i=>i.id===id); const el = document.getElementById('chdif-'+id); if(!it||!el) return;
+  const tmp = document.createElement('div'); tmp.innerHTML = filaConteoHoja(it);
+  const n = tmp.querySelector('#chdif-'+id); if(n) el.innerHTML = n.innerHTML;
+}
 function vacioCierre(v){ return v===undefined || v===null || String(v).trim()===''; }
 function filaCierreConteo(it){
   const esp = stockEsperadoCierre(it.id); const v = cierreVals[it.id];
@@ -5515,18 +5612,19 @@ function cuentaCierreTxt(){ const n = CATALOGO.filter(i=>esConsumibleCierre(i) &
 function renderCierre(){
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   const hojas = CATALOGO.filter(i=>esHoja(i));
-  const filaCorte = (it, sub) => `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">${sub}</span></span>
-    <input type="number" min="0" inputmode="decimal" placeholder="—" value="${cierreVals[it.id]||''}" oninput="cierreVals['${it.id}']=this.value"></label>`;
   const cp = cortesPendientes();
+  const conMaterial = hojas.filter(it=>{ const f=calcFormulaConPendientes(it.id); return f.completas>0.0005 || (f.autoCortes||0)>0 || !vacioCierre(cierreVals[it.id]); });
+  const visibles = cierreTodasHojas ? hojas : conMaterial;
   $('#main').innerHTML = `<div class="card">
       <div style="font-size:17px;font-weight:800">📝 Cierre del turno · ${modulo()}</div>
       <p class="hint">Tubos, bridas, correderas, jaladeras, bisagras, espejos, rieles, sistemas y bastidores <strong>ya se descontaron solos</strong> con las instalaciones y garantías. Aquí solo va lo demás.</p>
       ${cierreHechoHoy()?'<p class="hint" style="color:var(--ok)">✅ Ya capturaste un cierre hoy. Puedes agregar más si faltó algo.</p>':''}
     </div>
     <div class="card">
-      <div class="paso">1</div><strong>✂️ Hojas que se cortaron hoy</strong>
-      ${cp.length?`<p class="hint">Se usaron sin corte anotado: ${cp.map(x=>fmtNum(x.f.autoCortes)+' de '+x.it.nombre.replace('Melamina ','')).join(', ')}.</p>`:''}
-      <div class="movlist" style="margin-top:8px">${hojas.map(it=>{ const f=calcFormula(it.id); return filaCorte(it, `${fmtNum(f.completas)} completas${f.autoCortes?' · '+fmtNum(f.autoCortes)+' sin corte':''}`); }).join('')}</div>
+      <div class="paso">1</div><strong>✂️ ¿Cuántas hojas completas te quedan?</strong>
+      <p class="hint">Cuenta las hojas <strong>completas</strong> (sin cortar) de cada color y escríbelo. La app calcula sola cuántas se cortaron. El total del inventario no cambia: solo pasan de completas a cortadas.${cp.length?` <br>Pendiente de anotar: ${cp.map(x=>fmtNum(x.f.autoCortes)+' '+x.it.nombre.replace('Melamina ','')).join(', ')}.`:''}</p>
+      <div class="movlist" style="margin-top:8px">${visibles.map(filaConteoHoja).join('') || '<p class="hint">No hay hojas completas registradas.</p>'}</div>
+      ${hojas.length>conMaterial.length?`<button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="cierreTodasHojas=!cierreTodasHojas;renderCierre()">${cierreTodasHojas?'Ver solo los que tienen material':'Ver todos los colores ('+hojas.length+')'}</button>`:''}
     </div>
     <div class="card">
       <div class="paso">2</div><strong>📦 ¿Cuánto te queda?</strong>
@@ -5550,19 +5648,23 @@ function renderCierreConsumibles(){
 }
 async function guardarCierre(){
   const nota = (document.getElementById('cierre-nota').value||'').trim();
-  const cortes = CATALOGO.filter(i=>esHoja(i) && Number(cierreVals[i.id])>0).map(it=>({it, q:Number(cierreVals[it.id])}));
+  const hojasContadas = CATALOGO.filter(i=>esHoja(i) && !vacioCierre(cierreVals[i.id]));
+  for(const it of hojasContadas){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
+  const conteoHojas = hojasContadas.map(it=>Object.assign({it}, corteDesdeConteo(it.id, cierreVals[it.id])));
+  const cortes = conteoHojas.filter(x=>x.corte>0).map(x=>({it:x.it, q:x.corte, esp:x.esp, contadas:x.contadas}));
+  const hojasDeMas = conteoHojas.filter(x=>x.deMas>0);
   const contados = CATALOGO.filter(i=>esConsumibleCierre(i) && !vacioCierre(cierreVals[i.id]));
   for(const it of contados){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
   const salidas = [], deMas = [], iguales = [];
   contados.forEach(it=>{ const esp = stockEsperadoCierre(it.id), hay = Number(cierreVals[it.id]); const d = fmtNum(esp - hay);
     if(d>0) salidas.push({it, q:d, esp, hay}); else if(d<0) deMas.push({it, esp, hay}); else iguales.push(it); });
-  if(!cortes.length && !contados.length){
+  if(!hojasContadas.length && !contados.length){
     if(!confirm('No escribiste nada.\n\n¿Hoy no se cortaron hojas y no quieres contar consumibles?\n\nAceptar = sí, guardar "sin movimiento" para que no te lo vuelva a recordar hoy.')) return;
   }
-  for(const c of cortes){ const f=calcFormula(c.it.id); if(c.q > f.completas + f.autoCortes + 1e-9) return alert(`No alcanza: de ${c.it.nombre} hay ${fmtNum(f.completas+f.autoCortes)} hojas completas y escribiste ${c.q}.`); }
-  if(cortes.length || contados.length){
+  if(hojasContadas.length || contados.length){
     const txt = `Cierre del turno:\n\n`
-      + (cortes.length ? '✂️ Corte:\n'+cortes.map(c=>`• ${fmtNum(c.q)} hojas ${c.it.nombre}`).join('\n')+'\n\n' : '')
+      + (cortes.length ? '✂️ Se cortaron (pasan de completas a cortado):\n'+cortes.map(c=>`• ${fmtNum(c.q)} ${c.it.nombre} (quedan ${fmtNum(c.contadas)} completas)`).join('\n')+'\n\n' : '')
+      + (hojasDeMas.length ? '⚠️ Hay MÁS hojas completas de las que dice la app (se avisa a Dirección para que lo revise):\n'+hojasDeMas.map(x=>`• ${x.it.nombre}: app ${fmtNum(x.esp)}, tú ${fmtNum(x.contadas)}`).join('\n')+'\n\n' : '')
       + (salidas.length ? '📤 Se usó (se descuenta):\n'+salidas.map(x=>`• ${fmtNum(x.q)} ${x.it.unidad} ${x.it.nombre} (había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)})`).join('\n')+'\n\n' : '')
       + (iguales.length ? `✔️ Sin cambio: ${iguales.length} artículo(s)\n\n` : '')
       + (deMas.length ? '⚠️ Tienes MÁS de lo que dice la app (no se toca; si llegó material, anótalo en "Llegó material"):\n'+deMas.map(x=>`• ${x.it.nombre}: app ${fmtNum(x.esp)}, tú ${fmtNum(x.hay)}`).join('\n')+'\n\n' : '')
@@ -5572,12 +5674,19 @@ async function guardarCierre(){
   try{
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
     const loteC = cryptoId(), loteS = cryptoId();
-    for(const c of cortes) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.it.id, itemNombre:c.it.nombre, tipo:'corte', cantidad:c.q, nota:'Cierre del turno'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteC, creadoPor, cierreTurno:true});
+    for(const c of cortes) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.it.id, itemNombre:c.it.nombre, tipo:'corte', cantidad:c.q, nota:`Cierre del turno: quedan ${fmtNum(c.contadas)} completas`+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteC, creadoPor, cierreTurno:true, conteoCompletas:{esperado:c.esp, contado:c.contadas}});
+    // Hojas completas de más: no se tocan solas; van a Dirección como ajuste por aprobar.
+    const loteA = cryptoId();
+    for(const x of hojasDeMas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'ajuste', motivo:'cierreCompletasDeMas', cantidad:x.deMas, completasDelta:x.deMas, cortadoDelta:0, nota:`Cierre del turno: la app esperaba ${fmtNum(x.esp)} completas y contaron ${fmtNum(x.contadas)}`+(nota?' · '+nota:''), fecha, estado:'pendiente', loteId:loteA, creadoPor, cierreTurno:true});
     const estado = 'aprobado'; // Cierre del turno entra directo, sin aprobación (confirmado por el usuario)
     for(const x of salidas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'salida', cantidad:x.q, nota:`Cierre del turno: había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)}`+(nota?' · '+nota:''), fecha, estado, loteId:loteS, creadoPor, cierreTurno:true, conteoCierre:{esperado:x.esp, contado:x.hay}});
     if(!cortes.length && !salidas.length) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:'_cierre', itemNombre:'Cierre sin movimiento', tipo:'nota', cantidad:0, nota:'Cierre del turno sin movimiento'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:cryptoId(), creadoPor, cierreTurno:true});
+    // Aviso a Dirección: el módulo ya hizo su cierre del turno.
+    try{ await db.collection('cierres').doc(cryptoId()).set({modulo:mod, fecha, dia:fechaHoyLocal(), creadoPor, nota,
+      cortes:cortes.map(c=>({nombre:c.it.nombre, q:c.q})), hojasDeMas:hojasDeMas.map(x=>({nombre:x.it.nombre, q:x.deMas})),
+      consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length}); }catch(e){}
     cierreVals = {}; cierreBuscar = '';
-    toast('✅ Cierre del turno guardado.'+(salidas.length && estado==='pendiente'?'<br><small>Lo que se usó espera aprobación de Dirección.</small>':''));
+    toast('✅ Cierre del turno guardado.'+(hojasDeMas.length?'<br><small>Las hojas de más las revisa Dirección.</small>':''));
     setView('home');
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -6373,6 +6482,23 @@ function valorExtra(){ const v = valoresInst && valoresInst._extra; return (v!==
 function instCuenta(log, regresadas){
   return log.estado!=='rechazado' && !(regresadas && regresadas.has(log.id)) && !log.cambiadaPor && !(log.cambioDe && log.estado==='pendiente');
 }
+// Texto de los extras de una instalación (confirmado por el usuario: que se vea qué extra sumó).
+function describirExtra(a){
+  return (TIPOS_ADICIONAL[a.tipo]||a.tipo).replace(' (cantidad libre)','')
+    + (a.tipo==='cajonera'?' de '+a.cajones+' cajones':'')
+    + (a.tipo==='repisa'?' ×'+(Number(a.cantidad)||1):'')
+    + (a.conPuerta?(a.tipo==='zapatera'?' con puerta':' con puertitas'):'')
+    + (a.tipo!=='piso_zoclo' && a.color ? ' '+a.color : '');
+}
+function extrasLogHtml(log){
+  const n = Number(log.extras)||0; if(!n && !(log.extrasDetalle||[]).length) return '';
+  const txt = (log.extrasDetalle||[]).length ? log.extrasDetalle.join(', ') : n+' extra'+(n===1?'':'s');
+  return `<div style="margin-top:3px;font-size:12.5px;color:var(--sub)">➕ ${txt}</div>`;
+}
+function valorDetalleTxt(log){
+  const base = valorDe(grupoValor(claveInstalacion(log))), n = Number(log.extras)||0;
+  return n ? `${fmtNum(base)} del modelo + ${n} extra${n===1?'':'s'} × ${fmtNum(valorExtra())}` : '';
+}
 function valorInstalacion(log, regresadas){
   if(!instCuenta(log, regresadas)) return 0;
   return valorDe(grupoValor(claveInstalacion(log))) + (Number(log.extras)||0)*valorExtra();
@@ -6835,8 +6961,33 @@ function calcularAvisos(){
   } else {
     pedidos.forEach(p=>recepcionesDe(p).forEach((r,idx)=>{ if(r.fecha>visto && (p.modulo!==modulo() || estadoRecepcion(r)==='pendiente')) out.push({id:'pedrec_'+p.id+'_'+idx, fecha:r.fecha, ic:'📦',
       titulo:`${p.modulo} recibió material`, texto:'Revisa lo que llegó y apruébalo para sumarlo al inventario.'}); }));
+    if(esAdmin()) cierresCache.filter(c=>c.fecha>visto).forEach(c=>out.push({id:'cierre_'+c.id, fecha:c.fecha, ic:'📝',
+      titulo:`${c.modulo} hizo su cierre del turno`, texto:resumenCierreTxt(c)}));
   }
   return out.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+}
+let cierresCache = [];
+function resumenCierreTxt(c){
+  const partes = [];
+  if((c.cortes||[]).length) partes.push('Cortó '+c.cortes.map(x=>fmtNum(x.q)+' '+String(x.nombre).replace('Melamina ','')).join(', '));
+  else if(c.hojasContadas) partes.push('Sin corte de hojas');
+  if(c.consumibles) partes.push(c.consumibles+' consumible(s) descontados');
+  if((c.hojasDeMas||[]).length) partes.push('⚠️ Hojas de más: '+c.hojasDeMas.map(x=>fmtNum(x.q)+' '+String(x.nombre).replace('Melamina ','')).join(', ')+' (por aprobar)');
+  if((c.consDeMas||[]).length) partes.push('⚠️ Tienen más de: '+c.consDeMas.slice(0,3).join(', '));
+  return partes.join(' · ') || 'Sin movimiento';
+}
+function cierresHoyHtml(){
+  if(!esAdmin()) return '';
+  const hoy = fechaHoyLocal(), tarde = esHoraDeCierre();
+  const filas = MODULOS.map(m=>{
+    const c = cierresCache.find(x=>x.modulo===m.nombre && x.dia===hoy);
+    const hora = c ? new Date(c.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}) : '';
+    const alerta = c && ((c.hojasDeMas||[]).length || (c.consDeMas||[]).length);
+    return `<div class="movitem" style="align-items:flex-start"><span style="min-width:0"><span class="invname"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${m.color};margin-right:6px"></span>${m.nombre}</span>${c?`<span class="hint" style="display:block;margin:2px 0 0">${resumenCierreTxt(c)}</span>`:''}</span>
+      <strong style="white-space:nowrap;font-size:13px;color:${c?(alerta?'#b3742c':'var(--ok)'):(tarde?'var(--bad)':'var(--sub)')}">${c?(alerta?'⚠️ ':'✅ ')+hora:(tarde?'⏳ Falta':'Aún no')}</strong></div>`;
+  }).join('');
+  const hechos = MODULOS.filter(m=>cierresCache.some(x=>x.modulo===m.nombre && x.dia===hoy)).length;
+  return `<details class="card" style="padding:12px" ${tarde?'open':''}><summary><strong>📝 Cierres del turno de hoy</strong><span class="tag" style="margin-left:auto">${hechos} de ${MODULOS.length}</span></summary><div class="movlist">${filas}</div></details>`;
 }
 function fechaCorta(d){ return new Date((String(d).length===10?d+'T12:00:00':d)).toLocaleDateString('es-MX',{day:'numeric',month:'short'}); }
 function avisosCardHtml(){
@@ -7238,8 +7389,14 @@ async function cerrarInventarioDiarioUI(modo){
   catch(e){ alert('No se pudo generar el reporte: '+e.message); }
 }
 
-// modo 'completo' = inventario completo de siempre (en hojas: movimientos, completas, cortado y final).
-// modo 'sincortar' = reporte aparte, solo de Melamina: cuántas hojas quedan SIN CORTAR por color.
+// modo 'completo' = inventario completo; modo 'sincortar' = solo la hoja de hojas enteras.
+// Reporte diario con colores por material y hoja final de hojas enteras (confirmado por el usuario).
+const PDF_CAT_COLOR = {
+  'Melamina':[35,72,181], 'MDF':[138,90,43], 'Cintilla':[13,116,104], 'PVC':[74,59,143],
+  'Pegamento':[194,65,12], 'Stickers':[190,24,93], 'Herrajes':[55,65,81]
+};
+const PDF_SWATCH_RGB = {'Blanco':[247,247,244],'Cenizo':[185,178,166],'Beige':[227,211,181],'Durango':[155,107,67],'Gris':[141,145,150],'Lino':[216,207,192],'Bco Mármol':[236,236,236],'Neg Mármol':[45,45,45],'Monarca':[110,74,47],'Negro':[29,29,31],'Nogal':[90,59,38],'Polar':[232,236,239],'Rioja':[138,75,50],'Roble':[179,132,82],'Roble Santana':[166,120,74],'Choco':[74,46,34]};
+function pdfTinte(rgb, t){ return rgb.map(v=>Math.round(v+(255-v)*t)); }
 async function generarReporteDiarioPDF(modo){
   modo = modo || 'completo';
   const soloSinCortar = modo==='sincortar';
@@ -7248,168 +7405,176 @@ async function generarReporteDiarioPDF(modo){
   const mod = modulo();
   const ahora = new Date();
   const fechaStr = ahora.toLocaleDateString('es-MX', {year:'numeric', month:'long', day:'numeric'});
-  const horaStr = ahora.toLocaleTimeString('es-MX');
-
-  const marginL = 14;
+  const horaStr = ahora.toLocaleTimeString('es-MX', {hour:'numeric', minute:'2-digit'});
+  const marginL = 14, W = 182;
   const pageH = doc.internal.pageSize.getHeight();
-  // Columnas normales, y columnas extendidas para hojas (Melamina/MDF): Corte, Completas y Cortado.
   const COLS_NORMAL = [
     {label:'Artículo', w:54}, {label:'Inicial', w:16}, {label:'Entr.', w:16}, {label:'Sal.', w:16},
-    {label:'Instal.', w:16}, {label:'Garant.', w:16}, {label:'Mermas', w:16}, {label:'Ajuste', w:16}, {label:'Final', w:16}
+    {label:'Instal.', w:16}, {label:'Garant.', w:16}, {label:'Mermas', w:16}, {label:'Ajuste', w:16}, {label:'Final', w:16, k:'final'}
   ];
-  const COLS_HOJA = soloSinCortar
-    ? [ {label:'Artículo', w:120}, {label:'Hojas sin cortar', w:62} ]
-    : [
-      {label:'Artículo', w:38}, {label:'Inicial', w:13.1}, {label:'Entr.', w:13.1}, {label:'Sal.', w:13.1},
-      {label:'Corte', w:13.1}, {label:'Instal.', w:13.1}, {label:'Garant.', w:13.1}, {label:'Mermas', w:13.1}, {label:'Ajuste', w:13.1},
-      {label:'Compl.', w:13.1}, {label:'Cortado', w:13.1}, {label:'Final', w:13.1}
-    ];
-  let cols = COLS_NORMAL;
+  const COLS_HOJA = [
+    {label:'Artículo', w:38}, {label:'Inicial', w:13.1}, {label:'Entr.', w:13.1}, {label:'Sal.', w:13.1},
+    {label:'Corte', w:13.1}, {label:'Instal.', w:13.1}, {label:'Garant.', w:13.1}, {label:'Mermas', w:13.1}, {label:'Ajuste', w:13.1},
+    {label:'Compl.', w:13.1, k:'compl'}, {label:'Cortado', w:13.1, k:'cort'}, {label:'Final', w:13.1, k:'final'}
+  ];
+  let cols = COLS_NORMAL, color = [35,72,181];
   const tableW = () => cols.reduce((s,c)=>s+c.w,0);
-  function colX(i){ let x=marginL; for(let k=0;k<i;k++) x+=cols[k].w; return x; }
+  const colX = i => { let x=marginL; for(let k=0;k<i;k++) x+=cols[k].w; return x; };
+  let y = 0;
 
-  let y = 15;
-  doc.setFontSize(14);
-  doc.text(soloSinCortar ? 'Closets Vera · Melamina sin cortar' : 'Closets Vera · Inventario Diario', marginL, y); y+=7;
-  doc.setFontSize(10);
-  doc.text(`Módulo: ${mod}`, marginL, y); y+=5;
-  doc.text(`Cerrado: ${fechaStr}, ${horaStr}`, marginL, y); y+=5;
+  // Encabezado con franja de marca
+  const encabezado = (titulo, sub) => {
+    doc.setFillColor(35,72,181); doc.rect(0,0,210,24,'F');
+    doc.setFillColor(255,211,77); doc.rect(0,24,210,1.6,'F');
+    doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(15);
+    doc.text(titulo, marginL, 11);
+    doc.setFont(undefined,'normal'); doc.setFontSize(9.5);
+    doc.text(sub, marginL, 18);
+    doc.setTextColor(0,0,0);
+    y = 33;
+  };
   const correo = (typeof getCurrentUserEmail==='function' ? getCurrentUserEmail() : '') || '';
-  doc.text(`Por: ${correo}`, marginL, y); y+=8;
+  if(!soloSinCortar){
+  encabezado('Closets Vera · Inventario diario', `Módulo ${mod}  ·  ${fechaStr}, ${horaStr}${correo?'  ·  '+correo:''}`);
 
-  // Recuadro de resumen
-  const catsResumen = ['Melamina','MDF'];
-  const resumenHojas = catsResumen.map(cat=>{
+  // Tarjetas de resumen: completas / cortado / total por tipo de hoja
+  const resumen = ['Melamina','MDF'].map(cat=>{
     const t = CATALOGO.filter(i=>i.cat===cat).reduce((s,it)=>{ const f=calcFormula(it.id); s.c+=f.completas; s.k+=f.cortado; s.t+=f.final; s.a+=f.autoCortes; return s; },{c:0,k:0,t:0,a:0});
     return {cat, ...t};
   });
-  doc.setFillColor(238,242,255);
-  doc.rect(marginL, y, 182, 7+resumenHojas.length*5, 'F');
-  doc.setFontSize(9); doc.setFont(undefined,'bold');
-  doc.text(soloSinCortar ? 'Total de hojas sin cortar' : 'Hojas completas vs. material cortado/armado', marginL+2, y+5);
-  doc.setFont(undefined,'normal');
-  resumenHojas.forEach((r,i)=>{
-    const txt = soloSinCortar
-      ? `${r.cat}: ${fmtNum(r.c)} hojas sin cortar`
-      : `${r.cat}: ${fmtNum(r.c)} completas · ${fmtNum(r.k)} cortado/armado · ${fmtNum(r.t)} total${r.a?`  (${fmtNum(r.a)} hoja(s) sin corte registrado)`:''}`;
-    doc.text(txt, marginL+2, y+10+i*5);
+  resumen.forEach((r,i)=>{
+    const c = PDF_CAT_COLOR[r.cat], x = marginL + i*(W/2+2), w = W/2-2;
+    doc.setFillColor(...pdfTinte(c,.9)); doc.rect(x, y, w, 22, 'F');
+    doc.setFillColor(...c); doc.rect(x, y, 1.6, 22, 'F');
+    doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(...c); doc.text(r.cat, x+4, y+5.5);
+    const box = (lbl, val, bx, rgb) => { doc.setFontSize(7.5); doc.setFont(undefined,'normal'); doc.setTextColor(90,96,112); doc.text(lbl, bx, y+11.5); doc.setFontSize(13); doc.setFont(undefined,'bold'); doc.setTextColor(...rgb); doc.text(fmtNum(val)+'', bx, y+18.5); };
+    box('Completas', r.c, x+4, [35,72,181]); box('Cortado', r.k, x+30, [214,69,69]); box('Total', r.t, x+56, [22,26,43]);
+    doc.setTextColor(0,0,0); doc.setFont(undefined,'normal');
   });
-  y += 7+resumenHojas.length*5+6;
+  y += 28;
+  // Leyenda de colores de columnas
+  doc.setFontSize(7.5); doc.setTextColor(90,96,112);
+  doc.setFillColor(...pdfTinte([35,72,181],.82)); doc.rect(marginL, y-2.6, 3.5, 3.5, 'F'); doc.text('Completas', marginL+5, y);
+  doc.setFillColor(...pdfTinte([214,69,69],.82)); doc.rect(marginL+24, y-2.6, 3.5, 3.5, 'F'); doc.text('Cortado', marginL+29, y);
+  doc.setFont(undefined,'bold'); doc.text('Final en negritas', marginL+46, y); doc.setFont(undefined,'normal');
+  doc.text('·  números en rojo = negativo  ·  "–" = sin movimiento', marginL+72, y);
+  doc.setTextColor(0,0,0); y += 6;
 
   function drawHeaderRow(){
-    doc.setFillColor(62,92,222);
-    doc.setTextColor(255,255,255);
-    doc.rect(marginL, y, tableW(), 6, 'F');
-    doc.setFontSize(8);
-    doc.setFont(undefined,'bold');
-    cols.forEach((c,i)=> doc.text(c.label, colX(i)+1.5, y+4.2));
-    doc.setFont(undefined,'normal');
-    doc.setTextColor(0,0,0);
+    doc.setFillColor(...color); doc.rect(marginL, y, tableW(), 6, 'F');
+    doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold');
+    cols.forEach((c,i)=> i===0 ? doc.text(c.label, colX(i)+1.5, y+4.2) : doc.text(c.label, colX(i)+c.w-1.5, y+4.2, {align:'right'}));
+    doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
     y += 6;
   }
-
-  const cats = soloSinCortar ? ['Melamina','MDF'] : [...new Set(CATALOGO.map(i=>i.cat))];
+  function tituloCat(cat){
+    doc.setFillColor(...pdfTinte(color,.88)); doc.rect(marginL, y, tableW(), 7, 'F');
+    doc.setFillColor(...color); doc.rect(marginL, y, 1.6, 7, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined,'bold'); doc.setTextColor(...color);
+    doc.text(cat, marginL+4, y+5);
+    doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
+    y += 7;
+  }
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   cats.forEach(cat=>{
     const items = CATALOGO.filter(i=>i.cat===cat);
     const catHoja = items.length>0 && esHoja(items[0]);
-    cols = catHoja ? COLS_HOJA : COLS_NORMAL;
-    if(y > pageH-30){ doc.addPage(); y=15; }
-    doc.setFontSize(11);
-    doc.setFont(undefined,'bold');
-    doc.text(cat, marginL, y+4);
-    doc.setFont(undefined,'normal');
-    y += 7;
-    drawHeaderRow();
-    doc.setFontSize(8);
+    cols = catHoja ? COLS_HOJA : COLS_NORMAL; color = PDF_CAT_COLOR[cat] || [55,65,81];
+    if(y > pageH-34){ doc.addPage(); y=15; }
+    tituloCat(cat); drawHeaderRow();
     items.forEach((it,idx)=>{
-      if(y > pageH-15){ doc.addPage(); y=15; drawHeaderRow(); doc.setFontSize(8); }
-      if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tableW(), 5, 'F'); }
+      if(y > pageH-15){ doc.addPage(); y=15; tituloCat(cat+' (continúa)'); drawHeaderRow(); }
       const f = calcFormula(it.id);
       const vals = catHoja
-        ? (soloSinCortar ? [it.nombre, fmtNum(f.completas)]
-           : [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.cortes+f.autoCortes), fmtNum(f.instalaciones), fmtNum(f.garantias), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.completas), fmtNum(f.cortado), fmtNum(f.final)])
-        : [it.nombre, fmtNum(f.inicial), fmtNum(f.entradas), fmtNum(f.salidas), fmtNum(f.instalaciones), fmtNum(f.garantias), fmtNum(f.mermas), fmtNum(f.ajustes), fmtNum(f.final)];
-      const maxLen = catHoja ? (soloSinCortar ? 60 : 22) : 32;
+        ? [it.nombre, f.inicial, f.entradas, f.salidas, f.cortes+f.autoCortes, f.instalaciones, f.garantias, f.mermas, f.ajustes, f.completas, f.cortado, f.final]
+        : [it.nombre, f.inicial, f.entradas, f.salidas, f.instalaciones, f.garantias, f.mermas, f.ajustes, f.final];
+      if(idx%2===1){ doc.setFillColor(...pdfTinte(color,.94)); doc.rect(marginL, y, tableW(), 5, 'F'); }
+      cols.forEach((c,i)=>{ if(c.k==='compl'){ doc.setFillColor(...pdfTinte([35,72,181], idx%2? .78:.84)); doc.rect(colX(i), y, c.w, 5, 'F'); }
+        if(c.k==='cort'){ doc.setFillColor(...pdfTinte([214,69,69], idx%2? .78:.84)); doc.rect(colX(i), y, c.w, 5, 'F'); } });
+      doc.setFontSize(8);
       vals.forEach((v,i)=>{
-        let text = String(v);
-        if(i===0 && text.length>maxLen) text = text.slice(0,maxLen-2)+'…';
-        doc.text(text, colX(i)+1.5, y+3.6);
+        if(i===0){ let t=String(v); const max = catHoja?22:32; if(t.length>max) t=t.slice(0,max-2)+'…'; doc.text(t, colX(0)+1.5, y+3.6); return; }
+        const n = Number(v)||0, c = cols[i];
+        if(Math.abs(n)<0.0005 && c.k!=='final' && c.k!=='compl' && c.k!=='cort'){ doc.setTextColor(170,175,188); doc.text('–', colX(i)+c.w-1.5, y+3.6, {align:'right'}); doc.setTextColor(0,0,0); return; }
+        if(n<0) doc.setTextColor(214,69,69);
+        if(c.k==='final') doc.setFont(undefined,'bold');
+        doc.text(String(fmtNum(n)), colX(i)+c.w-1.5, y+3.6, {align:'right'});
+        doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
       });
       y += 5;
     });
     y += 6;
   });
 
-  // Segunda parte del MISMO reporte (confirmado por el usuario): hoja aparte con la melamina sin cortar.
-  if(!soloSinCortar){
-    doc.addPage(); y = 15;
-    doc.setFontSize(14);
-    doc.text('Melamina sin cortar', marginL, y); y+=7;
-    doc.setFontSize(10);
-    doc.text(`Módulo: ${mod} · ${fechaStr}, ${horaStr}`, marginL, y); y+=8;
-    const itemsMel = CATALOGO.filter(i=>i.cat==='Melamina');
-    const totMel = itemsMel.reduce((s,it)=>s+calcFormula(it.id).completas,0);
-    doc.setFillColor(238,242,255); doc.rect(marginL, y, 182, 9, 'F');
-    doc.setFontSize(11); doc.setFont(undefined,'bold');
-    doc.text(`Total: ${fmtNum(totMel)} hojas de melamina sin cortar`, marginL+2, y+6);
-    doc.setFont(undefined,'normal');
-    y += 15;
-    cols = [ {label:'Color', w:120}, {label:'Hojas sin cortar', w:62} ];
-    drawHeaderRow();
-    doc.setFontSize(9);
-    itemsMel.forEach((it,idx)=>{
-      if(y > pageH-15){ doc.addPage(); y=15; drawHeaderRow(); doc.setFontSize(9); }
-      if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tableW(), 5.5, 'F'); }
-      doc.text(it.nombre, colX(0)+1.5, y+4);
-      doc.text(String(fmtNum(calcFormula(it.id).completas)), colX(1)+1.5, y+4);
-      y += 5.5;
-    });
-    // MDF sin cortar (confirmado por el usuario): total de MDF de 3 y de 5 mm, igual que la melamina.
-    const itemsMdf = CATALOGO.filter(i=>i.cat==='MDF');
-    if(itemsMdf.length){
-      if(y > pageH-50){ doc.addPage(); y=15; } else { y += 10; }
-      const totMdf = itemsMdf.reduce((s,it)=>s+calcFormula(it.id).completas,0);
-      doc.setFontSize(12); doc.setFont(undefined,'bold'); doc.text('MDF sin cortar', marginL, y); y+=4;
-      doc.setFillColor(238,242,255); doc.rect(marginL, y, 182, 9, 'F');
-      doc.setFontSize(11); doc.text(`Total: ${fmtNum(totMdf)} hojas de MDF sin cortar`, marginL+2, y+6);
-      doc.setFont(undefined,'normal'); y += 14;
-      cols = [ {label:'MDF', w:120}, {label:'Hojas sin cortar', w:62} ];
-      drawHeaderRow(); doc.setFontSize(9);
-      itemsMdf.forEach((it,idx)=>{
-        if(idx%2===1){ doc.setFillColor(244,246,251); doc.rect(marginL, y, tableW(), 5.5, 'F'); }
-        doc.text(it.nombre, colX(0)+1.5, y+4);
-        doc.text(String(fmtNum(calcFormula(it.id).completas)), colX(1)+1.5, y+4);
-        y += 5.5;
-      });
+  // Correderas al final de las tablas (antes de la hoja de hojas enteras)
+  {
+    const corrHoy = correderasHoy();
+    if(corrHoy.length){
+      if(y > pageH-30){ doc.addPage(); y=15; }
+      color=[55,65,81]; cols = [ {label:'Correderas (inventario de hoy)', w:62}, {label:'Juegos completos', w:40, k:'final'}, {label:'Hembras sin macho', w:40}, {label:'Machos sin hembra', w:40} ];
+      tituloCat('Correderas'); drawHeaderRow();
+      corrHoy.forEach((bc,idx)=>{ if(idx%2===1){ doc.setFillColor(...pdfTinte(color,.94)); doc.rect(marginL, y, tableW(), 5.5, 'F'); }
+        doc.setFontSize(8.5); doc.text(bc.etiqueta, colX(0)+1.5, y+4);
+        [bc.juegos,bc.hembras,bc.machos].forEach((v,i)=>{ if(i===0) doc.setFont(undefined,'bold'); doc.text(String(fmtNum(v)), colX(i+1)+cols[i+1].w-1.5, y+4, {align:'right'}); doc.setFont(undefined,'normal'); });
+        y += 5.5; });
     }
   }
 
-  // Correderas del inventario ACTUAL (confirmado por el usuario: antes salía la foto de la última
-  // auditoría y no cambiaba al armar juegos). Juegos completos y medias sin pareja de hoy.
-  const corrHoy = !soloSinCortar ? correderasHoy() : [];
-  if(corrHoy.length){
-    if(y > pageH-50){ doc.addPage(); y=15; } else { y += 10; }
-    doc.setFontSize(12); doc.setFont(undefined,'bold');
-    doc.text('Correderas (inventario de hoy)', marginL, y); y+=6;
-    doc.setFont(undefined,'normal');
-    cols = [ {label:'Tipo', w:62}, {label:'Juegos completos', w:40}, {label:'Hembras sin macho', w:40}, {label:'Machos sin hembra', w:40} ];
-    drawHeaderRow(); doc.setFontSize(9);
-    corrHoy.forEach(bc=>{
-      doc.text(bc.etiqueta, colX(0)+1.5, y+4);
-      doc.text(String(fmtNum(bc.juegos)), colX(1)+1.5, y+4);
-      doc.text(String(fmtNum(bc.hembras)), colX(2)+1.5, y+4);
-      doc.text(String(fmtNum(bc.machos)), colX(3)+1.5, y+4);
-      y += 5.5;
-    });
+  } // fin de la parte de tablas
+  // Hoja final (confirmado por el usuario): SOLO hojas enteras de Melamina y MDF (3 y 5 mm).
+  {
+    if(!soloSinCortar) doc.addPage();
+    encabezado('Hojas enteras', `Lo que hay sin cortar  ·  Módulo ${mod}  ·  ${fechaStr}, ${horaStr}`);
+    // Diseño sencillo como las demás tablas, con resaltes (confirmado por el usuario).
+    const hdr = () => {
+      doc.setFillColor(...color); doc.rect(marginL, y, tableW(), 6, 'F');
+      doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold');
+      cols.forEach((c,i)=> i===0 ? doc.text(c.label, colX(i)+1.5, y+4.2) : doc.text(c.label, colX(i)+c.w-2, y+4.2, {align:'right'}));
+      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 6;
+    };
+    const tablaEnteras = (cat, titulo) => {
+      const datos = CATALOGO.filter(i=>i.cat===cat).map(it=>({it, n:calcFormula(it.id).completas}));
+      if(!datos.length) return;
+      color = PDF_CAT_COLOR[cat];
+      const tot = datos.reduce((s2,x)=>s2+x.n,0);
+      cols = [ {label: cat==='MDF'?'Espesor':'Color', w:122}, {label:'Hojas enteras', w:60, k:'compl'} ];
+      if(y > pageH-40){ doc.addPage(); y=15; }
+      // Título con el total a la derecha
+      doc.setFillColor(...pdfTinte(color,.88)); doc.rect(marginL, y, tableW(), 8, 'F');
+      doc.setFillColor(...color); doc.rect(marginL, y, 1.6, 8, 'F');
+      doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(...color);
+      doc.text(titulo, marginL+4, y+5.6); doc.text(`Total: ${fmtNum(tot)} hojas`, marginL+tableW()-2, y+5.6, {align:'right'});
+      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 8;
+      hdr();
+      datos.forEach((x,idx)=>{
+        if(y > pageH-15){ doc.addPage(); y=15; hdr(); }
+        const cero = x.n<0.0005, poco = !cero && x.n<=4+1e-9, rh = 6;
+        if(idx%2===1){ doc.setFillColor(...pdfTinte(color,.95)); doc.rect(marginL, y, tableW(), rh, 'F'); }
+        // Resaltes: 0 en rojo, 4 o menos en amarillo, lo demás en el color del material.
+        doc.setFillColor(...(cero?[253,226,226]:(poco?[255,243,196]:pdfTinte(color, idx%2? .80:.86)))); doc.rect(colX(1), y, cols[1].w, rh, 'F');
+        doc.setFontSize(9); doc.setTextColor(22,26,43);
+        doc.text(x.it.nombre==='MDF 5mm' ? 'MDF 5mm Blanco' : x.it.nombre, marginL+1.5, y+4.2);
+        doc.setFont(undefined,'bold'); doc.setFontSize(10);
+        doc.setTextColor(...(cero?[200,40,40]:(poco?[146,96,0]:color)));
+        doc.text(String(fmtNum(x.n)), colX(1)+cols[1].w-2, y+4.3, {align:'right'});
+        doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
+        y += rh;
+      });
+      y += 8;
+    };
+    tablaEnteras('Melamina','Melamina');
+    tablaEnteras('MDF','MDF (3 y 5 mm)');
+    doc.setFontSize(8); doc.setTextColor(110,116,132);
+    doc.text('Solo hojas completas, sin contar lo ya cortado.  Rojo = 0 hojas  ·  Amarillo = 4 o menos.', marginL, y);
+    doc.setTextColor(0,0,0);
   }
 
   const stamp = ahora.toISOString().slice(0,10);
-  const filename = `${soloSinCortar?'melamina-sin-cortar':'inventario'}-${mod.replace(/\s+/g,'_')}-${stamp}.pdf`;
+  const filename = `${soloSinCortar?'hojas-enteras':'inventario'}-${mod.replace(/\s+/g,'_')}-${stamp}.pdf`;
   const blob = doc.output('blob');
-
   if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
     try{
-      await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title: soloSinCortar?'Melamina sin cortar':'Inventario diario', text:`${soloSinCortar?'Melamina sin cortar':'Inventario diario'} · ${mod} · ${fechaStr}` });
+      await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title: soloSinCortar?'Hojas enteras':'Inventario diario', text:`${soloSinCortar?'Hojas enteras':'Inventario diario'} · ${mod} · ${fechaStr}` });
       return;
     }catch(e){ /* si cancela o falla compartir, cae a la descarga normal */ }
   }
