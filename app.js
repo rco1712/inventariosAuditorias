@@ -198,7 +198,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v126';
+const APP_VERSION = 'v127';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -341,6 +341,7 @@ async function loadStock(){
   try{
     sub(db.collection('movimientos').where('modulo','==',modulo()).onSnapshot(snap=>{
       movs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+      if(esAdmin()) _cierresMovT = 0; // vuelve a revisar los cierres de hoy
       if(current==='inv') renderInv(); if(current==='mov') renderMov(); if(current==='home') renderHome(); if(current==='ped') renderPed();
       revisarAvisosNuevos();
     }));
@@ -6968,6 +6969,7 @@ function calcularAvisos(){
 }
 let cierresCache = [];
 function resumenCierreTxt(c){
+  if(c.viejo) return 'Cierre capturado';
   const partes = [];
   if((c.cortes||[]).length) partes.push('Cortó '+c.cortes.map(x=>fmtNum(x.q)+' '+String(x.nombre).replace('Melamina ','')).join(', '));
   else if(c.hojasContadas) partes.push('Sin corte de hojas');
@@ -6976,17 +6978,33 @@ function resumenCierreTxt(c){
   if((c.consDeMas||[]).length) partes.push('⚠️ Tienen más de: '+c.consDeMas.slice(0,3).join(', '));
   return partes.join(' · ') || 'Sin movimiento';
 }
+// Cierres hechos con versiones anteriores (sin registro en "cierres"): se detectan por los
+// movimientos marcados como cierre del turno de hoy en cada módulo.
+let cierresMovHoy = {}, _cierresMovDia = null, _cierresMovT = 0;
+async function cargarCierresMovHoy(){
+  const hoy = fechaHoyLocal();
+  if(_cierresMovDia===hoy && Date.now()-_cierresMovT < 15000) return;
+  _cierresMovDia = hoy; _cierresMovT = Date.now();
+  try{
+    const local = iso => new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+    const snap = await db.collection('movimientos').get(); const out = {};
+    snap.docs.forEach(d=>{ const m = d.data(); if(m.cierreTurno && m.fecha && local(m.fecha)===hoy && (!out[m.modulo] || m.fecha>out[m.modulo])) out[m.modulo] = m.fecha; });
+    const antes = JSON.stringify(cierresMovHoy); cierresMovHoy = out;
+    if(JSON.stringify(out)!==antes && current==='home') renderHome();
+  }catch(e){}
+}
 function cierresHoyHtml(){
   if(!esAdmin()) return '';
+  cargarCierresMovHoy();
   const hoy = fechaHoyLocal(), tarde = esHoraDeCierre();
   const filas = MODULOS.map(m=>{
-    const c = cierresCache.find(x=>x.modulo===m.nombre && x.dia===hoy);
+    const c = cierresCache.find(x=>x.modulo===m.nombre && x.dia===hoy) || (cierresMovHoy[m.nombre] ? {modulo:m.nombre, fecha:cierresMovHoy[m.nombre], dia:hoy, viejo:true} : null);
     const hora = c ? new Date(c.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}) : '';
     const alerta = c && ((c.hojasDeMas||[]).length || (c.consDeMas||[]).length);
     return `<div class="movitem" style="align-items:flex-start"><span style="min-width:0"><span class="invname"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${m.color};margin-right:6px"></span>${m.nombre}</span>${c?`<span class="hint" style="display:block;margin:2px 0 0">${resumenCierreTxt(c)}</span>`:''}</span>
       <strong style="white-space:nowrap;font-size:13px;color:${c?(alerta?'#b3742c':'var(--ok)'):(tarde?'var(--bad)':'var(--sub)')}">${c?(alerta?'⚠️ ':'✅ ')+hora:(tarde?'⏳ Falta':'Aún no')}</strong></div>`;
   }).join('');
-  const hechos = MODULOS.filter(m=>cierresCache.some(x=>x.modulo===m.nombre && x.dia===hoy)).length;
+  const hechos = MODULOS.filter(m=>cierresCache.some(x=>x.modulo===m.nombre && x.dia===hoy) || cierresMovHoy[m.nombre]).length;
   return `<details class="card" style="padding:12px" ${tarde?'open':''}><summary><strong>📝 Cierres del turno de hoy</strong><span class="tag" style="margin-left:auto">${hechos} de ${MODULOS.length}</span></summary><div class="movlist">${filas}</div></details>`;
 }
 function fechaCorta(d){ return new Date((String(d).length===10?d+'T12:00:00':d)).toLocaleDateString('es-MX',{day:'numeric',month:'short'}); }
