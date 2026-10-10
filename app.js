@@ -198,7 +198,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v127';
+const APP_VERSION = 'v130';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -620,6 +620,8 @@ function setView(v){
   if(v==='gar'){ if(garSub==='sobrante') salirSobrante(); renderGar(); }
   if(v==='ini') renderIni();
   if(v==='movhist') renderMovHist();
+  if(v==='entr'){ entrCache=null; renderEntradas(); }
+  if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
   if(v==='mas') renderMas();
   if(v==='cierre') renderCierre();
@@ -908,12 +910,14 @@ function renderHome(){
     t('camion','Pedidos en camino', enCaminoT?enCaminoT+' pedido(s) de los 5 módulos':'No hay nada en camino',"pedSub='camino';irA('ped')",'ped', enCaminoT?{k:'num',t:String(enCaminoT)}:null);
     t('mas','Nuevo pedido','Subir material que va a llegar',"pedSub='nuevo';irA('ped')",'ped');
     t('lista','Falta por entregar','Reporte por módulo',"pedSub='faltan';irA('ped')",'ped');
+    t('barras','Entradas y hojas','Por módulo: diario o por fechas',"irA('admrep')",'ped');
   }
   if(esAdmin()){
     t('aprobar','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'dir');
     t('lupa','Auditoría y conteo','Contar lo que hay físicamente',"irA('aud')",'dir');
     t('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'dir');
     t('capas','Sobrantes','Material que regresó sin instalar',"irA('sob')",'dir');
+    t('entrada','Entradas y hojas','Por módulo: diario o por fechas',"irA('admrep')",'dir');
     t('tendencia','Resumen semanal','Cómo va cada módulo',"irA('resumen')",'dir');
   }
   if(esSoloLectura()) t('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'dir');
@@ -1002,6 +1006,214 @@ const TIPO_INFO = {
   merma:       {ic:'⚠️', t:'Merma',        s:'Material dañado o perdido', verbo:'Merma de'},
   instalacion: {ic:'🔧', t:'Instalación manual', s:'Solo si no usaste la pantalla de Instalación', verbo:'Instalación de'}
 };
+// ===== Origen de las entradas (confirmado por el usuario) =====
+// Toda entrada dice de dónde viene: de un proveedor o de otro módulo. Así el reporte de
+// entradas separa lo que se compró de lo que se movió entre módulos.
+let movOrigen = '', movProveedor = '', movOrigenMod = '', movProvOtra = false;
+// Proveedores de Closets Vera (confirmado por el usuario). "Otra tienda" deja escribir cualquier otra.
+const PROVEEDORES = [
+  {n:'PG Maderas', s:'Melamina y MDF'}, {n:'Herrajes de GDL', s:'Herrajes'}, {n:'COMPERS', s:'Espejos'},
+  {n:'Home Depot', s:'Bastidores'}, {n:'Ferretería Vadel', s:'Herrajes'}, {n:'Ferretería Legos', s:'Herrajes'}
+];
+function origenEntradaHtml(){
+  const otros = MODULOS.map(m=>m.nombre).filter(n=>n!==modulo());
+    const b = (k, ic, t, sub) => `<button class="tipobtn ${movOrigen===k?'on':''}" onclick="movOrigen='${k}';renderMov()"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
+  return `<div style="margin-top:14px;padding:12px;border-radius:14px;border:2px solid ${movOrigen?'var(--line)':'#e0791a'}">
+    <strong>📍 ¿De dónde viene? <span style="color:var(--bad)">*</span></strong>
+    <div class="tipos" style="margin-top:8px">${b('proveedor','🏭','Proveedor','Compra / pedido')}${b('modulo','🔄','Otro módulo','Lo mandó otro módulo')}</div>
+    ${movOrigen==='proveedor'?`<label class="hint" style="display:block;margin-top:10px">¿Qué proveedor? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px">${PROVEEDORES.map(x=>`<button class="chip ${!movProvOtra&&movProveedor===x.n?'on':''}" style="text-align:left;line-height:1.15" onclick="movProveedor='${x.n}';movProvOtra=false;renderMov()">${x.n}<br><small style="font-weight:500;opacity:.75">${x.s}</small></button>`).join('')}<button class="chip ${movProvOtra?'on':''}" onclick="movProvOtra=true;movProveedor='';renderMov()">✏️ Otra tienda<br><small style="font-weight:500;opacity:.75">Escribir cuál</small></button></div>
+      ${movProvOtra?`<input id="mv-prov" placeholder="Ej. Ferretería del centro, Coppel…" value="${String(movProveedor).replace(/"/g,'&quot;')}" oninput="movProveedor=this.value" style="margin-top:8px">`:''}
+      <p class="hint" style="margin:6px 0 0">Si llegó material de 2 proveedores distintos, captúralo en 2 entradas, una por cada proveedor.</p>`:''}
+    ${movOrigen==='modulo'?`<label class="hint" style="display:block;margin-top:10px">¿Qué módulo lo mandó?</label>
+      <select id="mv-omod" style="margin-top:4px" onchange="movOrigenMod=this.value"><option value="">— Elige el módulo —</option>${otros.map(n=>`<option ${movOrigenMod===n?'selected':''}>${n}</option>`).join('')}</select>
+      <p class="hint" style="margin:6px 0 0">⚠️ Si el otro módulo ya hizo el <strong>Traspaso</strong> en la app, no lo anotes aquí: ese material ya te llegó solo.</p>`:''}
+  </div>`;
+}
+// Clasifica de dónde vino una entrada (también las capturadas antes de pedir el origen).
+function origenDeEntrada(m){
+  if(m.origenTipo==='proveedor' || m.pedidoId) return {tipo:'proveedor', txt: m.proveedor ? 'Proveedor · '+m.proveedor : (/^Pedido de (.+?)( ·|$)/.test(m.nota||'') ? 'Proveedor · '+RegExp.$1 : 'Proveedor')};
+  if(m.origenTipo==='modulo') return {tipo:'modulo', txt:'Módulo '+(m.origenModulo||'')};
+  let x = /^Traspaso (.+?) → /.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[1]};
+  x = /^Devolución de préstamo (.+?) → /.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[1]+' (devolución)'};
+  if(m.motivo==='tuboAhorrado') return {tipo:'otro', txt:'Tubos ahorrados'};
+  if(m.motivo==='sobranteGarantia') return {tipo:'otro', txt:'Sobrante de garantía'};
+  return {tipo:'otro', txt:'Sin especificar'};
+}
+const ORIGEN_LBL = {proveedor:'🏭 Proveedores', modulo:'🔄 De otros módulos', otro:'📦 Otras entradas'};
+function entradasDe(lista){ return lista.filter(m=>m.tipo==='entrada' && m.estado!=='rechazado').map(m=>Object.assign({}, m, {_o:origenDeEntrada(m)})); }
+
+// ===== Apartado: Entradas de material (confirmado por el usuario) =====
+let entrTab = 'proveedor', entrRango = 'semana', entrDesde = '', entrHasta = '', entrMod = '', entrCache = null;
+function rangoEntradas(){
+  const hoy = fechaHoyLocal();
+  if(entrRango==='hoy') return [hoy, hoy];
+  if(entrRango==='semana'){ const sab = sabadoDe(hoy); return [sab, finSemana(sab)]; }
+  if(entrRango==='mes') return [hoy.slice(0,8)+'01', hoy];
+  return [entrDesde||hoy, entrHasta||hoy];
+}
+function diaLocal(iso){ return new Date(new Date(iso).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10); }
+async function renderEntradas(){
+  current = 'entr';
+  if(!entrMod) entrMod = esAdmin() ? '__todos' : modulo();
+  $('#main').innerHTML = '<div class="card hint">Cargando entradas…</div>';
+  if(!entrCache){ try{ const snap = await db.collection('movimientos').get(); entrCache = entradasDe(snap.docs.map(d=>({id:d.id,...d.data()}))); }catch(e){ entrCache = entradasDe(movs); } }
+  if(current!=='entr') return;
+  const [d1, d2] = rangoEntradas();
+  const mods = esAdmin() || esSoloLectura() ? ['__todos', ...MODULOS.map(m=>m.nombre)] : [modulo()];
+  const base = entrCache.filter(m=>(entrMod==='__todos' || m.modulo===entrMod) && diaLocal(m.fecha)>=d1 && diaLocal(m.fecha)<=d2);
+  const cuenta = k => base.filter(m=>m._o.tipo===k).length;
+  const lista = base.filter(m=>m._o.tipo===entrTab).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  const porCat = cats.map(c=>({c, ms:lista.filter(m=>{ const it=CATALOGO.find(i=>i.id===m.itemId); return it && it.cat===c; })})).filter(x=>x.ms.length);
+  const colorCat = c => { const x = PDF_CAT_COLOR[c]||[55,65,81]; return `rgb(${x.join(',')})`; };
+  const chip = (k, t) => `<button class="chip ${entrRango===k?'on':''}" onclick="entrRango='${k}';renderEntradas()">${t}</button>`;
+  const tab = k => `<button class="${entrTab===k?'active':''}" onclick="entrTab='${k}';renderEntradas()">${ORIGEN_LBL[k]} (${cuenta(k)})</button>`;
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">📥 Entradas de material</div>
+      <p class="hint">Lo que llegó de proveedores, separado de lo que mandaron otros módulos.</p>
+      <div class="chips" style="margin-top:8px">${chip('hoy','Hoy')}${chip('semana','Esta semana')}${chip('mes','Este mes')}${chip('rango','Otras fechas')}</div>
+      ${entrRango==='rango'?`<div class="grid2" style="margin-top:8px"><div><label class="hint">Desde</label><input type="date" value="${d1}" onchange="entrDesde=this.value;renderEntradas()"></div><div><label class="hint">Hasta</label><input type="date" value="${d2}" onchange="entrHasta=this.value;renderEntradas()"></div></div>`:`<p class="hint" style="margin:6px 0 0">Del ${fCorta(d1)} al ${fCorta(d2)}</p>`}
+      ${mods.length>1?`<select style="margin-top:8px" onchange="entrMod=this.value;renderEntradas()">${mods.map(m=>`<option value="${m}" ${entrMod===m?'selected':''}>${m==='__todos'?'Los 5 módulos':m}</option>`).join('')}</select>`:''}
+    </div>
+    <div class="subtabs">${tab('proveedor')}${tab('modulo')}${tab('otro')}</div>
+    ${porCat.length ? porCat.map(({c, ms})=>{ const col = colorCat(c);
+      const tot = {}; ms.forEach(m=>{ tot[m.itemId]=(tot[m.itemId]||0)+Number(m.cantidad||0); });
+      return `<div class="card" style="border-left:6px solid ${col}">
+        <div class="row" style="justify-content:space-between"><strong style="color:${col}">${ICONO_CAT[c]||''} ${c}</strong><span class="tag">${ms.length} entrada(s)</span></div>
+        <div class="wrap-x" style="margin-top:6px"><table><tr><th>Día</th><th>Material</th><th>Cant.</th><th>De dónde</th>${entrMod==='__todos'?'<th>Módulo</th>':''}</tr>
+        ${ms.map(m=>`<tr><td style="white-space:nowrap">${fCorta(diaLocal(m.fecha))}<div class="hint" style="margin:0">${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})}</div></td><td>${m.itemNombre}${m.estado==='pendiente'?' <span class="tag" style="color:#b3742c;border-color:#b3742c">Por aprobar</span>':''}</td><td><strong>${fmtNum(m.cantidad)}</strong> ${item2unidad(m.itemId)}</td><td>${m._o.txt}</td>${entrMod==='__todos'?`<td>${m.modulo}</td>`:''}</tr>`).join('')}
+        </table></div>
+        <p class="hint" style="margin:6px 0 0"><strong>Total:</strong> ${Object.keys(tot).map(k=>`${fmtNum(tot[k])} ${(CATALOGO.find(i=>i.id===k)||{}).nombre||k}`).join(' · ')}</p>
+      </div>`; }).join('') : `<div class="card hint">No hay entradas de este tipo en esas fechas.</div>`}`;
+}
+
+// ===== Administración: entradas y hojas completas por módulo (confirmado por el usuario) =====
+// Diario por defecto, con opción de rango de fechas. Muestra las entradas por origen y material y
+// las hojas completas que tiene cada módulo ahorita, con lo que entró de proveedor en el periodo.
+let admMod = 'Escobedo', admRango = 'hoy', admDesde = '', admHasta = '', admCache = null;
+function admPeriodo(){ const hoy = fechaHoyLocal(); return admRango==='hoy' ? [hoy, hoy] : [admDesde||hoy, admHasta||hoy]; }
+async function admDatos(){
+  if(admCache) return admCache;
+  const [{res}, snap] = await Promise.all([inventarioTodos(), db.collection('movimientos').get()]);
+  admCache = {res, ents: entradasDe(snap.docs.map(d=>({id:d.id,...d.data()})))};
+  return admCache;
+}
+function admProvPorItem(ents, mod, d1, d2){
+  const out = {};
+  ents.filter(m=>m.modulo===mod && m._o.tipo==='proveedor' && diaLocal(m.fecha)>=d1 && diaLocal(m.fecha)<=d2).forEach(m=>{
+    const o = out[m.itemId] = out[m.itemId] || {ok:0, pend:0}; if(m.estado==='pendiente') o.pend += Number(m.cantidad||0); else o.ok += Number(m.cantidad||0); });
+  return out;
+}
+async function renderAdmRep(){
+  current = 'admrep';
+  if(!(esAdmin() || esAdministracion() || esSoloLectura())){ $('#main').innerHTML='<div class="card">Este apartado es para Administración y Dirección.</div>'; return; }
+  $('#main').innerHTML = '<div class="card hint">Calculando…</div>';
+  let D; try{ D = await admDatos(); }catch(e){ $('#main').innerHTML = '<div class="card">No se pudo calcular: '+e.message+'</div>'; return; }
+  if(current!=='admrep') return;
+  const [d1, d2] = admPeriodo(), esHoy = admRango==='hoy';
+  const mods = admMod==='__todos' ? MODULOS.map(m=>m.nombre) : [admMod];
+  const periodoTxt = d1===d2 ? (esHoy?'Hoy, ':'')+fCorta(d1) : `Del ${fCorta(d1)} al ${fCorta(d2)}`;
+  const ents = D.ents.filter(m=>mods.includes(m.modulo) && diaLocal(m.fecha)>=d1 && diaLocal(m.fecha)<=d2).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  const colorCat = c => { const x = PDF_CAT_COLOR[c]||[55,65,81]; return `rgb(${x.join(',')})`; };
+  const bloqueOrigen = (k, titulo, col) => {
+    const g = ents.filter(m=>m._o.tipo===k); if(!g.length) return `<div class="movitem" style="border-left:5px solid ${col}"><span class="invname">${titulo}</span><span class="hint" style="margin:0">Sin entradas</span></div>`;
+    return `<details class="movitem" style="display:block;border-left:5px solid ${col}" ${g.length<=8?'open':''}><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span class="invname">${titulo}</span><strong>${g.length}</strong></summary>
+      ${cats.map(c=>{ const ms=g.filter(m=>(CATALOGO.find(i=>i.id===m.itemId)||{}).cat===c); if(!ms.length) return '';
+        return `<div style="margin-top:8px"><div style="font-weight:800;color:${colorCat(c)};font-size:13px">${ICONO_CAT[c]||''} ${c}</div>
+          ${ms.map(m=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13.5px"><span style="min-width:0">${m.itemNombre}${m.estado==='pendiente'?' <span class="tag" style="color:#b3742c;border-color:#b3742c">Por aprobar</span>':''}<span class="hint" style="display:block;margin:0">${esHoy?'':fCorta(diaLocal(m.fecha))+' · '}${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})} · ${m._o.txt}${mods.length>1?' · '+m.modulo:''}</span></span><strong style="white-space:nowrap">${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}</strong></div>`).join('')}</div>`; }).join('')}
+    </details>`; };
+  const hojasMod = mod => {
+    const prov = admProvPorItem(D.ents, mod, d1, d2);
+    const fila = it => { const n = D.res[mod][it.id].completas, st = n<0.0005?'color:var(--bad)':(n<=4+1e-9?'color:#d39b06':'color:var(--brand)'); const pv = prov[it.id];
+      const extra = pv ? `${pv.ok?`<span style="display:block;font-size:11.5px;font-weight:700;color:#22a35a;margin-top:2px">+${fmtNum(pv.ok)} ${esHoy?'hoy':'en el periodo'} de proveedor</span>`:''}${pv.pend?`<span style="display:block;font-size:11.5px;font-weight:700;color:#b3742c;margin-top:2px">+${fmtNum(pv.pend)} por aprobar</span>`:''}` : '';
+      return `<div class="movitem"><span class="invname" style="display:block">${it.nombre.replace(/^Melamina /,'').replace(/^MDF 5mm$/,'MDF 5mm Blanco')}${extra}</span><strong style="${st};font-size:17px">${fmtNum(n)}</strong></div>`; };
+    const mel = CATALOGO.filter(i=>i.cat==='Melamina'), mdf = CATALOGO.filter(i=>i.cat==='MDF');
+    const tot = l => fmtNum(l.reduce((s2,it)=>s2+D.res[mod][it.id].completas,0));
+    return `<div class="card"><div class="row" style="justify-content:space-between"><strong>🟦 Hojas completas ahora · ${mod}</strong><span class="tag">${tot(mel)} melamina · ${tot(mdf)} MDF</span></div>
+      <p class="hint" style="margin:4px 0 0">Rojo = 0 · Amarillo = 4 o menos · <span style="color:#22a35a;font-weight:700">Verde = entró de proveedor ${esHoy?'hoy':'en el periodo'}</span> (ya sumado)</p>
+      <div class="grid2" style="margin-top:8px">${mel.map(fila).join('')}</div>
+      <strong style="display:block;margin-top:12px">MDF</strong><div class="grid2" style="margin-top:6px">${mdf.map(fila).join('')}</div></div>`; };
+  const chipM = (k, t) => `<button class="chip ${admMod===k?'on':''}" onclick="admMod='${k}';renderAdmRep()">${t}</button>`;
+  $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:800">📊 Entradas y hojas por módulo</div>
+      <p class="hint">Lo que entró (de proveedores y de otros módulos) y las hojas completas que tiene cada módulo ahorita.</p>
+      <div class="chips" style="margin-top:8px">${MODULOS.map(m=>chipM(m.nombre, m.nombre)).join('')}${chipM('__todos','Los 5')}</div>
+      <div class="subtabs" style="margin-top:10px"><button class="${esHoy?'active':''}" onclick="admRango='hoy';renderAdmRep()">📅 Hoy</button><button class="${!esHoy?'active':''}" onclick="admRango='rango';renderAdmRep()">🗓️ De tal fecha a tal fecha</button></div>
+      ${!esHoy?`<div class="grid2"><div><label class="hint">Desde</label><input type="date" value="${d1}" onchange="admDesde=this.value;renderAdmRep()"></div><div><label class="hint">Hasta</label><input type="date" value="${d2}" onchange="admHasta=this.value;renderAdmRep()"></div></div>`:''}
+      <p class="hint" style="margin:8px 0 0"><strong>${periodoTxt}</strong>${mods.length>1?' · los 5 módulos':''}</p>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1" onclick="generarReporteModuloPDF()">📄 Descargar PDF</button><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="admCache=null;renderAdmRep()">🔄 Actualizar</button></div></div>
+    <div class="card"><strong>📥 Entradas ${d1===d2?(esHoy?'de hoy':'del '+fCorta(d1)):'del periodo'}</strong>
+      <div class="movlist">${bloqueOrigen('proveedor','🏭 De proveedores','#16804a')}${bloqueOrigen('modulo','🔄 De otros módulos','#b46e0a')}${ents.some(m=>m._o.tipo==='otro')?bloqueOrigen('otro','📦 Otras entradas','#6e7484'):''}</div></div>
+    ${mods.map(hojasMod).join('')}`;
+}
+async function generarReporteModuloPDF(){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  let D; try{ D = await admDatos(); }catch(e){ return alert('No se pudo calcular: '+e.message); }
+  const [d1, d2] = admPeriodo(), esHoy = admRango==='hoy';
+  const mods = admMod==='__todos' ? MODULOS.map(m=>m.nombre) : [admMod];
+  const { jsPDF } = window.jspdf; const doc = new jsPDF();
+  const marginL=14, W=182, pageH=doc.internal.pageSize.getHeight(); let y=0, color=[35,72,181], cols=[];
+  const tableW=()=>cols.reduce((s2,c)=>s2+c.w,0), colX=i=>{ let x=marginL; for(let k=0;k<i;k++) x+=cols[k].w; return x; };
+  const ahoraTxt = new Date().toLocaleString('es-MX',{day:'numeric',month:'long',year:'numeric',hour:'numeric',minute:'2-digit'});
+  const rango = d1===d2 ? fCorta(d1) : `${fCorta(d1)} al ${fCorta(d2)}`;
+  const enc=(t,sub)=>{ doc.setFillColor(35,72,181); doc.rect(0,0,210,24,'F'); doc.setFillColor(255,211,77); doc.rect(0,24,210,1.6,'F'); doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(15); doc.text(t,marginL,11); doc.setFont(undefined,'normal'); doc.setFontSize(9.5); doc.text(sub,marginL,18); doc.setTextColor(0,0,0); y=33; };
+  mods.forEach((mod, mi)=>{
+    if(mi>0) doc.addPage();
+    const ents = D.ents.filter(m=>m.modulo===mod && diaLocal(m.fecha)>=d1 && diaLocal(m.fecha)<=d2).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+    enc(`Entradas y hojas · ${mod}`, `Entradas: ${rango}  ·  Hojas completas al ${ahoraTxt}`);
+    const nProv = ents.filter(m=>m._o.tipo==='proveedor').length, nMod = ents.filter(m=>m._o.tipo==='modulo').length;
+    const totMel = CATALOGO.filter(i=>i.cat==='Melamina').reduce((s2,it)=>s2+D.res[mod][it.id].completas,0), totMdf = CATALOGO.filter(i=>i.cat==='MDF').reduce((s2,it)=>s2+D.res[mod][it.id].completas,0);
+    const kp=[['Entradas de proveedores',nProv,[22,128,74]],['Entradas de otros módulos',nMod,[180,110,10]],['Hojas melamina (ahora)',totMel,[35,72,181]],['Hojas MDF (ahora)',totMdf,[138,90,43]]];
+    const kw=(W-9)/4; kp.forEach((k,i)=>{ const x=marginL+i*(kw+3); doc.setFillColor(...pdfTinte(k[2],.88)); doc.rect(x,y,kw,18,'F'); doc.setFillColor(...k[2]); doc.rect(x,y,1.4,18,'F'); doc.setFontSize(7.5); doc.setTextColor(90,96,112); doc.text(k[0],x+3.5,y+5.5); doc.setFont(undefined,'bold'); doc.setFontSize(15); doc.setTextColor(...k[2]); doc.text(String(fmtNum(k[1])),x+3.5,y+14.5); doc.setFont(undefined,'normal'); });
+    doc.setTextColor(0,0,0); y+=26;
+    doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.text('Entradas de material', marginL, y); doc.setFont(undefined,'normal'); y+=4;
+    if(!ents.length){ doc.setFontSize(10); doc.setTextColor(110,116,132); doc.text('No hubo entradas en estas fechas.', marginL, y+5); doc.setTextColor(0,0,0); y+=10; }
+    [['proveedor','Proveedores',[22,128,74]],['modulo','De otros módulos',[180,110,10]],['otro','Otras entradas',[90,96,112]]].forEach(([k,t,oc])=>{
+      const g=ents.filter(m=>m._o.tipo===k); if(!g.length) return; if(y>pageH-40){ doc.addPage(); y=15; }
+      y+=2; doc.setFillColor(...oc); doc.rect(marginL,y,W,8,'F'); doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(10.5); doc.text(t,marginL+3,y+5.6); doc.text(`${g.length} entrada(s)`,marginL+W-3,y+5.6,{align:'right'}); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y+=11;
+      [...new Set(CATALOGO.map(i=>i.cat))].forEach(cat=>{ const ms=g.filter(m=>(CATALOGO.find(i=>i.id===m.itemId)||{}).cat===cat); if(!ms.length) return;
+        color=PDF_CAT_COLOR[cat]||[55,65,81]; cols=[{label:esHoy?'Hora':'Día',w:30},{label:cat,w:62},{label:'Cantidad',w:26,r:1},{label:'De dónde',w:64}];
+        if(y>pageH-30){ doc.addPage(); y=15; }
+        doc.setFillColor(...color); doc.rect(marginL,y,tableW(),6,'F'); doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold'); cols.forEach((c,i)=>c.r?doc.text(c.label,colX(i)+c.w-2,y+4.2,{align:'right'}):doc.text(c.label,colX(i)+1.5,y+4.2)); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y+=6;
+        ms.forEach((m,idx)=>{ if(y>pageH-14){ doc.addPage(); y=15; } if(idx%2){ doc.setFillColor(...pdfTinte(color,.94)); doc.rect(marginL,y,tableW(),5.5,'F'); }
+          doc.setFontSize(8.5); doc.text(esHoy ? new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}) : fCorta(diaLocal(m.fecha)), colX(0)+1.5, y+3.9);
+          let nom = m.itemNombre+(m.estado==='pendiente'?' (por aprobar)':''); if(nom.length>36) nom=nom.slice(0,34)+'…'; doc.text(nom, colX(1)+1.5, y+3.9);
+          doc.setFont(undefined,'bold'); doc.text(`${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}`, colX(2)+cols[2].w-2, y+3.9, {align:'right'}); doc.setFont(undefined,'normal');
+          let o = m._o.txt; if(o.length>38) o=o.slice(0,36)+'…'; doc.text(o, colX(3)+1.5, y+3.9); y+=5.5; });
+        y+=3; });
+    });
+    // Hojas completas ahora, con lo que entró de proveedor en el periodo
+    doc.addPage(); enc(`Hojas completas · ${mod}`, `Lo que hay sin cortar ahorita  ·  ${ahoraTxt}`);
+    const prov = admProvPorItem(D.ents, mod, d1, d2);
+    const lblE = esHoy ? 'Entró hoy (proveedor)' : 'Entró en el periodo';
+    const tabla=(cat,titulo)=>{ const datos=CATALOGO.filter(i=>i.cat===cat).map(it=>({it,n:D.res[mod][it.id].completas})); color=PDF_CAT_COLOR[cat]; const tot=datos.reduce((s2,x)=>s2+x.n,0);
+      cols=[{label:cat==='MDF'?'Espesor':'Color',w:92},{label:lblE,w:45},{label:'Hojas enteras',w:45}];
+      if(y>pageH-40){ doc.addPage(); y=15; }
+      doc.setFillColor(...pdfTinte(color,.88)); doc.rect(marginL,y,tableW(),8,'F'); doc.setFillColor(...color); doc.rect(marginL,y,1.6,8,'F'); doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(...color); doc.text(titulo,marginL+4,y+5.6); doc.text(`Total: ${fmtNum(tot)} hojas`,marginL+tableW()-2,y+5.6,{align:'right'}); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y+=8;
+      doc.setFillColor(...color); doc.rect(marginL,y,tableW(),6,'F'); doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold'); doc.text(cols[0].label,marginL+1.5,y+4.2); doc.text(cols[1].label,colX(1)+cols[1].w-2,y+4.2,{align:'right'}); doc.text(cols[2].label,colX(2)+cols[2].w-2,y+4.2,{align:'right'}); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y+=6;
+      datos.forEach((x,idx)=>{ const cero=x.n<0.0005, poco=!cero&&x.n<=4+1e-9; if(idx%2){ doc.setFillColor(...pdfTinte(color,.95)); doc.rect(marginL,y,tableW(),6,'F'); }
+        doc.setFillColor(...(cero?[253,226,226]:(poco?[255,243,196]:pdfTinte(color,idx%2?.8:.86)))); doc.rect(colX(2),y,cols[2].w,6,'F');
+        const pv = prov[x.it.id];
+        if(pv && (pv.ok||pv.pend)){ doc.setFillColor(220,245,228); doc.rect(colX(1),y,cols[1].w,6,'F'); doc.setFont(undefined,'bold'); doc.setFontSize(9.5);
+          if(pv.ok){ doc.setTextColor(22,128,74); doc.text('+'+fmtNum(pv.ok)+(pv.pend?'  ':''), colX(1)+cols[1].w-2-(pv.pend?18:0), y+4.3, {align:'right'}); }
+          if(pv.pend){ doc.setTextColor(179,116,44); doc.setFontSize(7.5); doc.text('+'+fmtNum(pv.pend)+' por aprobar', colX(1)+cols[1].w-2, y+4.2, {align:'right'}); }
+          doc.setFont(undefined,'normal'); }
+        else { doc.setTextColor(180,184,196); doc.setFontSize(9); doc.text('–', colX(1)+cols[1].w-2, y+4.2, {align:'right'}); }
+        doc.setTextColor(0,0,0); doc.setFontSize(9); doc.text(x.it.nombre==='MDF 5mm'?'MDF 5mm Blanco':x.it.nombre, marginL+1.5, y+4.2);
+        doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(...(cero?[200,40,40]:(poco?[146,96,0]:color))); doc.text(String(fmtNum(x.n)), colX(2)+cols[2].w-2, y+4.3, {align:'right'}); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y+=6; });
+      y+=8; };
+    tabla('Melamina','Melamina'); tabla('MDF','MDF (3 y 5 mm)');
+    doc.setFontSize(8); doc.setTextColor(110,116,132); doc.text('Rojo = 0 hojas  ·  Amarillo = 4 o menos  ·  Verde = entró de proveedores (ya sumado; lo "por aprobar" todavía no)', marginL, y); doc.setTextColor(0,0,0);
+  });
+  const filename = `entradas-hojas-${admMod==='__todos'?'5-modulos':admMod}-${d1}${d1!==d2?'_'+d2:''}.pdf`;
+  const blob = doc.output('blob');
+  if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
+    try{ await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'Entradas y hojas', text:`Entradas y hojas · ${admMod==='__todos'?'5 módulos':admMod} · ${rango}` }); return; }catch(e){}
+  }
+  doc.save(filename);
+}
+
 function renderMov(){
   if(!TIPO_INFO[movTipo]) movTipo='entrada';
   const todasCats = [...new Set(CATALOGO.map(i=>i.cat))];
@@ -1031,6 +1243,7 @@ function renderMov(){
     <div class="tipos" style="margin-top:10px">${tiposBtns}</div>
     <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');irA('pzenc')">🧩 Encontré piezas cortadas que no estaban en el inventario</button>
   </div>
+  ${movTipo==='entrada'?`<div class="card" style="padding:4px 16px 16px">${origenEntradaHtml()}</div>`:''}
   <div class="card">
     <div class="paso">2</div><strong>¿De qué material?</strong>
     <input id="mv-buscar" type="search" placeholder="🔍 Buscar artículo (ej. corredera, blanco)" value="${String(movBuscar).replace(/"/g,'&quot;')}" style="margin-top:10px" oninput="movBuscar=this.value;renderMovLista()">
@@ -1113,9 +1326,15 @@ async function registrarMovLote(){
     aplicar.push(mv);
   }
   if(aplicar.length===0) return alert('No escribiste ninguna cantidad. Escribe cuánto en el artículo que quieras anotar.');
+  if(tipo==='entrada'){
+    if(!movOrigen) return alert('📍 Falta decir de dónde viene el material: de un Proveedor o de Otro módulo.');
+    if(movOrigen==='modulo' && !movOrigenMod) return alert('📍 Elige qué módulo mandó el material.');
+    if(movOrigen==='proveedor' && !movProveedor.trim()) return alert(movProvOtra ? '📍 Escribe el nombre de la tienda o proveedor.' : '📍 Elige de qué proveedor llegó el material.');
+  }
+  const origenTxt = tipo==='entrada' ? (movOrigen==='proveedor' ? 'Proveedor'+(movProveedor.trim()?': '+movProveedor.trim():'') : 'De '+movOrigenMod) : '';
   const verbo = (TIPO_INFO[tipo]||{}).verbo || tipo;
   const resumen = aplicar.map(a=>`• ${fmtNum(a.cantidad)} ${item2unidad(a.itemId)} de ${a.itemNombre}`).join('\n');
-  if(!confirm(`¿Todo está bien?\n\n${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
+  if(!confirm(`¿Todo está bien?\n\n${origenTxt?'📍 '+origenTxt+'\n\n':''}${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
   if(avisosAuto.length && !confirm('Todavía no se anota el corte de hoy:\n\n'+avisosAuto.join('\n')+'\n\nNo pasa nada: cuando se registre el corte del día se ajusta solo. ¿Continuar?')) return;
   try{
     // Confirmado por el usuario: el Corte del día NO requiere aprobación (se aplica directo,
@@ -1125,6 +1344,7 @@ async function registrarMovLote(){
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const a of aplicar){
       const doc = {modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString(),estado,loteId,creadoPor};
+      if(tipo==='entrada'){ doc.origenTipo = movOrigen; if(movOrigen==='proveedor') doc.proveedor = movProveedor.trim(); else doc.origenModulo = movOrigenMod; }
       if(tipo==='merma' && (fotosTmp.merma||[]).length){ doc.fotos = fotosTmp.merma.length; doc.fotosRef = loteId; }
       if(a.lado) doc.lado = a.lado;
       await db.collection('movimientos').doc(cryptoId()).set(doc);
@@ -1133,7 +1353,7 @@ async function registrarMovLote(){
       ? '✅ Guardado. <br><small>Dirección lo tiene que aprobar para que cuente en el inventario.</small>'
       : '✅ Guardado: '+aplicar.length+' artículo(s).');
     if(tipo==='merma') await guardarFotos('merma', 'merma', loteId, mod);
-    movVals={}; movBuscar='';
+    movVals={}; movBuscar=''; movOrigen=''; movProveedor=''; movOrigenMod=''; movProvOtra=false; entrCache=null;
     renderMov();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -5112,7 +5332,7 @@ async function confirmarTraspaso(){
       // módulos (colección "prestamos") sí queda registrada para llevar el control de quién
       // le debe a quién ("estado" aquí es pendiente/parcial/cerrado de la DEUDA, no de aprobación).
       await db.collection('movimientos').doc(cryptoId()).set({modulo:origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'salida',cantidad:e.cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado',creadoPor});
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:destino,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:e.cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado',creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:destino,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:e.cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado',creadoPor,origenTipo:'modulo',origenModulo:origen});
       // Registro de préstamo: cada artículo lleva su propia deuda.
       await db.collection('prestamos').doc(cryptoId()).set({
         origen, destino, itemId:e.itemId, itemNombre:e.itemNombre, categoria:CATALOGO.find(i=>i.id===e.itemId).cat, unidad:e.unidad,
@@ -5169,7 +5389,7 @@ async function registrarDevolucion(prestamoId){
   try{
     const notaTxt = `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`;
     await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado'});
-    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId,itemNombre:item.nombre,tipo:'entrada',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado'});
+    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId,itemNombre:item.nombre,tipo:'entrada',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado',origenTipo:'modulo',origenModulo:p.destino});
     const nuevoDevuelto = p.devuelto + cantidad;
     const nuevoPendiente = p.cantidad - nuevoDevuelto;
     const nuevoEstado = nuevoPendiente<=0 ? 'cerrado' : (nuevoDevuelto>0 ? 'parcial' : 'pendiente');
@@ -5228,6 +5448,10 @@ function renderRep(){
   html += `<div class="card" id="rep-gas"><strong>⛽ Gasolina de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`;
   setTimeout(repGasolinaSemana, 0);
   setTimeout(repInstalacionesSemana, 0);
+  html += `<div class="card row" style="justify-content:space-between">
+      <div><strong>📥 Entradas de material</strong><p class="hint" style="margin:2px 0 0">Lo que llegó de proveedores y lo que mandaron otros módulos, por separado y por material.</p></div>
+      <button class="btn small" onclick="irA('entr')">Ver entradas</button>
+    </div>`;
   html += `<div class="card row" style="justify-content:space-between">
       <div><strong>📜 Historial de entradas y salidas</strong><p class="hint" style="margin:2px 0 0">Cuándo llegó material, cuándo salió y quién lo anotó, con totales por fechas.</p></div>
       <button class="btn small" onclick="irA('movhist')">Ver historial</button>
@@ -5410,7 +5634,8 @@ async function renderAprobaciones(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
-        ${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}${(()=>{ const m=items.find(x=>x.motivo==='piezasEncontradas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>✂️ Piezas cortadas encontradas</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Se suman al material cortado.</div></div>`:''; })()}${(()=>{ const m=items.find(x=>x.motivo==='mermaPiezas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(224,121,26,.10);border:1px solid rgba(224,121,26,.4)"><strong>⚠️ Piezas dañadas (merma)</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Salen del material cortado.</div></div>`:''; })()}
+        ${(()=>{ const e=items.find(x=>x.tipo==='entrada'); if(!e) return ''; const o=origenDeEntrada(e); const c=o.tipo==='proveedor'?'31,157,85':(o.tipo==='modulo'?'217,119,6':'110,116,132');
+          return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(${c},.12);border:1px solid rgba(${c},.45)"><strong>📍 De dónde viene:</strong> ${o.txt}</div>`; })()}${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}${(()=>{ const m=items.find(x=>x.motivo==='piezasEncontradas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>✂️ Piezas cortadas encontradas</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Se suman al material cortado.</div></div>`:''; })()}${(()=>{ const m=items.find(x=>x.motivo==='mermaPiezas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(224,121,26,.10);border:1px solid rgba(224,121,26,.4)"><strong>⚠️ Piezas dañadas (merma)</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Salen del material cortado.</div></div>`:''; })()}
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
@@ -7153,7 +7378,7 @@ function pedNuevoHtml(){
   <div class="card">
     <div class="paso">3</div><strong>Datos del pedido</strong>
     <div class="grid2" style="margin-top:10px">
-      <div><label class="hint">Proveedor</label><input style="margin-top:4px" value="${String(f.proveedor).replace(/"/g,'&quot;')}" oninput="pedForm.proveedor=this.value" placeholder="ej. Maderas del Norte"></div>
+      <div><label class="hint">Proveedor</label><input style="margin-top:4px" list="ped-prov-list" value="${String(f.proveedor).replace(/"/g,'&quot;')}" oninput="pedForm.proveedor=this.value" placeholder="ej. PG Maderas"><datalist id="ped-prov-list">${PROVEEDORES.map(x=>`<option value="${x.n}">`).join('')}</datalist></div>
       <div><label class="hint">Llega aprox.</label><input type="date" style="margin-top:4px" value="${f.fechaEstimada}" onchange="pedForm.fechaEstimada=this.value"></div>
     </div>
     <input style="margin-top:10px" value="${String(f.nota).replace(/"/g,'&quot;')}" oninput="pedForm.nota=this.value" placeholder="Nota (opcional, ej. número de orden)">
@@ -7215,7 +7440,7 @@ async function confirmarRecepcion(id){
     const notaMov = `Pedido${p.proveedor?' de '+p.proveedor:''}${nEntrega>1?' · entrega '+nEntrega:''}${nota?' · '+nota:''}`;
     for(const i of llegan){
       const nf = (fotosTmp.rec||[]).length;
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:p.modulo, itemId:i.itemId, itemNombre:i.itemNombre, tipo:'entrada', cantidad:i.cantidad, nota:notaMov, fecha, estado, loteId, pedidoId:p.id, creadoPor, ...(nf?{fotos:nf, fotosRef:loteId}:{})});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:p.modulo, itemId:i.itemId, itemNombre:i.itemNombre, tipo:'entrada', cantidad:i.cantidad, nota:notaMov, fecha, estado, loteId, pedidoId:p.id, origenTipo:'proveedor', proveedor:p.proveedor||'', creadoPor, ...(nf?{fotos:nf, fotosRef:loteId}:{})});
     }
     const nFotosRec = await guardarFotos('rec', 'pedido', loteId, p.modulo);
     const recepciones = recepcionesDe(p).concat([{fecha, por:creadoPor, items, nota, loteId, fotos:nFotosRec||0}]);
@@ -7585,6 +7810,49 @@ async function generarReporteDiarioPDF(modo){
     doc.setFontSize(8); doc.setTextColor(110,116,132);
     doc.text('Solo hojas completas, sin contar lo ya cortado.  Rojo = 0 hojas  ·  Amarillo = 4 o menos.', marginL, y);
     doc.setTextColor(0,0,0);
+  }
+
+  // Hoja aparte (confirmado por el usuario): ENTRADAS del día, separadas por origen y material.
+  if(!soloSinCortar){
+    doc.addPage();
+    encabezado('Entradas de material', `Lo que entró hoy  ·  Módulo ${mod}  ·  ${fechaStr}`);
+    const hoyL = fechaHoyLocal();
+    const ents = entradasDe(movs).filter(m=>m.modulo===mod && diaLocal(m.fecha)===hoyL).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+    if(!ents.length){
+      doc.setFontSize(11); doc.setTextColor(110,116,132); doc.text('No hubo entradas de material hoy.', marginL, y+4); doc.setTextColor(0,0,0);
+    }
+    const ORIG = [['proveedor','Proveedores',[22,128,74]],['modulo','De otros módulos',[180,110,10]],['otro','Otras entradas',[90,96,112]]];
+    ORIG.forEach(([k, titulo, oc])=>{
+      const grupo = ents.filter(m=>m._o.tipo===k); if(!grupo.length) return;
+      if(y > pageH-40){ doc.addPage(); y=15; }
+      doc.setFillColor(...oc); doc.rect(marginL, y, W, 9, 'F');
+      doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(11.5);
+      doc.text(titulo, marginL+3, y+6.2); doc.text(`${grupo.length} entrada(s)`, marginL+W-3, y+6.2, {align:'right'});
+      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 12;
+      [...new Set(CATALOGO.map(i=>i.cat))].forEach(cat=>{
+        const ms = grupo.filter(m=>{ const it=CATALOGO.find(i=>i.id===m.itemId); return it && it.cat===cat; }); if(!ms.length) return;
+        color = PDF_CAT_COLOR[cat] || [55,65,81];
+        cols = [ {label:'Hora', w:18}, {label:cat, w:70}, {label:'Cantidad', w:28, r:1}, {label:'De dónde', w:66} ];
+        if(y > pageH-30){ doc.addPage(); y=15; }
+        doc.setFillColor(...color); doc.rect(marginL, y, tableW(), 6, 'F');
+        doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold');
+        cols.forEach((c,i)=> c.r ? doc.text(c.label, colX(i)+c.w-2, y+4.2, {align:'right'}) : doc.text(c.label, colX(i)+1.5, y+4.2));
+        doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 6;
+        ms.forEach((m,idx)=>{
+          if(y > pageH-14){ doc.addPage(); y=15; }
+          if(idx%2===1){ doc.setFillColor(...pdfTinte(color,.94)); doc.rect(marginL, y, tableW(), 5.5, 'F'); }
+          doc.setFontSize(8.5);
+          doc.text(new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}), colX(0)+1.5, y+3.9);
+          let nom = m.itemNombre + (m.estado==='pendiente'?' (por aprobar)':''); if(nom.length>44) nom = nom.slice(0,42)+'…';
+          doc.text(nom, colX(1)+1.5, y+3.9);
+          doc.setFont(undefined,'bold'); doc.text(`${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}`, colX(2)+cols[2].w-2, y+3.9, {align:'right'}); doc.setFont(undefined,'normal');
+          let o = m._o.txt; if(o.length>40) o = o.slice(0,38)+'…'; doc.text(o, colX(3)+1.5, y+3.9);
+          y += 5.5;
+        });
+        y += 4;
+      });
+      y += 4;
+    });
   }
 
   const stamp = ahora.toISOString().slice(0,10);
