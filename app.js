@@ -55,7 +55,8 @@ const TIPOS_ADICIONAL = {
   entrepanera_max: 'Entrepañera Max',
   zapatera: 'Zapatera',
   repisa: 'Repisa',
-  piso_zoclo: 'Piso y zóclo'
+  piso_zoclo: 'Piso y zóclo',
+  piezas_sueltas: 'Piezas sueltas (tubos, maleteros, cargadores, zóclos)'
 };
 // Piso y zóclo (confirmado por el usuario): el coordinador elige cuánto de cada pieza y de qué color.
 const PISO_ZOCLO_PIEZAS = [
@@ -65,6 +66,16 @@ const PISO_ZOCLO_PIEZAS = [
   {k:'cargador', t:'Cargador 10×40', nombre:'Cargador', dim:'10×40 cm'},
   {k:'zoclo', t:'Zóclo 10×52', nombre:'Zóclo normal', dim:'10×52 cm'}
 ];
+
+// Piezas sueltas extra (confirmado por el usuario): solo descuentan material, NO suman valor a la instalación.
+const PIEZAS_SUELTAS = [
+  {k:'tubo', t:'Tubo 1.5 m', nombre:'Tubo', dim:'—', sinColor:true},
+  {k:'maleteroG', t:'Maletero grande', nombre:'Maletero grande', dim:'40×244 cm'},
+  {k:'maleteroC', t:'Maletero chico', nombre:'Maletero chico', dim:'191×40 cm'},
+  {k:'cargador', t:'Cargador 10×40', nombre:'Cargador', dim:'10×40 cm'},
+  {k:'zoclo', t:'Zóclo 10×52', nombre:'Zóclo normal', dim:'10×52 cm'}
+];
+const EXTRAS_SIN_VALOR = ['piezas_sueltas'];
 
 // ===== Composición por muebles: en vez de elegir un modelo con nombre, se arma la familia
 // mueble por mueble (entrepañera / cajonera / Emma / espejo / Max), confirmado por el usuario:
@@ -198,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v130';
+const APP_VERSION = 'v132';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3128,6 +3139,8 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
       add('Bisagra (zapatera)',1.5,'—','—','ok','Confirmado por el usuario');
       add('Jaladera (zapatera)',1,'—',color,'ok','Confirmado por el usuario');
     }
+  } else if(tipo==='piezas_sueltas'){
+    (extra && extra.ps || []).forEach(r=>{ const d = PIEZAS_SUELTAS.find(x=>x.k===r.k); if(d && r.cantidad>0) add(d.nombre, r.cantidad, d.dim, d.sinColor?'—':(r.color||color), 'ok', 'Pieza suelta extra'); });
   } else if(tipo==='piso_zoclo'){
     (extra && extra.pz || []).forEach(r=>{ const d = PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); if(d && r.cantidad>0) add(d.nombre, r.cantidad, d.dim, r.color||color, 'ok', 'Piso y zóclo'); });
   } else if(tipo==='repisa'){
@@ -3420,8 +3433,8 @@ function renderAdicBox(prefix){
   if(!box) return;
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
-      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.tipo==='piso_zoclo'?'<div class="hint" style="margin:2px 0 0">'+(a.pz||[]).map(r=>{ const d=PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+' '+r.color; }).join('<br>')+'</div>':''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
-      <td>${a.tipo==='piso_zoclo'?'—':a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
+      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.tipo==='piezas_sueltas'?'<div class="hint" style="margin:2px 0 0">'+(a.ps||[]).map(r=>{ const d=PIEZAS_SUELTAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+(r.color?' '+r.color:''); }).join('<br>')+'</div>':''}${a.tipo==='piso_zoclo'?'<div class="hint" style="margin:2px 0 0">'+(a.pz||[]).map(r=>{ const d=PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+' '+r.color; }).join('<br>')+'</div>':''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
+      <td>${a.tipo==='piso_zoclo'||a.tipo==='piezas_sueltas'?'—':a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
   box.innerHTML = `<div class="card">
@@ -3454,6 +3467,13 @@ function toggleAdicionalCajones(prefix){
       <label class="hint" style="display:block;margin-top:8px">¿Cuántas repisas?</label>
       <div class="chips" style="margin-top:4px" id="${prefix}-adic-cant-wrap">${[1,2,3].map(n=>`<button type="button" class="chip ${n===1?'on':''}" data-n="${n}" onclick="this.parentNode.querySelectorAll('.chip').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${n}</button>`).join('')}</div>
       <p class="hint">Se descuenta solo la parte de la hoja que usan las repisas, no la hoja completa.</p>`;
+  }
+  if(sel.value==='piezas_sueltas'){
+    const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
+    html = `<p class="hint" style="margin-top:8px">Escribe cuántas piezas sueltas lleva y de qué color. <strong>No suman a la instalación</strong>, solo se descuenta el material.</p>
+      <div class="movlist" style="margin-top:6px">${PIEZAS_SUELTAS.map(d=>`<div class="movitem" style="padding:8px 10px;gap:8px;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0"><strong>${d.t}</strong>${d.dim!=='—'?`<span class="hint" style="display:block;margin:0">${d.dim}</span>`:''}</span>
+        <input type="number" min="0" inputmode="numeric" id="${prefix}-ps-${d.k}" placeholder="0" style="width:64px;min-width:64px;text-align:center">
+        ${d.sinColor?'<span class="hint" style="margin:0;min-width:110px">sin color</span>':`<select id="${prefix}-psc-${d.k}" style="width:auto;min-width:110px">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`}</div>`).join('')}</div>`;
   }
   if(sel.value==='piso_zoclo'){
     const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
@@ -3491,6 +3511,10 @@ function agregarAdicional(prefix){
   const extEl = document.getElementById(prefix+'-adic-ext'); if((tipo==='cajonera' || tipo==='cajonera_emma') && extEl && extEl.checked) nuevo.ext = true;
   const cf = document.getElementById(prefix+'-adic-colorfrente');
   if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera' || String(tipo).startsWith('entrepanera')) && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
+  if(tipo==='piezas_sueltas'){
+    nuevo.ps = PIEZAS_SUELTAS.map(d=>({k:d.k, cantidad:Math.round(Number((document.getElementById(prefix+'-ps-'+d.k)||{}).value)||0), color:d.sinColor?'':((document.getElementById(prefix+'-psc-'+d.k)||{}).value||color)})).filter(r=>r.cantidad>0);
+    if(!nuevo.ps.length) return alert('Escribe cuántas piezas lleva de al menos una (tubo, maletero, cargador o zóclo).');
+  }
   if(tipo==='piso_zoclo'){
     nuevo.pz = PISO_ZOCLO_PIEZAS.map(d=>({k:d.k, cantidad:Math.round(Number((document.getElementById(prefix+'-pz-'+d.k)||{}).value)||0), color:(document.getElementById(prefix+'-pzc-'+d.k)||{}).value||color})).filter(r=>r.cantidad>0);
     if(!nuevo.pz.length) return alert('Escribe cuánto lleva de al menos una pieza (maletero, marco, cargador o zóclo).');
@@ -3948,6 +3972,7 @@ function renderInstMueble(){
     <div id="i-selector-wrap" style="margin-top:10px"></div>
     <div id="i-max-wrap"></div>
     <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> <span>Las cajoneras <strong>del modelo</strong> llevan corredera de extensión <span class="hint" style="margin:0">(los extras se marcan aparte; la Max siempre la lleva)</span></span></label>
+    <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-puertitas-modelo" style="width:22px;min-height:22px;flex:0 0 22px"> <span>Las cajoneras <strong>del modelo</strong> llevan <strong>puertitas</strong> <span class="hint" style="margin:0">(con sus bisagras y jaladeras; en Max, push)</span></span></label>
     <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="iModoComp=!iModoComp;renderInstMueble()">${iModoComp?'← Elegir de la lista de modelos':'¿No está el modelo? Ármalo mueble por mueble'}</button>
   </div>
   <div class="card">
@@ -4063,6 +4088,20 @@ function previewInst(){
     titulo = modeloSel.nombre+(maxOn?' Max':'')+(especial3m?' · a 3 metros':''); notaModelo = modeloSel.nota;
     modeloKey = modeloSel.nombre; esMax = maxOn;
   }
+  // Puertitas en las cajoneras DEL MODELO (confirmado por el usuario): 1 par por cajonera,
+  // del color del frente, con la medida de su cajonera (3, 5/Emma o Max).
+  const puertitasModelo = !!(document.getElementById('i-puertitas-modelo') && document.getElementById('i-puertitas-modelo').checked);
+  if(puertitasModelo){
+    const claves = [];
+    if(iModoComp){ iMueblesComp.forEach(m=>{ const k = {cajonera_3:'3', cajonera_5:'5', cajonera_emma:'5', cajonera_max:'max'}[m.value]; if(k) claves.push(k); }); }
+    else { const ms = MODELOS.find(x=>x.nombre===$('#i-modelo').value); const maxOn2 = !!(ms && ms.maxDisponible && document.getElementById('i-max') && document.getElementById('i-max').checked);
+      if(ms && ms.cajones>0){ const nCaj = {1:1,3:1,5:1,6:2,8:2,10:2}[ms.cajones]||1; const porCaj = ms.cajones/nCaj;
+        for(let k=0;k<nCaj;k++) claves.push(maxOn2 ? 'max' : (porCaj===3?'3':(porCaj===5?'5':null))); } }
+    if(!claves.length){ alert('Este modelo no tiene cajoneras para ponerles puertitas. Desmarca "llevan puertitas".'); return; }
+    const addP = (nombre,cantidad,dim,colorDestino,estado,nota)=>piezasModelo.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
+    claves.forEach(k=>piezasPuertitaCajonera(addP, color, k, k==='max'?'cajonera Max':'cajonera de '+(k||'?')+' cajones'));
+    titulo += ' · cajoneras con puertitas';
+  }
   const piezasAdic = iAdicionales.flatMap(a=>buildAdicionalPiezas(a.tipo, a.cajones, a.color, !!a.ext, a.conPuerta, a)); // cada extra con su propia corredera
   const piezas = piezasModelo.concat(piezasAdic);
   const pendientes = piezas.filter(p=>p.estado==='pendiente');
@@ -4079,7 +4118,7 @@ function previewInst(){
 
   const bloqueadoPorReceta = pendientes.length>0;
   const bloqueadoPorStock = !instRegresoLibre && faltantes.length>0; // un regreso suma, no necesita existencia
-  const extrasN = iAdicionales.reduce((t,a)=>t+(a.tipo==='repisa'?((Number(a.cantidad)||1)):1),0); // cada extra vale aparte (repisa: por pieza)
+  const extrasN = iAdicionales.reduce((t,a)=>t+(EXTRAS_SIN_VALOR.includes(a.tipo)?0:(a.tipo==='repisa'?((Number(a.cantidad)||1)):1)),0); // cada extra vale aparte (repisa: por pieza)
   instPreview = {modeloNombre:titulo,modeloKey,esMax,extras:extrasN,extrasDetalle:iAdicionales.map(describirExtra),color,colorCajonera,piezas,consumo,pendientes,faltantes,bloqueado: bloqueadoPorReceta||bloqueadoPorStock};
 
   let html = `<div class="card" id="i-preview-card">
@@ -4732,9 +4771,14 @@ function renderInstPuertas(){
   <div class="card">
     <div class="paso">2</div><strong>Medidas del hueco</strong>
     <div class="grid2" style="margin-top:10px">
-      <div><label class="hint">Ancho total (cm)</label><input id="p-ancho" type="number" inputmode="decimal" placeholder="ej. 180" style="margin-top:4px"></div>
-      <div><label class="hint">Alto total (cm)</label><input id="p-alto" type="number" inputmode="decimal" placeholder="ej. 240" style="margin-top:4px"></div>
+      <div><label class="hint">Ancho total (cm)</label><input id="p-ancho" type="number" inputmode="decimal" placeholder="ej. 180" style="margin-top:4px">
+        <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="p-ancho-dos" style="width:auto;min-height:0" onchange="document.getElementById('p-ancho2-wrap').style.display=this.checked?'block':'none'"> Tiene 2 medidas</label>
+        <div id="p-ancho2-wrap" style="display:none"><input id="p-ancho2" type="number" inputmode="decimal" placeholder="2.ª medida" style="margin-top:4px"></div></div>
+      <div><label class="hint">Alto total (cm)</label><input id="p-alto" type="number" inputmode="decimal" placeholder="ej. 240" style="margin-top:4px">
+        <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="p-alto-dos" style="width:auto;min-height:0" onchange="document.getElementById('p-alto2-wrap').style.display=this.checked?'block':'none'"> Tiene 2 medidas</label>
+        <div id="p-alto2-wrap" style="display:none"><input id="p-alto2" type="number" inputmode="decimal" placeholder="2.ª medida" style="margin-top:4px"></div></div>
     </div>
+    <p class="hint" style="margin:8px 0 0">Si el hueco mide distinto de un lado y del otro: en <strong>ancho</strong> se usa la medida más grande; en <strong>alto</strong>, marcos y puertas salen de la más baja y el fijo de la más alta.</p>
   </div>
   <div class="card">
     <div class="paso">3</div><strong>Color y jaladera</strong>
@@ -4909,7 +4953,10 @@ let puertaPreview = null;
 
 // Fórmulas de puertas (compartidas por Instalación de puertas y Garantías). Devuelve las medidas
 // para mostrar (info) y los cortes de melamina etiquetados por pieza (puerta/marco/fijo/paredFalsa/extFijo).
-function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
+function calcularPuerta(tipo, alto, ancho, paredFalsaExtra, altoMax){
+  // Dos medidas de alto (confirmado por el usuario): marcos, puertas y pared falsa salen del
+  // alto MÁS BAJO (alto); el fijo y su extensión, del alto MÁS ALTO (altoMax).
+  const altoF = (Number(altoMax)>alto) ? Number(altoMax) : alto;
   const piezas = [];
   const add=(n,v,nota)=>piezas.push({n,v,nota:nota||''});
   const cortes = [];
@@ -4931,14 +4978,14 @@ function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
     const altoPuertas = altoMarcos-7.5;
     const anchoPuertas = (ancho-1.5)/2+5;
     const anchoFijo = ancho+2;
-    const altoFijo = alto-altoMarcos+17;
+    const altoFijo = altoF-altoMarcos+17;
     add('Alto pared falsa', altoParedFalsa.toFixed(1)+' cm', (altoParedFalsa===244?'Tope de hoja: alto total − 2 pasa de 244, se deja en 244':'Alto total − 2')+(tipo==='Con dos paredes falsas'?' (aplica a cada una de las 2 paredes falsas)':''));
     add('Ancho pared falsa', '60 cm', 'Siempre 60 cm');
     add('Alto de marcos', altoMarcos.toFixed(1)+' cm', 'Alto de pared falsa − 4');
     add('Alto de puertas', altoPuertas.toFixed(1)+' cm', 'Alto de marcos − 7.5');
     add('Ancho de puertas (c/u del par)', anchoPuertas.toFixed(1)+' cm', '(Ancho total − 1.5) ÷ 2 + 5');
     add('Ancho del fijo', anchoFijo.toFixed(1)+' cm', 'Ancho total + 2');
-    add('Alto del fijo', altoFijo.toFixed(1)+' cm', 'Alto total − alto de marcos + 17');
+    add('Alto del fijo', altoFijo.toFixed(1)+' cm', (altoF!==alto?'Alto más alto ('+altoF+') − alto de marcos + 17':'Alto total − alto de marcos + 17'));
     add('Extensión de fijo', altoFijo.toFixed(1)+'×60 cm', 'Mismo ancho que la pared falsa (60 cm) y mismo alto que el fijo ('+(tipo==='Con dos paredes falsas'?'lleva 2':'lleva 1')+')');
     const numParedFalsa = tipo==='Con dos paredes falsas' ? 2 : 1;
     const numMarcos1 = tipo==='Con dos paredes falsas' ? 1 : 2;
@@ -4957,13 +5004,13 @@ function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
     const altoPuertas = altoMarcos-7.5;
     const anchoPuertas = (ancho-3)/2+5;
     const anchoFijo = ancho+2;
-    const altoFijo = alto-altoMarcos+17;
+    const altoFijo = altoF-altoMarcos+17;
     add('Ancho de puertas (c/u del par)', anchoPuertas.toFixed(1)+' cm', '(Ancho total − 3) ÷ 2 + 5');
     add('Alto de marcos', altoMarcos.toFixed(1)+' cm', altoMarcos===244 ? 'Tope de hoja: alto total − 6 pasa de 244, se deja en 244' : 'Alto total − 6');
     add('Alto de puertas', altoPuertas.toFixed(1)+' cm', 'Alto de marcos − 7.5');
     add('Ancho de marco', '10 cm', 'Fijo (confirmado por el usuario)');
     add('Ancho del fijo', anchoFijo.toFixed(1)+' cm', 'Ancho total + 2');
-    add('Alto del fijo', altoFijo.toFixed(1)+' cm', 'Alto total − alto de marcos + 17');
+    add('Alto del fijo', altoFijo.toFixed(1)+' cm', (altoF!==alto?'Alto más alto ('+altoF+') − alto de marcos + 17':'Alto total − alto de marcos + 17'));
     cortes.push({pieza:'puerta', ancho:anchoPuertas, alto:altoPuertas, cantidad:2});
     cortes.push({pieza:'marco', ancho:10, alto:altoMarcos, cantidad:3});
     cortes.push({pieza:'fijo', ancho:anchoFijo, alto:altoFijo, cantidad:1});
@@ -4978,7 +5025,7 @@ function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
     const altoMarcos = Math.min(alto-6, 244);
     const altoPuertas = altoMarcos-7.5;
     const anchoPuertas = (ancho-20)/2+5;
-    const altoFijo = alto-altoMarcos+17;
+    const altoFijo = altoF-altoMarcos+17;
     const anchoFijoTotal = ancho+2;
     const dosFijos = anchoFijoTotal>244;
     add('Ancho de puertas (c/u del par)', anchoPuertas.toFixed(1)+' cm', '(Ancho total − 20 de los cubos) ÷ 2 + 5');
@@ -5008,7 +5055,7 @@ function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
     const anchoEfectivo = ancho-10;
     const anchoPuertas = (anchoEfectivo/2-1.5)/2+5;
     const anchoFijo = (ancho+2)/2;
-    const altoFijo = alto-altoMarcos+17;
+    const altoFijo = altoF-altoMarcos+17;
     add('Ancho de puertas (c/u, 4 piezas)', anchoPuertas.toFixed(2)+' cm', '(((Ancho total − 10 del cubo) ÷ 2) − 1.5) ÷ 2 + 5');
     add('Alto de marcos', altoMarcos.toFixed(1)+' cm', altoMarcos===244 ? 'Tope de hoja: alto total − 6 pasa de 244, se deja en 244' : 'Alto total − 6');
     add('Alto de puertas', altoPuertas.toFixed(1)+' cm', 'Alto de marcos − 7.5');
@@ -5042,16 +5089,27 @@ function calcularPuerta(tipo, alto, ancho, paredFalsaExtra){
   return {info:piezas, cortes, zoclos};
 }
 
+function puertaSig(){ const v=id=>{ const e=document.getElementById(id); return e ? (e.type==='checkbox'?e.checked:e.value) : ''; };
+  return JSON.stringify(['p-tipo','p-color','p-alto','p-ancho','p-ancho-dos','p-ancho2','p-alto-dos','p-alto2'].map(v)); }
 function calcPuerta(){
   const tipo = $('#p-tipo').value;
   const color = $('#p-color').value;
-  const alto = Number($('#p-alto').value);
-  const ancho = Number($('#p-ancho').value);
-  if(!alto || !ancho) return alert('Captura alto y ancho');
+  const alto1 = Number($('#p-alto').value), ancho1 = Number($('#p-ancho').value);
+  if(!alto1 || !ancho1) return alert('Captura alto y ancho');
+  const dosAncho = !!(document.getElementById('p-ancho-dos')||{}).checked, dosAlto = !!(document.getElementById('p-alto-dos')||{}).checked;
+  const ancho2 = dosAncho ? Number((document.getElementById('p-ancho2')||{}).value) : 0, alto2 = dosAlto ? Number((document.getElementById('p-alto2')||{}).value) : 0;
+  if(dosAncho && !ancho2) return alert('Escribe la segunda medida de ancho (o desmarca "Tiene 2 medidas").');
+  if(dosAlto && !alto2) return alert('Escribe la segunda medida de alto (o desmarca "Tiene 2 medidas").');
+  // Dos medidas (confirmado por el usuario): ancho = el más grande; alto = el más bajo para marcos/puertas y el más alto para el fijo.
+  const ancho = dosAncho ? Math.max(ancho1, ancho2) : ancho1;
+  const alto = dosAlto ? Math.min(alto1, alto2) : alto1;
+  const altoMax = dosAlto ? Math.max(alto1, alto2) : alto1;
+  const medidasTxt = `${dosAncho?ancho1+'/'+ancho2:ancho1}×${dosAlto?alto1+'/'+alto2:alto1} cm (ancho×alto)`;
   const jaladeraTipo = $('#p-jaladera-tipo') ? $('#p-jaladera-tipo').value : 'normal';
   const pfExtra = !!(document.getElementById('p-pared-falsa-extra') && document.getElementById('p-pared-falsa-extra').checked);
-  const calc = calcularPuerta(tipo, alto, ancho, pfExtra);
+  const calc = calcularPuerta(tipo, alto, ancho, pfExtra, altoMax);
   const piezas = calc.info;
+  if(dosAncho || dosAlto) piezas.splice(1, 0, {n:'Medidas usadas', v:`Ancho ${ancho}${dosAncho?' (el más grande)':''} · Alto ${alto}${dosAlto?' para marcos y puertas, '+altoMax+' para el fijo':''}`, nota:'Se capturaron 2 medidas'});
   const add=(n,v,nota)=>piezas.push({n,v,nota:nota||''});
   const cortes = calc.cortes; // [{pieza,ancho,alto,cantidad}] para calcular hojas de melamina
 
@@ -5086,7 +5144,7 @@ function calcPuerta(){
   const sobHojas = (!instRegresoLibre && !instCambio) ? (empaque.sobrantesHoja||[]).filter(x=>x.sobra>=0.05) : [];
   const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:(sobHojas.length===1 ? Math.round((Math.ceil(Number(hojasMelamina)-1e-9)-Number(hojasMelamina))*1000)/1000 : Math.round(sobHojas.reduce((a,x)=>a+x.sobra,0)*1000)/1000), itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
   const prevSob = puertaPreview && puertaPreview.sobOferta && puertaPreview.tipo===tipo && puertaPreview.alto===alto && puertaPreview.ancho===ancho && puertaPreview.color===color ? puertaPreview.aSob : false;
-  puertaPreview = {tipo, color, alto, ancho, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: sobOferta ? prevSob : false};
+  puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: sobOferta ? prevSob : false};
 
   let html = `<div class="card"><h3>${tipo} · ${color}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
@@ -5134,9 +5192,9 @@ function pintarSobPuerta(){
 async function confirmarRegresoPuerta(){
   const pp = puertaPreview;
   if(!pp || !pp.regreso || !instRegresoLibre) return;
-  if(pp.color!==$('#p-color').value || pp.tipo!==$('#p-tipo').value || pp.alto!==Number($('#p-alto').value) || pp.ancho!==Number($('#p-ancho').value)) return alert('Vuelve a tocar "Revisar material": los datos cambiaron.');
+  if(pp.sig!==puertaSig()) return alert('Vuelve a tocar "Revisar material": los datos cambiaron.');
   const nota = ($('#p-nota').value||'').trim();
-  const desc = `Puerta ${pp.tipo} · ${pp.color} · ${pp.ancho}×${pp.alto} cm (ancho×alto)${pp.conHerrajes?'':' · sin herrajes'}`;
+  const desc = `Puerta ${pp.tipo} · ${pp.color} · ${pp.medidasTxt||(pp.ancho+'×'+pp.alto+' cm (ancho×alto)')}${pp.conHerrajes?'':' · sin herrajes'}`;
   const cons = pp.consumo.filter(c=>Number(c.cantidad)>0);
   if(!confirm(`↩️ Regresar al inventario:\n${desc}\n\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n')}\n\n¿Continuar?`)) return;
   try{
@@ -5150,13 +5208,13 @@ async function confirmarRegresoPuerta(){
 }
 async function registrarPuerta(tipo, alto, ancho){
   const colorSel = $('#p-color') ? $('#p-color').value : null;
-  if(!puertaPreview || puertaPreview.bloqueado || puertaPreview.regreso || puertaPreview.tipo!==tipo || puertaPreview.alto!==alto || puertaPreview.ancho!==ancho || puertaPreview.color!==colorSel){
+  if(!puertaPreview || puertaPreview.bloqueado || puertaPreview.regreso || puertaPreview.tipo!==tipo || puertaPreview.alto!==alto || puertaPreview.ancho!==ancho || puertaPreview.color!==colorSel || puertaPreview.sig!==puertaSig()){
     alert('Vuelve a calcular las medidas antes de registrar (los datos cambiaron o no hay vista previa).');
     return;
   }
   const nota = ($('#p-nota').value||'').trim();
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
-  const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${ancho}×${alto} cm (ancho×alto)`;
+  const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${puertaPreview.medidasTxt||(ancho+'×'+alto+' cm (ancho×alto)')}`;
   if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo});
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
@@ -5171,7 +5229,7 @@ async function registrarPuerta(tipo, alto, ancho){
       const item = CATALOGO.find(i=>i.id===c.itemId);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
     }
-    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,nota,fechaDia,fecha:new Date().toISOString(),estado});
+    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,altoMax:puertaPreview.altoMax||alto,medidas:puertaPreview.medidasTxt||'',nota,fechaDia,fecha:new Date().toISOString(),estado});
     await db.collection('instalacionesLog').doc(logId).set({
       modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia, modeloKey:'Puerta '+tipo,
       consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
@@ -6710,6 +6768,7 @@ function instCuenta(log, regresadas){
 }
 // Texto de los extras de una instalación (confirmado por el usuario: que se vea qué extra sumó).
 function describirExtra(a){
+  if(a.tipo==='piezas_sueltas') return 'Piezas sueltas: '+(a.ps||[]).map(r=>{ const d=PIEZAS_SUELTAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+(r.color?' '+r.color:''); }).join(', ')+' (no suma)';
   return (TIPOS_ADICIONAL[a.tipo]||a.tipo).replace(' (cantidad libre)','')
     + (a.tipo==='cajonera'?' de '+a.cajones+' cajones':'')
     + (a.tipo==='repisa'?' ×'+(Number(a.cantidad)||1):'')
