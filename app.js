@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v132';
+const APP_VERSION = 'v134';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -695,6 +695,8 @@ function renderInv(){
     </div>
     ${esAdmin() ? `<button class="btn" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('ini')">🔒 Stock inicial (solo Dirección, con PIN)</button>` : ''}
     <button class="btn" style="margin-top:8px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('movhist')">📜 Historial de entradas y salidas</button>
+    <button class="btn" style="margin-top:8px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('calc');irA('pzenc')">🧮 Calculadora de piezas (solo para checar)</button>
+    ${esAdmin()?`<button class="btn" style="margin-top:8px;width:100%;background:transparent;color:#5b6b7f;border:1px solid var(--line);box-shadow:none" onclick="irA('aud');setAudTipo('simulacion')">🧪 Simulador de auditoría (piezas, armados y todo)</button>`:''}
     <p class="hint">Elige qué quieres ver:</p>
     <div class="chips">${catsHtml}</div>
   </div>`;
@@ -1396,7 +1398,52 @@ function esComplementoAud(){ return audTipo==='complemento' && !modoConteoCoord(
 // Auditoría de un material (confirmado por el usuario): solo se compara lo que se cuenta; lo que no se
 // toca se queda como está (no se toma como 0). Sirve para corregir un material sin contar todo.
 function esParcialAud(){ return audTipo==='parcial' && !modoConteoCoord(); }
-function esLibreAud(){ return esComplementoAud() || esParcialAud(); }
+// Simulador de auditoría (confirmado por el usuario): se cuenta igual que una auditoría (hojas,
+// piezas, armados, herrajes) solo para comparar contra el inventario. NO se guarda ni mueve nada.
+function esSimAud(){ return audTipo==='simulacion' && !modoConteoCoord(); }
+function esLibreAud(){ return esComplementoAud() || esParcialAud() || esSimAud(); }
+let _audRealStash = null;
+function setAudTipo(v){
+  const eraSim = audTipo==='simulacion', seraSim = v==='simulacion';
+  if(eraSim!==seraSim){
+    guardarBorradorAud();
+    const st = {auditCapturas, auditPiezas, auditArmados, audPaso, audHechas, auditCat};
+    if(seraSim){ _audRealStash = st; auditCapturas={}; auditPiezas={}; auditArmados=[]; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    else if(_audRealStash){ ({auditCapturas, auditPiezas, auditArmados, audPaso, audHechas, auditCat} = _audRealStash); _audRealStash=null; }
+    else { auditCapturas={}; auditPiezas={}; auditArmados=[]; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    audTipo = v;
+    _borradorRevisado[modulo()+(seraSim?'_sim':'')] = false;
+  } else audTipo = v;
+  renderAud();
+}
+function simResultados(){
+  const eq = piezasAuditAHojas(), out = [];
+  CATALOGO.forEach(it=>{
+    const capt = auditCapturas[it.id]!==undefined && !esCorrSuelta(it);
+    const enP = Number(eq[it.id])||0;
+    if(!capt && !enP) return;
+    const f = calcFormula(it.id), comp = capt ? Number(auditCapturas[it.id])||0 : 0;
+    if(f.esHoja){
+      out.push({it, hoja:true, tC:f.completas, fC:capt?comp:null, tK:f.cortado, fK:enP?fmtNum(enP):null,
+        dC: capt?fmtNum(comp-f.completas):null, dK: enP?fmtNum(enP-f.cortado):null});
+    } else {
+      const fis = fmtNum(comp+enP); out.push({it, hoja:false, t:f.final, f:fis, d:fmtNum(fis-f.final)});
+    }
+  });
+  return out;
+}
+function simResultadosHtml(){
+  const r = simResultados();
+  if(!r.length) return '<p class="neg">Todavía no capturas nada. Ve a cualquier sección y escribe lo que contaste.</p>';
+  const dif = d => d===null ? '<span class="hint" style="margin:0">no contado</span>' : (Math.abs(d)<0.005 ? '<strong style="color:var(--ok)">✓ cuadra</strong>' : `<strong style="color:${d<0?'var(--bad)':'#b3742c'}">${d<0?'faltan':'sobran'} ${fmtNum(Math.abs(d))}</strong>`);
+  const malos = r.filter(x=>x.hoja ? ((x.dC!==null&&Math.abs(x.dC)>=0.005)||(x.dK!==null&&Math.abs(x.dK)>=0.005)) : Math.abs(x.d)>=0.005).length;
+  return `<p class="hint" style="margin:0 0 8px"><strong>${r.length}</strong> artículo(s) contados · <strong style="color:${malos?'var(--bad)':'var(--ok)'}">${malos?malos+' con diferencia':'todo cuadra'}</strong></p>
+    <div class="movlist">${r.map(x=>x.hoja
+      ? `<div class="movitem" style="display:block"><span class="invname">${swatchHtml(x.it.nombre)}${x.it.nombre}</span>
+          <div class="hint" style="margin:4px 0 0">Completas: app ${fmtNum(x.tC)} · contado ${x.fC===null?'—':fmtNum(x.fC)} → ${dif(x.dC)}</div>
+          <div class="hint" style="margin:2px 0 0">Cortado (piezas/armados): app ${fmtNum(x.tK)} · contado ${x.fK===null?'—':fmtNum(x.fK)} → ${dif(x.dK)}</div></div>`
+      : `<div class="movitem"><span style="min-width:0"><span class="invname">${x.it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">App ${fmtNum(x.t)} · contado ${fmtNum(x.f)} ${x.it.unidad||''}</span></span><span style="white-space:nowrap">${dif(x.d)}</span></div>`).join('')}</div>`;
+}
 // Complemento del conteo inicial: solo se captura lo que faltó; nada es obligatorio.
 function capturadosSeccionAud(k){
   if(k==='__piezas') return contarPiezasSueltas();
@@ -1481,7 +1528,7 @@ function sumarPiezaAud(grupo, key){
   setAuditPieza(grupo, key, String(actual+n)); guardarBorradorAud(); renderAud();
   toast(`${p.label}: ahora ${actual+n}`);
 }
-function etiquetaTipoAud(t){ return t==='conteo' ? 'Conteo inicial' : (t==='complemento' ? '➕ Complemento del conteo inicial' : (t==='parcial' ? '🎯 Auditoría de un material' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'))); }
+function etiquetaTipoAud(t){ if(t==='simulacion') return '🧪 Simulador de auditoría'; return t==='conteo' ? 'Conteo inicial' : (t==='complemento' ? '➕ Complemento del conteo inicial' : (t==='parcial' ? '🎯 Auditoría de un material' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'))); }
 function renderAud(){
   const ciego = modoConteoCoord();
   if(esCoordinador() && !ciego){ $('#main').innerHTML = '<div class="card">📋 El conteo del almacén solo se abre cuando Dirección lo activa, y solo ese día.</div>'; return; }
@@ -1495,7 +1542,7 @@ function renderAud(){
   const sec = AUD_SECCIONES[audPaso];
   const limite = primerPasoPendienteAud();
   const hechas = AUD_SECCIONES.filter(x=>seccionCompletaAud(x.k)).length;
-  const comp = esComplementoAud(), parcial = esParcialAud(), libre = comp || parcial;
+  const comp = esComplementoAud(), parcial = esParcialAud(), libre = comp || parcial || esSimAud();
   const chips = libre ? AUD_SECCIONES.map((x,i)=>{ const on=i===audPaso, n=capturadosSeccionAud(x.k);
     return `<button class="chip ${on?'on':''}" style="${n&&!on?'border-color:var(--ok);color:var(--ok);':''}" onclick="irPasoAud(${i})">${AUD_ICONO[x.k]||''} ${x.t}${n?` <small>(${n})</small>`:''}</button>`; }).join('')
   : AUD_SECCIONES.map((x,i)=>{ const ok = seccionCompletaAud(x.k), on = i===audPaso; const pend = pendienteSeccionTxt(x.k);
@@ -1507,6 +1554,13 @@ function renderAud(){
     cuerpo = renderAudPiezasHtml();
   } else if(sec.k==='__armados'){
     cuerpo = renderAudArmadosHtml();
+  } else if(sec.k==='__revisar' && esSimAud()){
+    cuerpo = `<div class="card" style="border:2px solid #5b6b7f"><h3>🧪 Resultado del simulador</h3>
+      <p class="hint">Se compara solo lo que contaste contra lo que dice la app. <strong>No se guarda nada y el inventario no cambia.</strong> En melamina/MDF: las hojas completas se comparan con las completas, y las piezas y armados con lo cortado.</p>
+      ${simResultadosHtml()}
+      <button class="btn" style="width:100%;margin-top:12px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar todo lo que llevas contado en el simulador?')){auditCapturas={};auditPiezas={};auditArmados=[];audHechas={};guardarBorradorAud();renderAud();}">🗑️ Borrar simulación y empezar de nuevo</button>
+      <button class="btn" style="width:100%;margin-top:8px" onclick="setAudTipo('seguimiento')">Salir del simulador</button>
+    </div>`;
   } else if(sec.k==='__revisar' && parcial){
     const eqP = piezasAuditAHojas(); const lin = [];
     CATALOGO.forEach(it=>{ if(auditCapturas[it.id]===undefined) return; const f=calcFormula(it.id); const v=(Number(auditCapturas[it.id])||0)+(Number(eqP[it.id])||0);
@@ -1572,14 +1626,15 @@ function renderAud(){
   ${esAdmin() ? conteoAdminCardHtml() : ''}
   ${ciego ? `<div class="card" style="border:2px solid var(--bad)"><div style="font-size:17px;font-weight:800">📋 Conteo del almacén · ${modulo()}</div>
     <p class="hint">Cuenta <strong>todo</strong> lo que hay en el módulo, también lo del taller, en cajas o en esquinas. Ve sección por sección; la app no te deja avanzar si algo quedó sin contar.</p></div>` : ''}
+  ${esSimAud()?`<div class="card" style="border:2px solid #5b6b7f;background:linear-gradient(0deg,rgba(91,107,127,.12),rgba(91,107,127,.12)),var(--card)"><div style="font-size:16px;font-weight:800">🧪 Simulador · solo para checar</div><p class="hint" style="margin:4px 0 0">Cuenta lo que quieras (hojas, piezas cortadas, armados, herrajes). En <strong>✅ Revisar</strong> ves si cuadra con el inventario. <strong>No se guarda nada ni se mueve el inventario.</strong> Lo que cuentes aquí se queda guardado en tu celular hasta que lo borres.</p></div>`:''}
   <div class="card">
     <strong>${ciego?'Conteo paso a paso':etiquetaTipoAud(audTipo)+' · '+modulo()}</strong>
     <div class="grid2" style="margin-top:8px">
-      <select id="aud-tipo" onchange="audTipo=this.value;renderAud()" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option><option value="parcial" ${audTipo==='parcial'?'selected':''}>🎯 Auditoría de un material (solo lo que cuentes)</option></select>
+      <select id="aud-tipo" onchange="setAudTipo(this.value)" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option><option value="parcial" ${audTipo==='parcial'?'selected':''}>🎯 Auditoría de un material (solo lo que cuentes)</option><option value="simulacion" ${audTipo==='simulacion'?'selected':''}>🧪 Simulador (solo para checar, no guarda nada)</option></select>
       <input id="aud-auditor" placeholder="Nombre de quien cuenta" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
     ${ciego||audTipo==='conteo'?'':`<button class="btn small" style="margin-top:8px;width:100%;${audOcultarTeo?'background:linear-gradient(135deg,#6b4bd6,#5338b8)':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="audOcultarTeo=!audOcultarTeo;guardarBorradorAud();renderAud()">${audOcultarTeo?'🙈 Contando a ciegas · toca para ver el teórico':'👁️ Viendo el teórico · toca para contar a ciegas'}</button>`}
-    ${ciego?'':`<p class="hint" style="margin-top:6px">${parcial?'<strong>Auditoría de un material:</strong> cuenta solo lo que quieres corregir (por ejemplo, la Melamina Blanco). Se compara contra lo que dice la app y, al aplicarla, solo eso se corrige; lo que no cuentes se queda igual.':comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
+    ${ciego?'':`<p class="hint" style="margin-top:6px">${esSimAud()?'<strong>Simulador:</strong> ve a cualquier sección, cuenta lo que quieras y revisa en ✅ Revisar si cuadra. Nada se guarda.':parcial?'<strong>Auditoría de un material:</strong> cuenta solo lo que quieres corregir (por ejemplo, la Melamina Blanco). Se compara contra lo que dice la app y, al aplicarla, solo eso se corrige; lo que no cuentes se queda igual.':comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
     ${libre?'':`<div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>`}
     <p class="hint" style="margin:4px 0 0;${libre?'display:none':''}">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas. Puedes pasar a cualquier sección; lo pendiente se marca con ⏳.</p>
     <div class="chips" style="margin-top:8px">${chips}</div>
@@ -1601,7 +1656,7 @@ function actualizarFaltanAud(){
 function selectAuditCat(c){ auditCat=c; renderAud(); }
 // Borrador del conteo/auditoría: se guarda en el teléfono cada pocos segundos, para no perder lo
 // contado si se cierra la app, se acaba la pila o llega una actualización.
-function claveBorradorAud(){ return 'borradorAud_'+modulo(); }
+function claveBorradorAud(){ return 'borradorAud_'+modulo()+(audTipo==='simulacion'?'_sim':''); }
 function guardarBorradorAud(){
   try{
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
@@ -1615,7 +1670,7 @@ function recuperarBorradorAud(){
   try{
     // Solo se recupera UNA vez al abrir el conteo (no cada vez que se redibuja la pantalla); si no,
     // al quitar lo último capturado regresaba el borrador y no se podía dejar en blanco.
-    if(_borradorRevisado[modulo()]) return; _borradorRevisado[modulo()] = true;
+    const _bk = modulo()+(audTipo==='simulacion'?'_sim':''); if(_borradorRevisado[_bk]) return; _borradorRevisado[_bk] = true;
     const raw = localStorage.getItem(claveBorradorAud()); if(!raw) return;
     const hayAhora = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
     if(hayAhora) return;
@@ -1923,6 +1978,7 @@ function setAuditPieza(grupo, key, val){
 }
 
 async function saveAudit(){
+  if(esSimAud()) return alert('Estás en el SIMULADOR: aquí no se guarda nada. Revisa el resultado en ✅ Revisar.');
   const tipo = $('#aud-tipo').value;
   const auditor = $('#aud-auditor').value.trim() || 'Sin nombre';
   const eq = piezasAuditAHojas();
@@ -6512,8 +6568,8 @@ function pzResumenHtml(){
   const pool = pzPool(), cons = pzConsumo();
   if(!pool.length && !pzMedidas.length) return '<p class="hint">Todavía no capturas piezas.</p>';
   return `<div class="hint" style="margin:0 0 6px">${pool.map(p=>`${p.cantidad} × ${p.label} · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle()).join('<br>')}</div>
-    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const f=calcFormula(it.id); const m=pzModo==='merma'||pzModo==='reg', rc=pzModo==='recon';
-      return `<div class="movitem"><span><span class="invname">${it.nombre}</span>${pzModo==='merma'?`<span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.cortado)} ya cortadas</span>`:''}</span><strong class="${rc?'':(m?'neg':'pos')}">${rc?'= ':(m?'−':'+')}${fmtNum(c.cantidad)} ${it.unidad}${rc?' en piezas':''}</strong></div>`; }).join('')}</div>`;
+    <div class="movlist">${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); const f=calcFormula(it.id); const m=pzModo==='merma'||pzModo==='reg', rc=pzModo==='recon'||pzModo==='calc';
+      return `<div class="movitem"><span><span class="invname">${it.nombre}</span>${pzModo==='merma'?`<span class="hint" style="display:block;margin:2px 0 0">Hay ${fmtNum(f.cortado)} ya cortadas</span>`:''}${pzModo==='calc'?`<span class="hint" style="display:block;margin:2px 0 0">La app dice: ${fmtNum(f.cortado)} ya cortadas${f.esHoja?' · '+fmtNum(f.completas)+' completas':''}${(()=>{ const d=fmtNum(Number(c.cantidad)-f.cortado); return Math.abs(d)<0.005?' · <strong style="color:var(--ok)">cuadra</strong>':` · <strong style="color:${d<0?'var(--bad)':'#b3742c'}">${d<0?'faltan':'sobran'} ${fmtNum(Math.abs(d))}</strong>`; })()}</span>`:''}</span><strong class="${rc?'':(m?'neg':'pos')}">${rc?'= ':(m?'−':'+')}${fmtNum(c.cantidad)} ${it.unidad}${rc?' en piezas':''}</strong></div>`; }).join('')}</div>`;
 }
 function setPz(g, key, val){
   const n = val==='' ? 0 : Number(val);
@@ -6531,8 +6587,9 @@ function sumarPz(g, key){
   setPz(g, key, String(actual+n)); renderPzEnc();
 }
 function renderPzEnc(){
-  if(esSoloLectura()){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  if(esSoloLectura() && pzModo!=='calc'){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   if(!pzGrupo) pzGrupo = MEL_COLORES[0];
+  const esCalc = pzModo==='calc';
   const esMDF = pzGrupo===AUD_GRUPO_MDF;
   const lista = PIEZAS_AUDIT.filter(p=>p.tipo===(esMDF?'mdf':'mel'));
   const counts = pzVals[pzGrupo]||{};
@@ -6540,7 +6597,11 @@ function renderPzEnc(){
     + (()=>{ const n=Object.keys(pzVals[AUD_GRUPO_MDF]||{}).length; return `<option value="${AUD_GRUPO_MDF}" ${esMDF?'selected':''}>MDF (fondos de cajón/cajonera)${n?' ✓'+n:''}</option>`; })();
   const esMerma = pzModo==='merma', esReg = pzModo==='reg';
   if(esReg){ const it=CATALOGO.find(i=>i.id===regPzItem); if(it){ pzGrupo = it.cat==='MDF' ? AUD_GRUPO_MDF : it.nombre.replace(/^Melamina /,''); } }
-  $('#main').innerHTML = (esReg ? `<div class="card" style="border:2px solid #e0791a">
+  $('#main').innerHTML = (esCalc ? `<div class="card" style="border:2px solid #5b6b7f">
+      <div style="font-size:17px;font-weight:800">🧮 Calculadora de piezas · ${modulo()}</div>
+      <p class="hint">Cuenta las piezas cortadas de un color y la app te dice <strong>a cuántas hojas equivalen</strong>, y lo compara con lo que dice el inventario. <strong>Solo es para checar: no se guarda ni se suma o resta nada.</strong></p>
+      <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');pzVals={};pzMedidas=[];irA('inv')">Salir</button>
+    </div>` : esReg ? `<div class="card" style="border:2px solid #e0791a">
       <div style="font-size:17px;font-weight:800">✂️ Piezas dañadas del regreso</div>
       <p class="hint">Cuenta solo las piezas de <strong>${(CATALOGO.find(i=>i.id===regPzItem)||{}).nombre||''}</strong> que vienen dañadas. La app las convierte a hojas y eso se va a merma; lo demás regresa al inventario.</p>
       <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="volverRegreso()">Cancelar</button>
@@ -6564,8 +6625,9 @@ function renderPzEnc(){
     </div>
     ${esMDF?'':pzMedidasHtml()}
     <div class="card">
-      <div class="paso">3</div><strong>${esMerma||esReg?'Esto se va a merma':'Esto se suma al inventario'}</strong>
+      <div class="paso">3</div><strong>${esCalc?'Equivale a (no se guarda)':(esMerma||esReg?'Esto se va a merma':'Esto se suma al inventario')}</strong>
       <div id="pz-resumen" style="margin-top:8px">${pzResumenHtml()}</div>
+      ${esCalc?`<button class="btn" style="margin-top:12px;width:100%;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar lo que llevas contado?')){pzVals={};pzMedidas=[];renderPzEnc();}">🗑️ Borrar y empezar de nuevo</button></div>`:''}${esCalc?'<div style="display:none">':''}
       <input id="pz-nota" placeholder="${esMerma?'¿Qué pasó? (opcional)':'¿Dónde estaban? (opcional)'}" value="${String(pzNota).replace(/"/g,'&quot;')}" oninput="pzNota=this.value" style="margin-top:10px">
       ${esMerma?fotoPickerHtml('merma','Foto de lo dañado (opcional)'):''}
       ${esReg?`<button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="usarPiezasRegreso()">✅ Usar estas piezas como merma</button>`:`<button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px;background:${esMerma?'linear-gradient(135deg,#e0791a,#c0620f)':'linear-gradient(135deg,#0e8a8a,#0b6f6f)'}" onclick="guardarPzEnc()">${esMerma?'⚠️ Registrar merma':'✅ Sumar al inventario'}</button>`}
