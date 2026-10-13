@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v134';
+const APP_VERSION = 'v135';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -632,6 +632,7 @@ function setView(v){
   if(v==='ini') renderIni();
   if(v==='movhist') renderMovHist();
   if(v==='entr'){ entrCache=null; renderEntradas(); }
+  if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
   if(v==='mas') renderMas();
@@ -1223,6 +1224,254 @@ async function generarReporteModuloPDF(){
   const blob = doc.output('blob');
   if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
     try{ await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'Entradas y hojas', text:`Entradas y hojas · ${admMod==='__todos'?'5 módulos':admMod} · ${rango}` }); return; }catch(e){}
+  }
+  doc.save(filename);
+}
+
+// ===== Reporte de consumo: ¿Cuánto se gastó y en qué? (confirmado por el usuario) =====
+// Por módulo, material y fechas: lo que tenía al inicio, lo que entró (solo hojas completas de
+// proveedor o de otro módulo; lo que no trae origen sale "Sin datos"), lo que salió (instalaciones
+// y otras cosas: mermas, garantías, faltantes de auditoría, traspasos, salidas, sobrantes) y lo que
+// hay al final (completas y cortadas). Instalaciones resumidas en muebles y puertas (sin lista
+// por modelo para que el reporte no sea largo). Solo cuenta lo aprobado. Solo Dirección.
+let conMod = '', conDesde = '', conHasta = '', conCat = 'Melamina', conDatosCache = null;
+async function conDatos(){
+  if(conDatosCache) return conDatosCache;
+  const [mv, ini, rs] = await Promise.all(['movimientos','inicial','resets'].map(c=>db.collection(c).get()));
+  const resetF = {}; rs.docs.forEach(d=>{ resetF[d.id]=d.data().fecha; });
+  const iniMap = {}; ini.docs.forEach(d=>{ iniMap[d.id]=d.data(); });
+  const movsT = mv.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado!=='pendiente' && m.estado!=='rechazado');
+  conDatosCache = {resetF, iniMap, movsT};
+  return conDatosCache;
+}
+function conRango(k){
+  const hoy = fechaHoyLocal();
+  if(k==='semana'){ conDesde = sabadoDe(hoy); conHasta = hoy; }
+  else if(k==='pasada'){ const s = new Date(sabadoDe(hoy)+'T12:00:00'); s.setDate(s.getDate()-7); conDesde = s.toISOString().slice(0,10); conHasta = finSemana(conDesde); }
+  else if(k==='mes'){ conDesde = hoy.slice(0,8)+'01'; conHasta = hoy; }
+  renderConsumo();
+}
+const fDiaCorto = ymd => new Date(ymd+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short'}).replace('.','');
+function conSalidaDestino(m){
+  let x = /^Traspaso (.+?) → (.+?)( ·|$)/.exec(m.nota||''); if(x) return x[2];
+  x = /^Devolución de préstamo (.+?) → (.+?)( \(|$)/.exec(m.nota||''); if(x) return x[2];
+  return '';
+}
+function conEsPuerta(m){ return /^Puerta /.test(m.nota||''); }
+function calcConsumo(D, mod, cat, d1, d2){
+  const iniISO = new Date(d1+'T00:00:00').toISOString(), finISO = new Date(d2+'T23:59:59.999').toISOString();
+  const items = CATALOGO.filter(i=>cat==='__todo' || i.cat===cat);
+  const filas = [], entradas = [], otras = [], instIds = {mueble:new Set(), puerta:new Set()};
+  let desdeConteo = null;
+  items.forEach(it=>{
+    const b = lineaBase(D.resetF[mod], D.iniMap[inicialKey(mod,it.id)]||null);
+    if(b.desde && b.desde > iniISO && (!desdeConteo || b.desde > desdeConteo)) desdeConteo = b.desde;
+    const todos = D.movsT.filter(m=>m.modulo===mod && m.itemId===it.id && (!b.desde || m.fecha>b.desde));
+    const antes = todos.filter(m=>m.fecha < iniISO), per = todos.filter(m=>m.fecha>=iniISO && m.fecha<=finISO);
+    const A = calcularFormula(it.id, b.inicial, b.inicialCortado, antes);
+    const Z = calcularFormula(it.id, b.inicial, b.inicialCortado, antes.concat(per));
+    const f = {it, tenia:A.final, inst:0, instMueble:0, instPuerta:0, nMueble:new Set(), nPuerta:new Set(), gar:0, merma:0, falto:0, sobro:0, trasp:0, traspA:{}, salida:0, sobrante:0,
+      prov:0, modE:0, sinDatos:0, regresos:0, hayComp:Z.completas, hayCort:Z.cortado, hay:Z.final, esHoja:!!Z.esHoja};
+    per.forEach(m=>{ const q = Number(m.cantidad)||0, dia = diaLocal(m.fecha);
+      if(m.tipo==='instalacion'){ f.inst += q; const lote = m.loteId||m.id, esCambio = /Cambio de modelo/.test(m.nota||'');
+        if(conEsPuerta(m)){ f.instPuerta += q; if(!esCambio){ f.nPuerta.add(lote); instIds.puerta.add(lote); } }
+        else { f.instMueble += q; if(!esCambio){ f.nMueble.add(lote); instIds.mueble.add(lote); } } }
+      else if(m.tipo==='garantia'){ f.gar += q; otras.push({dia, it, que:'Garantía', nota:m.nota||'', q}); }
+      else if(m.tipo==='merma'){ f.merma += q; otras.push({dia, it, que:'Merma', nota:m.nota||'', q, mal:true}); }
+      else if(m.tipo==='ajuste'){ if(q<0){ f.falto += -q; otras.push({dia, it, que:'Faltó en auditoría', nota:m.nota||'', q:-q, mal:true}); } else f.sobro += q; }
+      else if(m.tipo==='salida'){ const dest = conSalidaDestino(m);
+        if(dest){ f.trasp += q; f.traspA[dest] = (f.traspA[dest]||0)+q; otras.push({dia, it, que:'A otro módulo', nota:'A '+dest, q}); }
+        else { f.salida += q; otras.push({dia, it, que:'Salida', nota:m.nota||'', q}); } }
+      else if(m.tipo==='sobrante'){ f.sobrante += q; otras.push({dia, it, que:'A sobrantes', nota:m.nota||'', q}); }
+      else if(m.tipo==='devolucion') f.regresos += q;
+      else if(m.tipo==='entrada'){ const o = origenDeEntrada(m);
+        if(o.tipo==='proveedor'){ f.prov += q; entradas.push({dia, it, q, de:o.txt.replace(/^Proveedor · /,''), m}); }
+        else if(o.tipo==='modulo'){ f.modE += q; entradas.push({dia, it, q, de:o.txt, m}); }
+        else if(o.txt==='Sin especificar'){ f.sinDatos += q; entradas.push({dia, it, q, de:'', sd:true, m}); }
+        else f.regresos += q; }
+    });
+    f.otras = f.gar + f.merma + f.falto + f.trasp + f.salida + f.sobrante;
+    f.salieron = f.inst + f.otras; f.entraron = f.prov + f.modE + f.sinDatos;
+    if(f.salieron>0.0005 || f.entraron>0.0005 || f.regresos>0.0005 || f.sobro>0.0005) filas.push(f);
+  });
+  filas.sort((a,b)=>b.salieron-a.salieron);
+  // Posibles capturas dobles: misma instalación (mismo día, coordinador, descripción y material)
+  // capturada más de una vez.
+  const lotes = {};
+  D.movsT.filter(m=>m.modulo===mod && m.tipo==='instalacion' && m.fecha>=iniISO && m.fecha<=finISO && !/Cambio de modelo/.test(m.nota||'')).forEach(m=>{
+    const l = lotes[m.loteId||m.id] = lotes[m.loteId||m.id] || {dia:diaLocal(m.fecha), quien:m.creadoPor||'', nota:m.nota||'', its:[]};
+    l.its.push(m.itemId+':'+fmtNum(m.cantidad)); });
+  const grupos = {};
+  Object.values(lotes).forEach(l=>{ const k = [l.dia, l.quien, l.nota, l.its.sort().join(',')].join('|'); (grupos[k] = grupos[k] || []).push(l); });
+  const dobles = Object.values(grupos).filter(g=>g.length>1).map(g=>{ const l = g[0];
+    const enCat = l.its.map(x=>x.split(':')).filter(([id])=>items.some(i=>i.id===id));
+    if(!enCat.length) return null;
+    return {dia:l.dia, quien:l.quien.split('@')[0], nota:l.nota.split(' · ')[0], n:g.length, mat:enCat.map(([id,q])=>conNombre(CATALOGO.find(i=>i.id===id))+' '+q).join(', ')}; }).filter(Boolean)
+    .sort((a,b)=>a.dia.localeCompare(b.dia));
+  entradas.sort((a,b)=>a.dia.localeCompare(b.dia)); otras.sort((a,b)=>a.dia.localeCompare(b.dia));
+  // Punto a revisar: el color que más se fue en cosas que no son instalación (sin contar traspasos).
+  let peor = null; filas.forEach(f=>{ const x = f.merma + f.falto; if(x>0.0005 && (!peor || x > peor.merma+peor.falto)) peor = f; });
+  return {filas, entradas, otras, dobles, peor, desdeConteo, nInst:{mueble:instIds.mueble.size, puerta:instIds.puerta.size}};
+}
+function conDesgloseTxt(f){
+  const p = [];
+  if(f.merma>0.0005) p.push(fmtNum(f.merma)+' mermas');
+  if(f.gar>0.0005) p.push(fmtNum(f.gar)+' garantías');
+  if(f.falto>0.0005) p.push(fmtNum(f.falto)+' faltó en auditoría');
+  Object.entries(f.traspA).forEach(([d,q])=>p.push(fmtNum(q)+' a '+d));
+  if(f.salida>0.0005) p.push(fmtNum(f.salida)+' salidas');
+  if(f.sobrante>0.0005) p.push(fmtNum(f.sobrante)+' a sobrantes');
+  const extra = [];
+  if(f.regresos>0.0005) extra.push('regresaron '+fmtNum(f.regresos)+(f.esHoja?' cortadas':''));
+  if(f.sobro>0.0005) extra.push('sobraron '+fmtNum(f.sobro)+' en auditoría');
+  return {p, extra};
+}
+function conNombre(it){ return it.cat==='Melamina' ? it.nombre.replace(/^Melamina /,'') : (it.nombre==='MDF 5mm' ? 'MDF 5mm Blanco' : it.nombre); }
+function conPuntos(R){
+  const out = [];
+  if(R.peor) out.push(`<b>${conNombre(R.peor.it)}</b>: de ${fmtNum(R.peor.salieron)} que salieron, ${fmtNum(R.peor.merma+R.peor.falto)} fueron mermas o faltantes de auditoría.`);
+  R.dobles.slice(0,3).forEach(d=>out.push(`${d.n} instalaciones iguales el ${fDiaCorto(d.dia)}: <b>${d.nota}</b> (${d.mat} c/u, ${d.quien}). Revisar que no sea doble captura.`));
+  if(R.dobles.length>3) out.push(`… y ${R.dobles.length-3} grupo(s) más de instalaciones iguales.`);
+  const sd = R.filas.filter(f=>f.sinDatos>0.0005);
+  if(sd.length) out.push(`Entradas sin datos de dónde vienen: ${sd.map(f=>`<b>${conNombre(f.it)}</b> ${fmtNum(f.sinDatos)}`).join(', ')}.`);
+  return out;
+}
+async function renderConsumo(){
+  current = 'consumo';
+  if(!esAdmin()){ $('#main').innerHTML='<div class="card">Este reporte es solo para Dirección.</div>'; return; }
+  if(!conMod) conMod = modulo();
+  if(!conDesde || !conHasta){ conDesde = sabadoDe(fechaHoyLocal()); conHasta = fechaHoyLocal(); }
+  if(conDesde > conHasta){ const t = conDesde; conDesde = conHasta; conHasta = t; }
+  $('#main').innerHTML = '<div class="card hint">Calculando…</div>';
+  let D; try{ D = await conDatos(); }catch(e){ $('#main').innerHTML = '<div class="card">No se pudo calcular: '+e.message+'</div>'; return; }
+  if(current!=='consumo') return;
+  const R = calcConsumo(D, conMod, conCat, conDesde, conHasta);
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  const hoja = conCat==='Melamina' || conCat==='MDF';
+  const chip = (k,t) => `<button class="chip ${conMod===k?'on':''}" onclick="conMod='${k}';renderConsumo()">${t}</button>`;
+  const uni = f => f.esHoja ? '' : ' '+item2unidad(f.it.id);
+  const filasHtml = R.filas.map(f=>{ const d = conDesgloseTxt(f);
+    return `<div class="movitem" style="display:block;${R.peor===f?'border-left:5px solid #e2b23c;background:rgba(226,178,60,.10)':''}">
+      <div class="row" style="justify-content:space-between;gap:8px"><strong>${conNombre(f.it)}</strong><span>Salieron <strong>${fmtNum(f.salieron)}</strong>${uni(f)}</span></div>
+      <div class="hint" style="margin:3px 0 0">🔧 ${fmtNum(f.inst)} en instalaciones${f.otras>0.0005?` · <span style="color:var(--bad)">${fmtNum(f.otras)} en otras cosas</span> (${d.p.join(' · ')})`:''}${f.entraron>0.0005?` · <span style="color:#22a35a">entraron ${fmtNum(f.entraron)}</span>`:''}${d.extra.length?' · '+d.extra.join(' · '):''}</div>
+      <div class="hint" style="margin:2px 0 0">Tenía ${fmtNum(f.tenia)} → hay <strong>${fmtNum(f.hay)}</strong>${f.esHoja?` (${fmtNum(f.hayComp)} completas · ${fmtNum(f.hayCort)} cortadas)`:''}</div></div>`; }).join('');
+  const puntos = conPuntos(R);
+  $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:800">📊 ¿Cuánto se gastó y en qué?</div>
+      <p class="hint">Lo que tenía, lo que entró de proveedores u otros módulos, lo que salió (instalaciones, mermas, garantías, faltantes) y lo que hay. Solo cuenta lo aprobado.</p>
+      <div class="chips" style="margin-top:8px">${MODULOS.map(m=>chip(m.nombre, m.nombre)).join('')}</div>
+      <div class="grid2" style="margin-top:8px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+        <div><label class="hint">Desde</label><input type="date" value="${conDesde}" style="margin-top:4px;min-width:0;width:100%" onchange="conDesde=this.value;renderConsumo()"></div>
+        <div><label class="hint">Hasta</label><input type="date" value="${conHasta}" style="margin-top:4px;min-width:0;width:100%" onchange="conHasta=this.value;renderConsumo()"></div></div>
+      <div class="chips" style="margin-top:8px"><button class="chip" onclick="conRango('semana')">Esta semana</button><button class="chip" onclick="conRango('pasada')">Semana pasada</button><button class="chip" onclick="conRango('mes')">Este mes</button></div>
+      <label class="hint" style="display:block;margin-top:8px">Material</label>
+      <select style="margin-top:4px;width:100%" onchange="conCat=this.value;renderConsumo()">${cats.map(c=>`<option ${c===conCat?'selected':''}>${c}</option>`).join('')}<option value="__todo" ${conCat==='__todo'?'selected':''}>Todo</option></select>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1" onclick="generarConsumoPDF()">📄 Descargar PDF</button><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="conDatosCache=null;renderConsumo()">🔄 Actualizar</button></div>
+      ${R.desdeConteo?`<p class="hint" style="margin:8px 0 0">⚠️ El conteo inicial fue el ${new Date(R.desdeConteo).toLocaleDateString('es-MX',{day:'numeric',month:'long'})}: "Tenía" es lo que se contó ese día.</p>`:''}</div>
+    ${puntos.length?`<div class="card aviso"><strong>⚠️ Puntos a revisar</strong>${puntos.map(p=>`<div class="hint" style="margin:4px 0 0">• ${p}</div>`).join('')}</div>`:''}
+    <div class="card"><strong>${conCat==='__todo'?'Todo':conCat} · ${conMod} · ${fDiaCorto(conDesde)} al ${fDiaCorto(conHasta)}</strong>
+      ${hoja&&(R.nInst.mueble||R.nInst.puerta)?`<p class="hint" style="margin:4px 0 0">🔧 ${R.nInst.mueble} mueble(s) y ${R.nInst.puerta} puerta(s) instalados</p>`:''}
+      <div class="movlist" style="margin-top:8px">${filasHtml || '<p class="hint">No hubo movimientos en estas fechas.</p>'}</div></div>`;
+}
+async function generarConsumoPDF(){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  let D; try{ D = await conDatos(); }catch(e){ return alert('No se pudo calcular: '+e.message); }
+  const mod = conMod, cat = conCat, d1 = conDesde, d2 = conHasta;
+  const R = calcConsumo(D, mod, cat, d1, d2);
+  const catTxt = cat==='__todo' ? 'Todo el material' : cat;
+  const hoja = cat==='Melamina' || cat==='MDF';
+  const { jsPDF } = window.jspdf; const doc = new jsPDF();
+  const L = 14, W = 182, pageH = doc.internal.pageSize.getHeight(); let y = 0;
+  const rango = `del ${new Date(d1+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'long'})} al ${new Date(d2+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'})}`;
+  const enc = (t, col) => { doc.setFillColor(...col); doc.rect(0,0,210,24,'F'); doc.setFillColor(255,211,77); doc.rect(0,24,210,1.6,'F'); doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(15); doc.text(t, L, 11); doc.setFont(undefined,'normal'); doc.setFontSize(9.5); doc.text(`Módulo ${mod}  ·  ${catTxt}  ·  ${rango}`, L, 18); doc.setTextColor(0,0,0); y = 33; };
+  const titulo = (t, col) => { y += 4; if(y > pageH-40){ doc.addPage(); y = 15; } doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.setTextColor(...col); doc.text(t, L, y); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); y += 3; };
+  // Tabla genérica: cols [{t, w, r(alinear der.)}], celdas: texto o {t, sub, col, b}
+  const tabla = (cols, filas, col, opts) => { opts = opts||{};
+    const x0 = i => L + cols.slice(0,i).reduce((s,c)=>s+c.w,0);
+    const head = () => { const hh = cols.some(c=>c.t.includes('\n')) ? 9 : 6.5; doc.setFillColor(...col); doc.rect(L,y,W,hh,'F'); doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(7.6);
+      cols.forEach((c,i)=>{ const ls = c.t.split('\n'); ls.forEach((ln,k)=>{ const yy = y + (ls.length>1 ? 3.6+k*3.3 : 4.4); c.r ? doc.text(ln, x0(i)+c.w-1.5, yy, {align:'right'}) : doc.text(ln, x0(i)+1.5, yy); }); });
+      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += hh; };
+    head();
+    filas.forEach((fila, idx)=>{
+      const celdas = fila.celdas || fila;
+      const subs = celdas.map((c,i)=> c && typeof c==='object' && c.sub ? (doc.setFontSize(6.8), doc.splitTextToSize(c.sub, cols[i].w-3)) : []);
+      const h = 6 + Math.max(0, ...subs.map(s=>s.length)) * 2.9;
+      if(y + h > pageH-14){ doc.addPage(); y = 15; head(); }
+      if(fila.total){ doc.setFillColor(...pdfTinte(col,.86)); doc.rect(L,y,W,h,'F'); doc.setDrawColor(...col); doc.setLineWidth(0.5); doc.line(L,y,L+W,y); }
+      else if(fila.warn){ doc.setFillColor(255,244,214); doc.rect(L,y,W,h,'F'); }
+      else if(idx%2){ doc.setFillColor(...pdfTinte(col,.95)); doc.rect(L,y,W,h,'F'); }
+      celdas.forEach((c,i)=>{ const o = (c && typeof c==='object') ? c : {t:c==null?'':String(c)}; const cl = cols[i];
+        doc.setFontSize(8.6); doc.setFont(undefined, (o.b||fila.total||(i===0&&!opts.noBold0)) ? 'bold' : 'normal'); doc.setTextColor(...(o.col||[0,0,0]));
+        let t = String(o.t==null?'':o.t); const maxW = cl.w-3; while(t.length>3 && doc.getTextWidth(t)>maxW) t = t.slice(0,-2);
+        cl.r ? doc.text(t, x0(i)+cl.w-1.5, y+4.2, {align:'right'}) : doc.text(t, x0(i)+1.5, y+4.2);
+        if(subs[i].length){ doc.setFont(undefined,'normal'); doc.setFontSize(6.8); doc.setTextColor(95,100,112); subs[i].forEach((s,k)=>{ cl.r ? doc.text(s, x0(i)+cl.w-1.5, y+7.3+k*2.9, {align:'right'}) : doc.text(s, x0(i)+1.5, y+7.3+k*2.9); }); }
+      });
+      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); doc.setDrawColor(221,221,238); doc.setLineWidth(0.2); doc.line(L,y+h,L+W,y+h); y += h; });
+    y += 3; };
+  const nota = t => { doc.setFontSize(7.6); doc.setTextColor(90,96,112); doc.splitTextToSize(t, W).forEach(l=>{ doc.text(l, L, y+2.5); y += 3.4; }); doc.setTextColor(0,0,0); y += 3; };
+  const n = v => Math.abs(v)<0.0005 ? '—' : String(fmtNum(v));
+  const ROJO = [192,57,43], VERDE = [31,138,76], AZUL = [35,72,181], VERDEH = [31,122,70];
+  enc('Closets Vera · ¿Cuánto se gastó y en qué?', AZUL);
+  // 1. Lo que tenía, entró, salió y hay
+  titulo('1. Lo que tenía, lo que entró, lo que salió y lo que hay' + (hoja ? ' (hojas)' : ''), AZUL);
+  const tot = R.filas.reduce((s,f)=>{ ['tenia','entraron','salieron','inst','otras','hayComp','hayCort','hay'].forEach(k=>s[k]+=f[k]); return s; }, {tenia:0,entraron:0,salieron:0,inst:0,otras:0,hayComp:0,hayCort:0,hay:0});
+  const cols1 = hoja
+    ? [{t:'Color',w:27},{t:'Tenía\n'+fDiaCorto(d1),w:16,r:1},{t:'Entraron\ncompletas',w:17,r:1},{t:'Salieron',w:15,r:1},{t:'En insta-\nlaciones',w:16,r:1},{t:'En otras cosas',w:45,r:1},{t:'Hay\ncompletas',w:16,r:1},{t:'Hay\ncortadas',w:15,r:1},{t:'Hay\ntotal',w:15,r:1}]
+    : [{t:'Artículo',w:44},{t:'Tenía\n'+fDiaCorto(d1),w:18,r:1},{t:'Entraron',w:18,r:1},{t:'Salieron',w:18,r:1},{t:'En insta-\nlaciones',w:18,r:1},{t:'En otras cosas',w:48,r:1},{t:'Hay',w:18,r:1}];
+  const filas1 = R.filas.map(f=>{ const d = conDesgloseTxt(f); const sub = d.p.concat(d.extra.map(e=>'('+e+')')).join(' · ');
+    const otras = {t:n(f.otras), sub, col: (f.merma+f.falto)>0.0005 ? ROJO : [0,0,0], b:(f.merma+f.falto)>0.0005};
+    const base = [conNombre(f.it), n(f.tenia), {t: f.entraron>0.0005 ? '+'+fmtNum(f.entraron) : '—', col: f.entraron>0.0005 ? VERDE : [0,0,0], b: f.entraron>0.0005}, {t:n(f.salieron), b:true}, n(f.inst), otras];
+    const fin = hoja ? [{t:String(fmtNum(f.hayComp)), col: f.hayComp<0.0005 ? ROJO : [0,0,0], b: f.hayComp<0.0005}, String(fmtNum(f.hayCort)), {t:String(fmtNum(f.hay)), b:true}] : [{t:String(fmtNum(f.hay))+' '+item2unidad(f.it.id), b:true}];
+    return {celdas: base.concat(fin), warn: R.peor===f}; });
+  if(!filas1.length){ nota('No hubo movimientos de este material en estas fechas.'); }
+  else {
+    if(hoja) filas1.push({total:true, celdas:['Total', fmtNum(tot.tenia), '+'+fmtNum(tot.entraron), fmtNum(tot.salieron), fmtNum(tot.inst), fmtNum(tot.otras), fmtNum(tot.hayComp), fmtNum(tot.hayCort), fmtNum(tot.hay)]});
+    tabla(cols1, filas1, AZUL);
+    nota('Ordenado del que más salió al que menos. Tenía + Entraron − Salieron (+ lo cortado que regresó y lo que sobró en auditoría) = Hay. Solo cuenta lo aprobado.'
+      + (R.desdeConteo ? ` El conteo inicial fue el ${new Date(R.desdeConteo).toLocaleDateString('es-MX',{day:'numeric',month:'long'})}: "Tenía" es lo que se contó ese día.` : ''));
+  }
+  // 2. Instalaciones: muebles y puertas
+  const conInst = R.filas.filter(f=>f.inst>0.0005);
+  if(conInst.length){
+    titulo('2. Instalaciones', AZUL);
+    const cols2 = [{t:hoja?'Color':'Artículo',w:52},{t:'Muebles',w:26,r:1},{t:'Hojas en muebles',w:36,r:1},{t:'Puertas',w:26,r:1},{t:'Hojas en puertas',w:42,r:1}];
+    if(!hoja){ cols2[2].t = 'En muebles'; cols2[4].t = 'En puertas'; }
+    const filas2 = conInst.sort((a,b)=>b.inst-a.inst).map(f=>[conNombre(f.it), f.nMueble.size||'—', n(f.instMueble), f.nPuerta.size||'—', n(f.instPuerta)]);
+    if(hoja) filas2.push({total:true, celdas:['Total', String(R.nInst.mueble), fmtNum(conInst.reduce((s,f)=>s+f.instMueble,0)), String(R.nInst.puerta), fmtNum(conInst.reduce((s,f)=>s+f.instPuerta,0))]});
+    tabla(cols2, filas2, AZUL);
+    nota('Un mueble o puerta que lleva varios colores se cuenta en cada color que usó; el total cuenta cada instalación una sola vez.');
+  }
+  // 3. Lo que entró
+  titulo('3. Lo que entró' + (hoja ? ' (hojas completas de proveedor o de otro módulo)' : ' (de proveedor o de otro módulo)'), VERDEH);
+  if(!R.entradas.length) nota('No entró nada de proveedores ni de otros módulos en estas fechas.');
+  else {
+    const tp = R.filas.reduce((s,f)=>s+f.prov,0), tm = R.filas.reduce((s,f)=>s+f.modE,0), ts = R.filas.reduce((s,f)=>s+f.sinDatos,0);
+    const filas3 = R.entradas.map(e=>[conNombre(e.it), {t:'+'+fmtNum(e.q)+(e.it && !esHoja(e.it) ? ' '+item2unidad(e.it.id) : ''), col:VERDE, b:true}, e.sd ? {t:'Sin datos', col:[179,116,44]} : e.de, fDiaCorto(e.dia)]);
+    filas3.push({total:true, celdas:['Total', '+'+fmtNum(tp+tm+ts), `Proveedor ${fmtNum(tp)} · Otro módulo ${fmtNum(tm)}${ts>0.0005?' · Sin datos '+fmtNum(ts):''}`, '']});
+    tabla([{t:hoja?'Color':'Artículo',w:44},{t:'Entraron',w:26,r:1},{t:'De dónde viene',w:88},{t:'Fecha',w:24,r:1}], filas3, VERDEH);
+    nota('No incluye material cortado que regresó (garantías o cambios de modelo).' + (ts>0.0005 ? ' "Sin datos" = entrada anotada antes de que la app pidiera de dónde viene; sí cuenta en el inventario.' : ''));
+  }
+  // 4. Mermas, garantías, faltantes y traspasos
+  if(R.otras.length){
+    titulo('4. Mermas, garantías, faltantes y traspasos', ROJO);
+    const filas4 = R.otras.map(o=>[fDiaCorto(o.dia), conNombre(o.it), {t:o.que, col:o.mal?ROJO:[0,0,0], b:!!o.mal}, o.nota, {t:fmtNum(o.q)+(esHoja(o.it)?'':' '+item2unidad(o.it.id)), col:o.mal?ROJO:[0,0,0], b:!!o.mal}]);
+    filas4.push({total:true, celdas:['Total','','','', fmtNum(R.otras.reduce((s,o)=>s+o.q,0))]});
+    tabla([{t:'Fecha',w:20},{t:hoja?'Color':'Artículo',w:32},{t:'Qué fue',w:32},{t:'Nota',w:76},{t:'Cantidad',w:22,r:1}], filas4, ROJO, {noBold0:true});
+  }
+  // Puntos a revisar
+  const puntos = conPuntos(R).map(p=>p.replace(/<\/?b>/g,''));
+  if(puntos.length){
+    doc.setFontSize(8.6); const lineas = []; puntos.forEach(p=>doc.splitTextToSize('• '+p, W-8).forEach(l=>lineas.push(l)));
+    const h = 9 + lineas.length*4; if(y + h > pageH-14){ doc.addPage(); y = 15; }
+    doc.setFillColor(255,244,214); doc.setDrawColor(226,178,60); doc.setLineWidth(0.4); doc.rect(L, y, W, h, 'FD');
+    doc.setFont(undefined,'bold'); doc.setFontSize(9.5); doc.text('Puntos a revisar', L+4, y+5.5); doc.setFont(undefined,'normal'); doc.setFontSize(8.6);
+    lineas.forEach((l,k)=>doc.text(l, L+4, y+10+k*4)); y += h + 4;
+  }
+  const np = doc.getNumberOfPages();
+  for(let i=1;i<=np;i++){ doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(140,140,140); doc.text(`Closets Vera · ¿Cuánto se gastó? · ${mod}`, L, pageH-6); doc.text(`Página ${i} de ${np}`, L+W, pageH-6, {align:'right'}); }
+  const filename = `consumo-${mod}-${cat==='__todo'?'todo':cat}-${d1}_${d2}.pdf`.replace(/\s+/g,'-');
+  const blob = doc.output('blob');
+  if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
+    try{ await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'¿Cuánto se gastó?', text:`¿Cuánto se gastó? · ${mod} · ${catTxt} · ${rango}` }); return; }catch(e){}
   }
   doc.save(filename);
 }
@@ -5562,6 +5811,10 @@ function renderRep(){
   html += `<div class="card" id="rep-gas"><strong>⛽ Gasolina de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`;
   setTimeout(repGasolinaSemana, 0);
   setTimeout(repInstalacionesSemana, 0);
+  if(esAdmin()) html += `<div class="card row" style="justify-content:space-between">
+      <div><strong>📊 ¿Cuánto se gastó y en qué?</strong><p class="hint" style="margin:2px 0 0">Por módulo y fechas: lo que tenía, lo que entró, lo que salió (instalaciones, mermas, garantías) y lo que hay. En PDF.</p></div>
+      <button class="btn small" onclick="irA('consumo')">Ver</button>
+    </div>`;
   html += `<div class="card row" style="justify-content:space-between">
       <div><strong>📥 Entradas de material</strong><p class="hint" style="margin:2px 0 0">Lo que llegó de proveedores y lo que mandaron otros módulos, por separado y por material.</p></div>
       <button class="btn small" onclick="irA('entr')">Ver entradas</button>
