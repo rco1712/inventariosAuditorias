@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v135';
+const APP_VERSION = 'v139';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -632,6 +632,7 @@ function setView(v){
   if(v==='ini') renderIni();
   if(v==='movhist') renderMovHist();
   if(v==='entr'){ entrCache=null; renderEntradas(); }
+  if(v==='sal'){ salCache=null; renderSalidas(); }
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -1057,6 +1058,157 @@ function origenDeEntrada(m){
 const ORIGEN_LBL = {proveedor:'🏭 Proveedores', modulo:'🔄 De otros módulos', otro:'📦 Otras entradas'};
 function entradasDe(lista){ return lista.filter(m=>m.tipo==='entrada' && m.estado!=='rechazado').map(m=>Object.assign({}, m, {_o:origenDeEntrada(m)})); }
 
+// ===== Destino de las salidas (confirmado por el usuario) =====
+// Toda salida dice a dónde va. "Otro módulo" aquí es SOLO una salida: no se le suma al otro
+// módulo ni deja deuda (solo Escobedo usa la app por ahora). Si es un préstamo que van a
+// regresar, se usa Traspaso (ese sí deja deuda). También: regreso a proveedor u otro destino.
+let movDestino = '', movDestMod = '', movDestProv = '', movDestProvOtra = false, movDestOtro = '';
+function destinoSalidaHtml(){
+  const otros = MODULOS.map(m=>m.nombre).filter(n=>n!==modulo());
+  const b = (k, ic, t, sub, js) => `<button class="tipobtn ${movDestino===k?'on':''}" onclick="${js||`movDestino='${k}';renderMov()`}"><span class="tipo-ic">${ic}</span><span><strong>${t}</strong><br><small>${sub}</small></span></button>`;
+  return `<div style="margin-top:14px;padding:12px;border-radius:14px;border:2px solid ${movDestino?'var(--line)':'#e0791a'}">
+    <strong>📍 ¿A dónde va? <span style="color:var(--bad)">*</span></strong>
+    <div class="tipos" style="margin-top:8px">${b('modulo','📤','Otro módulo','Solo sale · sin deuda')}${b('proveedor','🏭','Regresa a proveedor','Devolución / cambio')}${b('traspaso','🔄','Traspaso','Préstamo · queda deuda',"irA('trasp')")}${b('otro','✏️','Otro','Taller, cliente… escribir')}</div>
+    ${movDestino==='modulo'?`<label class="hint" style="display:block;margin-top:10px">¿A qué módulo? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px">${otros.map(n=>`<button class="chip ${movDestMod===n?'on':''}" onclick="movDestMod='${n}';renderMov()">${n}</button>`).join('')}</div>
+      <p class="hint" style="margin:6px 0 0;color:#d39b06">Sale de ${modulo()} y <strong>no</strong> se le suma a ${movDestMod||'ese módulo'} ni queda deuda. Si es un préstamo que van a regresar, usa <strong>Traspaso</strong>.</p>`:''}
+    ${movDestino==='proveedor'?`<label class="hint" style="display:block;margin-top:10px">¿A qué proveedor? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px">${PROVEEDORES.map(x=>`<button class="chip ${!movDestProvOtra&&movDestProv===x.n?'on':''}" style="text-align:left;line-height:1.15" onclick="movDestProv='${x.n}';movDestProvOtra=false;renderMov()">${x.n}<br><small style="font-weight:500;opacity:.75">${x.s}</small></button>`).join('')}<button class="chip ${movDestProvOtra?'on':''}" onclick="movDestProvOtra=true;movDestProv='';renderMov()">✏️ Otra tienda<br><small style="font-weight:500;opacity:.75">Escribir cuál</small></button></div>
+      ${movDestProvOtra?`<input id="mv-dprov" placeholder="Nombre de la tienda o proveedor" value="${String(movDestProv).replace(/"/g,'&quot;')}" oninput="movDestProv=this.value" style="margin-top:8px">`:''}`:''}
+    ${movDestino==='otro'?`<label class="hint" style="display:block;margin-top:10px">¿A dónde? <span style="color:var(--bad)">*</span></label>
+      <input id="mv-dotro" placeholder="Ej. Cliente Sr. Ramírez (Cumbres), taller, muestras…" value="${String(movDestOtro).replace(/"/g,'&quot;')}" oninput="movDestOtro=this.value" style="margin-top:4px">`:''}
+    <p class="hint" style="margin:8px 0 0">El <strong>por qué</strong> se escribe en la Nota de abajo.</p>
+  </div>`;
+}
+// Clasifica a dónde se fue una salida (también las capturadas antes de pedir el destino).
+function destinoDeSalida(m){
+  const sinPrefijo = n => String(n||'').replace(/^(Traspaso|Devolución de préstamo) .+? → [^·(]+(\([^)]*\))?\s*(·\s*)?/,'').trim();
+  if(m.destinoTipo==='modulo') return {tipo:'modulo', txt:'Módulo '+(m.destinoModulo||'')+' · salida (sin deuda)', porque:m.nota||''};
+  if(m.destinoTipo==='proveedor') return {tipo:'proveedor', txt:m.proveedor||'Proveedor', porque:m.nota||''};
+  if(m.destinoTipo==='otro') return {tipo:'otro', txt:m.destinoTxt||'Otro', porque:m.nota||''};
+  let x = /^Traspaso (.+?) → (.+?)( ·|$)/.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[2].trim()+' · traspaso (préstamo)', porque:sinPrefijo(m.nota)};
+  x = /^Devolución de préstamo (.+?) → (.+?)( \(|$)/.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[2].trim()+' · devolución de préstamo', porque:''};
+  if(m.cierreTurno) return {tipo:'consumo', txt:'Se gastó en el turno', porque:''};
+  return {tipo:'sindatos', txt:'Sin datos', porque:m.nota||''};
+}
+const DESTINO_GRUPOS = [['modulo','A otros módulos','📤',[180,110,10]],['proveedor','A proveedor','🏭',[22,128,74]]];
+// Lo que se gastó en el turno (consumibles del cierre: PVC, pegamento…) no es "a dónde se fue": no entra aquí.
+// Confirmado por el usuario: el reporte de salidas solo trae lo que se fue a OTRO MÓDULO o a un
+// PROVEEDOR. Lo que se usa en el taller u otro destino ya se descuenta del inventario y no va aquí.
+function salidasDe(lista){ return lista.filter(m=>m.tipo==='salida' && m.estado!=='rechazado' && !m.cierreTurno).map(m=>Object.assign({}, m, {_d:destinoDeSalida(m)})).filter(m=>m._d.tipo==='modulo' || m._d.tipo==='proveedor'); }
+// Dibuja en un PDF (jsPDF) las salidas agrupadas por destino y material. Regresa la nueva "y".
+function dibujarSalidasPDF(doc, sals, o){
+  const L = o.marginL, W = o.W, pageH = o.pageH; let y = o.y;
+  if(!sals.length){ doc.setFontSize(11); doc.setTextColor(110,116,132); doc.text(o.vacio||'No hubo salidas de material.', L, y+4); doc.setTextColor(0,0,0); return y+10; }
+  DESTINO_GRUPOS.forEach(([k, titulo, ic, gc])=>{
+    const grupo = sals.filter(m=>m._d.tipo===k); if(!grupo.length) return;
+    if(y > pageH-40){ doc.addPage(); y = 15; }
+    doc.setFillColor(...gc); doc.rect(L, y, W, 9, 'F');
+    doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(11.5);
+    doc.text(titulo, L+3, y+6.2); doc.text(`${grupo.length} salida(s)`, L+W-3, y+6.2, {align:'right'});
+    doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 12;
+    [...new Set(CATALOGO.map(i=>i.cat))].forEach(cat=>{
+      const ms = grupo.filter(m=>{ const it=CATALOGO.find(i=>i.id===m.itemId); return it && it.cat===cat; }); if(!ms.length) return;
+      const color = PDF_CAT_COLOR[cat] || [55,65,81];
+      const cols = [{label:o.conDia?'Día':'Hora', w:20}, {label:cat, w:52}, {label:'Cantidad', w:30, r:1}, {label:'A dónde · por qué', w:W-102-(o.conModulo?22:0)}].concat(o.conModulo?[{label:'Módulo', w:22}]:[]);
+      const x0 = i => L + cols.slice(0,i).reduce((s,c)=>s+c.w,0);
+      if(y > pageH-30){ doc.addPage(); y = 15; }
+      doc.setFillColor(...color); doc.rect(L, y, W, 6, 'F');
+      doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold');
+      cols.forEach((c,i)=> c.r ? doc.text(c.label, x0(i)+c.w-2, y+4.2, {align:'right'}) : doc.text(c.label, x0(i)+1.5, y+4.2));
+      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 6;
+      ms.forEach((m,idx)=>{
+        doc.setFontSize(8.5);
+        const donde = m._d.txt + (m._d.porque ? ' · '+m._d.porque : '');
+        const lineas = doc.splitTextToSize(donde, cols[3].w-3).slice(0,3);
+        const h = Math.max(5.5, 1.8 + lineas.length*3.7);
+        if(y + h > pageH-14){ doc.addPage(); y = 15; }
+        if(idx%2===1){ doc.setFillColor(...pdfTinte(color,.94)); doc.rect(L, y, W, h, 'F'); }
+        doc.text(o.conDia ? fCorta(diaLocal(m.fecha)) : new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}), x0(0)+1.5, y+3.9);
+        let nom = m.itemNombre + (m.estado==='pendiente'?' (por aprobar)':''); while(nom.length>3 && doc.getTextWidth(nom) > cols[1].w-3) nom = nom.slice(0,-2);
+        doc.text(nom, x0(1)+1.5, y+3.9);
+        const hoja = esHojaId(m.itemId);
+        doc.setFont(undefined,'bold'); doc.text(`${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}${hoja?' compl.':''}`, x0(2)+cols[2].w-2, y+3.9, {align:'right'}); doc.setFont(undefined,'normal');
+        lineas.forEach((l,k)=>doc.text(l, x0(3)+1.5, y+3.9+k*3.7));
+        if(o.conModulo) doc.text(m.modulo||'', x0(4)+1.5, y+3.9);
+        y += h;
+      });
+      y += 4;
+    });
+    y += 3;
+  });
+  // Resumen de hojas completas que salieron (sin el consumo del turno)
+  const hojas = sals.filter(m=>esHojaId(m.itemId) && m._d.tipo!=='consumo' && m.estado!=='pendiente');
+  if(hojas.length){
+    const tot = hojas.reduce((s,m)=>s+Number(m.cantidad||0),0);
+    const ag = {}; hojas.forEach(m=>{ const a = m._d.tipo==='sindatos' ? 'sin datos' : m._d.txt.replace(/^Módulo /,'').replace(/ · .*$/,''); const k = String(m.itemNombre).replace(/^Melamina /,'')+'|'+a; ag[k] = (ag[k]||0) + Number(m.cantidad||0); });
+    const det = Object.entries(ag).map(([k,q])=>{ const [c,a] = k.split('|'); return `${fmtNum(q)} ${c} → ${a}`; }).join(' · ');
+    doc.setFontSize(9); doc.setFont(undefined,'bold'); const ls = doc.splitTextToSize(`Hojas completas que salieron${o.conDia?'':(o.sufijo!==undefined?o.sufijo:' hoy')}: ${fmtNum(tot)}   (${det})`, W-8);
+    const h = 5 + ls.length*4.2; if(y + h > pageH-14){ doc.addPage(); y = 15; }
+    doc.setFillColor(251,243,242); doc.setDrawColor(227,230,239); doc.rect(L, y, W, h, 'FD');
+    doc.setFont(undefined,'bold'); ls.forEach((l,k)=>{ doc.text(l, L+4, y+5.5+k*4.2); if(k===0) doc.setFont(undefined,'normal'); }); doc.setFont(undefined,'normal');
+    y += h + 4;
+  }
+  return y;
+}
+
+// ===== Apartado: Salidas de material (confirmado por el usuario) =====
+let salRango = 'semana', salDesde = '', salHasta = '', salMod = '', salCache = null;
+function rangoSalidas(){
+  const hoy = fechaHoyLocal();
+  if(salRango==='hoy') return [hoy, hoy];
+  if(salRango==='semana'){ const sab = sabadoDe(hoy); return [sab, finSemana(sab)]; }
+  if(salRango==='pasada'){ const s = new Date(sabadoDe(hoy)+'T12:00:00'); s.setDate(s.getDate()-7); const d = s.toISOString().slice(0,10); return [d, finSemana(d)]; }
+  return [salDesde||hoy, salHasta||hoy];
+}
+async function renderSalidas(){
+  current = 'sal';
+  if(!salMod) salMod = esAdmin() ? '__todos' : modulo();
+  $('#main').innerHTML = '<div class="card hint">Cargando salidas…</div>';
+  if(!salCache){ try{ const snap = await db.collection('movimientos').get(); salCache = salidasDe(snap.docs.map(d=>({id:d.id,...d.data()}))); }catch(e){ salCache = salidasDe(movs); } }
+  if(current!=='sal') return;
+  const [d1, d2] = rangoSalidas();
+  const mods = esAdmin() || esSoloLectura() ? ['__todos', ...MODULOS.map(m=>m.nombre)] : [modulo()];
+  const base = salCache.filter(m=>(salMod==='__todos' || m.modulo===salMod) && diaLocal(m.fecha)>=d1 && diaLocal(m.fecha)<=d2).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const chip = (k, t) => `<button class="chip ${salRango===k?'on':''}" onclick="salRango='${k}';renderSalidas()">${t}</button>`;
+  const grupos = DESTINO_GRUPOS.map(([k, t, ic, c])=>({k, t, ic, c:`rgb(${c.join(',')})`, ms:base.filter(m=>m._d.tipo===k)})).filter(g=>g.ms.length);
+  const fila = m => `<div class="movitem"><span style="min-width:0"><span class="invname">${m.itemNombre}${m.estado==='pendiente'?' <span class="tag" style="color:#b3742c;border-color:#b3742c">Por aprobar</span>':''}</span><span class="hint" style="display:block;margin:2px 0 0">${fCorta(diaLocal(m.fecha))} · ${m._d.txt}${m._d.porque?' · '+m._d.porque:''}${salMod==='__todos'?' · '+m.modulo:''}</span></span><strong style="white-space:nowrap">${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}</strong></div>`;
+  $('#main').innerHTML = `<div class="card">
+      <div style="font-size:17px;font-weight:800">📤 Salidas de material</div>
+      <p class="hint">Lo que se fue a otros módulos o se regresó a proveedores.</p>
+      <div class="chips" style="margin-top:8px">${chip('hoy','Hoy')}${chip('semana','Esta semana')}${chip('pasada','Semana pasada')}${chip('rango','🗓️ De tal fecha a tal fecha')}</div>
+      ${salRango==='rango'?`<div class="grid2" style="margin-top:8px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div><label class="hint">Desde</label><input type="date" value="${d1}" style="min-width:0;width:100%" onchange="salDesde=this.value;renderSalidas()"></div><div><label class="hint">Hasta</label><input type="date" value="${d2}" style="min-width:0;width:100%" onchange="salHasta=this.value;renderSalidas()"></div></div>`:`<p class="hint" style="margin:6px 0 0">Del ${fCorta(d1)} al ${fCorta(d2)}</p>`}
+      ${mods.length>1?`<select style="margin-top:8px" onchange="salMod=this.value;renderSalidas()">${mods.map(m=>`<option value="${m}" ${salMod===m?'selected':''}>${m==='__todos'?'Los 5 módulos':m}</option>`).join('')}</select>`:''}
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1" onclick="generarSalidasPDF()">📄 Descargar PDF</button><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="salCache=null;renderSalidas()">🔄 Actualizar</button></div>
+    </div>
+    <div class="card"><strong>${base.length} salida(s)</strong>
+      ${grupos.length ? grupos.map(g=>`<div style="border-left:5px solid ${g.c};padding-left:8px;margin:12px 0 4px;font-weight:800;display:flex;justify-content:space-between"><span>${g.ic} ${g.t}</span><span>${g.ms.length}</span></div><div class="movlist">${g.ms.map(fila).join('')}</div>`).join('') : '<p class="hint">No salió material a otros módulos ni a proveedores en esas fechas.</p>'}
+    </div>`;
+}
+async function generarSalidasPDF(){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  if(!salCache){ try{ const snap = await db.collection('movimientos').get(); salCache = salidasDe(snap.docs.map(d=>({id:d.id,...d.data()}))); }catch(e){ return alert('No se pudo cargar: '+e.message); } }
+  const [d1, d2] = rangoSalidas();
+  const sals = salCache.filter(m=>(salMod==='__todos' || m.modulo===salMod) && diaLocal(m.fecha)>=d1 && diaLocal(m.fecha)<=d2).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+  const { jsPDF } = window.jspdf; const doc = new jsPDF();
+  const L = 14, W = 182, pageH = doc.internal.pageSize.getHeight();
+  const modTxt = salMod==='__todos' ? 'Los 5 módulos' : 'Módulo '+salMod;
+  const rango = d1===d2 ? fCorta(d1) : `del ${fCorta(d1)} al ${fCorta(d2)}`;
+  doc.setFillColor(176,58,46); doc.rect(0,0,210,24,'F'); doc.setFillColor(255,211,77); doc.rect(0,24,210,1.6,'F');
+  doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(15); doc.text('Salidas de material', L, 11);
+  doc.setFont(undefined,'normal'); doc.setFontSize(9.5); doc.text(`${modTxt}  ·  ${rango}`, L, 18); doc.setTextColor(0,0,0);
+  doc.setFontSize(8.5); doc.setTextColor(90,96,112); doc.text('Lo que se fue a otros módulos o se regresó a proveedores.', L, 31); doc.setTextColor(0,0,0);
+  dibujarSalidasPDF(doc, sals, {marginL:L, W, pageH, y:35, conDia:d1!==d2, conModulo:salMod==='__todos', vacio:'No salió material a otros módulos ni a proveedores en estas fechas.'});
+  const np = doc.getNumberOfPages();
+  for(let i=1;i<=np;i++){ doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(140,140,140); doc.text(`Closets Vera · Salidas de material · ${modTxt}`, L, pageH-6); doc.text(`Página ${i} de ${np}`, L+W, pageH-6, {align:'right'}); }
+  const filename = `salidas-${salMod==='__todos'?'5-modulos':salMod}-${d1}${d1!==d2?'_'+d2:''}.pdf`;
+  const blob = doc.output('blob');
+  if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
+    try{ await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'Salidas de material', text:`Salidas de material · ${modTxt} · ${rango}` }); return; }catch(e){}
+  }
+  doc.save(filename);
+}
+
 // ===== Apartado: Entradas de material (confirmado por el usuario) =====
 let entrTab = 'proveedor', entrRango = 'semana', entrDesde = '', entrHasta = '', entrMod = '', entrCache = null;
 function rangoEntradas(){
@@ -1279,9 +1431,9 @@ function calcConsumo(D, mod, cat, d1, d2){
       else if(m.tipo==='garantia'){ f.gar += q; otras.push({dia, it, que:'Garantía', nota:m.nota||'', q}); }
       else if(m.tipo==='merma'){ f.merma += q; otras.push({dia, it, que:'Merma', nota:m.nota||'', q, mal:true}); }
       else if(m.tipo==='ajuste'){ if(q<0){ f.falto += -q; otras.push({dia, it, que:'Faltó en auditoría', nota:m.nota||'', q:-q, mal:true}); } else f.sobro += q; }
-      else if(m.tipo==='salida'){ const dest = conSalidaDestino(m);
-        if(dest){ f.trasp += q; f.traspA[dest] = (f.traspA[dest]||0)+q; otras.push({dia, it, que:'A otro módulo', nota:'A '+dest, q}); }
-        else { f.salida += q; otras.push({dia, it, que:'Salida', nota:m.nota||'', q}); } }
+      else if(m.tipo==='salida'){ const dest = m.destinoTipo==='modulo' ? m.destinoModulo : conSalidaDestino(m), dd = destinoDeSalida(m);
+        if(dest){ f.trasp += q; f.traspA[dest] = (f.traspA[dest]||0)+q; otras.push({dia, it, que:'A otro módulo', nota:dd.txt+(dd.porque?' · '+dd.porque:''), q}); }
+        else { f.salida += q; otras.push({dia, it, que: dd.tipo==='proveedor' ? 'A proveedor' : 'Salida', nota: dd.tipo==='sindatos' ? (m.nota||'') : dd.txt+(dd.porque?' · '+dd.porque:''), q}); } }
       else if(m.tipo==='sobrante'){ f.sobrante += q; otras.push({dia, it, que:'A sobrantes', nota:m.nota||'', q}); }
       else if(m.tipo==='devolucion') f.regresos += q;
       else if(m.tipo==='entrada'){ const o = origenDeEntrada(m);
@@ -1506,6 +1658,7 @@ function renderMov(){
     <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');irA('pzenc')">🧩 Encontré piezas cortadas que no estaban en el inventario</button>
   </div>
   ${movTipo==='entrada'?`<div class="card" style="padding:4px 16px 16px">${origenEntradaHtml()}</div>`:''}
+  ${movTipo==='salida'?`<div class="card" style="padding:4px 16px 16px">${destinoSalidaHtml()}</div>`:''}
   <div class="card">
     <div class="paso">2</div><strong>¿De qué material?</strong>
     <input id="mv-buscar" type="search" placeholder="🔍 Buscar artículo (ej. corredera, blanco)" value="${String(movBuscar).replace(/"/g,'&quot;')}" style="margin-top:10px" oninput="movBuscar=this.value;renderMovLista()">
@@ -1593,10 +1746,17 @@ async function registrarMovLote(){
     if(movOrigen==='modulo' && !movOrigenMod) return alert('📍 Elige qué módulo mandó el material.');
     if(movOrigen==='proveedor' && !movProveedor.trim()) return alert(movProvOtra ? '📍 Escribe el nombre de la tienda o proveedor.' : '📍 Elige de qué proveedor llegó el material.');
   }
+  if(tipo==='salida'){
+    if(!movDestino) return alert('📍 Falta decir a dónde va el material: Otro módulo, Proveedor u Otro.');
+    if(movDestino==='modulo' && !movDestMod) return alert('📍 Elige a qué módulo se va el material.');
+    if(movDestino==='proveedor' && !movDestProv.trim()) return alert(movDestProvOtra ? '📍 Escribe el nombre de la tienda o proveedor.' : '📍 Elige a qué proveedor se regresa el material.');
+    if(movDestino==='otro' && !movDestOtro.trim()) return alert('📍 Escribe a dónde va el material.');
+  }
   const origenTxt = tipo==='entrada' ? (movOrigen==='proveedor' ? 'Proveedor'+(movProveedor.trim()?': '+movProveedor.trim():'') : 'De '+movOrigenMod) : '';
+  const destinoTxt = tipo==='salida' ? (movDestino==='modulo' ? 'A '+movDestMod+' (solo salida, sin deuda)' : movDestino==='proveedor' ? 'Regresa a proveedor: '+movDestProv.trim() : 'A: '+movDestOtro.trim()) : '';
   const verbo = (TIPO_INFO[tipo]||{}).verbo || tipo;
   const resumen = aplicar.map(a=>`• ${fmtNum(a.cantidad)} ${item2unidad(a.itemId)} de ${a.itemNombre}`).join('\n');
-  if(!confirm(`¿Todo está bien?\n\n${origenTxt?'📍 '+origenTxt+'\n\n':''}${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
+  if(!confirm(`¿Todo está bien?\n\n${origenTxt?'📍 '+origenTxt+'\n\n':''}${destinoTxt?'📍 '+destinoTxt+'\n\n':''}${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
   if(avisosAuto.length && !confirm('Todavía no se anota el corte de hoy:\n\n'+avisosAuto.join('\n')+'\n\nNo pasa nada: cuando se registre el corte del día se ajusta solo. ¿Continuar?')) return;
   try{
     // Confirmado por el usuario: el Corte del día NO requiere aprobación (se aplica directo,
@@ -1606,6 +1766,7 @@ async function registrarMovLote(){
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const a of aplicar){
       const doc = {modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString(),estado,loteId,creadoPor};
+      if(tipo==='salida'){ doc.destinoTipo = movDestino; if(movDestino==='modulo') doc.destinoModulo = movDestMod; else if(movDestino==='proveedor') doc.proveedor = movDestProv.trim(); else doc.destinoTxt = movDestOtro.trim(); }
       if(tipo==='entrada'){ doc.origenTipo = movOrigen; if(movOrigen==='proveedor') doc.proveedor = movProveedor.trim(); else doc.origenModulo = movOrigenMod; }
       if(tipo==='merma' && (fotosTmp.merma||[]).length){ doc.fotos = fotosTmp.merma.length; doc.fotosRef = loteId; }
       if(a.lado) doc.lado = a.lado;
@@ -1615,7 +1776,7 @@ async function registrarMovLote(){
       ? '✅ Guardado. <br><small>Dirección lo tiene que aprobar para que cuente en el inventario.</small>'
       : '✅ Guardado: '+aplicar.length+' artículo(s).');
     if(tipo==='merma') await guardarFotos('merma', 'merma', loteId, mod);
-    movVals={}; movBuscar=''; movOrigen=''; movProveedor=''; movOrigenMod=''; movProvOtra=false; entrCache=null;
+    movVals={}; movBuscar=''; movOrigen=''; movProveedor=''; movOrigenMod=''; movProvOtra=false; entrCache=null; movDestino=''; movDestMod=''; movDestProv=''; movDestProvOtra=false; movDestOtro=''; salCache=null;
     renderMov();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -5793,6 +5954,7 @@ async function renderTraspResumen(){
 // ===== Capa 5: Reportes =====
 function puedeCerrarInventarioDiario(){ return esAdmin() || (miPerfil && miPerfil.rol==='coordinador'); }
 
+let repDiaSel = '';
 function renderRep(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   const conMovimiento = CATALOGO.filter(it=>{ const f=calcFormula(it.id); return f.inicial||f.entradas||f.salidas||f.instalaciones||f.garantias||f.mermas||f.cortes||f.ajustes; });
@@ -5807,6 +5969,18 @@ function renderRep(){
     </div>`;
   }
 
+  {
+    const ayer = new Date(fechaHoyLocal()+'T12:00:00'); ayer.setDate(ayer.getDate()-1);
+    if(!repDiaSel) repDiaSel = ayer.toISOString().slice(0,10);
+    html += `<div class="card">
+      <strong>📅 Reporte de un día</strong>
+      <p class="hint" style="margin:2px 0 0">Elige el día y sale con qué inició y con qué cerró ${modulo()} cada artículo, más sus entradas y salidas con proveedores y otros módulos.</p>
+      <div class="row" style="gap:8px;margin-top:8px;flex-wrap:nowrap">
+        <input type="date" value="${repDiaSel}" max="${fechaHoyLocal()}" style="flex:1;min-width:0" onchange="repDiaSel=this.value">
+        <button class="btn" onclick="if(!repDiaSel) return alert('Elige un día.'); generarReporteDiarioPDF('completo', repDiaSel)">📄 PDF</button>
+      </div>
+    </div>`;
+  }
   html += `<div class="card" id="rep-inst"><strong>🔧 Instalaciones de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`;
   html += `<div class="card" id="rep-gas"><strong>⛽ Gasolina de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`;
   setTimeout(repGasolinaSemana, 0);
@@ -5818,6 +5992,10 @@ function renderRep(){
   html += `<div class="card row" style="justify-content:space-between">
       <div><strong>📥 Entradas de material</strong><p class="hint" style="margin:2px 0 0">Lo que llegó de proveedores y lo que mandaron otros módulos, por separado y por material.</p></div>
       <button class="btn small" onclick="irA('entr')">Ver entradas</button>
+    </div>`;
+  html += `<div class="card row" style="justify-content:space-between">
+      <div><strong>📤 Salidas de material</strong><p class="hint" style="margin:2px 0 0">Lo que se fue a otros módulos o se regresó a proveedores.</p></div>
+      <button class="btn small" onclick="irA('sal')">Ver salidas</button>
     </div>`;
   html += `<div class="card row" style="justify-content:space-between">
       <div><strong>📜 Historial de entradas y salidas</strong><p class="hint" style="margin:2px 0 0">Cuándo llegó material, cuándo salió y quién lo anotó, con totales por fechas.</p></div>
@@ -8014,7 +8192,7 @@ const PDF_CAT_COLOR = {
 };
 const PDF_SWATCH_RGB = {'Blanco':[247,247,244],'Cenizo':[185,178,166],'Beige':[227,211,181],'Durango':[155,107,67],'Gris':[141,145,150],'Lino':[216,207,192],'Bco Mármol':[236,236,236],'Neg Mármol':[45,45,45],'Monarca':[110,74,47],'Negro':[29,29,31],'Nogal':[90,59,38],'Polar':[232,236,239],'Rioja':[138,75,50],'Roble':[179,132,82],'Roble Santana':[166,120,74],'Choco':[74,46,34]};
 function pdfTinte(rgb, t){ return rgb.map(v=>Math.round(v+(255-v)*t)); }
-async function generarReporteDiarioPDF(modo){
+async function generarReporteDiarioPDF(modo, fechaDia){
   modo = modo || 'completo';
   const soloSinCortar = modo==='sincortar';
   const { jsPDF } = window.jspdf;
@@ -8023,6 +8201,11 @@ async function generarReporteDiarioPDF(modo){
   const ahora = new Date();
   const fechaStr = ahora.toLocaleDateString('es-MX', {year:'numeric', month:'long', day:'numeric'});
   const horaStr = ahora.toLocaleTimeString('es-MX', {hour:'numeric', minute:'2-digit'});
+  // Reporte de cualquier día (confirmado por el usuario): con qué inició y con qué cerró el módulo
+  // ese día, más sus entradas y salidas. Si es hoy, sale el reporte completo de siempre.
+  const diaSel = fechaDia || fechaHoyLocal();
+  const esPasado = diaSel !== fechaHoyLocal();
+  const diaStr = new Date(diaSel+'T12:00:00').toLocaleDateString('es-MX', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
   const marginL = 14, W = 182;
   const pageH = doc.internal.pageSize.getHeight();
   const COLS_NORMAL = [
@@ -8052,8 +8235,10 @@ async function generarReporteDiarioPDF(modo){
   };
   const correo = (typeof getCurrentUserEmail==='function' ? getCurrentUserEmail() : '') || '';
   if(!soloSinCortar){
-  encabezado('Closets Vera · Inventario diario', `Módulo ${mod}  ·  ${fechaStr}, ${horaStr}${correo?'  ·  '+correo:''}`);
+  if(esPasado) encabezado('Closets Vera · Reporte del día', `Módulo ${mod}  ·  ${diaStr}  ·  sacado el ${fechaStr}, ${horaStr}`);
+  else encabezado('Closets Vera · Inventario diario', `Módulo ${mod}  ·  ${fechaStr}, ${horaStr}${correo?'  ·  '+correo:''}`);
 
+  if(!esPasado){
   // Tarjetas de resumen: completas / cortado / total por tipo de hoja
   const resumen = ['Melamina','MDF'].map(cat=>{
     const t = CATALOGO.filter(i=>i.cat===cat).reduce((s,it)=>{ const f=calcFormula(it.id); s.c+=f.completas; s.k+=f.cortado; s.t+=f.final; s.a+=f.autoCortes; return s; },{c:0,k:0,t:0,a:0});
@@ -8076,6 +8261,93 @@ async function generarReporteDiarioPDF(modo){
   doc.setFont(undefined,'bold'); doc.text('Final en negritas', marginL+46, y); doc.setFont(undefined,'normal');
   doc.text('·  números en rojo = negativo  ·  "–" = sin movimiento', marginL+72, y);
   doc.setTextColor(0,0,0); y += 6;
+  }
+
+  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  // Movimiento de HOY (confirmado por el usuario): con qué inició el día cada artículo (en hojas:
+  // completas y cortado), lo que entró, salió, se cortó, se instaló, garantías, mermas y ajustes del
+  // día, y con cuánto queda. Inició + movimientos = Queda.
+  {
+    const hoyL = diaSel;
+    const iniDiaISO = new Date(hoyL+'T00:00:00').toISOString(), finDiaISO = new Date(hoyL+'T23:59:59.999').toISOString();
+    const deHoy = movs.filter(m=>m.modulo===mod && m.fecha && diaLocal(m.fecha)===hoyL && m.tipo!=='nota');
+    const aprobHoy = deHoy.filter(m=>m.estado!=='pendiente' && m.estado!=='rechazado');
+    const pendHoy = deHoy.filter(m=>m.estado==='pendiente').length;
+    const porItem = {};
+    aprobHoy.forEach(m=>{ const t = porItem[m.itemId] = porItem[m.itemId] || {ent:0, sal:0, corte:0, inst:0, gar:0, merma:0, aj:0};
+      const q = Number(m.cantidad)||0;
+      if(m.tipo==='entrada' || m.tipo==='devolucion') t.ent += q; else if(m.tipo==='salida' || m.tipo==='sobrante') t.sal += q;
+      else if(m.tipo==='corte') t.corte += q; else if(m.tipo==='instalacion') t.inst += q; else if(m.tipo==='garantia') t.gar += q;
+      else if(m.tipo==='merma') t.merma += q; else if(m.tipo==='ajuste') t.aj += q; });
+    // Cómo estaba cada artículo en un momento (mismo cálculo que el inventario): al empezar el día
+    // (sin lo de ese día) y al cerrar el día (con todo lo de ese día).
+    const alCorte = (itemId, cutISO, incluye) => {
+      const resetFecha = resetMap[mod];
+      const docI = inicialMap[itemId]!==undefined ? {cantidad:inicialMap[itemId], cortado:inicialCortadoMap[itemId], fecha:inicialFechaMap[itemId]} : null;
+      const bl = lineaBase(resetFecha, docI);
+      if(bl.desde && bl.desde >= cutISO) return {final:bl.inicial, completas:bl.inicial-bl.inicialCortado, cortado:bl.inicialCortado};
+      const lista = movs.filter(m=>m.itemId===itemId && (!bl.desde || m.fecha>bl.desde) && (incluye ? m.fecha <= cutISO : m.fecha < cutISO) && m.estado!=='pendiente' && m.estado!=='rechazado');
+      return calcularFormula(itemId, bl.inicial, bl.inicialCortado, lista);
+    };
+    const inicioDia = itemId => alCorte(itemId, iniDiaISO, false);
+    doc.setFillColor(255,211,77); doc.rect(marginL, y, W, 9, 'F');
+    doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.setTextColor(22,26,43);
+    doc.text(esPasado ? 'El día: con qué inició, qué se movió y con qué cerró' : 'El día de hoy: con qué inició, qué se movió y con qué queda', marginL+3, y+6.3);
+    doc.setFont(undefined,'normal'); doc.setFontSize(8.5); doc.text(esPasado ? diaStr : fechaStr, marginL+W-3, y+6.3, {align:'right'});
+    doc.setTextColor(0,0,0); y += 12;
+    const COLS_HOY_HOJA = [{label:'Artículo', w:38}, {label:'Inició\ncompl.', w:14, k:'ini'}, {label:'Inició\ncortado', w:14, k:'ini'}, {label:'Entró', w:12}, {label:'Salió', w:12}, {label:'Corte', w:12}, {label:'Instal.', w:12}, {label:'Garant.', w:12}, {label:'Mermas', w:12}, {label:'Ajuste', w:12}, {label:(esPasado?'Cerró':'Queda')+'\ncompl.', w:16, k:'fin'}, {label:(esPasado?'Cerró':'Queda')+'\ncortado', w:16, k:'fin'}];
+    const COLS_HOY = [{label:'Artículo', w:52}, {label:'Inició', w:18, k:'ini'}, {label:'Entró', w:16}, {label:'Salió', w:16}, {label:'Instal.', w:16}, {label:'Garant.', w:16}, {label:'Mermas', w:16}, {label:'Ajuste', w:14}, {label:esPasado?'Cerró':'Queda', w:18, k:'fin'}];
+    const hdrHoy = () => { doc.setFillColor(...color); doc.rect(marginL, y, tableW(), 8, 'F'); doc.setTextColor(255,255,255); doc.setFontSize(7.2); doc.setFont(undefined,'bold');
+      cols.forEach((c,i)=>{ const ls = c.label.split('\n'); ls.forEach((l,k)=>{ const yy = y + (ls.length>1 ? 3.3+k*3.2 : 5); i===0 ? doc.text(l, colX(i)+1.5, yy) : doc.text(l, colX(i)+c.w-1.5, yy, {align:'right'}); }); });
+      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 8; };
+    let hubo = false;
+    cats.forEach(cat=>{
+      const its = CATALOGO.filter(i=>i.cat===cat).map(it=>({it, f: esPasado ? alCorte(it.id, finDiaISO, true) : calcFormula(it.id), i0:inicioDia(it.id), t:porItem[it.id]||{ent:0,sal:0,corte:0,inst:0,gar:0,merma:0,aj:0}}))
+        .filter(x=>porItem[x.it.id] || Math.abs(x.f.final)>0.0005 || Math.abs(x.i0.final)>0.0005);
+      if(!its.length) return; hubo = true;
+      const hoja = esHoja(its[0].it);
+      cols = hoja ? COLS_HOY_HOJA : COLS_HOY; color = PDF_CAT_COLOR[cat] || [55,65,81];
+      if(y > pageH-32){ doc.addPage(); y = 15; }
+      tituloCat(cat); hdrHoy();
+      its.forEach((x,idx)=>{
+        if(y > pageH-15){ doc.addPage(); y = 15; tituloCat(cat+' (continúa)'); hdrHoy(); }
+        const t = x.t, movio = !!porItem[x.it.id];
+        const vals = hoja ? [x.i0.completas, x.i0.cortado, t.ent, t.sal, t.corte, t.inst, t.gar, t.merma, t.aj, x.f.completas, x.f.cortado]
+                          : [x.i0.final, t.ent, t.sal, t.inst, t.gar, t.merma, t.aj, x.f.final];
+        if(idx%2===1){ doc.setFillColor(...pdfTinte(color,.94)); doc.rect(marginL, y, tableW(), 5, 'F'); }
+        cols.forEach((c,i)=>{ if(c.k==='ini'){ doc.setFillColor(...pdfTinte([110,116,132], idx%2?.84:.9)); doc.rect(colX(i), y, c.w, 5, 'F'); }
+          if(c.k==='fin'){ doc.setFillColor(...(movio ? [255,236,179] : pdfTinte([35,72,181], idx%2?.84:.9))); doc.rect(colX(i), y, c.w, 5, 'F'); } });
+        doc.setFontSize(8); doc.setFont(undefined, movio?'bold':'normal');
+        let nm = x.it.nombre.replace(/^Melamina /,'').replace(/^MDF 5mm$/,'MDF 5mm Blanco'); if(nm.length>(hoja?20:30)) nm = nm.slice(0,(hoja?18:28))+'…'; doc.text(nm, colX(0)+1.5, y+3.6); doc.setFont(undefined,'normal');
+        vals.forEach((v,k)=>{ const i = k+1, c = cols[i], n = Number(v)||0;
+          if(!c.k && Math.abs(n)<0.0005){ doc.setTextColor(185,190,200); doc.text('–', colX(i)+c.w-1.5, y+3.6, {align:'right'}); doc.setTextColor(0,0,0); return; }
+          const esEnt = c.label==='Entró';
+          if(esEnt) doc.setTextColor(22,128,74); else if(!c.k && c.label!=='Corte' && c.label!=='Ajuste') doc.setTextColor(192,57,43);
+          if(n<0) doc.setTextColor(214,69,69);
+          if(c.k==='fin') doc.setFont(undefined,'bold');
+          doc.text((esEnt?'+':(!c.k && c.label!=='Corte' && c.label!=='Ajuste' ? '−' : ''))+fmtNum(n), colX(i)+c.w-1.5, y+3.6, {align:'right'});
+          doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); });
+        y += 5;
+      });
+      y += 4;
+    });
+    if(!hubo){ doc.setFontSize(10); doc.setTextColor(110,116,132); doc.text('No hay inventario ni movimientos en este módulo.', marginL, y+3); doc.setTextColor(0,0,0); y += 9; }
+    if(y > pageH-20){ doc.addPage(); y = 15; }
+    doc.setFontSize(7.5); doc.setTextColor(90,96,112);
+    doc.text(`Inició + Entró − Salió − Instal. − Garant. − Mermas ± Ajuste = ${esPasado?'Cerró':'Queda'}. El corte solo pasa hojas de completas a cortado.`, marginL, y);
+    doc.text(`En negritas y amarillo: lo que tuvo movimiento ${esPasado?'ese día':'hoy'}. Solo cuenta lo aprobado` + (pendHoy ? `; hay ${pendHoy} movimiento(s) de ${esPasado?'ese día':'hoy'} por aprobar.` : '.'), marginL, y+3.6);
+    doc.setTextColor(0,0,0);
+    // Lo acumulado desde el conteo va en hoja aparte (solo en el reporte de hoy)
+    if(!esPasado){
+    doc.addPage(); y = 15;
+    const fIni = Object.values(inicialFechaMap||{}).filter(Boolean).sort().pop();
+    doc.setFillColor(35,72,181); doc.rect(marginL, y, W, 9, 'F');
+    doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.setTextColor(255,255,255);
+    doc.text('Acumulado desde el conteo', marginL+3, y+6.3);
+    doc.setFont(undefined,'normal'); doc.setFontSize(8.5); if(fIni) doc.text('Conteo del '+new Date(fIni).toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'}), marginL+W-3, y+6.3, {align:'right'});
+    doc.setTextColor(0,0,0); y += 13;
+    }
+  }
 
   function drawHeaderRow(){
     doc.setFillColor(...color); doc.rect(marginL, y, tableW(), 6, 'F');
@@ -8092,7 +8364,7 @@ async function generarReporteDiarioPDF(modo){
     doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
     y += 7;
   }
-  const cats = [...new Set(CATALOGO.map(i=>i.cat))];
+  if(!esPasado){
   cats.forEach(cat=>{
     const items = CATALOGO.filter(i=>i.cat===cat);
     const catHoja = items.length>0 && esHoja(items[0]);
@@ -8137,9 +8409,10 @@ async function generarReporteDiarioPDF(modo){
     }
   }
 
+  } // fin de acumulado y correderas (solo hoy)
   } // fin de la parte de tablas
   // Hoja final (confirmado por el usuario): SOLO hojas enteras de Melamina y MDF (3 y 5 mm).
-  {
+  if(!esPasado || soloSinCortar){
     if(!soloSinCortar) doc.addPage();
     encabezado('Hojas enteras', `Lo que hay sin cortar  ·  Módulo ${mod}  ·  ${fechaStr}, ${horaStr}`);
     // Diseño sencillo como las demás tablas, con resaltes (confirmado por el usuario).
@@ -8189,13 +8462,14 @@ async function generarReporteDiarioPDF(modo){
   // Hoja aparte (confirmado por el usuario): ENTRADAS del día, separadas por origen y material.
   if(!soloSinCortar){
     doc.addPage();
-    encabezado('Entradas de material', `Lo que entró hoy  ·  Módulo ${mod}  ·  ${fechaStr}`);
-    const hoyL = fechaHoyLocal();
-    const ents = entradasDe(movs).filter(m=>m.modulo===mod && diaLocal(m.fecha)===hoyL).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+    encabezado('Entradas de material', `${esPasado?'Lo que entró':'Lo que entró hoy'}  ·  Módulo ${mod}  ·  ${esPasado?diaStr:fechaStr}`);
+    const hoyL = diaSel;
+    const ents = entradasDe(movs).filter(m=>m.modulo===mod && diaLocal(m.fecha)===hoyL && (m._o.tipo==='proveedor' || m._o.tipo==='modulo')).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
     if(!ents.length){
-      doc.setFontSize(11); doc.setTextColor(110,116,132); doc.text('No hubo entradas de material hoy.', marginL, y+4); doc.setTextColor(0,0,0);
+      doc.setFontSize(11); doc.setTextColor(110,116,132); doc.text(esPasado ? 'Ese día no llegó material de proveedores ni de otros módulos.' : 'Hoy no llegó material de proveedores ni de otros módulos.', marginL, y+4); doc.setTextColor(0,0,0);
     }
-    const ORIG = [['proveedor','Proveedores',[22,128,74]],['modulo','De otros módulos',[180,110,10]],['otro','Otras entradas',[90,96,112]]];
+    // Confirmado por el usuario: aquí solo lo que llegó de proveedores o de otros módulos.
+    const ORIG = [['proveedor','Proveedores',[22,128,74]],['modulo','De otros módulos',[180,110,10]]];
     ORIG.forEach(([k, titulo, oc])=>{
       const grupo = ents.filter(m=>m._o.tipo===k); if(!grupo.length) return;
       if(y > pageH-40){ doc.addPage(); y=15; }
@@ -8229,8 +8503,18 @@ async function generarReporteDiarioPDF(modo){
     });
   }
 
+  // Hoja aparte (confirmado por el usuario): SALIDAS del día, separadas por destino y material.
+  if(!soloSinCortar){
+    doc.addPage();
+    encabezado('Salidas de material', `${esPasado?'Lo que salió':'Lo que salió hoy'}  ·  Módulo ${mod}  ·  ${esPasado?diaStr:fechaStr}`);
+    doc.setFontSize(8.5); doc.setTextColor(90,96,112); doc.text(`Lo que se fue ${esPasado?'ese día':'hoy'} a otros módulos o se regresó a proveedores.`, marginL, y); doc.setTextColor(0,0,0); y += 5;
+    const hoyL = diaSel;
+    const sals = salidasDe(movs).filter(m=>m.modulo===mod && diaLocal(m.fecha)===hoyL).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+    y = dibujarSalidasPDF(doc, sals, {marginL, W, pageH, y, vacio: esPasado ? 'Ese día no salió material a otros módulos ni a proveedores.' : 'Hoy no salió material a otros módulos ni a proveedores.', conDia:false, sufijo: esPasado?' ese día':' hoy'});
+  }
+
   const stamp = ahora.toISOString().slice(0,10);
-  const filename = `${soloSinCortar?'hojas-enteras':'inventario'}-${mod.replace(/\s+/g,'_')}-${stamp}.pdf`;
+  const filename = esPasado ? `reporte-del-dia-${mod.replace(/\s+/g,'_')}-${diaSel}.pdf` : `${soloSinCortar?'hojas-enteras':'inventario'}-${mod.replace(/\s+/g,'_')}-${stamp}.pdf`;
   const blob = doc.output('blob');
   if(navigator.canShare && navigator.canShare({ files:[new File([blob], filename, {type:'application/pdf'})] })){
     try{
