@@ -27,7 +27,7 @@ let moduloActual = localStorage.getItem('am_modulo') || null;
 // para no decir "dueño"); el valor guardado en la base no cambia. Sin Supabase configurado,
 // miPerfil queda null y la app se comporta como antes (un solo usuario local, sin restricciones).
 let miPerfil = null;
-const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente', administracion:'Administración' };
+const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente', administracion:'Administración', auditor:'Auditor' };
 // 'administracion' (confirmado por el usuario): la persona que surte el material. Sube los pedidos
 // que van a llegar, aprueba lo que llegó, ve lo que falta por entregar y el inventario de los 5
 // módulos. NO aprueba instalaciones ni captura entradas/salidas/instalaciones.
@@ -172,7 +172,7 @@ function aplicarPermisosUI(){
   // Coordinadores: solo lo que usan en el día (se ocultan Catálogo e Historial, que son de consulta avanzada).
   // Coordinador: menú corto (confirmado por el usuario) con lo del día; lo demás queda en "☰ Más".
   const ocultarTabs = miPerfil.rol==='administracion' ? ['mov','aud','inst','trasp','usr','apr','mas','gar','cat','desp','hist']
-    : (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente') ? ['mov','aud','inst','trasp','usr','apr','ped','mas'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist','gar','trasp','rep','desp'] : ['mas']);
+    : (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente'||miPerfil.rol==='auditor') ? ['mov','aud','inst','trasp','usr','apr','ped','mas'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist','gar','trasp','rep','desp'] : ['mas']);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
   });
@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v139';
+const APP_VERSION = 'v140';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -633,6 +633,8 @@ function setView(v){
   if(v==='movhist') renderMovHist();
   if(v==='entr'){ entrCache=null; renderEntradas(); }
   if(v==='sal'){ salCache=null; renderSalidas(); }
+  if(v==='herr'){ herrCache=null; renderHerr(); }
+  if(v==='alm'){ herrCache=null; renderAlmacen(); }
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -859,7 +861,7 @@ async function guardarIni(){
 
 // ===== Inicio: botones grandes según el rol =====
 const ICONO_CAT = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩'};
-function esSoloLectura(){ return miPerfil && (miPerfil.rol==='supervisor' || miPerfil.rol==='gerente' || miPerfil.rol==='administracion'); }
+function esSoloLectura(){ return miPerfil && (miPerfil.rol==='supervisor' || miPerfil.rol==='gerente' || miPerfil.rol==='administracion' || miPerfil.rol==='auditor'); }
 function esCoordinador(){ return miPerfil && miPerfil.rol==='coordinador'; }
 // Abre una pantalla con opciones ya elegidas (p. ej. Entradas/Salidas en "Corte" de Melamina).
 function irA(v, opts){
@@ -871,6 +873,8 @@ function irA(v, opts){
 }
 // Iconos de línea para Inicio (diseño serio, confirmado por el usuario).
 const HOME_IC = {
+  llave:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+  almacen:'<path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/>',
   entrada:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   salida:'<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
   traspaso:'<path d="M7 7h13"/><path d="m16 3 4 4-4 4"/><path d="M17 17H4"/><path d="m8 13-4 4 4 4"/>',
@@ -899,10 +903,11 @@ const HOME_SECCIONES = {
   mat:{t:'Material', c:'#2348b5'},
   dia:{t:'Trabajo del día', c:'#0d7468'},
   dir:{t:'Dirección', c:'#4a3b8f'},
-  ped:{t:'Pedidos', c:'#2348b5'}
+  ped:{t:'Pedidos', c:'#2348b5'},
+  herr:{t:'Herramienta', c:'#c2410c'}
 };
 function renderHome(){
-  const sec = {mat:[], dia:[], dir:[], ped:[]};
+  const sec = {mat:[], dia:[], dir:[], ped:[], herr:[]};
   const t = (icon, titulo, sub, js, s, badge) => sec[s].push(`<button class="tile" style="--tc:${HOME_SECCIONES[s].c}" onclick="${js}" title="${String(sub).replace(/"/g,'&quot;')}">${badge?`<span class="tile-b ${badge.k}">${badge.t}</span>`:''}<span class="tile-ic">${homeIcon(icon)}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`);
   const ENTRA = {k:'ent', t:'↓ Entra'}, SALE = {k:'sal', t:'↑ Sale'}, MUEVE = {k:'mov', t:'⇄ Mueve'};
   let destacado = '';
@@ -939,7 +944,15 @@ function renderHome(){
   if((esAdmin() || esSoloLectura()) && !esAdministracion()) t('reloj','Historial','Auditorías y faltantes',"irA('hist')",'dir');
   t('barras','Reportes','Reporte del día en PDF',"irA('rep')", (esAdmin()||esSoloLectura()) ? 'dir' : 'dia');
   if(esAdmin()) t('usuarios','Usuarios','Dar de alta al personal',"irA('usr')",'dir');
-  const orden = esAdministracion() ? ['ped','mat','dia','dir'] : ['mat','dia','dir','ped'];
+  if(puedeCapturarHerr() || miPerfil && (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente')){
+    // Herramienta (confirmado por el usuario): sección propia en naranja.
+    const H = herrCache; const nPend = H ? herrPendientes(H).filter(m=>puedeAprobarHerr() || m.modulo===modulo()).length : 0, nDan = H ? herrDanadasSinEntregar(H, modulo()).length : 0;
+    if(!H) herrCargar().then(()=>{ if(current==='home') renderHome(); }).catch(()=>{});
+    t('llave','Herramienta', nDan ? nDan+' dañada(s) sin entregar' : 'Por instalador, taller y stock',"herrTab='inst';irA('herr')",'herr', nPend?{k:'num', t:String(nPend)}:null);
+    if(puedeCapturarHerr()) t('traspaso','Cambio de herramienta','Por daño o desgaste',"irA('herr');setTimeout(()=>herrIniciarCambio(''),50)",'herr');
+    if(puedeAprobarHerr()) t('almacen','Almacén general','Herramienta para instaladores y taller',"irA('alm')",'herr');
+  }
+  const orden = esAdministracion() ? ['ped','mat','dia','dir','herr'] : ['mat','dia','dir','herr','ped'];
   const tilesHtml = destacado + orden.filter(k=>sec[k].length).map(k=>`<div class="home-sec" style="--tc:${HOME_SECCIONES[k].c}"><div class="home-sec-t">${HOME_SECCIONES[k].t}</div><div class="tiles">${sec[k].join('')}</div></div>`).join('');
 
   const pend = [];
@@ -1626,6 +1639,478 @@ async function generarConsumoPDF(){
     try{ await navigator.share({ files:[new File([blob], filename, {type:'application/pdf'})], title:'¿Cuánto se gastó?', text:`¿Cuánto se gastó? · ${mod} · ${catTxt} · ${rango}` }); return; }catch(e){}
   }
   doc.save(filename);
+}
+
+// ===== Herramienta (confirmado por el usuario) =====
+// Por módulo: herramienta de cada instalador, herramienta del taller (por área, funcionando o
+// descompuesta) y stock de herramienta. Aparte: almacén general (herramienta para instaladores
+// y para taller), que solo manejan Dirección y Auditor. El coordinador da de alta y pide cambios;
+// todo movimiento queda registrado y lo aprueba Dirección o el Auditor. En un cambio por daño se
+// registra si el coordinador ya entregó la herramienta dañada.
+const HERR_LISTA_INST = ['Escalera','Atornillador','Taladro','Martillo','Segueta','Caladora','Extensión','Cinta métrica','Bandas sujetadoras'];
+const HERR_LISTA_TALLER = ['Taladro','Atornillador','Martillo','Pinzas','Sargentos','Prensas','Compresor','Router','Escalera','Clavadora','Extensión','Manguera de compresor','Cinta métrica'];
+const HERR_MARCAS = [{n:'Pretul',bg:'#f28c00',fg:'#111',rgb:[242,140,0]},{n:'DeWalt',bg:'#febd17',fg:'#111',rgb:[254,189,23]},{n:'Milwaukee',bg:'#db011c',fg:'#fff',rgb:[219,1,28]},{n:'Bosch',bg:'#1e6fb8',fg:'#fff',rgb:[30,111,184]},{n:'Genérico',bg:'#8b93a3',fg:'#fff',rgb:[139,147,163]}];
+const HERR_COLORES = ['Amarillo','Rojo','Azul','Naranja','Verde','Negro','Gris'];
+const HERR_AREAS = ['Cajoneras','Cajones','Espejos','Corte'];
+const HERR_TIPOS = {alambrica:{ic:'🔌',t:'Alámbrica'}, inalambrica:{ic:'🔋',t:'Inalámbrica'}, manual:{ic:'✋',t:'Manual'}};
+const HERR_LUGAR = {instalador:'👷 Instalador', taller:'🛠️ Taller', stock:'📦 Stock', almacen:'🏢 Almacén general'};
+const HERR_MOTIVOS = {dano:'💥 Daño', desgaste:'⚙️ Desgaste', robo:'🚫 Robo o pérdida', otro:'✏️ Otro'};
+const HERR_VIEJA = {tirar:'🗑️ Se tira', reparacion:'🔧 A reparación', taller:'🛠️ Regresa al taller'};
+const HERR_COLOR = '#c2410c', HERR_RGB = [194,65,12], ALM = '__almacen';
+function esAuditor(){ return !!miPerfil && miPerfil.rol==='auditor'; }
+function puedeAprobarHerr(){ return esAdmin() || esAuditor(); }
+function puedeCapturarHerr(){ return esAdmin() || esAuditor() || esCoordinador(); }
+let herrTab = 'inst', herrCache = null, herrForm = null, herrCambio = null, herrEnt = null, herrAbierta = '', herrAlmTab = 'inst';
+async function herrCargar(force){
+  if(herrCache && !force) return herrCache;
+  const [t, m, i] = await Promise.all(['herramientas','herrMovs','herrInstaladores'].map(c=>db.collection(c).get()));
+  const rows = s => s.docs.map(d=>({id:d.id, ...d.data()}));
+  herrCache = {tools: rows(t).filter(x=>!x.baja), todas: rows(t), movs: rows(m).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')), insts: rows(i).filter(x=>x.activo!==false)};
+  return herrCache;
+}
+const herrMarca = n => HERR_MARCAS.find(m=>m.n===n) || HERR_MARCAS[4];
+const herrChipMarca = n => { const m = herrMarca(n); return `<span style="display:inline-block;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;margin-right:5px;background:${m.bg};color:${m.fg}">${String(n||'Genérico').toUpperCase()}</span>`; };
+const herrDesc = t => `${t.nombre} ${t.marca||'Genérico'} ${String(t.color||'').toLowerCase()}`.trim();
+const herrDondeTxt = t => t.lugar==='instalador' ? 'Instalador: '+(t.instNombre||'') : t.lugar==='taller' ? 'Taller'+(t.area?' · Área '+t.area:'') : t.lugar==='stock' ? 'Stock' : 'Almacén general'+(t.uso?' · para '+(t.uso==='taller'?'taller':'instaladores'):'');
+const herrEsc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+function herrToolHtml(t, opts){
+  opts = opts||{};
+  const tp = HERR_TIPOS[t.tipo] || HERR_TIPOS.manual;
+  const desc = t.estado==='descompuesta';
+  const abierta = herrAbierta===t.id;
+  const hist = (t.hist||[]).slice().reverse();
+  return `<div style="border-bottom:1px solid var(--line);padding:9px 0">
+    <div style="display:flex;gap:10px;align-items:center;cursor:pointer" onclick="herrAbierta=herrAbierta==='${t.id}'?'':'${t.id}';${opts.render||'renderHerr()'}">
+      <div style="width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;background:rgba(194,65,12,.15);border:1px solid rgba(194,65,12,.4);flex:0 0 38px">${tp.ic}</div>
+      <div style="min-width:0;flex:1"><strong style="display:block">${herrEsc(t.nombre)}${(t.cantidad||1)>1?` <span style="font-weight:800;color:${HERR_COLOR}">× ${t.cantidad}</span>`:''}</strong>
+        <span>${herrChipMarca(t.marca)}</span><span class="hint" style="margin:0">${herrEsc(t.color||'')} · ${tp.t}${opts.donde?' · '+herrEsc(herrDondeTxt(t)):(t.lugar==='taller'&&t.area?' · Área '+herrEsc(t.area):'')}${t.serie?' · '+herrEsc(t.serie):''}${t.nota?' · "'+herrEsc(t.nota)+'"':''}</span></div>
+      ${desc?'<span class="tag" style="color:var(--bad);border-color:var(--bad);white-space:nowrap">Descompuesta</span>':''}
+    </div>
+    ${abierta?`<div style="margin:8px 0 0 48px">
+      ${hist.length?hist.map(h=>`<div class="hint" style="margin:0 0 4px;border-left:3px solid ${HERR_COLOR};padding-left:8px"><strong>${new Date(h.f).toLocaleDateString('es-MX',{day:'numeric',month:'short'})}</strong> · ${herrEsc(h.t)}</div>`).join(''):'<p class="hint" style="margin:0">Sin historial.</p>'}
+      ${opts.acciones!==false && puedeCapturarHerr() && t.modulo!==ALM ? `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn small" style="background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrIniciarCambio('${t.id}')">🔁 Cambiar</button>
+        ${t.lugar==='taller'||t.lugar==='stock'?`<button class="btn small" style="background:transparent;color:${desc?'var(--ok)':'var(--bad)'};border:1px solid var(--line);box-shadow:none" onclick="herrCambiarEstado('${t.id}')">${desc?'✅ Ya funciona':'⚠️ Se descompuso'}</button>`:''}
+      </div>`:''}
+    </div>`:''}
+  </div>`;
+}
+function herrMovResumen(m){
+  const d = m.datos||{};
+  if(m.tipo==='alta') return `Alta: ${d.cantidad>1?d.cantidad+' ':''}${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()} → ${d.lugar==='instalador'?'instalador '+(d.instNombre||''):d.lugar==='taller'?'taller'+(d.area?' (área '+d.area+')':''):d.lugar==='stock'?'stock':'almacén general'}${d.estado==='descompuesta'?' · descompuesta':''}`;
+  if(m.tipo==='estado') return `${d.desc||'Herramienta'}: ${d.estado==='descompuesta'?'se descompuso':'ya funciona'}${d.nota?' · "'+d.nota+'"':''}`;
+  if(m.tipo==='cambio') return `Cambio (${(HERR_MOTIVOS[d.motivo]||'').replace(/^\S+ /,'')}): ${d.descVieja||''}${d.quien?' de '+d.quien:''} → ${d.fuente==='stock'?(d.descNueva||'del stock'):d.fuente==='almacen'?((d.descNueva||'herramienta')+' (del almacén general)'):(d.descNueva||'nueva')+' (comprada)'} · la vieja: ${(HERR_VIEJA[d.vieja]||'').replace(/^\S+ /,'').toLowerCase()}${d.motivoTxt?' · "'+d.motivoTxt+'"':''}`;
+  if(m.tipo==='entrega') return `Almacén general → ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.descTool||''} · recibe ${d.coordinador||''} · para ${d.destino==='taller'?'taller (área '+(d.area||'')+')':'instalador '+(d.instNombre||'')}`;
+  return m.tipo;
+}
+const herrEstadoMov = () => puedeAprobarHerr() ? 'aprobado' : 'pendiente';
+async function herrGuardarMov(m){
+  m.id = m.id || cryptoId(); m.fecha = m.fecha || new Date().toISOString(); m.creadoPor = getCurrentUserEmail?getCurrentUserEmail():''; m.estado = herrEstadoMov();
+  if(m.estado==='aprobado'){ const err = await herrAplicar(m); if(err){ alert(err); return false; } m.aprobadoPor = m.creadoPor; m.fechaAprob = m.fecha; }
+  m.resumen = herrMovResumen(m);
+  await db.collection('herrMovs').doc(m.id).set(Object.assign({}, m));
+  herrCache = null; return true;
+}
+// Aplica un movimiento APROBADO a la herramienta. Regresa un texto de error si no se puede.
+async function herrAplicar(m, extra){
+  extra = extra||{};
+  const D = await herrCargar(true);
+  const d = m.datos||{}, now = new Date().toISOString(), quien = (getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0];
+  const put = t => db.collection('herramientas').doc(t.id).set(t);
+  const nueva = (base, lugarTxt) => Object.assign({id:cryptoId(), cantidad:1, estado:'funcionando', desde:now, hist:[]}, base, {hist:[{f:now, t:lugarTxt}]});
+  if(m.tipo==='alta'){
+    const t = nueva({modulo:m.modulo, lugar:d.lugar, instId:d.instId||'', instNombre:d.instNombre||'', area:d.area||'', uso:d.uso||'', nombre:d.nombre, cantidad:Number(d.cantidad)||1, marca:d.marca, color:d.color, tipo:d.tipo, estado:d.estado||'funcionando', serie:d.serie||'', nota:d.nota||''}, `Alta en ${d.lugar==='instalador'?'instalador '+d.instNombre:d.lugar==='taller'?'taller'+(d.area?' (área '+d.area+')':''):d.lugar==='stock'?'stock':'almacén general'} · aprobó ${quien}`);
+    await put(t); return '';
+  }
+  if(m.tipo==='estado'){
+    const t = D.todas.find(x=>x.id===d.toolId); if(!t) return 'Ya no existe esa herramienta.';
+    t.estado = d.estado; t.nota = d.estado==='descompuesta' ? (d.nota||t.nota||'') : ''; t.hist = (t.hist||[]).concat([{f:now, t:(d.estado==='descompuesta'?'Se descompuso':'Ya funciona')+(d.nota?' · "'+d.nota+'"':'')+' · aprobó '+quien}]);
+    await put(t); return '';
+  }
+  if(m.tipo==='cambio'){
+    const vieja = D.todas.find(x=>x.id===d.toolId); if(!vieja || vieja.baja) return 'La herramienta que se cambia ya no existe.';
+    let fuente = null;
+    if(d.fuente==='stock' || d.fuente==='almacen'){
+      const fid = d.fuente==='almacen' ? (extra.almacenToolId || d.fuenteToolId) : d.fuenteToolId;
+      fuente = D.todas.find(x=>x.id===fid && !x.baja);
+      if(!fuente) return d.fuente==='almacen' ? 'Elige qué herramienta del almacén general se entrega.' : 'La herramienta del stock ya no está disponible.';
+      if((fuente.cantidad||1) < 1) return 'Ya no hay de esa herramienta.';
+      d.fuenteToolId = fuente.id; d.descNueva = herrDesc(fuente);
+    }
+    // A dónde va la que recibe a cambio: al mismo lugar que tenía la vieja (antes de moverla).
+    const destino = {modulo:vieja.modulo, lugar:vieja.lugar, instId:vieja.instId||'', instNombre:vieja.instNombre||'', area:vieja.area||''};
+    const descVieja = herrDesc(vieja);
+    // La unidad dañada: si eran varias, se separa una.
+    let danada = vieja;
+    if((vieja.cantidad||1) > 1){ vieja.cantidad -= 1; vieja.hist = (vieja.hist||[]).concat([{f:now, t:`Se cambió 1 por ${(HERR_MOTIVOS[d.motivo]||'').replace(/^\S+ /,'').toLowerCase()}`}]); await put(vieja);
+      danada = Object.assign({}, vieja, {id:cryptoId(), cantidad:1, hist:(vieja.hist||[]).slice()}); }
+    const txtMot = `Cambio por ${(HERR_MOTIVOS[d.motivo]||'').replace(/^\S+ /,'').toLowerCase()}${d.motivoTxt?' · "'+d.motivoTxt+'"':''} · aprobó ${quien}`;
+    if(d.vieja==='tirar'){ danada.baja = true; danada.fechaBaja = now; danada.hist = (danada.hist||[]).concat([{f:now, t:txtMot+' · se tiró'}]); }
+    else { danada.lugar = 'taller'; danada.estado = 'descompuesta'; danada.instId=''; danada.instNombre=''; danada.nota = d.vieja==='reparacion' ? 'En reparación' : (d.motivoTxt||'Dañada'); danada.hist = (danada.hist||[]).concat([{f:now, t:txtMot+(d.vieja==='reparacion'?' · se mandó a reparación':' · regresó al taller')}]); }
+    await put(danada);
+    if(fuente){
+      const desdeTxt = d.fuente==='almacen' ? 'del almacén general' : 'del stock';
+      if((fuente.cantidad||1) > 1){ fuente.cantidad -= 1; fuente.hist = (fuente.hist||[]).concat([{f:now, t:`Salió 1 para ${destino.instNombre||'taller'} (${vieja.modulo}) · aprobó ${quien}`}]); await put(fuente);
+        await put(nueva(Object.assign({nombre:fuente.nombre, marca:fuente.marca, color:fuente.color, tipo:fuente.tipo, serie:''}, destino), `Llegó ${desdeTxt} por cambio de ${descVieja} · aprobó ${quien}`)); }
+      else { Object.assign(fuente, destino, {estado:'funcionando', nota:'', desde:now, uso:''}); fuente.hist = (fuente.hist||[]).concat([{f:now, t:`Llegó ${desdeTxt} por cambio de ${descVieja} · aprobó ${quien}`}]); await put(fuente); }
+    } else {
+      const n = d.nueva||{};
+      await put(nueva(Object.assign({nombre:n.nombre||vieja.nombre, marca:n.marca||'Genérico', color:n.color||'', tipo:n.tipo||vieja.tipo, serie:n.serie||''}, destino), `Nueva (comprada) por cambio de ${descVieja} · aprobó ${quien}`));
+      d.descNueva = `${n.nombre||vieja.nombre} ${n.marca||'Genérico'} ${String(n.color||'').toLowerCase()}`;
+    }
+    return '';
+  }
+  if(m.tipo==='entrega'){
+    const t = D.todas.find(x=>x.id===d.toolId && !x.baja); if(!t) return 'Esa herramienta ya no está en el almacén general.';
+    const q = Number(d.cantidad)||1; if((t.cantidad||1) < q) return `En el almacén solo hay ${t.cantidad||1}.`;
+    const destino = {modulo:m.modulo, lugar:d.destino==='taller'?'taller':'instalador', instId:d.instId||'', instNombre:d.instNombre||'', area:d.area||''};
+    const txt = `Entregada del almacén general a ${m.modulo} · recibió ${d.coordinador} · para ${d.destino==='taller'?'taller (área '+d.area+')':'instalador '+d.instNombre} · aprobó ${quien}`;
+    if((t.cantidad||1) > q){ t.cantidad -= q; t.hist = (t.hist||[]).concat([{f:now, t:`Salieron ${q} a ${m.modulo} (${d.destino==='taller'?'taller':d.instNombre})`}]); await put(t);
+      await put(nueva({nombre:t.nombre, marca:t.marca, color:t.color, tipo:t.tipo, serie:'', cantidad:q, ...destino}, txt)); }
+    else { Object.assign(t, destino, {estado:'funcionando', nota:'', desde:now, uso:''}); t.hist = (t.hist||[]).concat([{f:now, t:txt}]); await put(t); }
+    return '';
+  }
+  return 'Movimiento desconocido.';
+}
+async function herrAprobar(id, ok){
+  const D = await herrCargar(true); const m = D.movs.find(x=>x.id===id); if(!m || m.estado!=='pendiente') return;
+  if(ok){
+    const extra = {}; const sel = document.getElementById('ha-alm-'+id); if(sel) extra.almacenToolId = sel.value;
+    if(m.tipo==='cambio' && m.datos.fuente==='almacen' && !extra.almacenToolId) return alert('Elige qué herramienta del almacén general se le entrega.');
+    const err = await herrAplicar(m, extra); if(err) return alert(err);
+    m.estado = 'aprobado';
+  } else {
+    if(!confirm('¿Rechazar este movimiento de herramienta?')) return;
+    m.estado = 'rechazado';
+  }
+  m.aprobadoPor = getCurrentUserEmail?getCurrentUserEmail():''; m.fechaAprob = new Date().toISOString(); m.resumen = herrMovResumen(m);
+  await db.collection('herrMovs').doc(m.id).set(m);
+  herrCache = null; toast(ok?'✅ Aprobado':'Rechazado'); if(current==='alm') renderAlmacen(); else renderHerr();
+}
+async function herrMarcarEntregada(id){
+  if(!confirm('¿El coordinador ya entregó la herramienta dañada?')) return;
+  const D = await herrCargar(true); const m = D.movs.find(x=>x.id===id); if(!m) return;
+  m.danadaEntregada = true; m.fechaEntregaDanada = new Date().toISOString(); m.entregaMarcadaPor = getCurrentUserEmail?getCurrentUserEmail():'';
+  await db.collection('herrMovs').doc(m.id).set(m); herrCache = null; toast('✅ Marcado: ya se entregó la dañada'); renderHerr();
+}
+async function herrCambiarEstado(toolId){
+  const D = await herrCargar(); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
+  const aDesc = t.estado!=='descompuesta';
+  let nota = '';
+  if(aDesc){ nota = prompt('¿Qué le pasó? (ej. no prende, se rompió el cable)'); if(nota===null) return; }
+  else if(!confirm('¿Marcar como que ya funciona?')) return;
+  const ok = await herrGuardarMov({tipo:'estado', modulo:t.modulo, datos:{toolId, estado:aDesc?'descompuesta':'funcionando', nota:(nota||'').trim(), desc:herrDesc(t)}});
+  if(ok){ toast(puedeAprobarHerr() ? '✅ Guardado' : '✅ Enviado. Dirección lo tiene que aprobar.'); renderHerr(); }
+}
+async function herrAgregarInstalador(){
+  const n = (prompt('Nombre del instalador de '+modulo()+':')||'').trim(); if(!n) return;
+  await db.collection('herrInstaladores').doc(cryptoId()).set({modulo:modulo(), nombre:n, activo:true, creado:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''});
+  herrCache = null; renderHerr();
+}
+async function herrQuitarInstalador(id){
+  const D = await herrCargar(); const i = D.insts.find(x=>x.id===id); if(!i) return;
+  if(D.tools.some(t=>t.instId===id)) return alert('Este instalador todavía tiene herramienta. Primero cámbiala o regrésala al taller.');
+  if(!confirm('¿Quitar a '+i.nombre+' de la lista?')) return;
+  await db.collection('herrInstaladores').doc(id).set(Object.assign({}, i, {activo:false})); herrCache = null; renderHerr();
+}
+// --- Formulario de alta (módulo o almacén general) ---
+function herrNuevoForm(lugar, enAlmacen){ herrForm = {lugar: enAlmacen?'almacen':(lugar||''), uso: enAlmacen?(herrAlmTab==='taller'?'taller':'instalador'):'', instId:'', area:'', nombre:'', otraHerr:false, cantidad:1, marca:'', color:'', otroColor:false, tipo:'', estado:'funcionando', serie:'', almacen:!!enAlmacen}; herrCambio = null; herrEnt = null; enAlmacen ? renderAlmacen() : renderHerr(); }
+function herrFormHtml(D, rerender){
+  const f = herrForm, set = (k, v) => `herrForm.${k}=${v};${rerender}`;
+  const chips = (lista, k, extra) => lista.map(x=>`<button class="chip ${f[k]===x?'on':''}" style="${f[k]===x?`background:${HERR_COLOR};border-color:${HERR_COLOR};color:#fff`:''}" onclick="${set(k, `'${x}'`)}${extra||''}">${x}</button>`).join('');
+  const insts = D.insts.filter(i=>i.modulo===modulo());
+  const esTaller = f.lugar==='taller' || (f.almacen && f.uso==='taller');
+  const lista = esTaller ? HERR_LISTA_TALLER : HERR_LISTA_INST;
+  return `<div class="card" style="border:2px solid ${HERR_COLOR}"><div style="font-size:16px;font-weight:800">➕ Agregar herramienta${f.almacen?' al almacén general':' · '+modulo()}</div>
+    ${f.almacen ? `<label class="hint" style="display:block;margin-top:10px">¿Es herramienta para…? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px"><button class="chip ${f.uso==='instalador'?'on':''}" onclick="${set('uso',"'instalador'")}">👷 Instaladores</button><button class="chip ${f.uso==='taller'?'on':''}" onclick="${set('uso',"'taller'")}">🛠️ Taller</button></div>`
+    : `<label class="hint" style="display:block;margin-top:10px">¿Para dónde? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px">${['instalador','taller','stock'].map(k=>`<button class="chip ${f.lugar===k?'on':''}" onclick="${set('lugar',`'${k}'`)}">${HERR_LUGAR[k]}</button>`).join('')}</div>
+      ${f.lugar==='instalador'?`<label class="hint" style="display:block;margin-top:10px">¿Qué instalador? <span style="color:var(--bad)">*</span></label>
+        <div class="chips" style="margin-top:6px">${insts.map(i=>`<button class="chip ${f.instId===i.id?'on':''}" onclick="${set('instId',`'${i.id}'`)}">${herrEsc(i.nombre)}</button>`).join('')}<button class="chip" onclick="herrAgregarInstalador()">➕ Agregar instalador</button></div>`:''}
+      ${f.lugar==='taller'?`<label class="hint" style="display:block;margin-top:10px">Área del taller <span style="color:var(--bad)">*</span></label><div class="chips" style="margin-top:6px">${chips(HERR_AREAS,'area')}</div>`:''}`}
+    <label class="hint" style="display:block;margin-top:10px">Herramienta <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${lista.map(x=>`<button class="chip ${!f.otraHerr&&f.nombre===x?'on':''}" onclick="herrForm.otraHerr=false;${set('nombre',`'${x}'`)}">${x}</button>`).join('')}<button class="chip ${f.otraHerr?'on':''}" onclick="herrForm.otraHerr=true;${set('nombre',"''")}">✏️ Otra</button></div>
+    ${f.otraHerr?`<input id="hf-nom" placeholder="¿Qué herramienta?" value="${herrEsc(f.nombre)}" oninput="herrForm.nombre=this.value" style="margin-top:8px">`:''}
+    <label class="hint" style="display:block;margin-top:10px">Cantidad</label>
+    <input type="number" min="1" inputmode="numeric" value="${f.cantidad}" style="max-width:120px;margin-top:4px" oninput="herrForm.cantidad=this.value">
+    <label class="hint" style="display:block;margin-top:10px">Marca <span style="color:var(--bad)">*</span> <span style="opacity:.8">(si no tiene marca: Genérico)</span></label>
+    <div class="chips" style="margin-top:6px">${HERR_MARCAS.map(m=>`<button class="chip ${f.marca===m.n?'on':''}" style="${f.marca===m.n?`background:${m.bg};border-color:${m.bg};color:${m.fg}`:''}" onclick="${set('marca',`'${m.n}'`)}">${m.n}</button>`).join('')}</div>
+    <label class="hint" style="display:block;margin-top:10px">Color <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${HERR_COLORES.map(x=>`<button class="chip ${!f.otroColor&&f.color===x?'on':''}" onclick="herrForm.otroColor=false;${set('color',`'${x}'`)}">${x}</button>`).join('')}<button class="chip ${f.otroColor?'on':''}" onclick="herrForm.otroColor=true;${set('color',"''")}">✏️ Otro</button></div>
+    ${f.otroColor?`<input placeholder="¿Qué color?" value="${herrEsc(f.color)}" oninput="herrForm.color=this.value" style="margin-top:8px">`:''}
+    <label class="hint" style="display:block;margin-top:10px">Tipo <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${Object.keys(HERR_TIPOS).map(k=>`<button class="chip ${f.tipo===k?'on':''}" onclick="${set('tipo',`'${k}'`)}">${HERR_TIPOS[k].ic} ${HERR_TIPOS[k].t}</button>`).join('')}</div>
+    ${(f.lugar==='taller'||f.lugar==='stock'||f.almacen)?`<label class="hint" style="display:block;margin-top:10px">Estado <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px"><button class="chip ${f.estado==='funcionando'?'on':''}" onclick="${set('estado',"'funcionando'")}">✅ Funcionando</button><button class="chip ${f.estado==='descompuesta'?'on':''}" onclick="${set('estado',"'descompuesta'")}">⚠️ Descompuesta</button></div>`:''}
+    <label class="hint" style="display:block;margin-top:10px">Número de serie o seña (opcional)</label>
+    <input placeholder="Ej. SN 4471 · tiene cinta roja" value="${herrEsc(f.serie)}" oninput="herrForm.serie=this.value" style="margin-top:4px">
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrGuardarAlta()">${puedeAprobarHerr()?'Guardar':'Guardar · Dirección lo aprueba'}</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrForm=null;${rerender}">Cancelar</button></div>
+  </div>`;
+}
+async function herrGuardarAlta(){
+  const f = herrForm; const D = await herrCargar();
+  if(!f.almacen && !f.lugar) return alert('Elige para dónde es: Instalador, Taller o Stock.');
+  if(f.almacen && !f.uso) return alert('Elige si es herramienta para instaladores o para taller.');
+  if(f.lugar==='instalador' && !f.instId) return alert('Elige el instalador.');
+  if(f.lugar==='taller' && !f.area) return alert('Elige el área del taller.');
+  if(!String(f.nombre).trim()) return alert('Elige o escribe la herramienta.');
+  if(!f.marca) return alert('Elige la marca (si no tiene: Genérico).');
+  if(!String(f.color).trim()) return alert('Elige el color.');
+  if(!f.tipo) return alert('Elige si es alámbrica, inalámbrica o manual.');
+  const cant = Math.max(1, Math.round(Number(f.cantidad)||1));
+  const inst = D.insts.find(i=>i.id===f.instId);
+  const datos = {lugar:f.almacen?'almacen':f.lugar, uso:f.almacen?f.uso:'', instId:f.instId||'', instNombre:inst?inst.nombre:'', area:f.lugar==='taller'?f.area:'', nombre:String(f.nombre).trim(), cantidad:cant, marca:f.marca, color:String(f.color).trim(), tipo:f.tipo, estado:(f.lugar==='instalador')?'funcionando':f.estado, serie:String(f.serie||'').trim()};
+  const ok = await herrGuardarMov({tipo:'alta', modulo:f.almacen?ALM:modulo(), datos});
+  if(!ok) return;
+  toast(puedeAprobarHerr() ? '✅ Herramienta agregada' : '✅ Enviado. Dirección lo tiene que aprobar.');
+  const alm = f.almacen; herrForm = null; alm ? renderAlmacen() : renderHerr();
+}
+// --- Cambio de herramienta ---
+async function herrIniciarCambio(toolId){
+  herrCambio = {toolId:toolId||'', motivo:'', motivoTxt:'', entregada:null, vieja:'', fuente:'', fuenteToolId:'', nueva:{nombre:'', marca:'', color:'', tipo:''}};
+  herrForm = null; renderHerr(); window.scrollTo(0,0);
+}
+function herrCambioHtml(D){
+  const c = herrCambio, R = 'renderHerr()';
+  const mias = D.tools.filter(t=>t.modulo===modulo() && (t.lugar==='instalador'||t.lugar==='taller'));
+  const vieja = D.tools.find(t=>t.id===c.toolId);
+  const stock = D.tools.filter(t=>t.modulo===modulo() && t.lugar==='stock' && t.estado!=='descompuesta');
+  const chip = (k, v, txt) => `<button class="chip ${c[k]===v?'on':''}" onclick="herrCambio.${k}='${v}';${R}">${txt}</button>`;
+  return `<div class="card" style="border:2px solid ${HERR_COLOR}"><div style="font-size:16px;font-weight:800">🔁 Cambio de herramienta · ${modulo()}</div>
+    <label class="hint" style="display:block;margin-top:10px">¿Cuál se cambia? <span style="color:var(--bad)">*</span></label>
+    <select style="margin-top:4px" onchange="herrCambio.toolId=this.value;${R}"><option value="">— Elige la herramienta —</option>${mias.map(t=>`<option value="${t.id}" ${t.id===c.toolId?'selected':''}>${herrEsc(herrDesc(t))} · ${herrEsc(herrDondeTxt(t))}${(t.cantidad||1)>1?' (×'+t.cantidad+')':''}</option>`).join('')}</select>
+    ${vieja?`<div style="border:1px solid ${HERR_COLOR};border-radius:12px;padding:0 10px;margin-top:8px">${herrToolHtml(vieja,{acciones:false, donde:true})}</div>`:''}
+    <label class="hint" style="display:block;margin-top:10px">¿Por qué? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${Object.keys(HERR_MOTIVOS).map(k=>chip('motivo',k,HERR_MOTIVOS[k])).join('')}</div>
+    <input placeholder="¿Qué le pasó? (ej. se cayó, se rompió el mandril)" value="${herrEsc(c.motivoTxt)}" oninput="herrCambio.motivoTxt=this.value" style="margin-top:8px">
+    <label class="hint" style="display:block;margin-top:10px">¿El coordinador ya entregó la herramienta dañada? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px"><button class="chip ${c.entregada===true?'on':''}" onclick="herrCambio.entregada=true;${R}">✅ Sí, ya la entregó</button><button class="chip ${c.entregada===false?'on':''}" onclick="herrCambio.entregada=false;${R}">⏳ Todavía no</button></div>
+    ${c.entregada===false?`<p class="hint" style="margin:6px 0 0;color:#d39b06">Queda como <strong>"dañada sin entregar"</strong> hasta que se marque que ya se entregó.</p>`:''}
+    <label class="hint" style="display:block;margin-top:10px">¿Qué pasa con la vieja? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${Object.keys(HERR_VIEJA).map(k=>chip('vieja',k,HERR_VIEJA[k])).join('')}</div>
+    <label class="hint" style="display:block;margin-top:10px">¿Qué recibe a cambio? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${chip('fuente','stock','📦 Del stock del módulo')}${chip('fuente','almacen','🏢 Del almacén general')}${chip('fuente','nueva','🛒 Comprada nueva')}</div>
+    ${c.fuente==='stock'?(stock.length?`<select style="margin-top:8px" onchange="herrCambio.fuenteToolId=this.value"><option value="">— Elige del stock —</option>${stock.map(t=>`<option value="${t.id}" ${t.id===c.fuenteToolId?'selected':''}>${herrEsc(herrDesc(t))}${(t.cantidad||1)>1?' (hay '+t.cantidad+')':''}</option>`).join('')}</select>`:'<p class="hint" style="margin:6px 0 0;color:var(--bad)">No hay herramienta en el stock de este módulo.</p>'):''}
+    ${c.fuente==='almacen'?`<p class="hint" style="margin:6px 0 0">Dirección o el Auditor eligen cuál del almacén general se entrega al aprobar.</p>`:''}
+    ${c.fuente==='almacen'||c.fuente==='nueva'?`<label class="hint" style="display:block;margin-top:8px">Herramienta que recibe</label>
+      <div class="chips" style="margin-top:6px">${HERR_MARCAS.map(m=>`<button class="chip ${c.nueva.marca===m.n?'on':''}" onclick="herrCambio.nueva.marca='${m.n}';${R}">${m.n}</button>`).join('')}</div>
+      <div class="chips" style="margin-top:6px">${HERR_COLORES.map(x=>`<button class="chip ${c.nueva.color===x?'on':''}" onclick="herrCambio.nueva.color='${x}';${R}">${x}</button>`).join('')}</div>
+      <div class="chips" style="margin-top:6px">${Object.keys(HERR_TIPOS).map(k=>`<button class="chip ${c.nueva.tipo===k?'on':''}" onclick="herrCambio.nueva.tipo='${k}';${R}">${HERR_TIPOS[k].ic} ${HERR_TIPOS[k].t}</button>`).join('')}</div>`:''}
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrGuardarCambio()">${puedeAprobarHerr()?'Guardar cambio':'Enviar a Dirección'}</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrCambio=null;${R}">Cancelar</button></div>
+  </div>`;
+}
+async function herrGuardarCambio(){
+  const c = herrCambio; const D = await herrCargar();
+  const vieja = D.tools.find(t=>t.id===c.toolId);
+  if(!vieja) return alert('Elige qué herramienta se cambia.');
+  if(!c.motivo) return alert('Elige por qué se cambia.');
+  if(c.entregada===null) return alert('Indica si el coordinador ya entregó la herramienta dañada.');
+  if(!c.vieja) return alert('Elige qué pasa con la herramienta vieja.');
+  if(!c.fuente) return alert('Elige qué herramienta recibe a cambio.');
+  if(c.fuente==='stock' && !c.fuenteToolId) return alert('Elige qué herramienta del stock recibe.');
+  if((c.fuente==='nueva'||c.fuente==='almacen') && (!c.nueva.marca || !c.nueva.color || !c.nueva.tipo)) return alert('Elige marca, color y tipo de la herramienta que recibe.');
+  const fuenteT = D.tools.find(t=>t.id===c.fuenteToolId);
+  const datos = {toolId:vieja.id, descVieja:herrDesc(vieja), quien: vieja.lugar==='instalador' ? vieja.instNombre : 'taller'+(vieja.area?' (área '+vieja.area+')':''), motivo:c.motivo, motivoTxt:String(c.motivoTxt||'').trim(), vieja:c.vieja, fuente:c.fuente, fuenteToolId:c.fuenteToolId||'',
+    nueva:Object.assign({nombre:vieja.nombre, tipo:c.nueva.tipo||vieja.tipo}, c.nueva), descNueva: fuenteT ? herrDesc(fuenteT) : `${vieja.nombre} ${c.nueva.marca||''} ${String(c.nueva.color||'').toLowerCase()}`.trim()};
+  if(!datos.nueva.nombre) datos.nueva.nombre = vieja.nombre;
+  const ok = await herrGuardarMov({tipo:'cambio', modulo:vieja.modulo, datos, danadaEntregada: c.entregada===true, fechaEntregaDanada: c.entregada===true ? new Date().toISOString() : ''});
+  if(!ok) return;
+  toast(puedeAprobarHerr() ? '✅ Cambio guardado' : '✅ Enviado. Dirección lo tiene que aprobar.');
+  herrCambio = null; renderHerr();
+}
+// --- Tarjeta de aprobación (naranja) ---
+function herrAprobCard(m, D){
+  const almOpts = (m.tipo==='cambio' && m.datos.fuente==='almacen') ? D.tools.filter(t=>t.modulo===ALM && t.nombre===m.datos.nueva.nombre) : [];
+  const almTodas = (m.tipo==='cambio' && m.datos.fuente==='almacen') ? D.tools.filter(t=>t.modulo===ALM) : [];
+  const lbl = {alta:'Alta', estado:'Estado', cambio:'Cambio por '+((HERR_MOTIVOS[(m.datos||{}).motivo]||'').replace(/^\S+ /,'').toLowerCase()), entrega:'Entrega del almacén'}[m.tipo] || m.tipo;
+  return `<div class="card" style="border-left:6px solid #ea580c">
+    <span style="display:inline-block;background:#ea580c;color:#fff;padding:3px 10px;border-radius:12px;font-size:12.5px;font-weight:800">🧰 Herramienta · ${lbl}</span>
+    <div style="margin-top:8px"><strong>${m.modulo===ALM?'Almacén general':m.modulo}</strong> <span class="hint" style="margin:0">${new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})} · ${herrEsc((m.creadoPor||'').split('@')[0])}</span></div>
+    <p style="margin:4px 0 0">${herrEsc(herrMovResumen(m))}</p>
+    ${m.tipo==='cambio'?`<div class="hint" style="margin:6px 0 0;padding:6px 8px;border-radius:8px;${m.danadaEntregada?'background:rgba(31,157,85,.15);color:var(--ok)':'background:rgba(211,155,6,.15);color:#d39b06'}">${m.danadaEntregada?'✅ La dañada ya se entregó':'⏳ La dañada todavía no se entrega'}</div>`:''}
+    ${almTodas.length||(m.tipo==='cambio'&&m.datos.fuente==='almacen')?`<label class="hint" style="display:block;margin-top:8px">¿Cuál del almacén general se entrega? <span style="color:var(--bad)">*</span></label>
+      <select id="ha-alm-${m.id}" style="margin-top:4px"><option value="">— Elige —</option>${(almOpts.length?almOpts:almTodas).map(t=>`<option value="${t.id}">${herrEsc(herrDesc(t))} (hay ${t.cantidad||1})</option>`).join('')}</select>`:''}
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn small" style="flex:1;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="herrAprobar('${m.id}', false)">Rechazar</button><button class="btn small" style="flex:1;background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrAprobar('${m.id}', true)">Aprobar</button></div>
+  </div>`;
+}
+function herrPendientes(D){ return D.movs.filter(m=>m.estado==='pendiente' && (puedeAprobarHerr() || m.modulo===modulo())); }
+function herrDanadasSinEntregar(D, mod){ return D.movs.filter(m=>m.tipo==='cambio' && m.estado!=='rechazado' && !m.danadaEntregada && (!mod || m.modulo===mod)); }
+// --- Pantalla del módulo ---
+async function renderHerr(){
+  current = 'herr';
+  $('#main').innerHTML = '<div class="card hint">Cargando herramienta…</div>';
+  let D; try{ D = await herrCargar(); }catch(e){ $('#main').innerHTML = '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
+  if(current!=='herr') return;
+  const mod = modulo();
+  const mias = D.tools.filter(t=>t.modulo===mod);
+  const pend = herrPendientes(D), pendMod = pend.filter(m=>m.modulo===mod);
+  const danadas = herrDanadasSinEntregar(D, mod);
+  const total = mias.reduce((s,t)=>s+(t.cantidad||1),0);
+  const tab = (k, t) => `<button class="${herrTab===k?'active':''}" onclick="herrTab='${k}';herrAbierta='';renderHerr()">${t}</button>`;
+  let cuerpo = '';
+  if(herrTab==='inst'){
+    const insts = D.insts.filter(i=>i.modulo===mod);
+    cuerpo = insts.map(i=>{ const ts = mias.filter(t=>t.lugar==='instalador' && t.instId===i.id);
+      return `<div class="card" style="border-left:5px solid ${HERR_COLOR}"><div class="row" style="justify-content:space-between"><strong>👷 ${herrEsc(i.nombre)}</strong><span class="hint" style="margin:0">${ts.length} herramienta(s)${puedeCapturarHerr()&&!ts.length?` · <a href="#" onclick="herrQuitarInstalador('${i.id}');return false;">quitar</a>`:''}</span></div>
+        ${ts.length?ts.map(t=>herrToolHtml(t)).join(''):'<p class="hint">Sin herramienta registrada.</p>'}</div>`; }).join('')
+      + (puedeCapturarHerr()?`<button class="btn" style="width:100%;margin-top:4px;background:transparent;color:${HERR_COLOR};border:1px solid var(--line);box-shadow:none" onclick="herrAgregarInstalador()">➕ Agregar instalador</button>`:'')
+      + (!insts.length?'<div class="card hint">Todavía no hay instaladores. Agrégalos con el botón de arriba.</div>':'');
+  } else if(herrTab==='taller'){
+    const ts = mias.filter(t=>t.lugar==='taller');
+    const ok = ts.filter(t=>t.estado!=='descompuesta'), mal = ts.filter(t=>t.estado==='descompuesta');
+    cuerpo = `<div class="card"><div class="row" style="justify-content:space-between"><strong style="color:var(--ok)">✅ Funcionando</strong><span class="hint" style="margin:0">${ok.reduce((s,t)=>s+(t.cantidad||1),0)}</span></div>
+        ${HERR_AREAS.concat(['']).map(a=>{ const xs = ok.filter(t=>(t.area||'')===a); return xs.length?`<div class="hint" style="margin:10px 0 0;font-weight:800">${a?'Área de '+a.toLowerCase():'Sin área'}</div>${xs.map(t=>herrToolHtml(t)).join('')}`:''; }).join('') || '<p class="hint">Nada registrado.</p>'}</div>
+      <div class="card" style="border-left:5px solid var(--bad)"><div class="row" style="justify-content:space-between"><strong style="color:var(--bad)">⚠️ Descompuesta</strong><span class="hint" style="margin:0">${mal.reduce((s,t)=>s+(t.cantidad||1),0)}</span></div>
+        ${mal.length?mal.map(t=>herrToolHtml(t)).join(''):'<p class="hint">Nada descompuesto.</p>'}</div>`;
+  } else if(herrTab==='stock'){
+    const ts = mias.filter(t=>t.lugar==='stock');
+    cuerpo = `<div class="card"><strong>📦 Stock de herramienta</strong><p class="hint" style="margin:2px 0 0">Herramienta de repuesto guardada para cuando se necesite un cambio.</p>${ts.length?ts.map(t=>herrToolHtml(t)).join(''):'<p class="hint">No hay herramienta en stock.</p>'}</div>`;
+  } else if(herrTab==='hist'){
+    const ms = D.movs.filter(m=>m.modulo===mod).slice(0,80);
+    cuerpo = `<div class="card"><strong>📜 Historial de movimientos · ${mod}</strong>${ms.length?ms.map(m=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div class="row" style="justify-content:space-between;gap:8px"><span class="hint" style="margin:0">${new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'})} · ${herrEsc((m.creadoPor||'').split('@')[0])}</span>${badgeEstado(m.estado)}</div><div style="margin-top:2px">${herrEsc(m.resumen||herrMovResumen(m))}</div>${m.estado==='aprobado'&&m.aprobadoPor?`<div class="hint" style="margin:0">Aprobó: ${herrEsc(m.aprobadoPor.split('@')[0])}</div>`:''}</div>`).join(''):'<p class="hint">Sin movimientos.</p>'}</div>`;
+  } else if(herrTab==='apr'){
+    cuerpo = pend.length ? pend.map(m=>herrAprobCard(m, D)).join('') : '<div class="card hint">No hay movimientos de herramienta por aprobar.</div>';
+  }
+  $('#main').innerHTML = `<div class="card"><div class="row" style="justify-content:space-between;gap:8px"><div><div style="font-size:17px;font-weight:800">🧰 Herramienta · ${mod}</div>
+      <p class="hint" style="margin:2px 0 0">${total} herramienta(s)${pendMod.length?` · <strong style="color:#d39b06">${pendMod.length} por aprobar</strong>`:''}${danadas.length?` · <strong style="color:var(--bad)">${danadas.length} dañada(s) sin entregar</strong>`:''}</p></div>
+      <button class="btn small" style="background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="generarHerrPDF()">📄 PDF</button></div>
+      ${puedeCapturarHerr()?`<div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrNuevoForm('${herrTab==='taller'?'taller':herrTab==='stock'?'stock':'instalador'}')">➕ Agregar</button><button class="btn" style="flex:1;background:transparent;color:#fb923c;border:1px solid var(--line);box-shadow:none" onclick="herrIniciarCambio('')">🔁 Cambiar</button></div>`:''}
+      ${puedeAprobarHerr()?`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#fb923c;border:1px solid var(--line);box-shadow:none" onclick="irA('alm')">🏢 Almacén general</button>`:''}
+    </div>
+    ${herrForm && !herrForm.almacen ? herrFormHtml(D, 'renderHerr()') : ''}
+    ${herrCambio ? herrCambioHtml(D) : ''}
+    ${danadas.length?`<div class="card" style="border-left:5px solid #d39b06"><strong>⏳ Dañadas sin entregar</strong>${danadas.map(m=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:8px 0"><span style="min-width:0">${herrEsc(m.datos.descVieja)}<span class="hint" style="display:block;margin:0">${herrEsc(m.datos.quien||'')} · cambio del ${new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})}${m.estado==='pendiente'?' · por aprobar':''}</span></span>${puedeCapturarHerr()?`<button class="btn small" style="white-space:nowrap" onclick="herrMarcarEntregada('${m.id}')">✅ Ya la entregó</button>`:''}</div>`).join('')}</div>`:''}
+    <div class="subtabs">${tab('inst','👷 Instaladores')}${tab('taller','🛠️ Taller')}${tab('stock','📦 Stock')}${tab('hist','📜 Historial')}${puedeAprobarHerr()?tab('apr',`✅ Aprobar${pend.length?' ('+pend.length+')':''}`):''}</div>
+    ${cuerpo}`;
+}
+// --- Almacén general (Dirección y Auditor) ---
+function herrNuevaEntrega(){ herrEnt = {toolId:'', cantidad:1, modulo:'', coordinador:'', destino:'', instId:'', area:''}; herrForm = null; renderAlmacen(); }
+async function renderAlmacen(){
+  current = 'alm';
+  if(!puedeAprobarHerr()){ $('#main').innerHTML = '<div class="card">El almacén general solo lo manejan Dirección y el Auditor.</div>'; return; }
+  $('#main').innerHTML = '<div class="card hint">Cargando almacén…</div>';
+  let D; try{ D = await herrCargar(); }catch(e){ $('#main').innerHTML = '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
+  if(current!=='alm') return;
+  const alm = D.tools.filter(t=>t.modulo===ALM);
+  const deUso = k => alm.filter(t=>(t.uso||'instalador')===k);
+  const ents = D.movs.filter(m=>m.tipo==='entrega').slice(0,30);
+  const pendAlm = D.movs.filter(m=>m.estado==='pendiente' && (m.modulo===ALM || m.tipo==='entrega'));
+  let entHtml = '';
+  if(herrEnt){
+    const e = herrEnt, R = 'renderAlmacen()';
+    const t = alm.find(x=>x.id===e.toolId);
+    const insts = D.insts.filter(i=>i.modulo===e.modulo);
+    entHtml = `<div class="card" style="border:2px solid #7c2d12"><div style="font-size:16px;font-weight:800">📤 Entregar a un módulo</div>
+      <label class="hint" style="display:block;margin-top:10px">Herramienta <span style="color:var(--bad)">*</span></label>
+      <select style="margin-top:4px" onchange="herrEnt.toolId=this.value;${R}"><option value="">— Elige —</option>${alm.filter(x=>x.estado!=='descompuesta').map(x=>`<option value="${x.id}" ${x.id===e.toolId?'selected':''}>${herrEsc(herrDesc(x))} · para ${x.uso==='taller'?'taller':'instaladores'} (hay ${x.cantidad||1})</option>`).join('')}</select>
+      ${t&&(t.cantidad||1)>1?`<label class="hint" style="display:block;margin-top:8px">Cantidad</label><input type="number" min="1" max="${t.cantidad}" value="${e.cantidad}" style="max-width:120px;margin-top:4px" oninput="herrEnt.cantidad=this.value">`:''}
+      <label class="hint" style="display:block;margin-top:10px">Módulo <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px">${MODULOS.map(m=>`<button class="chip ${e.modulo===m.nombre?'on':''}" onclick="herrEnt.modulo='${m.nombre}';herrEnt.instId='';${R}">${m.nombre}</button>`).join('')}</div>
+      <label class="hint" style="display:block;margin-top:10px">Coordinador que la recibe <span style="color:var(--bad)">*</span></label>
+      <input placeholder="Nombre del coordinador" value="${herrEsc(e.coordinador)}" oninput="herrEnt.coordinador=this.value" style="margin-top:4px">
+      <label class="hint" style="display:block;margin-top:10px">¿Para qué es? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px"><button class="chip ${e.destino==='instalador'?'on':''}" onclick="herrEnt.destino='instalador';${R}">👷 Instalador</button><button class="chip ${e.destino==='taller'?'on':''}" onclick="herrEnt.destino='taller';${R}">🛠️ Taller</button></div>
+      ${e.destino==='instalador'?(e.modulo?(insts.length?`<label class="hint" style="display:block;margin-top:10px">¿Para qué instalador? <span style="color:var(--bad)">*</span></label><div class="chips" style="margin-top:6px">${insts.map(i=>`<button class="chip ${e.instId===i.id?'on':''}" onclick="herrEnt.instId='${i.id}';${R}">${herrEsc(i.nombre)}</button>`).join('')}</div>`:`<p class="hint" style="color:var(--bad)">${e.modulo} todavía no tiene instaladores dados de alta en Herramienta.</p>`):'<p class="hint">Primero elige el módulo.</p>'):''}
+      ${e.destino==='taller'?`<label class="hint" style="display:block;margin-top:10px">¿A qué área? <span style="color:var(--bad)">*</span></label><div class="chips" style="margin-top:6px">${HERR_AREAS.map(a=>`<button class="chip ${e.area===a?'on':''}" onclick="herrEnt.area='${a}';${R}">${a}</button>`).join('')}</div>`:''}
+      <div class="row" style="gap:8px;margin-top:12px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#9a3412,#7c2d12)" onclick="herrGuardarEntrega()">Registrar entrega</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrEnt=null;${R}">Cancelar</button></div></div>`;
+  }
+  const lista = k => { const xs = deUso(k); return xs.length ? xs.map(t=>herrToolHtml(t,{render:'renderAlmacen()'})).join('') : '<p class="hint">Nada registrado.</p>'; };
+  $('#main').innerHTML = `<div class="card" style="border-left:6px solid #7c2d12"><div class="row" style="justify-content:space-between;gap:8px"><div><div style="font-size:17px;font-weight:800">🏢 Almacén general de herramienta</div>
+      <p class="hint" style="margin:2px 0 0">Solo Dirección y Auditor · ${alm.reduce((s,t)=>s+(t.cantidad||1),0)} herramienta(s)</p></div>
+      <button class="btn small" style="background:linear-gradient(135deg,#9a3412,#7c2d12)" onclick="generarAlmacenPDF()">📄 PDF</button></div>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrNuevoForm('',true)">➕ Agregar</button><button class="btn" style="flex:1;background:linear-gradient(135deg,#9a3412,#7c2d12)" onclick="herrNuevaEntrega()">📤 Entregar a módulo</button></div>
+      <button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#fb923c;border:1px solid var(--line);box-shadow:none" onclick="irA('herr')">🧰 Herramienta de ${modulo()}</button></div>
+    ${herrForm && herrForm.almacen ? herrFormHtml(D, 'renderAlmacen()') : ''}
+    ${entHtml}
+    ${pendAlm.length?pendAlm.map(m=>herrAprobCard(m,D)).join(''):''}
+    <div class="subtabs"><button class="${herrAlmTab==='inst'?'active':''}" onclick="herrAlmTab='inst';renderAlmacen()">👷 Para instaladores</button><button class="${herrAlmTab==='taller'?'active':''}" onclick="herrAlmTab='taller';renderAlmacen()">🛠️ Para taller</button><button class="${herrAlmTab==='ent'?'active':''}" onclick="herrAlmTab='ent';renderAlmacen()">📤 Entregas</button></div>
+    ${herrAlmTab==='ent' ? `<div class="card">${ents.length?ents.map(m=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div class="row" style="justify-content:space-between;gap:8px"><span class="hint" style="margin:0">${new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'})}</span>${badgeEstado(m.estado)}</div>${herrEsc(m.resumen||herrMovResumen(m))}</div>`).join(''):'<p class="hint">Todavía no hay entregas.</p>'}</div>`
+      : `<div class="card">${lista(herrAlmTab==='taller'?'taller':'instalador')}</div>`}`;
+}
+async function herrGuardarEntrega(){
+  const e = herrEnt; const D = await herrCargar();
+  const t = D.tools.find(x=>x.id===e.toolId);
+  if(!t) return alert('Elige la herramienta.');
+  if(!e.modulo) return alert('Elige el módulo.');
+  if(!String(e.coordinador).trim()) return alert('Escribe el coordinador que la recibe.');
+  if(!e.destino) return alert('Elige si es para un instalador o para el taller.');
+  if(e.destino==='instalador' && !e.instId) return alert('Elige el instalador.');
+  if(e.destino==='taller' && !e.area) return alert('Elige el área del taller.');
+  const q = Math.max(1, Math.round(Number(e.cantidad)||1)); if(q > (t.cantidad||1)) return alert('En el almacén solo hay '+(t.cantidad||1)+'.');
+  const inst = D.insts.find(i=>i.id===e.instId);
+  const ok = await herrGuardarMov({tipo:'entrega', modulo:e.modulo, datos:{toolId:t.id, descTool:herrDesc(t), cantidad:q, coordinador:String(e.coordinador).trim(), destino:e.destino, instId:e.instId||'', instNombre:inst?inst.nombre:'', area:e.destino==='taller'?e.area:''}});
+  if(!ok) return;
+  toast('✅ Entrega registrada'); herrEnt = null; renderAlmacen();
+}
+// --- PDFs ---
+function herrPdfBase(titulo, sub, rgb){
+  const { jsPDF } = window.jspdf; const doc = new jsPDF();
+  const L = 14, W = 182, pageH = doc.internal.pageSize.getHeight();
+  doc.setFillColor(...rgb); doc.rect(0,0,210,24,'F'); doc.setFillColor(255,211,77); doc.rect(0,24,210,1.6,'F');
+  doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(15); doc.text(titulo, L, 11);
+  doc.setFont(undefined,'normal'); doc.setFontSize(9.5); doc.text(sub, L, 18); doc.setTextColor(0,0,0);
+  const S = {doc, L, W, pageH, y:33};
+  S.kpis = (arr) => { const kw = (W - (arr.length-1)*3)/arr.length; arr.forEach((k,i)=>{ const x = L + i*(kw+3), c = k[2]||rgb; doc.setFillColor(...pdfTinte(c,.9)); doc.rect(x,S.y,kw,15,'F'); doc.setFillColor(...c); doc.rect(x,S.y,1.4,15,'F'); doc.setFont(undefined,'bold'); doc.setFontSize(13); doc.setTextColor(...c); doc.text(String(k[0]), x+3.5, S.y+7); doc.setFont(undefined,'normal'); doc.setFontSize(7.5); doc.setTextColor(90,96,112); doc.text(k[1], x+3.5, S.y+12); }); doc.setTextColor(0,0,0); S.y += 19; };
+  S.banda = (t, der, c) => { c = c||rgb; if(S.y > pageH-35){ doc.addPage(); S.y = 15; } doc.setFillColor(...pdfTinte(c,.85)); doc.rect(L,S.y,W,8,'F'); doc.setFillColor(...c); doc.rect(L,S.y,1.6,8,'F'); doc.setFont(undefined,'bold'); doc.setFontSize(10.5); doc.setTextColor(...c); doc.text(t, L+4, S.y+5.6); if(der) doc.text(der, L+W-2, S.y+5.6, {align:'right'}); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); S.y += 8; };
+  S.tabla = (cols, filas, c) => { c = c||rgb; const x0 = i => L + cols.slice(0,i).reduce((s,k)=>s+k.w,0);
+    const head = () => { doc.setFillColor(...c); doc.rect(L,S.y,W,6,'F'); doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold'); cols.forEach((k,i)=>doc.text(k.t, x0(i)+1.5, S.y+4.2)); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); S.y += 6; };
+    head();
+    filas.forEach((f,idx)=>{ doc.setFontSize(8.3); const lines = f.map((v,i)=>doc.splitTextToSize(String(v.t!==undefined?v.t:v), cols[i].w-3).slice(0,3)); const h = Math.max(5.5, 1.8+Math.max(...lines.map(l=>l.length))*3.6);
+      if(S.y + h > pageH-14){ doc.addPage(); S.y = 15; head(); }
+      if(idx%2){ doc.setFillColor(...pdfTinte(c,.95)); doc.rect(L,S.y,W,h,'F'); }
+      f.forEach((v,i)=>{ const o = (v && typeof v==='object') ? v : {}; if(o.col) doc.setTextColor(...o.col); if(o.b) doc.setFont(undefined,'bold'); lines[i].forEach((l,k)=>doc.text(l, x0(i)+1.5, S.y+3.9+k*3.6)); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); });
+      S.y += h; });
+    S.y += 4; };
+  S.vacio = t => { doc.setFontSize(9); doc.setTextColor(120,124,136); doc.text(t, L+2, S.y+4); doc.setTextColor(0,0,0); S.y += 9; };
+  S.fin = async (nombre, pie) => { const np = doc.getNumberOfPages(); for(let i=1;i<=np;i++){ doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(140,140,140); doc.text(pie, L, pageH-6); doc.text(`Página ${i} de ${np}`, L+W, pageH-6, {align:'right'}); }
+    const blob = doc.output('blob');
+    if(navigator.canShare && navigator.canShare({ files:[new File([blob], nombre, {type:'application/pdf'})] })){ try{ await navigator.share({ files:[new File([blob], nombre, {type:'application/pdf'})], title:pie }); return; }catch(e){} }
+    doc.save(nombre); };
+  return S;
+}
+const herrFila = (t, extra) => [t.nombre, String(t.cantidad||1), t.marca||'Genérico', t.color||'', (HERR_TIPOS[t.tipo]||HERR_TIPOS.manual).t].concat(extra||[]);
+async function generarHerrPDF(){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  const D = await herrCargar(true); const mod = modulo();
+  const mias = D.tools.filter(t=>t.modulo===mod);
+  const cuenta = xs => xs.reduce((s,t)=>s+(t.cantidad||1),0);
+  const hoyTxt = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  const S = herrPdfBase('Closets Vera · Herramienta', `Módulo ${mod}  ·  ${hoyTxt}  ·  solo lo aprobado`, HERR_RGB);
+  const inst = mias.filter(t=>t.lugar==='instalador'), tal = mias.filter(t=>t.lugar==='taller'), stk = mias.filter(t=>t.lugar==='stock');
+  S.kpis([[cuenta(mias),'herramientas'],[cuenta(inst),'con instaladores'],[cuenta(tal),'en taller'],[cuenta(stk),'en stock'],[cuenta(mias.filter(t=>t.estado==='descompuesta')),'descompuestas',[192,57,43]]]);
+  S.kpis(HERR_MARCAS.map(m=>[cuenta(mias.filter(t=>(t.marca||'Genérico')===m.n)), m.n, m.n==='DeWalt'?[163,115,0]:m.rgb]));
+  const colsBase = [{t:'Herramienta',w:52},{t:'Cant.',w:14},{t:'Marca',w:28},{t:'Color',w:26},{t:'Tipo',w:26}];
+  D.insts.filter(i=>i.modulo===mod).forEach(i=>{ const xs = inst.filter(t=>t.instId===i.id); S.banda('Instalador: '+i.nombre, `${cuenta(xs)} herramienta(s)`);
+    xs.length ? S.tabla(colsBase.concat([{t:'Desde',w:36}]), xs.map(t=>herrFila(t,[new Date(t.desde).toLocaleDateString('es-MX',{day:'numeric',month:'short'})]))) : S.vacio('Sin herramienta registrada.'); });
+  const ok = tal.filter(t=>t.estado!=='descompuesta'), mal = tal.filter(t=>t.estado==='descompuesta');
+  S.banda('Taller · funcionando', String(cuenta(ok)));
+  ok.length ? S.tabla(colsBase.concat([{t:'Área',w:36}]), ok.map(t=>herrFila(t,[t.area||'']))) : S.vacio('Nada registrado.');
+  S.banda('Taller · descompuesta', String(cuenta(mal)), [192,57,43]);
+  mal.length ? S.tabla(colsBase.concat([{t:'Nota',w:36}]), mal.map(t=>herrFila(t,[t.nota||''])), [192,57,43]) : S.vacio('Nada descompuesto.');
+  S.banda('Stock de herramienta', String(cuenta(stk)));
+  stk.length ? S.tabla(colsBase.concat([{t:'Estado',w:36}]), stk.map(t=>herrFila(t,[t.estado==='descompuesta'?'Descompuesta':'Funcionando']))) : S.vacio('No hay herramienta en stock.');
+  const cambios = D.movs.filter(m=>m.modulo===mod && m.tipo==='cambio' && m.estado!=='rechazado').slice(0,40);
+  S.banda('Cambios de herramienta', String(cambios.length), [192,57,43]);
+  cambios.length ? S.tabla([{t:'Fecha',w:18},{t:'Quién',w:28},{t:'Salió',w:38},{t:'Entró',w:38},{t:'Motivo',w:30},{t:'¿Entregó la dañada?',w:30}],
+    cambios.map(m=>[new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'}), m.datos.quien||'', m.datos.descVieja||'', (m.datos.descNueva||'')+(m.estado==='pendiente'?' (por aprobar)':''), (HERR_MOTIVOS[m.datos.motivo]||'').replace(/^\S+ /,'')+(m.datos.motivoTxt?': '+m.datos.motivoTxt:''), m.danadaEntregada?{t:'Sí'}:{t:'Todavía no', col:[180,83,9], b:true}]), [192,57,43]) : S.vacio('Sin cambios.');
+  await S.fin(`herramienta-${mod}-${fechaHoyLocal()}.pdf`, `Closets Vera · Herramienta · ${mod}`);
+}
+async function generarAlmacenPDF(){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  const D = await herrCargar(true);
+  const alm = D.tools.filter(t=>t.modulo===ALM); const cuenta = xs => xs.reduce((s,t)=>s+(t.cantidad||1),0);
+  const ents = D.movs.filter(m=>m.tipo==='entrega' && m.estado!=='rechazado');
+  const hoyTxt = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  const S = herrPdfBase('Almacén general de herramienta', `${hoyTxt}  ·  solo lo aprobado`, [124,45,18]);
+  S.kpis([[cuenta(alm),'en almacén'],[cuenta(alm.filter(t=>(t.uso||'instalador')==='instalador')),'para instaladores'],[cuenta(alm.filter(t=>t.uso==='taller')),'para taller'],[ents.length,'entregas registradas']]);
+  const cols = [{t:'Herramienta',w:56},{t:'Cant.',w:16},{t:'Marca',w:30},{t:'Color',w:28},{t:'Tipo',w:28},{t:'Estado',w:24}];
+  [['instalador','Para instaladores'],['taller','Para taller']].forEach(([k,t])=>{ const xs = alm.filter(x=>(x.uso||'instalador')===k); S.banda(t, String(cuenta(xs)));
+    xs.length ? S.tabla(cols, xs.map(x=>herrFila(x,[x.estado==='descompuesta'?{t:'Descompuesta',col:[192,57,43]}:'Funcionando']))) : S.vacio('Nada registrado.'); });
+  S.banda('Entregas a módulos', String(ents.length));
+  ents.length ? S.tabla([{t:'Fecha',w:17},{t:'Herramienta',w:40},{t:'Cant.',w:11},{t:'Módulo',w:22},{t:'Recibió',w:26},{t:'Para',w:40},{t:'Aprobó',w:26}],
+    ents.map(m=>[new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'}), m.datos.descTool||'', String(m.datos.cantidad||1), m.modulo, m.datos.coordinador||'', m.datos.destino==='taller'?'Taller: área '+(m.datos.area||''):'Instalador: '+(m.datos.instNombre||''), m.estado==='pendiente'?{t:'Por aprobar',col:[180,83,9]}:(m.aprobadoPor||'').split('@')[0]])) : S.vacio('Todavía no hay entregas.');
+  await S.fin(`almacen-general-herramienta-${fechaHoyLocal()}.pdf`, 'Closets Vera · Almacén general de herramienta');
 }
 
 function renderMov(){
@@ -6136,6 +6621,13 @@ function aprobLeyendaHtml(clases){
   return `<div class="card" style="padding:10px 12px"><div class="hint" style="margin:0 0 6px">Colores:</div><div style="display:flex;flex-wrap:wrap;gap:6px">${ks.map(k=>aprobChip(APROB_CLASES[k])).join('')}</div></div>`;
 }
 async function renderAprobaciones(){
+  await renderAprobacionesBase();
+  if(current!=='apr' || !esAdmin()) return;
+  try{ const D = await herrCargar(true); const n = D.movs.filter(m=>m.estado==='pendiente').length;
+    if(n && current==='apr') $('#main').insertAdjacentHTML('afterbegin', `<div class="card" style="border-left:6px solid #ea580c"><div class="row" style="justify-content:space-between;gap:8px"><strong>🧰 Herramienta: ${n} movimiento(s) por aprobar</strong><button class="btn small" style="background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrTab='apr';irA('herr')">Ver</button></div></div>`);
+  }catch(e){}
+}
+async function renderAprobacionesBase(){
   if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Esta sección es solo para Dirección.</div>'; return; }
   $('#main').innerHTML = '<div class="card">Cargando pendientes…</div>';
   let todosMovs=[], todosLogs=[], garLogs=[], sobLogs=[];
@@ -8048,7 +8540,7 @@ async function renderUsuarios(){
   try{ usuariosCache = (await listarUsuarios()).perfiles || []; }
   catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar la lista de usuarios: ${e.message}<p class="hint">Si el error dice "Failed to fetch" o "404", probablemente la función 'admin-usuarios' todavía no está pegada en tu proyecto de Supabase — dile a Claude que te pase esa parte del README.</p></div>`; return; }
 
-  const rolOpts = (sel)=>['admin','administracion','coordinador','supervisor','gerente'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
+  const rolOpts = (sel)=>['admin','administracion','coordinador','supervisor','gerente','auditor'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
   const moduloOpts = (sel)=>`<option value="">(sin módulo)</option>`+MODULOS.map(m=>`<option value="${m.nombre}" ${m.nombre===sel?'selected':''}>${m.nombre}</option>`).join('');
 
   let html = `<div class="card">
