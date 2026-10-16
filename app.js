@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v143';
+const APP_VERSION = 'v145';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1669,6 +1669,7 @@ async function herrCargar(force){
   return herrCache;
 }
 const herrMarca = n => HERR_MARCAS.find(m=>m.n===n) || {n:n||'Genérico', bg:'#5b6474', fg:'#fff', rgb:[91,100,116]};
+const herrPilasTxt = t => t && t.tipo==='inalambrica' && (Number(t.pilas)||Number(t.cargadores)) ? `${Number(t.pilas)||0} pila(s) · ${Number(t.cargadores)||0} cargador(es)` : '';
 const herrEsMarcaLista = n => HERR_MARCAS.some(m=>m.n===n);
 const herrChipMarca = n => { const m = herrMarca(n); return `<span style="display:inline-block;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;margin-right:5px;background:${m.bg};color:${m.fg}">${String(n||'Genérico').toUpperCase()}</span>`; };
 const herrDesc = t => `${t.nombre} ${t.marca||'Genérico'} ${String(t.color||'').toLowerCase()}`.trim();
@@ -1684,7 +1685,7 @@ function herrToolHtml(t, opts){
     <div style="display:flex;gap:10px;align-items:center;cursor:pointer" onclick="herrAbierta=herrAbierta==='${t.id}'?'':'${t.id}';${opts.render||'renderHerr()'}">
       <div style="width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;background:rgba(194,65,12,.15);border:1px solid rgba(194,65,12,.4);flex:0 0 38px">${tp.ic}</div>
       <div style="min-width:0;flex:1"><strong style="display:block">${herrEsc(t.nombre)}${(t.cantidad||1)>1?` <span style="font-weight:800;color:${HERR_COLOR}">× ${t.cantidad}</span>`:''}</strong>
-        <span>${herrChipMarca(t.marca)}</span><span class="hint" style="margin:0">${herrEsc(t.color||'')} · ${tp.t}${opts.donde?' · '+herrEsc(herrDondeTxt(t)):(t.lugar==='taller'&&t.area?' · Área '+herrEsc(t.area):'')}${t.serie?' · '+herrEsc(t.serie):''}${t.nota?' · "'+herrEsc(t.nota)+'"':''}</span></div>
+        <span>${herrChipMarca(t.marca)}</span><span class="hint" style="margin:0">${herrEsc(t.color||'')} · ${tp.t}${herrPilasTxt(t)?' · 🔋 '+herrPilasTxt(t):''}${opts.donde?' · '+herrEsc(herrDondeTxt(t)):(t.lugar==='taller'&&t.area?' · Área '+herrEsc(t.area):'')}${t.serie?' · '+herrEsc(t.serie):''}${t.nota?' · "'+herrEsc(t.nota)+'"':''}</span></div>
       ${desc?'<span class="tag" style="color:var(--bad);border-color:var(--bad);white-space:nowrap">Descompuesta</span>':''}
     </div>
     ${abierta?`<div style="margin:8px 0 0 48px">
@@ -1700,10 +1701,10 @@ function herrToolHtml(t, opts){
 }
 function herrMovResumen(m){
   const d = m.datos||{};
-  if(m.tipo==='alta') return `Alta: ${d.cantidad>1?d.cantidad+' ':''}${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()} → ${d.lugar==='instalador'?'instalador '+(d.instNombre||''):d.lugar==='taller'?'taller'+(d.area?' (área '+d.area+')':''):d.lugar==='stock'?'stock':'almacén general'}${d.estado==='descompuesta'?' · descompuesta':''}`;
+  if(m.tipo==='alta') return `Alta: ${d.cantidad>1?d.cantidad+' ':''}${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()}${herrPilasTxt(d)?' ('+herrPilasTxt(d)+')':''} → ${d.lugar==='instalador'?'instalador '+(d.instNombre||''):d.lugar==='taller'?'taller'+(d.area?' (área '+d.area+')':''):d.lugar==='stock'?'stock':'almacén general'}${d.estado==='descompuesta'?' · descompuesta':''}`;
   if(m.tipo==='estado') return `${d.desc||'Herramienta'}: ${d.estado==='descompuesta'?'se descompuso':'ya funciona'}${d.nota?' · "'+d.nota+'"':''}`;
   if(m.tipo==='cambio') return `Cambio (${(HERR_MOTIVOS[d.motivo]||'').replace(/^\S+ /,'')}): ${d.descVieja||''}${d.quien?' de '+d.quien:''} → ${d.fuente==='stock'?(d.descNueva||'del stock'):d.fuente==='almacen'?((d.descNueva||'herramienta')+' (del almacén general)'):(d.descNueva||'nueva')+' (comprada)'} · la vieja: ${(HERR_VIEJA[d.vieja]||'').replace(/^\S+ /,'').toLowerCase()}${d.motivoTxt?' · "'+d.motivoTxt+'"':''}`;
-  if(m.tipo==='editar'){ const c = d.cambios||{}, a = d.antes||{}; const ks = Object.keys(c).filter(k=>String(c[k])!==String(a[k]||'')); return `Corrección de ${d.desc||'herramienta'}: ${ks.map(k=>({nombre:'herramienta',marca:'marca',color:'color',tipo:'tipo',serie:'serie',cantidad:'cantidad'}[k]||k)+' '+(k==='tipo'?(HERR_TIPOS[a[k]]||{}).t||a[k]:a[k]||'—')+' → '+(k==='tipo'?(HERR_TIPOS[c[k]]||{}).t||c[k]:c[k])).join(' · ')}`; }
+  if(m.tipo==='editar'){ const c = d.cambios||{}, a = d.antes||{}; const ks = Object.keys(c).filter(k=>String(c[k])!==String(a[k]||'')); return `Corrección de ${d.desc||'herramienta'}: ${ks.map(k=>({nombre:'herramienta',marca:'marca',color:'color',tipo:'tipo',serie:'serie',cantidad:'cantidad',pilas:'pilas',cargadores:'cargadores'}[k]||k)+' '+(k==='tipo'?(HERR_TIPOS[a[k]]||{}).t||a[k]:a[k]||'—')+' → '+(k==='tipo'?(HERR_TIPOS[c[k]]||{}).t||c[k]:c[k])).join(' · ')}`; }
   if(m.tipo==='entrega') return `Almacén general → ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.descTool||''} · recibe ${d.coordinador||''} · para ${d.destino==='taller'?'taller (área '+(d.area||'')+')':'instalador '+(d.instNombre||'')}`;
   return m.tipo;
 }
@@ -1723,7 +1724,7 @@ async function herrAplicar(m, extra){
   const put = t => db.collection('herramientas').doc(t.id).set(t);
   const nueva = (base, lugarTxt) => Object.assign({id:cryptoId(), cantidad:1, estado:'funcionando', desde:now, hist:[]}, base, {hist:[{f:now, t:lugarTxt}]});
   if(m.tipo==='alta'){
-    const t = nueva({modulo:m.modulo, lugar:d.lugar, instId:d.instId||'', instNombre:d.instNombre||'', area:d.area||'', uso:d.uso||'', nombre:d.nombre, cantidad:Number(d.cantidad)||1, marca:d.marca, color:d.color, tipo:d.tipo, estado:d.estado||'funcionando', serie:d.serie||'', nota:d.nota||''}, `Alta en ${d.lugar==='instalador'?'instalador '+d.instNombre:d.lugar==='taller'?'taller'+(d.area?' (área '+d.area+')':''):d.lugar==='stock'?'stock':'almacén general'} · aprobó ${quien}`);
+    const t = nueva({modulo:m.modulo, lugar:d.lugar, instId:d.instId||'', instNombre:d.instNombre||'', area:d.area||'', uso:d.uso||'', nombre:d.nombre, cantidad:Number(d.cantidad)||1, marca:d.marca, color:d.color, tipo:d.tipo, estado:d.estado||'funcionando', serie:d.serie||'', nota:d.nota||'', pilas:Number(d.pilas)||0, cargadores:Number(d.cargadores)||0}, `Alta en ${d.lugar==='instalador'?'instalador '+d.instNombre:d.lugar==='taller'?'taller'+(d.area?' (área '+d.area+')':''):d.lugar==='stock'?'stock':'almacén general'} · aprobó ${quien}`);
     await put(t); return '';
   }
   if(m.tipo==='estado'){
@@ -1755,7 +1756,7 @@ async function herrAplicar(m, extra){
     if(fuente){
       const desdeTxt = d.fuente==='almacen' ? 'del almacén general' : 'del stock';
       if((fuente.cantidad||1) > 1){ fuente.cantidad -= 1; fuente.hist = (fuente.hist||[]).concat([{f:now, t:`Salió 1 para ${destino.instNombre||'taller'} (${vieja.modulo}) · aprobó ${quien}`}]); await put(fuente);
-        await put(nueva(Object.assign({nombre:fuente.nombre, marca:fuente.marca, color:fuente.color, tipo:fuente.tipo, serie:''}, destino), `Llegó ${desdeTxt} por cambio de ${descVieja} · aprobó ${quien}`)); }
+        await put(nueva(Object.assign({nombre:fuente.nombre, marca:fuente.marca, color:fuente.color, tipo:fuente.tipo, serie:'', pilas:fuente.pilas||0, cargadores:fuente.cargadores||0}, destino), `Llegó ${desdeTxt} por cambio de ${descVieja} · aprobó ${quien}`)); }
       else { Object.assign(fuente, destino, {estado:'funcionando', nota:'', desde:now, uso:''}); fuente.hist = (fuente.hist||[]).concat([{f:now, t:`Llegó ${desdeTxt} por cambio de ${descVieja} · aprobó ${quien}`}]); await put(fuente); }
     } else {
       const n = d.nueva||{};
@@ -1766,7 +1767,7 @@ async function herrAplicar(m, extra){
   }
   if(m.tipo==='editar'){
     const t = D.todas.find(x=>x.id===d.toolId && !x.baja); if(!t) return 'Ya no existe esa herramienta.';
-    const c = d.cambios||{}; Object.keys(c).forEach(k=>{ t[k] = k==='cantidad' ? Math.max(1, Math.round(Number(c[k])||1)) : c[k]; });
+    const c = d.cambios||{}; Object.keys(c).forEach(k=>{ t[k] = k==='cantidad' ? Math.max(1, Math.round(Number(c[k])||1)) : (k==='pilas'||k==='cargadores') ? (Number(c[k])||0) : c[k]; });
     t.hist = (t.hist||[]).concat([{f:now, t:herrMovResumen(m).replace(/^Corrección de [^:]*: /,'Corrección: ')+' · aprobó '+quien}]);
     await put(t); return '';
   }
@@ -1776,7 +1777,7 @@ async function herrAplicar(m, extra){
     const destino = {modulo:m.modulo, lugar:d.destino==='taller'?'taller':'instalador', instId:d.instId||'', instNombre:d.instNombre||'', area:d.area||''};
     const txt = `Entregada del almacén general a ${m.modulo} · recibió ${d.coordinador} · para ${d.destino==='taller'?'taller (área '+d.area+')':'instalador '+d.instNombre} · aprobó ${quien}`;
     if((t.cantidad||1) > q){ t.cantidad -= q; t.hist = (t.hist||[]).concat([{f:now, t:`Salieron ${q} a ${m.modulo} (${d.destino==='taller'?'taller':d.instNombre})`}]); await put(t);
-      await put(nueva({nombre:t.nombre, marca:t.marca, color:t.color, tipo:t.tipo, serie:'', cantidad:q, ...destino}, txt)); }
+      await put(nueva({nombre:t.nombre, marca:t.marca, color:t.color, tipo:t.tipo, serie:'', pilas:t.pilas||0, cargadores:t.cargadores||0, cantidad:q, ...destino}, txt)); }
     else { Object.assign(t, destino, {estado:'funcionando', nota:'', desde:now, uso:''}); t.hist = (t.hist||[]).concat([{f:now, t:txt}]); await put(t); }
     return '';
   }
@@ -1850,6 +1851,7 @@ function herrFormHtml(D, rerender){
     ${f.otroColor?`<input placeholder="¿Qué color?" value="${herrEsc(f.color)}" oninput="herrForm.color=this.value" style="margin-top:8px">`:''}
     <label class="hint" style="display:block;margin-top:10px">Tipo <span style="color:var(--bad)">*</span></label>
     <div class="chips" style="margin-top:6px">${Object.keys(HERR_TIPOS).map(k=>`<button class="chip ${f.tipo===k?'on':''}" onclick="${set('tipo',`'${k}'`)}">${HERR_TIPOS[k].ic} ${HERR_TIPOS[k].t}</button>`).join('')}</div>
+    ${f.tipo==='inalambrica'?`<div class="grid2" style="margin-top:10px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div><label class="hint">🔋 ¿Cuántas pilas? <span style="color:var(--bad)">*</span></label><input type="number" min="0" inputmode="numeric" value="${herrEsc(f.pilas)}" style="margin-top:4px;min-width:0;width:100%" oninput="herrForm.pilas=this.value"></div><div><label class="hint">🔌 ¿Cuántos cargadores? <span style="color:var(--bad)">*</span></label><input type="number" min="0" inputmode="numeric" value="${herrEsc(f.cargadores)}" style="margin-top:4px;min-width:0;width:100%" oninput="herrForm.cargadores=this.value"></div></div>`:''}
     ${(f.lugar==='taller'||f.lugar==='stock'||f.almacen)?`<label class="hint" style="display:block;margin-top:10px">Estado <span style="color:var(--bad)">*</span></label>
       <div class="chips" style="margin-top:6px"><button class="chip ${f.estado==='funcionando'?'on':''}" onclick="${set('estado',"'funcionando'")}">✅ Funcionando</button><button class="chip ${f.estado==='descompuesta'?'on':''}" onclick="${set('estado',"'descompuesta'")}">⚠️ Descompuesta</button></div>`:''}
     <label class="hint" style="display:block;margin-top:10px">Número de serie o seña (opcional)</label>
@@ -1866,9 +1868,10 @@ async function herrGuardarAlta(){
   if(!String(f.marca||'').trim()) return alert('Elige o escribe la marca (si no tiene: Genérico).');
   if(!String(f.color).trim()) return alert('Elige el color.');
   if(!f.tipo) return alert('Elige si es alámbrica, inalámbrica o manual.');
+  if(f.tipo==='inalambrica' && (String(f.pilas??'').trim()==='' || String(f.cargadores??'').trim()==='')) return alert('🔋 Escribe cuántas pilas y cuántos cargadores tiene (pon 0 si no tiene).');
   const cant = Math.max(1, Math.round(Number(f.cantidad)||1));
   const inst = D.insts.find(i=>i.id===f.instId);
-  const datos = {lugar:f.almacen?'almacen':f.lugar, uso:f.almacen?f.uso:'', instId:f.instId||'', instNombre:inst?inst.nombre:'', area:f.lugar==='taller'?f.area:'', nombre:String(f.nombre).trim(), cantidad:cant, marca:String(f.marca).trim(), color:String(f.color).trim(), tipo:f.tipo, estado:(f.lugar==='instalador')?'funcionando':f.estado, serie:String(f.serie||'').trim()};
+  const datos = {lugar:f.almacen?'almacen':f.lugar, uso:f.almacen?f.uso:'', instId:f.instId||'', instNombre:inst?inst.nombre:'', area:f.lugar==='taller'?f.area:'', nombre:String(f.nombre).trim(), cantidad:cant, marca:String(f.marca).trim(), color:String(f.color).trim(), tipo:f.tipo, estado:(f.lugar==='instalador')?'funcionando':f.estado, serie:String(f.serie||'').trim(), pilas:f.tipo==='inalambrica'?Math.max(0,Math.round(Number(f.pilas)||0)):0, cargadores:f.tipo==='inalambrica'?Math.max(0,Math.round(Number(f.cargadores)||0)):0};
   const ok = await herrGuardarMov({tipo:'alta', modulo:f.almacen?ALM:modulo(), datos});
   if(!ok) return;
   toast(puedeAprobarHerr() ? '✅ Herramienta agregada' : '✅ Enviado. Dirección lo tiene que aprobar.');
@@ -1878,7 +1881,7 @@ async function herrGuardarAlta(){
 // --- Corregir una herramienta (nombre, marca, color, tipo, serie, cantidad) ---
 async function herrIniciarEdicion(toolId){
   const D = await herrCargar(); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
-  herrEdit = {toolId, nombre:t.nombre, otraHerr:![...HERR_LISTA_INST, ...HERR_LISTA_TALLER].includes(t.nombre), marca:t.marca||'Genérico', otraMarca:!herrEsMarcaLista(t.marca||'Genérico'), color:t.color||'', otroColor:!!t.color && !HERR_COLORES.includes(t.color), tipo:t.tipo||'manual', serie:t.serie||'', cantidad:t.cantidad||1};
+  herrEdit = {toolId, nombre:t.nombre, otraHerr:![...HERR_LISTA_INST, ...HERR_LISTA_TALLER].includes(t.nombre), marca:t.marca||'Genérico', otraMarca:!herrEsMarcaLista(t.marca||'Genérico'), color:t.color||'', otroColor:!!t.color && !HERR_COLORES.includes(t.color), tipo:t.tipo||'manual', serie:t.serie||'', cantidad:t.cantidad||1, pilas:t.pilas||0, cargadores:t.cargadores||0};
   herrForm = null; herrCambio = null; herrEnt = null;
   current==='alm' ? renderAlmacen() : renderHerr(); window.scrollTo(0,0);
 }
@@ -1898,6 +1901,7 @@ function herrEditHtml(D, R){
     ${e.otroColor?`<input placeholder="¿Qué color?" value="${herrEsc(e.color)}" oninput="herrEdit.color=this.value" style="margin-top:8px">`:''}
     <label class="hint" style="display:block;margin-top:10px">Tipo</label>
     <div class="chips" style="margin-top:6px">${Object.keys(HERR_TIPOS).map(k=>`<button class="chip ${e.tipo===k?'on':''}" onclick="herrEdit.tipo='${k}';${R}">${HERR_TIPOS[k].ic} ${HERR_TIPOS[k].t}</button>`).join('')}</div>
+    ${e.tipo==='inalambrica'?`<div class="grid2" style="margin-top:10px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div><label class="hint">🔋 Pilas</label><input type="number" min="0" value="${e.pilas}" style="margin-top:4px;min-width:0;width:100%" oninput="herrEdit.pilas=this.value"></div><div><label class="hint">🔌 Cargadores</label><input type="number" min="0" value="${e.cargadores}" style="margin-top:4px;min-width:0;width:100%" oninput="herrEdit.cargadores=this.value"></div></div>`:''}
     <label class="hint" style="display:block;margin-top:10px">Cantidad</label>
     <input type="number" min="1" value="${e.cantidad}" style="max-width:120px;margin-top:4px" oninput="herrEdit.cantidad=this.value">
     <label class="hint" style="display:block;margin-top:10px">Número de serie o seña</label>
@@ -1907,10 +1911,10 @@ function herrEditHtml(D, R){
 }
 async function herrGuardarEdicion(){
   const e = herrEdit; const D = await herrCargar(); const t = D.tools.find(x=>x.id===e.toolId); if(!t) return alert('Ya no existe esa herramienta.');
-  const nuevo = {nombre:String(e.nombre||'').trim(), marca:String(e.marca||'').trim(), color:String(e.color||'').trim(), tipo:e.tipo, serie:String(e.serie||'').trim(), cantidad:Math.max(1, Math.round(Number(e.cantidad)||1))};
+  const nuevo = {nombre:String(e.nombre||'').trim(), marca:String(e.marca||'').trim(), color:String(e.color||'').trim(), tipo:e.tipo, serie:String(e.serie||'').trim(), cantidad:Math.max(1, Math.round(Number(e.cantidad)||1)), pilas:e.tipo==='inalambrica'?Math.max(0,Math.round(Number(e.pilas)||0)):0, cargadores:e.tipo==='inalambrica'?Math.max(0,Math.round(Number(e.cargadores)||0)):0};
   if(!nuevo.nombre) return alert('Escribe la herramienta.'); if(!nuevo.marca) return alert('Escribe la marca (si no tiene: Genérico).'); if(!nuevo.color) return alert('Escribe el color.');
   const cambios = {}, antes = {};
-  Object.keys(nuevo).forEach(k=>{ const a = k==='cantidad' ? (t.cantidad||1) : (t[k]||''); if(String(nuevo[k])!==String(a)){ cambios[k] = nuevo[k]; antes[k] = a; } });
+  Object.keys(nuevo).forEach(k=>{ const a = k==='cantidad' ? (t.cantidad||1) : (k==='pilas'||k==='cargadores') ? (Number(t[k])||0) : (t[k]||''); if(String(nuevo[k])!==String(a)){ cambios[k] = nuevo[k]; antes[k] = a; } });
   if(!Object.keys(cambios).length) return alert('No cambiaste nada.');
   const enAlm = current==='alm';
   const ok = await herrGuardarMov({tipo:'editar', modulo:t.modulo, datos:{toolId:t.id, desc:herrDesc(t), cambios, antes}});
@@ -2113,9 +2117,12 @@ function herrPdfBase(titulo, sub, rgb){
     filas.forEach((f,idx)=>{ doc.setFontSize(8.3); const lines = f.map((v,i)=>doc.splitTextToSize(String(v.t!==undefined?v.t:v), cols[i].w-3).slice(0,3)); const h = Math.max(5.5, 1.8+Math.max(...lines.map(l=>l.length))*3.6);
       if(S.y + h > pageH-14){ doc.addPage(); S.y = 15; head(); }
       if(idx%2){ doc.setFillColor(...pdfTinte(c,.95)); doc.rect(L,S.y,W,h,'F'); }
-      f.forEach((v,i)=>{ const o = (v && typeof v==='object') ? v : {}; if(o.col) doc.setTextColor(...o.col); if(o.b) doc.setFont(undefined,'bold'); lines[i].forEach((l,k)=>doc.text(l, x0(i)+1.5, S.y+3.9+k*3.6)); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); });
+      f.forEach((v,i)=>{ const o = (v && typeof v==='object') ? v : {};
+        if(o.chip){ doc.setFont(undefined,'bold'); doc.setFontSize(7.6); const tw = doc.getTextWidth(String(o.t)); doc.setFillColor(...o.chip); doc.rect(x0(i)+1, S.y+1, Math.min(tw+4, cols[i].w-2), 4.3, 'F'); doc.setTextColor(...(o.fg||[255,255,255])); doc.text(String(o.t), x0(i)+3, S.y+4.1); doc.setFont(undefined,'normal'); doc.setFontSize(8.3); doc.setTextColor(0,0,0); return; }
+        if(o.col) doc.setTextColor(...o.col); if(o.b) doc.setFont(undefined,'bold'); lines[i].forEach((l,k)=>doc.text(l, x0(i)+1.5, S.y+3.9+k*3.6)); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); });
       S.y += h; });
     S.y += 4; };
+  S.seccion = (t, sub, c, nuevaPagina) => { if(nuevaPagina || S.y > pageH-50){ doc.addPage(); S.y = 15; } doc.setFillColor(...c); doc.rect(L, S.y, W, 14, 'F'); doc.setFillColor(255,211,77); doc.rect(L, S.y+14, W, 1, 'F'); doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(13); doc.text(t, L+4, S.y+6.6); doc.setFont(undefined,'normal'); doc.setFontSize(8.5); if(sub) doc.text(sub, L+4, S.y+11.6); doc.setTextColor(0,0,0); S.y += 19; };
   S.vacio = t => { doc.setFontSize(9); doc.setTextColor(120,124,136); doc.text(t, L+2, S.y+4); doc.setTextColor(0,0,0); S.y += 9; };
   S.fin = async (nombre, pie) => { const np = doc.getNumberOfPages(); for(let i=1;i<=np;i++){ doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(140,140,140); doc.text(pie, L, pageH-6); doc.text(`Página ${i} de ${np}`, L+W, pageH-6, {align:'right'}); }
     const blob = doc.output('blob');
@@ -2123,7 +2130,7 @@ function herrPdfBase(titulo, sub, rgb){
     doc.save(nombre); };
   return S;
 }
-const herrFila = (t, extra) => [t.nombre, String(t.cantidad||1), t.marca||'Genérico', t.color||'', (HERR_TIPOS[t.tipo]||HERR_TIPOS.manual).t].concat(extra||[]);
+const herrFila = (t, extra) => [t.nombre, String(t.cantidad||1), t.marca||'Genérico', t.color||'', (HERR_TIPOS[t.tipo]||HERR_TIPOS.manual).t+(t.tipo==='inalambrica'?` (${Number(t.pilas)||0} pilas, ${Number(t.cargadores)||0} carg.)`:'')].concat(extra||[]);
 async function generarHerrPDF(){
   if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
   const D = await herrCargar(true); const mod = modulo();
@@ -2132,23 +2139,43 @@ async function generarHerrPDF(){
   const hoyTxt = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
   const S = herrPdfBase('Closets Vera · Herramienta', `Módulo ${mod}  ·  ${hoyTxt}  ·  solo lo aprobado`, HERR_RGB);
   const inst = mias.filter(t=>t.lugar==='instalador'), tal = mias.filter(t=>t.lugar==='taller'), stk = mias.filter(t=>t.lugar==='stock');
-  S.kpis([[cuenta(mias),'herramientas'],[cuenta(inst),'con instaladores'],[cuenta(tal),'en taller'],[cuenta(stk),'en stock'],[cuenta(mias.filter(t=>t.estado==='descompuesta')),'descompuestas',[192,57,43]]]);
+  // Colores por área (confirmado por el usuario: que se vea a simple vista que es otra área).
+  const C_INST = [194,65,12], C_TALLER = [13,116,104], C_STOCK = [79,70,229], C_MAL = [192,57,43], C_CAMB = [124,45,18];
+  const INST_TONOS = [[194,65,12],[180,83,9],[154,52,18],[217,119,6]];
+  const AREA_TONOS = {Cajoneras:[13,116,104], Cajones:[8,145,178], Espejos:[37,99,235], Corte:[22,101,52], '':[71,85,105]};
+  S.kpis([[cuenta(mias),'herramientas',[55,65,81]],[cuenta(inst),'de instaladores',C_INST],[cuenta(tal),'del taller',C_TALLER],[cuenta(stk),'en stock',C_STOCK],[cuenta(mias.filter(t=>t.estado==='descompuesta')),'descompuestas',C_MAL]]);
   const otrasM = cuenta(mias.filter(t=>!herrEsMarcaLista(t.marca||'Genérico')));
   S.kpis(HERR_MARCAS.map(m=>[cuenta(mias.filter(t=>(t.marca||'Genérico')===m.n)), m.n, m.n==='DeWalt'?[163,115,0]:m.rgb]).concat(otrasM?[[otrasM,'Otras marcas',[91,100,116]]]:[]));
-  const colsBase = [{t:'Herramienta',w:52},{t:'Cant.',w:14},{t:'Marca',w:28},{t:'Color',w:26},{t:'Tipo',w:26}];
-  D.insts.filter(i=>i.modulo===mod).forEach(i=>{ const xs = inst.filter(t=>t.instId===i.id); S.banda('Instalador: '+i.nombre, `${cuenta(xs)} herramienta(s)`);
-    xs.length ? S.tabla(colsBase.concat([{t:'Desde',w:36}]), xs.map(t=>herrFila(t,[new Date(t.desde).toLocaleDateString('es-MX',{day:'numeric',month:'short'})]))) : S.vacio('Sin herramienta registrada.'); });
+  const inal = mias.filter(t=>t.tipo==='inalambrica');
+  S.kpis([[cuenta(inal),'herramientas inalámbricas',[22,128,74]],[inal.reduce((s,t)=>s+(Number(t.pilas)||0),0),'pilas en total',[22,128,74]],[inal.reduce((s,t)=>s+(Number(t.cargadores)||0),0),'cargadores en total',[22,128,74]]]);
+  const marcaCel = t => { const m = herrMarca(t.marca||'Genérico'); return {t:t.marca||'Genérico', chip:m.rgb, fg: m.fg==='#111'?[17,17,17]:[255,255,255]}; };
+  const tipoCel = t => { const k = t.tipo||'manual'; return {t:(HERR_TIPOS[k]||HERR_TIPOS.manual).t, col: k==='inalambrica'?[22,128,74]:k==='alambrica'?[37,99,235]:[107,114,128], b:true}; };
+  const pilasCel = t => t.tipo==='inalambrica' ? {t:`${Number(t.pilas)||0} / ${Number(t.cargadores)||0}`, b:true, col:[22,128,74]} : '–';
+  const fila = (t, extra) => [{t:t.nombre, b:true}, String(t.cantidad||1), marcaCel(t), t.color||'', tipoCel(t), pilasCel(t)].concat(extra||[]);
+  const cols = ultimo => [{t:'Herramienta',w:44},{t:'Cant.',w:11},{t:'Marca',w:28},{t:'Color',w:22},{t:'Tipo',w:24},{t:'Pilas /\ncargadores',w:20},{t:ultimo,w:33}];
+  // 1. INSTALADORES
+  S.seccion('HERRAMIENTA DE INSTALADORES', `${cuenta(inst)} herramienta(s) · ${D.insts.filter(i=>i.modulo===mod).length} instalador(es)`, C_INST);
+  D.insts.filter(i=>i.modulo===mod).forEach((i,k)=>{ const xs = inst.filter(t=>t.instId===i.id), c = INST_TONOS[k%INST_TONOS.length];
+    S.banda('Instalador: '+i.nombre, `${cuenta(xs)} herramienta(s)`, c);
+    xs.length ? S.tabla(cols('Desde'), xs.map(t=>fila(t,[new Date(t.desde).toLocaleDateString('es-MX',{day:'numeric',month:'short'})])), c) : S.vacio('Sin herramienta registrada.'); });
+  // 2. TALLER (hoja aparte, otro color)
   const ok = tal.filter(t=>t.estado!=='descompuesta'), mal = tal.filter(t=>t.estado==='descompuesta');
-  S.banda('Taller · funcionando', String(cuenta(ok)));
-  ok.length ? S.tabla(colsBase.concat([{t:'Área',w:36}]), ok.map(t=>herrFila(t,[t.area||'']))) : S.vacio('Nada registrado.');
-  S.banda('Taller · descompuesta', String(cuenta(mal)), [192,57,43]);
-  mal.length ? S.tabla(colsBase.concat([{t:'Nota',w:36}]), mal.map(t=>herrFila(t,[t.nota||''])), [192,57,43]) : S.vacio('Nada descompuesto.');
-  S.banda('Stock de herramienta', String(cuenta(stk)));
-  stk.length ? S.tabla(colsBase.concat([{t:'Estado',w:36}]), stk.map(t=>herrFila(t,[t.estado==='descompuesta'?'Descompuesta':'Funcionando']))) : S.vacio('No hay herramienta en stock.');
+  S.seccion('HERRAMIENTA DE TALLER', `${cuenta(tal)} herramienta(s) · ${cuenta(ok)} funcionando · ${cuenta(mal)} descompuesta(s)`, C_TALLER, true);
+  const areas = HERR_AREAS.concat(['']).filter(a=>ok.some(t=>(t.area||'')===a));
+  if(!areas.length) S.vacio('No hay herramienta de taller funcionando registrada.');
+  areas.forEach(a=>{ const xs = ok.filter(t=>(t.area||'')===a), c = AREA_TONOS[a]||AREA_TONOS[''];
+    S.banda(a ? 'Área de '+a.toLowerCase() : 'Sin área', `${cuenta(xs)} funcionando`, c);
+    S.tabla(cols('Estado'), xs.map(t=>fila(t,[{t:'Funcionando',col:[22,128,74],b:true}])), c); });
+  S.banda('Taller · descompuesta', String(cuenta(mal)), C_MAL);
+  mal.length ? S.tabla(cols('Nota'), mal.map(t=>fila(t,[{t:[t.area?'Área '+t.area:'', t.nota||''].filter(Boolean).join(' · '), col:C_MAL}])), C_MAL) : S.vacio('Nada descompuesto.');
+  // 3. STOCK
+  S.seccion('STOCK DE HERRAMIENTA', `${cuenta(stk)} herramienta(s) de repuesto`, C_STOCK);
+  stk.length ? S.tabla(cols('Estado'), stk.map(t=>fila(t,[t.estado==='descompuesta'?{t:'Descompuesta',col:C_MAL,b:true}:{t:'Funcionando',col:[22,128,74],b:true}])), C_STOCK) : S.vacio('No hay herramienta en stock.');
+  // 4. CAMBIOS
   const cambios = D.movs.filter(m=>m.modulo===mod && m.tipo==='cambio' && m.estado!=='rechazado').slice(0,40);
-  S.banda('Cambios de herramienta', String(cambios.length), [192,57,43]);
-  cambios.length ? S.tabla([{t:'Fecha',w:18},{t:'Quién',w:28},{t:'Salió',w:38},{t:'Entró',w:38},{t:'Motivo',w:30},{t:'¿Entregó la dañada?',w:30}],
-    cambios.map(m=>[new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'}), m.datos.quien||'', m.datos.descVieja||'', (m.datos.descNueva||'')+(m.estado==='pendiente'?' (por aprobar)':''), (HERR_MOTIVOS[m.datos.motivo]||'').replace(/^\S+ /,'')+(m.datos.motivoTxt?': '+m.datos.motivoTxt:''), m.danadaEntregada?{t:'Sí'}:{t:'Todavía no', col:[180,83,9], b:true}]), [192,57,43]) : S.vacio('Sin cambios.');
+  S.seccion('CAMBIOS DE HERRAMIENTA', `${cambios.length} cambio(s)`, C_CAMB);
+  cambios.length ? S.tabla([{t:'Fecha',w:18},{t:'Quién',w:28},{t:'Salió',w:38},{t:'Entró',w:38},{t:'Motivo',w:30},{t:'¿Entregó la\ndañada?',w:30}],
+    cambios.map(m=>[new Date(m.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'}), {t:m.datos.quien||'',b:true}, m.datos.descVieja||'', (m.datos.descNueva||'')+(m.estado==='pendiente'?' (por aprobar)':''), (HERR_MOTIVOS[m.datos.motivo]||'').replace(/^\S+ /,'')+(m.datos.motivoTxt?': '+m.datos.motivoTxt:''), m.danadaEntregada?{t:'Sí',col:[22,128,74],b:true}:{t:'Todavía no', col:[180,83,9], b:true}]), C_CAMB) : S.vacio('Sin cambios.');
   await S.fin(`herramienta-${mod}-${fechaHoyLocal()}.pdf`, `Closets Vera · Herramienta · ${mod}`);
 }
 async function generarAlmacenPDF(){
@@ -2160,7 +2187,7 @@ async function generarAlmacenPDF(){
   const S = herrPdfBase('Almacén general de herramienta', `${hoyTxt}  ·  solo lo aprobado`, [124,45,18]);
   const entInst = ents.filter(m=>m.datos.destino!=='taller'), entTal = ents.filter(m=>m.datos.destino==='taller');
   S.kpis([[cuenta(alm),'en almacén'],[ents.length,'entregas'],[entInst.reduce((s,m)=>s+(m.datos.cantidad||1),0),'para instaladores'],[entTal.reduce((s,m)=>s+(m.datos.cantidad||1),0),'para taller']]);
-  const cols = [{t:'Herramienta',w:56},{t:'Cant.',w:16},{t:'Marca',w:30},{t:'Color',w:28},{t:'Tipo',w:28},{t:'Estado',w:24}];
+  const cols = [{t:'Herramienta',w:48},{t:'Cant.',w:13},{t:'Marca',w:28},{t:'Color',w:24},{t:'Tipo',w:45},{t:'Estado',w:24}];
   S.banda('Herramienta en el almacén', String(cuenta(alm)));
   alm.length ? S.tabla(cols, alm.map(x=>herrFila(x,[x.estado==='descompuesta'?{t:'Descompuesta',col:[192,57,43]}:'Funcionando']))) : S.vacio('Nada registrado.');
   S.banda('Entregas a módulos', String(ents.length));
