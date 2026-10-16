@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v145';
+const APP_VERSION = 'v146';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1651,7 +1651,8 @@ const HERR_LISTA_INST = ['Escalera','Atornillador','Taladro','Martillo','Segueta
 const HERR_LISTA_TALLER = ['Taladro','Atornillador','Martillo','Pinzas','Sargentos','Prensas','Compresor','Router','Escalera','Clavadora','Extensión','Manguera de compresor','Cinta métrica'];
 const HERR_MARCAS = [{n:'Pretul',bg:'#f28c00',fg:'#111',rgb:[242,140,0]},{n:'DeWalt',bg:'#febd17',fg:'#111',rgb:[254,189,23]},{n:'Milwaukee',bg:'#db011c',fg:'#fff',rgb:[219,1,28]},{n:'Bosch',bg:'#1e6fb8',fg:'#fff',rgb:[30,111,184]},{n:'Truper',bg:'#f26522',fg:'#fff',rgb:[242,101,34]},{n:'Genérico',bg:'#8b93a3',fg:'#fff',rgb:[139,147,163]}];
 const HERR_COLORES = ['Amarillo','Rojo','Azul','Naranja','Verde','Negro','Gris'];
-const HERR_AREAS = ['Cajoneras','Cajones','Espejos','Corte'];
+const HERR_AREAS = ['General','Cajoneras','Cajones','Espejos','Corte'];
+const herrAreaTxt = a => !a ? 'Sin área' : a==='General' ? 'Área general (la usan todos)' : 'Área de '+a.toLowerCase();
 const HERR_TIPOS = {alambrica:{ic:'🔌',t:'Alámbrica'}, inalambrica:{ic:'🔋',t:'Inalámbrica'}, manual:{ic:'✋',t:'Manual'}};
 const HERR_LUGAR = {instalador:'👷 Instalador', taller:'🛠️ Taller', stock:'📦 Stock', almacen:'🏢 Almacén general'};
 const HERR_MOTIVOS = {dano:'💥 Daño', desgaste:'⚙️ Desgaste', robo:'🚫 Robo o pérdida', otro:'✏️ Otro'};
@@ -1704,7 +1705,7 @@ function herrMovResumen(m){
   if(m.tipo==='alta') return `Alta: ${d.cantidad>1?d.cantidad+' ':''}${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()}${herrPilasTxt(d)?' ('+herrPilasTxt(d)+')':''} → ${d.lugar==='instalador'?'instalador '+(d.instNombre||''):d.lugar==='taller'?'taller'+(d.area?' (área '+d.area+')':''):d.lugar==='stock'?'stock':'almacén general'}${d.estado==='descompuesta'?' · descompuesta':''}`;
   if(m.tipo==='estado') return `${d.desc||'Herramienta'}: ${d.estado==='descompuesta'?'se descompuso':'ya funciona'}${d.nota?' · "'+d.nota+'"':''}`;
   if(m.tipo==='cambio') return `Cambio (${(HERR_MOTIVOS[d.motivo]||'').replace(/^\S+ /,'')}): ${d.descVieja||''}${d.quien?' de '+d.quien:''} → ${d.fuente==='stock'?(d.descNueva||'del stock'):d.fuente==='almacen'?((d.descNueva||'herramienta')+' (del almacén general)'):(d.descNueva||'nueva')+' (comprada)'} · la vieja: ${(HERR_VIEJA[d.vieja]||'').replace(/^\S+ /,'').toLowerCase()}${d.motivoTxt?' · "'+d.motivoTxt+'"':''}`;
-  if(m.tipo==='editar'){ const c = d.cambios||{}, a = d.antes||{}; const ks = Object.keys(c).filter(k=>String(c[k])!==String(a[k]||'')); return `Corrección de ${d.desc||'herramienta'}: ${ks.map(k=>({nombre:'herramienta',marca:'marca',color:'color',tipo:'tipo',serie:'serie',cantidad:'cantidad',pilas:'pilas',cargadores:'cargadores'}[k]||k)+' '+(k==='tipo'?(HERR_TIPOS[a[k]]||{}).t||a[k]:a[k]||'—')+' → '+(k==='tipo'?(HERR_TIPOS[c[k]]||{}).t||c[k]:c[k])).join(' · ')}`; }
+  if(m.tipo==='editar'){ const c = d.cambios||{}, a = d.antes||{}; const ks = Object.keys(c).filter(k=>String(c[k])!==String(a[k]||'')); return `Corrección de ${d.desc||'herramienta'}: ${ks.map(k=>({nombre:'herramienta',marca:'marca',color:'color',tipo:'tipo',serie:'serie',cantidad:'cantidad',pilas:'pilas',cargadores:'cargadores',area:'área'}[k]||k)+' '+(k==='tipo'?(HERR_TIPOS[a[k]]||{}).t||a[k]:a[k]||'—')+' → '+(k==='tipo'?(HERR_TIPOS[c[k]]||{}).t||c[k]:c[k])).join(' · ')}`; }
   if(m.tipo==='entrega') return `Almacén general → ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.descTool||''} · recibe ${d.coordinador||''} · para ${d.destino==='taller'?'taller (área '+(d.area||'')+')':'instalador '+(d.instNombre||'')}`;
   return m.tipo;
 }
@@ -1881,7 +1882,7 @@ async function herrGuardarAlta(){
 // --- Corregir una herramienta (nombre, marca, color, tipo, serie, cantidad) ---
 async function herrIniciarEdicion(toolId){
   const D = await herrCargar(); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
-  herrEdit = {toolId, nombre:t.nombre, otraHerr:![...HERR_LISTA_INST, ...HERR_LISTA_TALLER].includes(t.nombre), marca:t.marca||'Genérico', otraMarca:!herrEsMarcaLista(t.marca||'Genérico'), color:t.color||'', otroColor:!!t.color && !HERR_COLORES.includes(t.color), tipo:t.tipo||'manual', serie:t.serie||'', cantidad:t.cantidad||1, pilas:t.pilas||0, cargadores:t.cargadores||0};
+  herrEdit = {toolId, nombre:t.nombre, otraHerr:![...HERR_LISTA_INST, ...HERR_LISTA_TALLER].includes(t.nombre), marca:t.marca||'Genérico', otraMarca:!herrEsMarcaLista(t.marca||'Genérico'), color:t.color||'', otroColor:!!t.color && !HERR_COLORES.includes(t.color), tipo:t.tipo||'manual', serie:t.serie||'', cantidad:t.cantidad||1, pilas:t.pilas||0, cargadores:t.cargadores||0, esTaller:t.lugar==='taller', area:t.area||''};
   herrForm = null; herrCambio = null; herrEnt = null;
   current==='alm' ? renderAlmacen() : renderHerr(); window.scrollTo(0,0);
 }
@@ -1902,6 +1903,7 @@ function herrEditHtml(D, R){
     <label class="hint" style="display:block;margin-top:10px">Tipo</label>
     <div class="chips" style="margin-top:6px">${Object.keys(HERR_TIPOS).map(k=>`<button class="chip ${e.tipo===k?'on':''}" onclick="herrEdit.tipo='${k}';${R}">${HERR_TIPOS[k].ic} ${HERR_TIPOS[k].t}</button>`).join('')}</div>
     ${e.tipo==='inalambrica'?`<div class="grid2" style="margin-top:10px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div><label class="hint">🔋 Pilas</label><input type="number" min="0" value="${e.pilas}" style="margin-top:4px;min-width:0;width:100%" oninput="herrEdit.pilas=this.value"></div><div><label class="hint">🔌 Cargadores</label><input type="number" min="0" value="${e.cargadores}" style="margin-top:4px;min-width:0;width:100%" oninput="herrEdit.cargadores=this.value"></div></div>`:''}
+    ${e.esTaller?`<label class="hint" style="display:block;margin-top:10px">Área del taller</label><div class="chips" style="margin-top:6px">${HERR_AREAS.map(a=>`<button class="chip ${e.area===a?'on':''}" onclick="herrEdit.area='${a}';${R}">${a}</button>`).join('')}</div>`:''}
     <label class="hint" style="display:block;margin-top:10px">Cantidad</label>
     <input type="number" min="1" value="${e.cantidad}" style="max-width:120px;margin-top:4px" oninput="herrEdit.cantidad=this.value">
     <label class="hint" style="display:block;margin-top:10px">Número de serie o seña</label>
@@ -1912,6 +1914,7 @@ function herrEditHtml(D, R){
 async function herrGuardarEdicion(){
   const e = herrEdit; const D = await herrCargar(); const t = D.tools.find(x=>x.id===e.toolId); if(!t) return alert('Ya no existe esa herramienta.');
   const nuevo = {nombre:String(e.nombre||'').trim(), marca:String(e.marca||'').trim(), color:String(e.color||'').trim(), tipo:e.tipo, serie:String(e.serie||'').trim(), cantidad:Math.max(1, Math.round(Number(e.cantidad)||1)), pilas:e.tipo==='inalambrica'?Math.max(0,Math.round(Number(e.pilas)||0)):0, cargadores:e.tipo==='inalambrica'?Math.max(0,Math.round(Number(e.cargadores)||0)):0};
+  if(e.esTaller) nuevo.area = e.area||'';
   if(!nuevo.nombre) return alert('Escribe la herramienta.'); if(!nuevo.marca) return alert('Escribe la marca (si no tiene: Genérico).'); if(!nuevo.color) return alert('Escribe el color.');
   const cambios = {}, antes = {};
   Object.keys(nuevo).forEach(k=>{ const a = k==='cantidad' ? (t.cantidad||1) : (k==='pilas'||k==='cargadores') ? (Number(t[k])||0) : (t[k]||''); if(String(nuevo[k])!==String(a)){ cambios[k] = nuevo[k]; antes[k] = a; } });
@@ -2017,7 +2020,7 @@ async function renderHerr(){
     const ts = mias.filter(t=>t.lugar==='taller');
     const ok = ts.filter(t=>t.estado!=='descompuesta'), mal = ts.filter(t=>t.estado==='descompuesta');
     cuerpo = `<div class="card"><div class="row" style="justify-content:space-between"><strong style="color:var(--ok)">✅ Funcionando</strong><span class="hint" style="margin:0">${ok.reduce((s,t)=>s+(t.cantidad||1),0)}</span></div>
-        ${HERR_AREAS.concat(['']).map(a=>{ const xs = ok.filter(t=>(t.area||'')===a); return xs.length?`<div class="hint" style="margin:10px 0 0;font-weight:800">${a?'Área de '+a.toLowerCase():'Sin área'}</div>${xs.map(t=>herrToolHtml(t)).join('')}`:''; }).join('') || '<p class="hint">Nada registrado.</p>'}</div>
+        ${HERR_AREAS.concat(['']).map(a=>{ const xs = ok.filter(t=>(t.area||'')===a); return xs.length?`<div class="hint" style="margin:10px 0 0;font-weight:800">${herrAreaTxt(a)}</div>${xs.map(t=>herrToolHtml(t)).join('')}`:''; }).join('') || '<p class="hint">Nada registrado.</p>'}</div>
       <div class="card" style="border-left:5px solid var(--bad)"><div class="row" style="justify-content:space-between"><strong style="color:var(--bad)">⚠️ Descompuesta</strong><span class="hint" style="margin:0">${mal.reduce((s,t)=>s+(t.cantidad||1),0)}</span></div>
         ${mal.length?mal.map(t=>herrToolHtml(t)).join(''):'<p class="hint">Nada descompuesto.</p>'}</div>`;
   } else if(herrTab==='stock'){
@@ -2142,7 +2145,7 @@ async function generarHerrPDF(){
   // Colores por área (confirmado por el usuario: que se vea a simple vista que es otra área).
   const C_INST = [194,65,12], C_TALLER = [13,116,104], C_STOCK = [79,70,229], C_MAL = [192,57,43], C_CAMB = [124,45,18];
   const INST_TONOS = [[194,65,12],[180,83,9],[154,52,18],[217,119,6]];
-  const AREA_TONOS = {Cajoneras:[13,116,104], Cajones:[8,145,178], Espejos:[37,99,235], Corte:[22,101,52], '':[71,85,105]};
+  const AREA_TONOS = {General:[180,83,9], Cajoneras:[13,116,104], Cajones:[8,145,178], Espejos:[37,99,235], Corte:[22,101,52], '':[71,85,105]};
   S.kpis([[cuenta(mias),'herramientas',[55,65,81]],[cuenta(inst),'de instaladores',C_INST],[cuenta(tal),'del taller',C_TALLER],[cuenta(stk),'en stock',C_STOCK],[cuenta(mias.filter(t=>t.estado==='descompuesta')),'descompuestas',C_MAL]]);
   const otrasM = cuenta(mias.filter(t=>!herrEsMarcaLista(t.marca||'Genérico')));
   S.kpis(HERR_MARCAS.map(m=>[cuenta(mias.filter(t=>(t.marca||'Genérico')===m.n)), m.n, m.n==='DeWalt'?[163,115,0]:m.rgb]).concat(otrasM?[[otrasM,'Otras marcas',[91,100,116]]]:[]));
@@ -2164,7 +2167,7 @@ async function generarHerrPDF(){
   const areas = HERR_AREAS.concat(['']).filter(a=>ok.some(t=>(t.area||'')===a));
   if(!areas.length) S.vacio('No hay herramienta de taller funcionando registrada.');
   areas.forEach(a=>{ const xs = ok.filter(t=>(t.area||'')===a), c = AREA_TONOS[a]||AREA_TONOS[''];
-    S.banda(a ? 'Área de '+a.toLowerCase() : 'Sin área', `${cuenta(xs)} funcionando`, c);
+    S.banda(herrAreaTxt(a), `${cuenta(xs)} funcionando`, c);
     S.tabla(cols('Estado'), xs.map(t=>fila(t,[{t:'Funcionando',col:[22,128,74],b:true}])), c); });
   S.banda('Taller · descompuesta', String(cuenta(mal)), C_MAL);
   mal.length ? S.tabla(cols('Nota'), mal.map(t=>fila(t,[{t:[t.area?'Área '+t.area:'', t.nota||''].filter(Boolean).join(' · '), col:C_MAL}])), C_MAL) : S.vacio('Nada descompuesto.');
