@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v153';
+const APP_VERSION = 'v154';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -2091,6 +2091,12 @@ async function herrGuardarMover(){
   if(!ok) return;
   toast(puedeAprobarHerr() ? '🔀 Movida' : '✅ Enviado. Dirección lo tiene que aprobar.'); herrMov = null; renderHerr();
 }
+async function herrTodoAlStock(){
+  const D = await herrCargar(true); const xs = D.tools.filter(t=>t.modulo===modulo() && t.lugar==='porasignar');
+  if(!xs.length) return; if(!confirm(`¿Mandar las ${herrCuenta(xs)} herramienta(s) al stock de ${modulo()}?\n\nDespués puedes moverlas una por una con 🔀 Mover.`)) return;
+  for(const t of xs) await herrGuardarMov({tipo:'asignar', siempre:true, modulo:t.modulo, datos:{toolId:t.id, desc:herrDesc(t), lugar:'stock', instId:'', instNombre:'', area:'', reemplazaId:'', reemplazaDesc:''}});
+  toast('📦 Todo quedó en el stock'); renderHerr();
+}
 // --- Regreso al almacén ---
 function herrIniciarRegreso(toolId){ herrReg = {toolId, motivo:'', nota:'', estadoVuelta:'', cantidad:1}; herrForm = null; herrEdit = null; herrAsig = null; renderHerr(); window.scrollTo(0,0); }
 function herrRegHtml(D){
@@ -2247,7 +2253,7 @@ async function renderHerr(){
     ${herrAsig ? herrAsigHtml(D) : ''}
     ${herrMov ? herrMovHtml(D) : ''}
     ${herrReg ? herrRegHtml(D) : ''}
-    ${porAsig.length?`<div class="card" style="border:2px solid ${HERR_COLOR}"><strong>📥 Por asignar (${herrCuenta(porAsig)})</strong><p class="hint" style="margin:2px 0 0">Llegó del almacén general. Toca cada una y elige a quién va.</p>${porAsig.map(t=>herrToolHtml(t)).join('')}</div>`:''}
+    ${porAsig.length?`<div class="card" style="border:2px solid ${HERR_COLOR}"><strong>📥 Por asignar (${herrCuenta(porAsig)})</strong><p class="hint" style="margin:2px 0 0">Llegó del almacén general. Toca cada una y elige a quién va, o mándalas todas al stock.</p>${puedeCapturarHerr()&&porAsig.length>1?`<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#4f46e5,#4338ca)" onclick="herrTodoAlStock()">📦 Mandar todo al stock (${herrCuenta(porAsig)})</button>`:''}${porAsig.map(t=>herrToolHtml(t)).join('')}</div>`:''}
     ${enCamino.length?`<div class="card" style="border-left:5px solid #0891b2"><strong>🚚 En camino al almacén (${enCamino.length})</strong><p class="hint" style="margin:2px 0 0">Siguen contando en ${mod} hasta que Dirección o el Auditor las reciban.</p>${enCamino.map(m=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:8px 0"><span style="min-width:0"><strong>${herrEsc(m.datos.desc)}</strong>${m.datos.cantidad>1?' × '+m.datos.cantidad:''}<span class="hint" style="display:block;margin:0">${herrEsc(herrMotTxt(HERR_REG_MOT,m.datos.motivo,m.datos.nota))} · ${herrFecha(m.fecha)} · ⏳ esperando que el almacén la reciba</span></span>${puedeCapturarHerr()?btnLinea('Cancelar',`herrCancelarRegreso('${m.id}')`,'var(--sub)'):''}</div>`).join('')}</div>`:''}
     <div class="subtabs">${tab('inst','👷 Instaladores')}${tab('taller','🛠️ Taller')}${tab('stock','📦 Stock')}${tab('hist','📜 Historial')}</div>
     ${cuerpo}`;
@@ -2279,7 +2285,7 @@ function herrEntradasAlm(D){
 function herrSalidasAlm(D, conMermas){
   const r = [];
   D.movs.filter(m=>m.estado==='aprobado').forEach(m=>{ const d = m.datos||{};
-    if(m.tipo==='entrega') r.push({f:m.fecha, desc:d.descTool, q:d.cantidad||1, a:`${m.modulo} · recibió ${d.coordinador||''}`, mot:d.destino?'Entrega':herrMotTxt(HERR_ENT_MOT,d.motivo,d.motivoTxt)});
+    if(m.tipo==='entrega') r.push({f:m.fecha, desc:d.descTool, q:d.cantidad||1, a:`${m.modulo} · recibió ${d.coordinador||''}`, mot:d.destino?'Entrega':herrMotTxt(HERR_ENT_MOT,d.motivo,d.motivoTxt), lote:d.lote||''});
     if(m.tipo==='compra') r.push({f:m.fechaAprob||m.fecha, desc:`${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()}`, q:d.cantidad||1, a:`${m.modulo} · ${herrDondeDatos(d)}`, mot:'🛒 Compra del módulo (entró y salió)'});
     if(conMermas && m.tipo==='merma') r.push({f:m.fecha, desc:d.desc, q:d.cantidad||1, a:'🗑️ Merma', mot:herrMotTxt(HERR_MERMA_MOT,d.motivo,d.nota), merma:true});
   });
@@ -2288,7 +2294,53 @@ function herrSalidasAlm(D, conMermas){
 // Herramienta prestada: la que está en los módulos y salió del almacén (entregas y compras).
 const herrPrestada = D => D.tools.filter(t=>t.modulo!==ALM && ['almacen','compra'].includes(herrOrigen(t)));
 // --- Almacén general (Dirección y Auditor) ---
-function herrNuevaEntrega(){ herrEnt = {toolId:'', cantidad:1, modulo:'', coordinador:'', motivo:'', motivoTxt:''}; herrForm = null; herrMer = null; herrEdit = null; renderAlmacen(); window.scrollTo(0,0); }
+// Entrega de VARIAS herramientas a la vez (confirmado por el usuario): lista con casillas y cantidades.
+function herrNuevaEntrega(){ herrEnt = {modulo:'', coordinador:'', motivo:'', motivoTxt:'', sel:{}, revisar:false}; herrForm = null; herrMer = null; herrEdit = null; renderAlmacen(); window.scrollTo(0,0); }
+function herrEntHtml(D){
+  const e = herrEnt; if(!e) return ''; e.sel = e.sel||{};
+  const R = 'herrEntRefresh()';
+  const buenas = D.tools.filter(t=>t.modulo===ALM && t.estado!=='descompuesta');
+  Object.keys(e.sel).forEach(id=>{ if(!buenas.some(t=>t.id===id)) delete e.sel[id]; });
+  const ids = Object.keys(e.sel), total = ids.reduce((s,id)=>s+(Number(e.sel[id])||0),0);
+  const sub = t => `${herrEsc(t.color||'')} · ${t.tipo==='accesorio'?herrEsc(herrAccesTxt(t)):(HERR_TIPOS[t.tipo]||HERR_TIPOS.manual).t+(t.tipo==='inalambrica'?' · '+(Number(t.pilas)||Number(t.cargadores)?`🔋 ${Number(t.pilas)||0} pila(s) · ${Number(t.cargadores)||0} cargador(es)`:'sin pilas ni cargador'):'')}${t.serie?' · '+herrEsc(t.serie):''}`;
+  if(e.revisar){
+    return `<div id="herr-ent" class="card" style="border:2px solid #0e7490"><div style="font-size:16px;font-weight:800">¿Enviar a ${herrEsc(e.modulo)}?</div>
+      <p class="hint" style="margin:2px 0 0">Recibe: ${herrEsc(e.coordinador)} · ${herrEsc(herrMotTxt(HERR_ENT_MOT,e.motivo,e.motivoTxt))}</p>
+      ${buenas.filter(t=>e.sel[t.id]).map(t=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:8px 0"><span style="min-width:0"><strong>${herrEsc(t.nombre)}</strong> ${herrChipMarca(t.marca)}<span class="hint" style="display:block;margin:0">${sub(t)}</span></span><strong style="font-size:17px">${e.sel[t.id]}</strong></div>`).join('')}
+      <div class="row" style="justify-content:space-between;margin-top:8px;font-weight:800"><span>Total</span><span>${total} herramienta(s)</span></div>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:transparent;color:#fb923c;border:1px solid var(--line);box-shadow:none" onclick="herrEnt.revisar=false;${R}">Regresar</button><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrGuardarEntrega()">✅ Sí, enviar</button></div></div>`;
+  }
+  const fila = t => { const on = !!e.sel[t.id], hay = t.cantidad||1, q = e.sel[t.id]||0;
+    return `<div style="display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line);border-radius:10px;${on?'background:rgba(22,163,74,.10)':''}">
+      <button aria-label="Marcar" onclick="herrEntToggle('${t.id}')" style="width:32px;height:32px;flex:0 0 32px;border-radius:8px;font-weight:900;font-size:17px;cursor:pointer;${on?'background:#16a34a;color:#fff;border:0':'background:transparent;border:2px solid #4b5563;color:transparent'}">✓</button>
+      <div style="min-width:0;flex:1;cursor:pointer" onclick="herrEntToggle('${t.id}')"><strong>${herrEsc(t.nombre)}</strong>${hay>1?` <span style="color:${HERR_COLOR};font-weight:800">× ${hay}</span>`:''}<br>${herrChipMarca(t.marca)}<span class="hint" style="margin:0">${sub(t)}</span></div>
+      ${on&&hay>1?`<div style="display:flex;align-items:center;gap:6px;flex:none"><button class="btn small" style="padding:4px 10px;background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--ink)" onclick="herrEntCant('${t.id}',-1)">−</button><strong>${q}</strong><button class="btn small" style="padding:4px 10px;background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--ink)" onclick="herrEntCant('${t.id}',1)">+</button></div>`:''}
+    </div>`; };
+  return `<div id="herr-ent"><div class="card" style="border:2px solid #0e7490"><div style="font-size:16px;font-weight:800">📤 Entregar a un módulo</div>
+      <label class="hint" style="display:block;margin-top:10px">¿A qué módulo? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px">${MODULOS.map(m=>`<button class="chip ${e.modulo===m.nombre?'on':''}" onclick="herrEnt.modulo='${m.nombre}';${R}">${m.nombre}</button>`).join('')}</div>
+      <label class="hint" style="display:block;margin-top:10px">¿Qué coordinador la recibe? <span style="color:var(--bad)">*</span></label>
+      <input placeholder="Nombre del coordinador" value="${herrEsc(e.coordinador)}" oninput="herrEnt.coordinador=this.value" style="margin-top:4px">
+      <label class="hint" style="display:block;margin-top:10px">¿Por qué se entrega? <span style="color:var(--bad)">*</span></label>
+      <div class="chips" style="margin-top:6px">${Object.keys(HERR_ENT_MOT).map(k=>`<button class="chip ${e.motivo===k?'on':''}" onclick="herrEnt.motivo='${k}';${R}">${HERR_ENT_MOT[k]}</button>`).join('')}</div>
+      ${e.motivo==='otro'?`<input placeholder="¿Por qué?" value="${herrEsc(e.motivoTxt)}" oninput="herrEnt.motivoTxt=this.value" style="margin-top:8px">`:''}</div>
+    <div class="card" style="border-left:5px solid var(--ok)"><div class="row" style="justify-content:space-between;gap:8px"><strong style="color:var(--ok)">🟢 Disponible en almacén (${herrCuenta(buenas)})</strong><button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="herrEntTodo()">${ids.length===buenas.length&&buenas.length?'☐ Quitar todo':'☑️ Marcar todo'}</button></div>
+      ${buenas.length?buenas.map(fila).join(''):'<p class="hint">No hay herramienta buena en el almacén.</p>'}</div>
+    <div style="position:sticky;bottom:0;z-index:5;background:var(--bg);padding:8px 0 6px"><div class="row" style="gap:8px"><button class="btn" style="flex:1;margin:0;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrEntRevisar()">📤 Enviar ${total} herramienta(s)${e.modulo?' a '+herrEsc(e.modulo):''}</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrEnt=null;renderAlmacen()">Cancelar</button></div></div></div>`;
+}
+function herrEntRefresh(){ const el = document.getElementById('herr-ent'); if(!el || !herrCache) return renderAlmacen(); el.outerHTML = herrEntHtml(herrCache); }
+function herrEntToggle(id){ const t = herrCache && herrCache.tools.find(x=>x.id===id); if(!t) return; if(herrEnt.sel[id]) delete herrEnt.sel[id]; else herrEnt.sel[id] = t.cantidad||1; herrEntRefresh(); }
+function herrEntCant(id, d){ const t = herrCache && herrCache.tools.find(x=>x.id===id); if(!t) return; herrEnt.sel[id] = Math.max(1, Math.min(t.cantidad||1, (Number(herrEnt.sel[id])||1)+d)); herrEntRefresh(); }
+function herrEntTodo(){ const buenas = herrCache.tools.filter(t=>t.modulo===ALM && t.estado!=='descompuesta'); if(Object.keys(herrEnt.sel).length===buenas.length) herrEnt.sel = {}; else buenas.forEach(t=>{ herrEnt.sel[t.id] = herrEnt.sel[t.id] || (t.cantidad||1); }); herrEntRefresh(); }
+function herrEntRevisar(){
+  const e = herrEnt;
+  if(!e.modulo) return alert('Elige el módulo.');
+  if(!String(e.coordinador).trim()) return alert('Escribe el coordinador que la recibe.');
+  if(!e.motivo) return alert('Elige por qué se entrega.');
+  if(e.motivo==='otro' && !String(e.motivoTxt).trim()) return alert('Escribe por qué se entrega.');
+  if(!Object.keys(e.sel||{}).length) return alert('Marca la herramienta que vas a mandar.');
+  e.revisar = true; herrEntRefresh(); const el = document.getElementById('herr-ent'); if(el) el.scrollIntoView();
+}
 async function renderAlmacen(){
   current = 'alm';
   if(!puedeAprobarHerr()){ $('#main').innerHTML = '<div class="card">El almacén general solo lo manejan Dirección y el Auditor.</div>'; return; }
@@ -2299,8 +2351,8 @@ async function renderAlmacen(){
   const alm = D.tools.filter(t=>t.modulo===ALM), buenas = alm.filter(t=>t.estado!=='descompuesta'), danadas = alm.filter(t=>t.estado==='descompuesta');
   const porRec = herrPorRecibir(D), prest = herrPrestada(D), avD = herrAvisosDir(D);
   const pendAlm = D.movs.filter(m=>m.estado==='pendiente' && (m.modulo===ALM || m.tipo==='compra'));
-  let entHtml = '';
-  if(herrEnt){
+  const entHtml = herrEntHtml(D);
+  if(false){
     const e = herrEnt; const t = alm.find(x=>x.id===e.toolId);
     entHtml = `<div class="card" style="border:2px solid #0e7490"><div style="font-size:16px;font-weight:800">📤 Entregar herramienta a un módulo</div>
       <label class="hint" style="display:block;margin-top:10px">Herramienta del almacén <span style="color:var(--bad)">*</span></label>
@@ -2326,7 +2378,10 @@ async function renderAlmacen(){
   else if(herrAlmTab==='prest'){ const mods = [...new Set(prest.map(t=>t.modulo))];
     cuerpo = mods.length ? mods.map(md=>{ const xs = prest.filter(t=>t.modulo===md); return `<div class="card" style="border-left:5px solid #1d4ed8"><div class="row" style="justify-content:space-between"><strong>📍 ${herrEsc(md)}</strong><span class="hint" style="margin:0">${herrCuenta(xs)} herramienta(s)</span></div>${xs.map(t=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(t.nombre)}</strong>${(t.cantidad||1)>1?' × '+t.cantidad:''} ${herrChipMarca(t.marca)}${t.enCamino?' <span class="tag" style="color:#38bdf8;border-color:#38bdf8">🚚 En camino</span>':''}</div><div class="hint" style="margin:0">${t.lugar==='porasignar'?'📥 Por asignar':'➜ '+herrEsc(herrDondeTxt(t))} · salió ${herrFecha(t.origenFecha||t.desde)} · ${herrEsc(herrOrigenTxt(t))}</div></div>`).join('')}</div>`; }).join('') : '<div class="card hint">Todavía no has prestado herramienta a los módulos.</div>'; }
   else if(herrAlmTab==='ent'){ const xs = herrEntradasAlm(D); cuerpo = `<div class="card" style="border-left:5px solid var(--ok)"><strong>📥 Entradas al almacén</strong>${xs.length?xs.slice(0,80).map(x=>regRow(x,true)).join(''):'<p class="hint">Todavía no hay entradas.</p>'}</div>`; }
-  else if(herrAlmTab==='sal'){ const xs = herrSalidasAlm(D, true); cuerpo = `<div class="card" style="border-left:5px solid #d97706"><strong>📤 Salidas del almacén (bajas)</strong>${xs.length?xs.slice(0,80).map(x=>regRow(x,false)).join(''):'<p class="hint">Todavía no hay salidas.</p>'}</div>`; }
+  else if(herrAlmTab==='sal'){ const xs = herrSalidasAlm(D, true).slice(0,120); const vistos = new Set();
+    const html = xs.map(x=>{ if(!x.lote) return regRow(x,false); if(vistos.has(x.lote)) return ''; vistos.add(x.lote); const g = xs.filter(y=>y.lote===x.lote);
+      return `<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>📦 Entrega de ${herrCuenta(g.map(y=>({cantidad:y.q})))} herramienta(s)</strong></div><div class="hint" style="margin:0 0 4px">${herrFecha(x.f)} · ➜ ${herrEsc(x.a)} · ${herrEsc(x.mot)}</div>${g.map(y=>`<div class="hint" style="margin:0 0 0 10px">• ${herrEsc(y.desc)}${y.q>1?' × '+y.q:''}</div>`).join('')}</div>`; }).join('');
+    cuerpo = `<div class="card" style="border-left:5px solid #d97706"><strong>📤 Salidas del almacén (bajas)</strong>${xs.length?html:'<p class="hint">Todavía no hay salidas.</p>'}</div>`; }
   else if(herrAlmTab==='mermas') cuerpo = `<div class="card" style="border-left:5px solid #7f1d1d"><strong>🗑️ Mermas (${herrCuenta(D.mermas)})</strong><p class="hint" style="margin:2px 0 0">Herramienta que ya no sirve. No sale en los PDF. Toca una para eliminarla para siempre.</p>${D.mermas.length?D.mermas.slice().sort((a,b)=>(b.fechaMerma||'').localeCompare(a.fechaMerma||'')).map(t=>herrToolHtml(t,{render:R})).join(''):'<p class="hint">No hay mermas.</p>'}</div>`;
   $('#main').innerHTML = `<div class="card" style="border-left:6px solid #7c2d12"><div class="row" style="justify-content:space-between;gap:8px"><div><div style="font-size:17px;font-weight:800">🏢 Almacén general de herramienta</div>
       <p class="hint" style="margin:2px 0 0">Solo Dirección y Auditor</p></div>
@@ -2344,17 +2399,19 @@ async function renderAlmacen(){
     ${cuerpo}`;
 }
 async function herrGuardarEntrega(){
-  const e = herrEnt; const D = await herrCargar();
-  const t = D.tools.find(x=>x.id===e.toolId);
-  if(!t) return alert('Elige la herramienta.');
+  const e = herrEnt; const D = await herrCargar(true);
+  if(e.toolId && !e.sel) e.sel = {[e.toolId]: e.cantidad||1};
   if(!e.modulo) return alert('Elige el módulo.');
   if(!String(e.coordinador).trim()) return alert('Escribe el coordinador que la recibe.');
   if(!e.motivo) return alert('Elige por qué se entrega.');
   if(e.motivo==='otro' && !String(e.motivoTxt).trim()) return alert('Escribe por qué se entrega.');
-  const q = Math.max(1, Math.round(Number(e.cantidad)||1)); if(q > (t.cantidad||1)) return alert('En el almacén solo hay '+(t.cantidad||1)+'.');
-  const ok = await herrGuardarMov({tipo:'entrega', modulo:e.modulo, datos:{toolId:t.id, descTool:herrDesc(t), cantidad:q, coordinador:String(e.coordinador).trim(), motivo:e.motivo, motivoTxt:String(e.motivoTxt||'').trim()}});
-  if(!ok) return;
-  toast('✅ Entregada. Le llega al coordinador en "Por asignar".'); herrEnt = null; herrAlmTab = 'prest'; renderAlmacen();
+  const ids = Object.keys(e.sel||{}); if(!ids.length) return alert('Marca la herramienta que vas a mandar.');
+  for(const id of ids){ const t = D.tools.find(x=>x.id===id && x.modulo===ALM); if(!t) return alert('Una herramienta ya no está en el almacén. Vuelve a abrir la entrega.'); if(Number(e.sel[id]) > (t.cantidad||1)) return alert(`De ${herrDesc(t)} solo hay ${t.cantidad||1}.`); }
+  const lote = cryptoId(); let n = 0, piezas = 0;
+  for(const id of ids){ const t = (await herrCargar(true)).tools.find(x=>x.id===id); if(!t) continue; const q = Math.max(1, Math.round(Number(e.sel[id])||1));
+    const ok = await herrGuardarMov({tipo:'entrega', modulo:e.modulo, lote, datos:{toolId:t.id, descTool:herrDesc(t), cantidad:q, coordinador:String(e.coordinador).trim(), motivo:e.motivo, motivoTxt:String(e.motivoTxt||'').trim(), lote, loteTotal:ids.length}});
+    if(ok){ n++; piezas += q; } }
+  toast(`✅ ${piezas} herramienta(s) enviadas a ${e.modulo}. Le llegan en "Por asignar".`); herrEnt = null; herrAlmTab = 'prest'; renderAlmacen();
 }
 // --- PDFs ---
 function herrPdfBase(titulo, sub, rgb){
