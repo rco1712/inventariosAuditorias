@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v152';
+const APP_VERSION = 'v153';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1697,7 +1697,7 @@ const HERR_COLOR = '#c2410c', HERR_RGB = [194,65,12], ALM = '__almacen';
 function esAuditor(){ return !!miPerfil && miPerfil.rol==='auditor'; }
 function puedeAprobarHerr(){ return esAdmin() || esAuditor(); }
 function puedeCapturarHerr(){ return esAdmin() || esAuditor() || esCoordinador(); }
-let herrTab = 'inst', herrCache = null, herrForm = null, herrEnt = null, herrEdit = null, herrAbierta = '', herrAlmTab = 'buenas', herrAsig = null, herrReg = null, herrMer = null;
+let herrTab = 'inst', herrCache = null, herrForm = null, herrEnt = null, herrEdit = null, herrAbierta = '', herrAlmTab = 'buenas', herrAsig = null, herrReg = null, herrMer = null, herrMov = null;
 async function herrCargar(force){
   if(herrCache && !force) return herrCache;
   const [t, m, i] = await Promise.all(['herramientas','herrMovs','herrInstaladores'].map(c=>db.collection(c).get()));
@@ -1706,7 +1706,10 @@ async function herrCargar(force){
   const fixes = [];
   todas.forEach(x=>{ const c = herrMarcaCanon(x.marca||''); if(x.marca && c!==x.marca){ fixes.push(x); x.hist = (x.hist||[]).concat([{f:new Date().toISOString(), t:`Marca "${x.marca}" se reconoció como ${c}`}]); x.marca = c; } });
   if(fixes.length && typeof puedeAprobarHerr==='function' && puedeAprobarHerr()) fixes.forEach(x=>db.collection('herramientas').doc(x.id).set(x).catch(()=>{}));
-  herrCache = {todas, tools: todas.filter(x=>!x.baja && x.lugar!=='merma').sort(herrOrden), mermas: todas.filter(x=>!x.baja && x.lugar==='merma'), movs: rows(m).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')), insts: rows(i).filter(x=>x.activo!==false)};
+  const movsAll = rows(m);
+  const pendMov = new Set(); movsAll.filter(x=>x.tipo==='mover' && x.estado==='pendiente').forEach(x=>{ pendMov.add((x.datos||{}).toolId); if((x.datos||{}).interId) pendMov.add(x.datos.interId); });
+  todas.forEach(x=>{ x.movPend = pendMov.has(x.id); });
+  herrCache = {todas, tools: todas.filter(x=>!x.baja && x.lugar!=='merma').sort(herrOrden), mermas: todas.filter(x=>!x.baja && x.lugar==='merma'), movs: movsAll.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')), insts: rows(i).filter(x=>x.activo!==false)};
   return herrCache;
 }
 const herrMarca = n => HERR_MARCAS.find(m=>m.n===herrMarcaCanon(n)) || {n:n||'Genérico', bg:'#5b6474', fg:'#fff', rgb:[91,100,116]};
@@ -1741,6 +1744,7 @@ function herrToolHtml(t, opts){
     else if(t.lugar==='porasignar') acc = `<div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrIniciarAsignar('${t.id}')">📍 Asignar</button></div>`;
     else acc = `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
         ${btnLinea('✏️ Editar',`herrIniciarEdicion('${t.id}')`)}
+        ${t.movPend?'<span class="tag" style="color:#d39b06;border-color:#d39b06">⏳ Movimiento por aprobar</span>':btnLinea('🔀 Mover',`herrIniciarMover('${t.id}')`)}
         ${t.lugar==='taller'||t.lugar==='stock'?btnLinea(desc?'✅ Ya funciona':'⚠️ Se descompuso',`herrCambiarEstado('${t.id}')`,desc?'var(--ok)':'var(--bad)'):''}
         <button class="btn small" style="background:linear-gradient(135deg,#475569,#334155)" onclick="herrIniciarRegreso('${t.id}')">↩️ Regresar al almacén</button></div>`;
   }
@@ -1768,6 +1772,7 @@ function herrMovResumen(m){
   if(m.tipo==='asignar') return `${d.desc||'Herramienta'} ➜ ${herrDondeDatos(d)}${d.reemplazaDesc?' · reemplaza a '+d.reemplazaDesc:''}`;
   if(m.tipo==='compra') return `Compra de ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()} → ${herrDondeDatos(d)} · ${herrMotTxt(HERR_COMPRA_MOT,d.motivo,d.motivoTxt)}${Number(d.costo)?' · $'+Number(d.costo).toLocaleString('es-MX'):''}${d.reemplazaDesc?' · reemplaza a '+d.reemplazaDesc+' ('+(d.reemplazaEstado==='descompuesta'?'dañada':'sirve')+')':''}`;
   if(m.tipo==='regreso') return `Regreso al almacén: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''}${d.quien?' (la tenía '+d.quien+')':''} · ${herrMotTxt(HERR_REG_MOT,d.motivo,d.nota)} · ${d.estadoVuelta==='descompuesta'?'dañada':'sirve'}`;
+  if(m.tipo==='mover') return `Mover: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} de ${herrDondeDatos(d.desde||{})} ➜ ${herrDondeDatos(d)}${d.interDesc?' · intercambio: '+d.interDesc+' pasa a '+herrDondeDatos(d.desde||{}):''}`;
   if(m.tipo==='merma') return `Merma: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} · ${herrMotTxt(HERR_MERMA_MOT,d.motivo,d.nota)}`;
   return m.tipo;
 }
@@ -1836,6 +1841,15 @@ async function herrAplicar(m){
     await herrPut(t); d.nuevoToolId = t.id;
     if(d.reemplazaId){ const v = (await herrCargar(true)).tools.find(x=>x.id===d.reemplazaId && !x.enCamino);
       if(v) await herrCrearRegreso(v.id, {motivo:d.reemplazaEstado==='descompuesta'?'danada':'renovacion', nota:'se reemplazó por '+herrDesc(t)+' (compra)', estadoVuelta:d.reemplazaEstado||'funcionando', cantidad:1}); }
+    return '';
+  }
+  if(m.tipo==='mover'){
+    const t0 = D.tools.find(x=>x.id===d.toolId && x.modulo===m.modulo && !x.enCamino && x.lugar!=='porasignar'); if(!t0) return 'Esa herramienta ya no está en ese lugar.';
+    const i0 = d.interId ? D.tools.find(x=>x.id===d.interId && x.modulo===m.modulo && !x.enCamino && x.lugar!=='porasignar') : null; if(d.interId && !i0) return 'La herramienta del intercambio ya no está en ese lugar.';
+    const desde = lugarDe(t0), txtD = herrDondeDatos(desde), txtA = herrDondeDatos(d);
+    const t = await herrSeparar(t0, d.cantidad||1, `🔀 ${d.cantidad} se movieron a ${txtA}`);
+    Object.assign(t, lugarDe(d), {desde:now, movPend:false}); t.hist = (t.hist||[]).concat([{f:now, t:`🔀 Se movió de ${txtD} a ${txtA}${i0?' · intercambio con '+herrDesc(i0):''} · aprobó ${quien}`}]); await herrPut(t);
+    if(i0){ const o = await herrSeparar(i0, 1, `🔀 1 se movió a ${txtD}`); Object.assign(o, desde, {desde:now, movPend:false}); o.hist = (o.hist||[]).concat([{f:now, t:`🔀 Se movió de ${txtA} a ${txtD} · intercambio con ${herrDesc(t)} · aprobó ${quien}`}]); await herrPut(o); }
     return '';
   }
   if(m.tipo==='merma'){
@@ -2041,6 +2055,42 @@ async function herrGuardarAsignar(){
   if(vieja) await herrCrearRegreso(vieja.id, {motivo:a.reemplazaEstado==='descompuesta'?'danada':'renovacion', nota:'se reemplazó por '+herrDesc(t), estadoVuelta:a.reemplazaEstado, cantidad:1});
   toast(vieja ? '✅ Asignada. La vieja quedó en camino al almacén.' : '✅ Asignada'); herrAsig = null; renderHerr();
 }
+// --- Mover dentro del módulo (con aprobación de Dirección): a otro instalador, área o stock, o intercambio ---
+function herrIniciarMover(toolId){ herrMov = {toolId, lugar:'', instId:'', area:'', cantidad:1, interId:''}; herrForm = null; herrEdit = null; herrAsig = null; herrReg = null; renderHerr(); window.scrollTo(0,0); }
+function herrMovHtml(D){
+  const a = herrMov, R = 'renderHerr()'; const t = D.tools.find(x=>x.id===a.toolId); if(!t) return '';
+  const insts = D.insts.filter(i=>i.modulo===modulo());
+  const listo = a.lugar && (a.lugar!=='instalador'||a.instId) && (a.lugar!=='taller'||a.area);
+  const mismo = listo && t.lugar===a.lugar && (a.lugar!=='instalador'||t.instId===a.instId) && (a.lugar!=='taller'||t.area===a.area);
+  const cands = listo && !mismo ? D.tools.filter(x=>x.id!==t.id && x.modulo===modulo() && !x.enCamino && !x.movPend && x.lugar===a.lugar && (a.lugar!=='instalador'||x.instId===a.instId) && (a.lugar!=='taller'||x.area===a.area)) : [];
+  const chip = (k, v, txt) => `<button class="chip ${a[k]===v?'on':''}" onclick="herrMov.${k}='${v}';herrMov.interId='';${R}">${txt}</button>`;
+  return `<div class="card" style="border:2px solid #0891b2"><div style="font-size:16px;font-weight:800">🔀 Mover herramienta · ${modulo()}</div>
+    <div style="border:1px solid var(--line);border-radius:12px;padding:0 10px;margin-top:8px">${herrToolHtml(t,{acciones:false, donde:true})}</div>
+    <p class="hint" style="margin:6px 0 0">Ahora está en: <strong>${herrEsc(herrDondeTxt(t))}</strong></p>
+    ${(t.cantidad||1)>1?`<label class="hint" style="display:block;margin-top:10px">¿Cuántas mueves? (hay ${t.cantidad})</label><input type="number" min="1" max="${t.cantidad}" value="${a.cantidad}" style="max-width:120px;margin-top:4px" oninput="herrMov.cantidad=this.value">`:''}
+    <label class="hint" style="display:block;margin-top:10px">¿A dónde va? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${['instalador','taller','stock'].map(k=>`<button class="chip ${a.lugar===k?'on':''}" onclick="herrMov.lugar='${k}';herrMov.instId='';herrMov.area='';herrMov.interId='';${R}">${HERR_LUGAR[k]}</button>`).join('')}</div>
+    ${a.lugar==='instalador'?`<div class="chips" style="margin-top:6px">${insts.map(i=>chip('instId',i.id,herrEsc(i.nombre))).join('')}</div>`:''}
+    ${a.lugar==='taller'?`<div class="chips" style="margin-top:6px">${HERR_AREAS.map(x=>chip('area',x,x)).join('')}</div>`:''}
+    ${mismo?'<p class="hint" style="margin:8px 0 0;color:var(--bad)">Ya está ahí. Elige otro lugar.</p>':''}
+    ${cands.length?`<label class="hint" style="display:block;margin-top:10px">¿Es intercambio? (la otra pasa a donde estaba esta)</label>
+      <select style="margin-top:4px" onchange="herrMov.interId=this.value;${R}"><option value="">No, solo se mueve esta</option>${cands.map(x=>`<option value="${x.id}" ${x.id===a.interId?'selected':''}>Sí, por: ${herrEsc(herrDesc(x))}${(x.cantidad||1)>1?' (×'+x.cantidad+', se cambia 1)':''}</option>`).join('')}</select>`:''}
+    ${a.interId?`<p class="hint" style="margin:6px 0 0">➜ ${herrEsc(herrDesc(D.tools.find(x=>x.id===a.interId)||{}))} pasa a <strong>${herrEsc(herrDondeTxt(t))}</strong>.</p>`:''}
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrGuardarMover()">${puedeAprobarHerr()?'Mover':'Enviar a Dirección'}</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrMov=null;${R}">Cancelar</button></div></div>`;
+}
+async function herrGuardarMover(){
+  const a = herrMov; const D = await herrCargar(); const t = D.tools.find(x=>x.id===a.toolId); if(!t) return;
+  if(!a.lugar) return alert('Elige a dónde va.');
+  if(a.lugar==='instalador' && !a.instId) return alert('Elige el instalador.');
+  if(a.lugar==='taller' && !a.area) return alert('Elige el área del taller.');
+  if(t.lugar===a.lugar && (a.lugar!=='instalador'||t.instId===a.instId) && (a.lugar!=='taller'||t.area===a.area)) return alert('Ya está ahí.');
+  const inst = D.insts.find(i=>i.id===a.instId), otro = D.tools.find(x=>x.id===a.interId);
+  const q = Math.min(t.cantidad||1, Math.max(1, Math.round(Number(a.cantidad)||1)));
+  const desde = {lugar:t.lugar, instId:t.instId||'', instNombre:t.instNombre||'', area:t.area||''};
+  const ok = await herrGuardarMov({tipo:'mover', modulo:t.modulo, datos:{toolId:t.id, desc:herrDesc(t), cantidad:q, desde, lugar:a.lugar, instId:a.lugar==='instalador'?a.instId:'', instNombre:a.lugar==='instalador'&&inst?inst.nombre:'', area:a.lugar==='taller'?a.area:'', interId:otro?otro.id:'', interDesc:otro?herrDesc(otro):''}});
+  if(!ok) return;
+  toast(puedeAprobarHerr() ? '🔀 Movida' : '✅ Enviado. Dirección lo tiene que aprobar.'); herrMov = null; renderHerr();
+}
 // --- Regreso al almacén ---
 function herrIniciarRegreso(toolId){ herrReg = {toolId, motivo:'', nota:'', estadoVuelta:'', cantidad:1}; herrForm = null; herrEdit = null; herrAsig = null; renderHerr(); window.scrollTo(0,0); }
 function herrRegHtml(D){
@@ -2137,7 +2187,7 @@ async function herrEliminar(toolId){
 }
 // --- Tarjeta de aprobación (naranja) ---
 function herrAprobCard(m, D){
-  const lbl = {alta:'Alta (ya la tenían)', editar:'Corrección', estado:'Estado', compra:'🛒 Compra del coordinador'}[m.tipo] || m.tipo;
+  const lbl = {alta:'Alta (ya la tenían)', editar:'Corrección', estado:'Estado', compra:'🛒 Compra del coordinador', mover:'🔀 Mover dentro del módulo'}[m.tipo] || m.tipo;
   return `<div class="card" style="border-left:6px solid #ea580c">
     <span style="display:inline-block;background:#ea580c;color:#fff;padding:3px 10px;border-radius:12px;font-size:12.5px;font-weight:800">🧰 Herramienta · ${lbl}</span>
     <div style="margin-top:8px"><strong>${m.modulo===ALM?'Almacén general':m.modulo}</strong> <span class="hint" style="margin:0">${herrFecha(m.fecha)} · ${herrEsc((m.creadoPor||'').split('@')[0])}</span></div>
@@ -2195,6 +2245,7 @@ async function renderHerr(){
     ${herrForm && !herrForm.almacen ? herrFormHtml(D, 'renderHerr()') : ''}
     ${herrEdit ? herrEditHtml(D, 'renderHerr()') : ''}
     ${herrAsig ? herrAsigHtml(D) : ''}
+    ${herrMov ? herrMovHtml(D) : ''}
     ${herrReg ? herrRegHtml(D) : ''}
     ${porAsig.length?`<div class="card" style="border:2px solid ${HERR_COLOR}"><strong>📥 Por asignar (${herrCuenta(porAsig)})</strong><p class="hint" style="margin:2px 0 0">Llegó del almacén general. Toca cada una y elige a quién va.</p>${porAsig.map(t=>herrToolHtml(t)).join('')}</div>`:''}
     ${enCamino.length?`<div class="card" style="border-left:5px solid #0891b2"><strong>🚚 En camino al almacén (${enCamino.length})</strong><p class="hint" style="margin:2px 0 0">Siguen contando en ${mod} hasta que Dirección o el Auditor las reciban.</p>${enCamino.map(m=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:8px 0"><span style="min-width:0"><strong>${herrEsc(m.datos.desc)}</strong>${m.datos.cantidad>1?' × '+m.datos.cantidad:''}<span class="hint" style="display:block;margin:0">${herrEsc(herrMotTxt(HERR_REG_MOT,m.datos.motivo,m.datos.nota))} · ${herrFecha(m.fecha)} · ⏳ esperando que el almacén la reciba</span></span>${puedeCapturarHerr()?btnLinea('Cancelar',`herrCancelarRegreso('${m.id}')`,'var(--sub)'):''}</div>`).join('')}</div>`:''}
