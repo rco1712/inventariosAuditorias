@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v151';
+const APP_VERSION = 'v152';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1664,6 +1664,7 @@ const HERR_LISTA_INST = ['Escalera','Atornillador','Taladro','Martillo','Segueta
 const HERR_LISTA_TALLER = ['Taladro','Atornillador','Martillo','Pinzas','Sargentos','Prensas','Compresor','Router','Escalera','Clavadora','Extensión','Manguera de compresor','Cinta métrica','Pila','Cargador'];
 const HERR_MARCAS = [
   {n:'Bosch',bg:'#1e6fb8',fg:'#fff',rgb:[30,111,184]},
+  {n:'Bostitch',bg:'#4b5563',fg:'#facc15',rgb:[75,85,99],fgRgb:[250,204,21],alias:['bostich','stanley bostitch','bostitch stanley']},
   {n:'DeWalt',bg:'#febd17',fg:'#111',rgb:[254,189,23]},
   {n:'Makita',bg:'#008c95',fg:'#fff',rgb:[0,140,149]},
   {n:'Mikels',bg:'#9b1b1f',fg:'#fff',rgb:[155,27,31],alias:["mikel's",'mikel']},
