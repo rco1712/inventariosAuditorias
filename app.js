@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v157';
+const APP_VERSION = 'v158';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1783,7 +1783,7 @@ function herrMovResumen(m){
   if(m.tipo==='cambio') return `Cambio (${(HERR_MOTIVOS[d.motivo]||'').replace(/^\S+ /,'')}): ${d.descVieja||''}${d.quien?' de '+d.quien:''} → ${d.descNueva||''}`;
   if(m.tipo==='editar'){ const c = d.cambios||{}, a = d.antes||{}; const ks = Object.keys(c).filter(k=>String(c[k])!==String(a[k]||'')); return `Corrección de ${d.desc||'herramienta'}: ${ks.map(k=>({nombre:'herramienta',marca:'marca',color:'color',tipo:'tipo',serie:'serie',cantidad:'cantidad',pilas:'pilas',cargadores:'cargadores',area:'área',para:'para',voltaje:'voltaje'}[k]||k)+' '+(k==='tipo'?(HERR_TIPOS[a[k]]||{}).t||a[k]:a[k]||'—')+' → '+(k==='tipo'?(HERR_TIPOS[c[k]]||{}).t||c[k]:c[k])).join(' · ')}`; }
   if(m.tipo==='entrega') return d.destino ? `Almacén general → ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.descTool||''} · recibe ${d.coordinador||''}` : `Salió del almacén ➜ ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.descTool||''} · recibe ${d.coordinador||''} · ${herrMotTxt(HERR_ENT_MOT,d.motivo,d.motivoTxt)}`;
-  if(m.tipo==='asignar') return `${d.desc||'Herramienta'} ➜ ${herrDondeDatos(d)}${d.reemplazaDesc?' · reemplaza a '+d.reemplazaDesc:''}`;
+  if(m.tipo==='asignar') return `${d.cantidad>1?d.cantidad+' ':''}${d.desc||'Herramienta'} ➜ ${herrDondeDatos(d)}${d.reemplazaDesc?' · reemplaza a '+d.reemplazaDesc:''}`;
   if(m.tipo==='compra') return `Compra de ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()} → ${herrDondeDatos(d)} · ${herrMotTxt(HERR_COMPRA_MOT,d.motivo,d.motivoTxt)}${Number(d.costo)?' · $'+Number(d.costo).toLocaleString('es-MX'):''}${d.reemplazaDesc?' · reemplaza a '+d.reemplazaDesc+' ('+(d.reemplazaEstado==='descompuesta'?'dañada':'sirve')+')':''}`;
   if(m.tipo==='regreso') return `Regreso al almacén: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''}${d.quien?' (la tenía '+d.quien+')':''} · ${herrMotTxt(HERR_REG_MOT,d.motivo,d.nota)} · ${d.estadoVuelta==='descompuesta'?'dañada':'sirve'}`;
   if(m.tipo==='mover') return `Mover: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} de ${herrDondeDatos(d.desde||{})} ➜ ${herrDondeDatos(d)}${d.interDesc?' · intercambio: '+d.interDesc+' pasa a '+herrDondeDatos(d.desde||{}):''}`;
@@ -1841,7 +1841,8 @@ async function herrAplicar(m){
     await herrPut(t); d.nuevoToolId = t.id; return '';
   }
   if(m.tipo==='asignar'){
-    const t = D.tools.find(x=>x.id===d.toolId && x.lugar==='porasignar'); if(!t) return 'Esa herramienta ya no está por asignar.';
+    const t0 = D.tools.find(x=>x.id===d.toolId && x.lugar==='porasignar'); if(!t0) return 'Esa herramienta ya no está por asignar.';
+    const t = await herrSeparar(t0, d.cantidad||t0.cantidad||1, `📍 ${d.cantidad} se asignaron a ${herrDondeDatos(d)}`);
     Object.assign(t, lugarDe(d), {desde:now});
     t.hist = (t.hist||[]).concat([{f:now, t:`📍 ${m.modulo} la asignó a ${herrDondeDatos(d)}${d.reemplazaDesc?' · reemplaza a '+d.reemplazaDesc:''} · ${quien}`}]);
     await herrPut(t); return '';
@@ -2040,7 +2041,7 @@ async function herrGuardarEdicion(){
   herrEdit = null; enAlm ? renderAlmacen() : renderHerr();
 }
 // --- Asignar lo que llegó del almacén (coordinador; solo queda registrado) ---
-function herrIniciarAsignar(toolId){ herrAsig = {toolId, lugar:'', instId:'', area:'', reemplazaId:'', reemplazaEstado:'funcionando'}; herrForm = null; herrEdit = null; herrReg = null; renderHerr(); window.scrollTo(0,0); }
+function herrIniciarAsignar(toolId){ herrAsig = {toolId, lugar:'', instId:'', area:'', reemplazaId:'', reemplazaEstado:'funcionando', cantidad:1}; herrForm = null; herrEdit = null; herrReg = null; renderHerr(); window.scrollTo(0,0); }
 function herrAsigHtml(D){
   const a = herrAsig, R = 'renderHerr()'; const t = D.tools.find(x=>x.id===a.toolId); if(!t) return '';
   const insts = D.insts.filter(i=>i.modulo===modulo());
@@ -2049,6 +2050,8 @@ function herrAsigHtml(D){
   const chip = (k, v, txt) => `<button class="chip ${a[k]===v?'on':''}" onclick="herrAsig.${k}='${v}';${k==='lugar'?"herrAsig.reemplazaId='';":''}${R}">${txt}</button>`;
   return `<div class="card" style="border:2px solid ${HERR_COLOR}"><div style="font-size:16px;font-weight:800">📍 ¿A dónde va?</div>
     <div style="border:1px solid var(--line);border-radius:12px;padding:0 10px;margin-top:8px">${herrToolHtml(t,{acciones:false})}</div>
+    ${(t.cantidad||1)>1?`<label class="hint" style="display:block;margin-top:10px">¿Cuántas asignas aquí? (llegaron ${t.cantidad}; las demás se quedan en Por asignar)</label>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><button class="btn small" style="padding:4px 12px;background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--ink)" onclick="herrAsig.cantidad=Math.max(1,(Number(herrAsig.cantidad)||1)-1);${R}">−</button><strong style="font-size:18px">${Math.min(t.cantidad, Math.max(1, Number(a.cantidad)||1))}</strong><button class="btn small" style="padding:4px 12px;background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--ink)" onclick="herrAsig.cantidad=Math.min(${t.cantidad},(Number(herrAsig.cantidad)||1)+1);${R}">+</button><span class="hint" style="margin:0">de ${t.cantidad}</span></div>`:''}
     <label class="hint" style="display:block;margin-top:10px">Para <span style="color:var(--bad)">*</span></label>
     <div class="chips" style="margin-top:6px">${['instalador','taller','stock'].map(k=>chip('lugar',k,HERR_LUGAR[k])).join('')}</div>
     ${a.lugar==='instalador'?`<div class="chips" style="margin-top:6px">${insts.map(i=>chip('instId',i.id,herrEsc(i.nombre))).join('')}<button class="chip" onclick="herrAgregarInstalador()">➕ Agregar instalador</button></div>`:''}
@@ -2064,10 +2067,11 @@ async function herrGuardarAsignar(){
   if(a.lugar==='instalador' && !a.instId) return alert('Elige el instalador.');
   if(a.lugar==='taller' && !a.area) return alert('Elige el área del taller.');
   const inst = D.insts.find(i=>i.id===a.instId), vieja = D.tools.find(x=>x.id===a.reemplazaId);
-  const ok = await herrGuardarMov({tipo:'asignar', siempre:true, modulo:t.modulo, datos:{toolId:t.id, desc:herrDesc(t), lugar:a.lugar, instId:a.lugar==='instalador'?a.instId:'', instNombre:a.lugar==='instalador'&&inst?inst.nombre:'', area:a.lugar==='taller'?a.area:'', reemplazaId:vieja?vieja.id:'', reemplazaDesc:vieja?herrDesc(vieja):''}});
+  const qa = Math.min(t.cantidad||1, Math.max(1, Math.round(Number(a.cantidad)||1)));
+  const ok = await herrGuardarMov({tipo:'asignar', siempre:true, modulo:t.modulo, datos:{toolId:t.id, desc:herrDesc(t), cantidad:qa, lugar:a.lugar, instId:a.lugar==='instalador'?a.instId:'', instNombre:a.lugar==='instalador'&&inst?inst.nombre:'', area:a.lugar==='taller'?a.area:'', reemplazaId:vieja?vieja.id:'', reemplazaDesc:vieja?herrDesc(vieja):''}});
   if(!ok) return;
   if(vieja) await herrCrearRegreso(vieja.id, {motivo:a.reemplazaEstado==='descompuesta'?'danada':'renovacion', nota:'se reemplazó por '+herrDesc(t), estadoVuelta:a.reemplazaEstado, cantidad:1});
-  toast(vieja ? '✅ Asignada. La vieja quedó en camino al almacén.' : '✅ Asignada'); herrAsig = null; renderHerr();
+  toast((vieja ? '✅ Asignada. La vieja quedó en camino al almacén.' : '✅ Asignada')+((t.cantidad||1)>qa?` Quedan ${(t.cantidad||1)-qa} por asignar.`:'')); herrAsig = null; renderHerr();
 }
 // --- Mover dentro del módulo (con aprobación de Dirección): a otro instalador, área o stock, o intercambio ---
 function herrIniciarMover(toolId){ herrMov = {toolId, lugar:'', instId:'', area:'', cantidad:1, interId:''}; herrForm = null; herrEdit = null; herrAsig = null; herrReg = null; renderHerr(); window.scrollTo(0,0); }
