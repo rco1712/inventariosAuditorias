@@ -10,7 +10,7 @@
 
 const $=s=>document.querySelector(s);
 let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={}, pedidos=[], minimosMap={};
-let auditCat=null, auditCapturas={};
+let auditCat=null, auditCapturas={}, auditDesglose={}; // desglose de herrajes por lugar {id:{alm,tal,otro}}
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='seguimiento', audAuditor='', audPaso=0, audHechas={};
 // Contar a ciegas (confirmado por el usuario): oculta el teórico mientras se cuenta; se puede prender o
@@ -209,7 +209,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v159';
+const APP_VERSION = 'v161';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -636,6 +636,7 @@ function setView(v){
   if(v==='herr'){ herrCache=null; renderHerr(); }
   if(v==='alm'){ herrCache=null; renderAlmacen(); }
   if(v==='herrapr'){ herrCache=null; renderHerrApr(); }
+  if(v==='ferrec') renderFerRec();
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -952,11 +953,14 @@ function renderHome(){
     const avC = H && esCoordinador() ? herrAvisosCoord(H, mod) : [], avD = H ? herrAvisosDir(H) : [];
     if(!H) herrCargar().then(()=>{ if(current==='home') renderHome(); }).catch(()=>{});
     const nVienen = H && puedeCapturarHerr() ? herrCuenta(herrVienen(H, mod)) : 0, nRecEnv = H ? herrEnviosRecibidos(H).reduce((x,m)=>x+(Number((m.datos||{}).cantidad)||1),0) : 0;
+    const fV = H ? ferEnvios(H, mod) : [], fR = H && puedeAprobarHerr() ? ferRecibidosSinVer(H) : [];
+    if(fV.length) destacado += `<button class="tile tile-ancho" style="--tc:#ca8a04;grid-column:1/-1" onclick="irA('ferrec')"><span class="tile-ic">${homeIcon('camion')}</span><span><span class="tile-t">Viene ferretería del almacén general</span><span class="tile-s">${fV.reduce((s,m)=>s+ferPiezas(m),0)} pieza(s) en camino a ${mod}: toca para confirmar que la recibiste</span></span></button>`;
+    if(fR.length) destacado += `<button class="tile tile-ancho" style="--tc:#16a34a;grid-column:1/-1" onclick="herrAlmSec='fer';irA('alm')"><span class="tile-ic">${homeIcon('almacen')}</span><span><span class="tile-t">Ya recibieron la ferretería</span><span class="tile-s">${fR.map(m=>m.modulo).filter((x,i,a)=>a.indexOf(x)===i).join(', ')} confirmó lo que mandaste</span></span></button>`;
     if(nVienen) destacado += `<button class="tile tile-ancho" style="--tc:#0891b2;grid-column:1/-1" onclick="herrTab='inst';irA('herr')"><span class="tile-ic">${homeIcon('camion')}</span><span><span class="tile-t">Viene herramienta del almacén general</span><span class="tile-s">${nVienen} herramienta(s) en camino a ${mod}: toca para confirmar que la recibiste</span></span></button>`;
     if(nRecEnv) destacado += `<button class="tile tile-ancho" style="--tc:#16a34a;grid-column:1/-1" onclick="irA('alm')"><span class="tile-ic">${homeIcon('almacen')}</span><span><span class="tile-t">Ya recibieron lo que enviaste</span><span class="tile-s">${nRecEnv} herramienta(s) confirmadas por el módulo</span></span></button>`;
     if(avC.length) destacado += `<button class="tile tile-ancho" style="--tc:#16a34a;grid-column:1/-1" onclick="herrTab='inst';irA('herr')"><span class="tile-ic">${homeIcon('llave')}</span><span><span class="tile-t">Ya recibieron tu herramienta en el almacén</span><span class="tile-s">${avC.length} herramienta(s): toca para confirmar que ya se entregó</span></span></button>`;
-    if(avD.length) destacado += `<button class="tile tile-ancho" style="--tc:#0891b2;grid-column:1/-1" onclick="herrAlmTab='buenas';irA('alm')"><span class="tile-ic">${homeIcon('almacen')}</span><span><span class="tile-t">El Auditor recogió herramienta</span><span class="tile-s">${avD.length} herramienta(s) regresaron al almacén general</span></span></button>`;
-    if(puedeAprobarHerr() && nRec) destacado += `<button class="tile tile-ancho" style="--tc:#0891b2;grid-column:1/-1" onclick="herrAlmTab='recibir';irA('alm')"><span class="tile-ic">${homeIcon('camion')}</span><span><span class="tile-t">Herramienta en camino al almacén</span><span class="tile-s">${nRec} por recibir: toca "Ya la recibí" cuando la tengas</span></span></button>`;
+    if(avD.length) destacado += `<button class="tile tile-ancho" style="--tc:#0891b2;grid-column:1/-1" onclick="herrAlmSec='herr';herrAlmTab='buenas';irA('alm')"><span class="tile-ic">${homeIcon('almacen')}</span><span><span class="tile-t">El Auditor recogió herramienta</span><span class="tile-s">${avD.length} herramienta(s) regresaron al almacén general</span></span></button>`;
+    if(puedeAprobarHerr() && nRec) destacado += `<button class="tile tile-ancho" style="--tc:#0891b2;grid-column:1/-1" onclick="herrAlmSec='herr';herrAlmTab='recibir';irA('alm')"><span class="tile-ic">${homeIcon('camion')}</span><span><span class="tile-t">Herramienta en camino al almacén</span><span class="tile-s">${nRec} por recibir: toca "Ya la recibí" cuando la tengas</span></span></button>`;
     t('llave','Herramienta', nAsig ? nAsig+' por asignar' : 'Por instalador, taller y stock',"herrTab='inst';irA('herr')",'herr', puedeAprobarHerr() ? (nAsig?{k:'num', t:String(nAsig)}:null) : ((nPend||nAsig)?{k:'num', t:String(nPend||nAsig)}:null));
     if(puedeAprobarHerr()) t('aprobar','Aprobaciones de herramienta', nPend ? nPend+' por aprobar' : 'Compras, altas y correcciones',"irA('herrapr')",'herr', nPend?{k:'num', t:String(nPend)}:null);
     if(puedeCapturarHerr()) t('entrada','Compré herramienta','Pasa por el almacén y llega a tu módulo',"irA('herr');setTimeout(()=>herrNuevoForm('',false,true),50)",'herr');
@@ -1071,6 +1075,7 @@ function origenEntradaHtml(){
 // Clasifica de dónde vino una entrada (también las capturadas antes de pedir el origen).
 function origenDeEntrada(m){
   if(m.origenTipo==='proveedor' || m.pedidoId) return {tipo:'proveedor', txt: m.proveedor ? 'Proveedor · '+m.proveedor : (/^Pedido de (.+?)( ·|$)/.test(m.nota||'') ? 'Proveedor · '+RegExp.$1 : 'Proveedor')};
+  if(m.origenTipo==='almacen') return {tipo:'otro', txt:'🏢 Almacén general'};
   if(m.origenTipo==='modulo') return {tipo:'modulo', txt:'Módulo '+(m.origenModulo||'')};
   let x = /^Traspaso (.+?) → /.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[1]};
   x = /^Devolución de préstamo (.+?) → /.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[1]+' (devolución)'};
@@ -1709,7 +1714,8 @@ async function herrCargar(force){
   const fixes = [];
   todas.forEach(x=>{ const c = herrMarcaCanon(x.marca||''); if(x.marca && c!==x.marca){ fixes.push(x); x.hist = (x.hist||[]).concat([{f:new Date().toISOString(), t:`Marca "${x.marca}" se reconoció como ${c}`}]); x.marca = c; } });
   if(fixes.length && typeof puedeAprobarHerr==='function' && puedeAprobarHerr()) fixes.forEach(x=>db.collection('herramientas').doc(x.id).set(x).catch(()=>{}));
-  const movsAll = rows(m);
+  const fer = rows(m).filter(x=>ferEsTipo(x.tipo)).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const movsAll = rows(m).filter(x=>!ferEsTipo(x.tipo));
   const pendMov = new Set(); movsAll.filter(x=>x.tipo==='mover' && x.estado==='pendiente').forEach(x=>{ pendMov.add((x.datos||{}).toolId); if((x.datos||{}).interId) pendMov.add(x.datos.interId); if((x.datos||{}).viejaId) pendMov.add(x.datos.viejaId); });
   todas.forEach(x=>{ x.movPend = pendMov.has(x.id); });
   // Envíos hechos antes de v156 (llegaron directo a "Por asignar"): pasan a "en camino" para que el
@@ -1723,7 +1729,7 @@ async function herrCargar(force){
       db.collection('herramientas').doc(x.id).set(x).catch(()=>{});
     });
   }
-  herrCache = {todas, tools: todas.filter(x=>!x.baja && x.lugar!=='merma').sort(herrOrden), mermas: todas.filter(x=>!x.baja && x.lugar==='merma'), movs: movsAll.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')), insts: rows(i).filter(x=>x.activo!==false)};
+  herrCache = {todas, tools: todas.filter(x=>!x.baja && x.lugar!=='merma').sort(herrOrden), mermas: todas.filter(x=>!x.baja && x.lugar==='merma'), movs: movsAll.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')), insts: rows(i).filter(x=>x.activo!==false), fer};
   return herrCache;
 }
 const herrMarca = n => HERR_MARCAS.find(m=>m.n===herrMarcaCanon(n)) || {n:n||'Genérico', bg:'#5b6474', fg:'#fff', rgb:[91,100,116]};
@@ -2393,7 +2399,7 @@ async function renderHerrApr(){
   const mods = [...new Set(pend.map(m=>m.modulo))].sort((a,b)=>(a===ALM?'':a).localeCompare(b===ALM?'':b));
   $('#main').innerHTML = `<div class="card" style="border-left:6px solid ${HERR_COLOR}"><div style="font-size:17px;font-weight:800">🧰 Aprobaciones de herramienta</div>
       <p class="hint" style="margin:2px 0 0">${pend.length ? pend.length+' por aprobar' : 'No hay nada por aprobar'} · aparte de las aprobaciones del inventario</p>
-      ${porRec.length?`<button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrAlmTab='recibir';irA('alm')">🚚 ${porRec.length} herramienta(s) en camino al almacén · Recibir</button>`:''}</div>
+      ${porRec.length?`<button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrAlmSec='herr';herrAlmTab='recibir';irA('alm')">🚚 ${porRec.length} herramienta(s) en camino al almacén · Recibir</button>`:''}</div>
     ${mods.map(md=>`<div class="hint" style="margin:10px 2px 4px;font-weight:800">${md===ALM?'🏢 Almacén general':'📍 '+herrEsc(md)}</div>`+pend.filter(m=>m.modulo===md).map(m=>herrAprobCard(m,D)).join('')).join('')}`;
 }
 // --- Registros del almacén: lo que entró y lo que salió ---
@@ -2473,6 +2479,7 @@ async function renderAlmacen(){
   $('#main').innerHTML = '<div class="card hint">Cargando almacén…</div>';
   let D; try{ D = await herrCargar(); }catch(e){ $('#main').innerHTML = '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
   if(current!=='alm') return;
+  if(herrAlmSec==='fer') return renderFer(D);
   const R = 'renderAlmacen()';
   const alm = D.tools.filter(t=>t.modulo===ALM), buenas = alm.filter(t=>t.estado!=='descompuesta'), danadas = alm.filter(t=>t.estado==='descompuesta');
   const porRec = herrPorRecibir(D), prest = herrPrestada(D), avD = herrAvisosDir(D);
@@ -2509,7 +2516,7 @@ async function renderAlmacen(){
       return `<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>📦 Entrega de ${herrCuenta(g.map(y=>({cantidad:y.q})))} herramienta(s)</strong></div><div class="hint" style="margin:0 0 4px">${herrFecha(x.f)} · ➜ ${herrEsc(x.a)} · ${herrEsc(x.mot)}</div>${g.map(y=>`<div style="margin:3px 0 0 10px">• <strong>${herrEsc(y.nombre)}</strong>${y.q>1?' × '+y.q:''} ${herrChipMarca(y.marca)}<span class="hint" style="margin:0">${herrEsc(y.color||'')}</span></div>`).join('')}</div>`; }).join('');
     cuerpo = `<div class="card" style="border-left:5px solid #d97706"><strong>📤 Salidas del almacén (bajas)</strong>${xs.length?html:'<p class="hint">Todavía no hay salidas.</p>'}</div>`; }
   else if(herrAlmTab==='mermas') cuerpo = `<div class="card" style="border-left:5px solid #7f1d1d"><strong>🗑️ Mermas (${herrCuenta(D.mermas)})</strong><p class="hint" style="margin:2px 0 0">Herramienta que ya no sirve. No sale en los PDF. Toca una para eliminarla para siempre.</p>${D.mermas.length?D.mermas.slice().sort((a,b)=>(b.fechaMerma||'').localeCompare(a.fechaMerma||'')).map(t=>herrToolHtml(t,{render:R})).join(''):'<p class="hint">No hay mermas.</p>'}</div>`;
-  $('#main').innerHTML = `<div class="card" style="border-left:6px solid #7c2d12"><div class="row" style="justify-content:space-between;gap:8px"><div><div style="font-size:17px;font-weight:800">🏢 Almacén general de herramienta</div>
+  $('#main').innerHTML = `${ferToggleHtml()}<div class="card" style="border-left:6px solid #7c2d12"><div class="row" style="justify-content:space-between;gap:8px"><div><div style="font-size:17px;font-weight:800">🏢 Almacén general de herramienta</div>
       <p class="hint" style="margin:2px 0 0">Solo Dirección y Auditor</p></div>
       <button class="btn small" style="background:linear-gradient(135deg,#9a3412,#7c2d12)" onclick="generarAlmacenPDF()">📄 PDF</button></div>
       <div class="grid2" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px">${[[herrCuenta(buenas),'buenas','var(--ok)','buenas'],[herrCuenta(danadas),'dañadas','var(--bad)','danadas'],[herrCuenta(prest),'prestada','#60a5fa','prest'],[porRec.length,'por recibir','#38bdf8','recibir']].map(k=>`<div onclick="herrAlmTab='${k[3]}';${R}" style="cursor:pointer;background:rgba(127,127,127,.08);border-radius:10px;padding:7px 4px;text-align:center"><div style="font-size:19px;font-weight:800;color:${k[2]}">${k[0]}</div><div class="hint" style="margin:0;font-size:11px">${k[1]}</div></div>`).join('')}</div>
@@ -2544,6 +2551,161 @@ async function herrGuardarEntrega(){
   toast(`🚚 ${piezas} herramienta(s) en camino a ${e.modulo}. Cuando las reciban te avisa.`); herrEnt = null; herrAlmTab = 'prest'; renderAlmacen();
 }
 // --- PDFs ---
+// ===== Ferretería del almacén general (confirmado por el usuario) =====
+// Dentro del almacén general, separado de la herramienta: herrajes, stickers, PVC, cintilla y
+// pegamento (la melamina no). Dirección le da entrada (con proveedor) y lo manda a los módulos;
+// va "en camino" hasta que el módulo toca "Ya lo recibí" y entonces entra a su inventario
+// como entrada "de Almacén general". Se guarda en herrMovs (tipo ferEntrada / ferEnvio).
+const FER_CATS = ['Herrajes','Stickers','PVC','Cintilla','Pegamento'];
+const FER_COL = {Herrajes:'#ca8a04', Stickers:'#db2777', PVC:'#2563eb', Cintilla:'#7c3aed', Pegamento:'#059669'};
+const FER_IC = {Herrajes:'🔩', Stickers:'🏷️', PVC:'🧻', Cintilla:'🎞️', Pegamento:'🧴'};
+let herrAlmSec = 'herr', ferTab = 'stock', ferForm = null, ferEnv = null;
+const ferItems = () => CATALOGO.filter(i=>FER_CATS.includes(i.cat));
+const ferEsTipo = t => t==='ferEntrada' || t==='ferEnvio';
+function ferStock(D){ const s = {}; (D.fer||[]).forEach(m=>{ if(m.estado==='cancelado') return; const sg = m.tipo==='ferEntrada' ? 1 : -1; ((m.datos||{}).items||[]).forEach(x=>{ s[x.itemId] = (s[x.itemId]||0) + sg*(Number(x.q)||0); }); }); return s; }
+const ferEnvios = (D, mod) => (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado==='encamino' && (!mod || m.modulo===mod));
+const ferRecibidosSinVer = D => (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado==='recibido' && !m.dirAck);
+const ferPiezas = m => ((m.datos||{}).items||[]).reduce((s,x)=>s+(Number(x.q)||0),0);
+const ferChipCat = c => `<span style="display:inline-block;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;margin-right:5px;background:${FER_COL[c]||'#5b6474'};color:#fff">${FER_IC[c]||''} ${String(c).toUpperCase()}</span>`;
+function ferItemsLista(m){ return ((m.datos||{}).items||[]).map(x=>`<div style="margin:3px 0 0 10px">• ${ferChipCat(x.cat)}<strong>${herrEsc(x.nombre)}</strong> × ${fmtNum(x.q)} <span class="hint" style="margin:0">${herrEsc(x.unidad||'')}</span></div>`).join(''); }
+function ferToggleHtml(){
+  const b = (k, t, c) => `<button onclick="herrAlmSec='${k}';ferForm=null;ferEnv=null;renderAlmacen()" style="flex:1;border:0;border-radius:12px;padding:11px 6px;font-weight:900;font-size:15px;cursor:pointer;${herrAlmSec===k?`background:${c};color:#fff;box-shadow:0 3px 10px rgba(0,0,0,.3)`:'background:transparent;color:var(--sub)'}">${t}</button>`;
+  return `<div style="display:flex;gap:6px;padding:5px;border-radius:15px;background:rgba(127,127,127,.12);margin-bottom:10px">${b('herr','🧰 Herramienta','linear-gradient(135deg,#ea580c,#c2410c)')}${b('fer','🔩 Ferretería','linear-gradient(135deg,#ca8a04,#a16207)')}</div>`;
+}
+function ferCatChips(sel, js){ return `<div class="chips" style="margin-top:6px">${FER_CATS.map(c=>`<button class="chip ${sel===c?'on':''}" style="${sel===c?`background:${FER_COL[c]};border-color:${FER_COL[c]};color:#fff`:''}" onclick="${js.replace('#',c)}">${FER_IC[c]} ${c}</button>`).join('')}</div>`; }
+function ferFormHtml(D){
+  const f = ferForm, its = ferItems().filter(i=>i.cat===f.cat), st = ferStock(D);
+  const n = Object.values(f.cant).filter(v=>Number(v)>0).length;
+  return `<div class="card" style="border:2px solid #16a34a"><div style="font-size:17px;font-weight:900;color:#4ade80">📥 Entrada a ferretería</div>
+    <label class="hint" style="display:block;margin-top:10px">¿De qué proveedor llegó? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${PROVEEDORES.map(x=>`<button class="chip ${!f.otra&&f.prov===x.n?'on':''}" style="text-align:left;line-height:1.15" onclick="ferForm.prov='${x.n}';ferForm.otra=false;renderAlmacen()">${x.n}<br><small style="font-weight:500;opacity:.75">${x.s}</small></button>`).join('')}<button class="chip ${f.otra?'on':''}" onclick="ferForm.otra=true;ferForm.prov='';renderAlmacen()">✏️ Otra tienda</button></div>
+    ${f.otra?`<input placeholder="¿Cuál tienda?" value="${herrEsc(f.prov)}" oninput="ferForm.prov=this.value" style="margin-top:8px">`:''}
+    <label class="hint" style="display:block;margin-top:12px">¿Qué llegó? Escribe cuántas de cada una</label>
+    ${ferCatChips(f.cat, "ferForm.cat='#';renderAlmacen()")}
+    <div style="margin-top:6px">${its.map(i=>`<div class="row" style="gap:8px;border-bottom:1px solid var(--line);padding:7px 0;flex-wrap:nowrap"><span style="flex:1;min-width:0"><strong>${herrEsc(i.nombre)}</strong><span class="hint" style="display:block;margin:0">${i.unidad||''} · hay ${fmtNum(st[i.id]||0)}</span></span>
+      <input id="fere-${i.id}" type="number" min="0" inputmode="decimal" placeholder="0" value="${f.cant[i.id]||''}" style="width:86px;margin:0;text-align:center;font-weight:800;font-size:16px;${Number(f.cant[i.id])>0?'border-color:#16a34a;background:rgba(22,163,74,.15)':''}" oninput="ferForm.cant['${i.id}']=this.value;ferResumen('e')"></div>`).join('')}</div>
+    <input placeholder="Nota (opcional): factura, quién lo trajo…" value="${herrEsc(f.nota)}" oninput="ferForm.nota=this.value" style="margin-top:10px">
+    <div id="fer-res-e" class="hint" style="margin:8px 0 0;font-weight:800;color:#4ade80">${n?n+' artículo(s) con cantidad':''}</div>
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="ferGuardarEntrada()">✅ Guardar entrada</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="ferForm=null;renderAlmacen()">Cancelar</button></div></div>`;
+}
+function ferResumen(k){ const el = document.getElementById('fer-res-'+k); const o = k==='e' ? ferForm : ferEnv; if(!el || !o) return; const n = Object.values(o.cant).filter(v=>Number(v)>0).length; el.textContent = n ? n+' artículo(s) con cantidad' : ''; }
+function ferEnvHtml(D){
+  const e = ferEnv, st = ferStock(D);
+  if(e.revisar){ const sel = ferItems().filter(i=>Number(e.cant[i.id])>0);
+    return `<div class="card" style="border:2px solid #0891b2"><div style="font-size:17px;font-weight:900;color:#38bdf8">📋 Revisa antes de mandar</div>
+      <div style="margin-top:8px;padding:10px;border-radius:12px;background:rgba(8,145,178,.18)"><span class="hint" style="margin:0">Va para</span><div style="font-size:20px;font-weight:900">📍 ${herrEsc(e.mod)}</div></div>
+      ${FER_CATS.map(c=>{ const g = sel.filter(i=>i.cat===c); if(!g.length) return ''; return `<div style="margin-top:10px">${ferChipCat(c)}</div>`+g.map(i=>`<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0"><span>${herrEsc(i.nombre)}</span><strong>× ${fmtNum(Number(e.cant[i.id]))} <span class="hint" style="margin:0">${i.unidad||''}</span></strong></div>`).join(''); }).join('')}
+      <p class="hint" style="margin:10px 0 0">Se descuenta de tu ferretería ahora. A ${herrEsc(e.mod)} le entra a su inventario cuando toque <strong>✅ Ya lo recibí</strong>.</p>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="ferGuardarEnvio()">🚚 Mandar</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="ferEnv.revisar=false;renderAlmacen()">← Cambiar</button></div></div>`; }
+  const its = ferItems().filter(i=>i.cat===e.cat && (st[i.id]||0)>0);
+  const n = Object.values(e.cant).filter(v=>Number(v)>0).length;
+  return `<div class="card" style="border:2px solid #0891b2"><div style="font-size:17px;font-weight:900;color:#38bdf8">📤 Mandar ferretería a un módulo</div>
+    <label class="hint" style="display:block;margin-top:10px">¿A qué módulo? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${MODULOS.map(m=>`<button class="chip ${e.mod===m.nombre?'on':''}" style="${e.mod===m.nombre?'background:#0891b2;border-color:#0891b2;color:#fff':''}" onclick="ferEnv.mod='${m.nombre}';renderAlmacen()">📍 ${m.nombre}</button>`).join('')}</div>
+    <label class="hint" style="display:block;margin-top:12px">¿Qué le mandas? Escribe cuántas</label>
+    ${ferCatChips(e.cat, "ferEnv.cat='#';renderAlmacen()")}
+    <div style="margin-top:6px">${its.length?its.map(i=>`<div class="row" style="gap:8px;border-bottom:1px solid var(--line);padding:7px 0;flex-wrap:nowrap"><span style="flex:1;min-width:0"><strong>${herrEsc(i.nombre)}</strong><span class="hint" style="display:block;margin:0">hay <b style="color:#4ade80">${fmtNum(st[i.id])}</b> ${i.unidad||''}</span></span>
+      <input id="ferv-${i.id}" type="number" min="0" max="${st[i.id]}" inputmode="decimal" placeholder="0" value="${e.cant[i.id]||''}" style="width:86px;margin:0;text-align:center;font-weight:800;font-size:16px" oninput="ferEnv.cant['${i.id}']=this.value;ferResumen('v')"></div>`).join(''):'<p class="hint">No hay nada de esto en la ferretería. Dale entrada primero.</p>'}</div>
+    <div id="fer-res-v" class="hint" style="margin:8px 0 0;font-weight:800;color:#38bdf8">${n?n+' artículo(s) con cantidad':''}</div>
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="ferRevisar()">Revisar →</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="ferEnv=null;renderAlmacen()">Cancelar</button></div></div>`;
+}
+const ferNuevaEntrada = () => { ferEnv = null; ferForm = {prov:'', otra:false, cat:'Herrajes', cant:{}, nota:''}; renderAlmacen(); };
+const ferNuevoEnvio = () => { ferForm = null; ferEnv = {mod:'', cat:'Herrajes', cant:{}, revisar:false}; renderAlmacen(); };
+const ferSel = o => ferItems().filter(i=>Number(o.cant[i.id])>0).map(i=>({itemId:i.id, nombre:i.nombre, unidad:i.unidad||'', cat:i.cat, q:Number(o.cant[i.id])}));
+async function ferGuardarEntrada(){
+  const f = ferForm; if(!f) return; if(!String(f.prov).trim()) return alert('Elige de qué proveedor llegó.');
+  const items = ferSel(f); if(!items.length) return alert('Escribe cuántas llegaron de al menos un artículo.');
+  if(!confirm(`¿Guardar entrada de ${f.prov.trim()}?\n\n${items.map(x=>`• ${fmtNum(x.q)} ${x.unidad} de ${x.nombre}`).join('\n')}`)) return;
+  const id = cryptoId();
+  try{ await db.collection('herrMovs').doc(id).set({id, tipo:'ferEntrada', modulo:ALM, fecha:new Date().toISOString(), estado:'aprobado', siempre:true, creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{proveedor:f.prov.trim(), items, nota:String(f.nota||'').trim()}}); }
+  catch(e){ return alert('Error: '+e.message); }
+  ferForm = null; ferTab = 'stock'; herrCache = null; toast('✅ Entrada guardada'); renderAlmacen();
+}
+async function ferRevisar(){
+  const e = ferEnv; if(!e) return; if(!e.mod) return alert('Elige a qué módulo lo mandas.');
+  const D = await herrCargar(), st = ferStock(D), items = ferSel(e); if(!items.length) return alert('Escribe cuántas mandas de al menos un artículo.');
+  const mal = items.find(x=>x.q > (st[x.itemId]||0)); if(mal) return alert(`De ${mal.nombre} solo hay ${fmtNum(st[mal.itemId]||0)}.`);
+  e.revisar = true; renderAlmacen(); window.scrollTo(0,0);
+}
+async function ferGuardarEnvio(){
+  const e = ferEnv; if(!e) return; const items = ferSel(e); const id = cryptoId();
+  try{ await db.collection('herrMovs').doc(id).set({id, tipo:'ferEnvio', modulo:e.mod, fecha:new Date().toISOString(), estado:'encamino', creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{items}}); }
+  catch(er){ return alert('Error: '+er.message); }
+  ferEnv = null; ferTab = 'camino'; herrCache = null; toast('🚚 Enviado a '+e.mod); renderAlmacen();
+}
+async function ferCancelarEnvio(id){
+  if(!confirm('¿Cancelar este envío? Todo regresa a tu ferretería.')) return;
+  const D = await herrCargar(true), m = (D.fer||[]).find(x=>x.id===id); if(!m || m.estado!=='encamino') return alert('Ese envío ya no está en camino.');
+  m.estado = 'cancelado'; m.fechaCancelado = new Date().toISOString(); await db.collection('herrMovs').doc(m.id).set(m);
+  herrCache = null; toast('Envío cancelado'); renderAlmacen();
+}
+async function ferRecibir(id){
+  const D = await herrCargar(true), m = (D.fer||[]).find(x=>x.id===id); if(!m || m.estado!=='encamino') { toast('Ya estaba recibido'); herrCache=null; return current==='home'?renderHome():renderFerRec(); }
+  if(!confirm(`¿Ya recibiste todo?\n\n${m.datos.items.map(x=>`• ${fmtNum(x.q)} ${x.unidad} de ${x.nombre}`).join('\n')}\n\nSe suma a tu inventario de ${m.modulo}.`)) return;
+  const fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+  try{
+    for(const x of m.datos.items) await db.collection('movimientos').doc(cryptoId()).set({modulo:m.modulo, itemId:x.itemId, itemNombre:x.nombre, tipo:'entrada', cantidad:Number(x.q), nota:'Del Almacén general (ferretería)', fecha, estado:'aprobado', loteId:m.id, ferEnvioId:m.id, origenTipo:'almacen', creadoPor});
+    Object.assign(m, {estado:'recibido', fechaRecibido:fecha, recibidoPor:creadoPor, dirAck:false}); await db.collection('herrMovs').doc(m.id).set(m);
+  }catch(e){ return alert('Error: '+e.message); }
+  herrCache = null; entrCache = null; toast('✅ Recibido: ya está en tu inventario'); if(current==='ferrec') renderFerRec(); else renderHome();
+}
+async function ferEnterado(){ const D = await herrCargar(true); for(const m of ferRecibidosSinVer(D)){ m.dirAck = true; await db.collection('herrMovs').doc(m.id).set(m); } herrCache = null; renderAlmacen(); }
+function ferEnvioCard(m, dir){
+  const col = m.estado==='recibido' ? '#16a34a' : m.estado==='cancelado' ? '#6b7280' : '#0891b2';
+  const est = m.estado==='recibido' ? `✅ Recibido ${herrFecha(m.fechaRecibido)}` : m.estado==='cancelado' ? '✖️ Cancelado' : '🚚 En camino';
+  return `<div style="border-left:5px solid ${col};background:${col}1a;border-radius:12px;padding:10px;margin-top:8px"><div class="row" style="justify-content:space-between;gap:8px"><strong>📍 ${herrEsc(m.modulo)}</strong><span style="font-size:12px;font-weight:800;color:${col}">${est}</span></div>
+    <div class="hint" style="margin:2px 0 4px">Salió ${herrFecha(m.fecha)} · ${fmtNum(ferPiezas(m))} pieza(s)</div>${ferItemsLista(m)}
+    ${m.estado==='encamino' ? (dir ? `<button class="btn small" style="margin-top:8px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="ferCancelarEnvio('${m.id}')">Cancelar envío</button>` : `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#16a34a,#15803d);min-height:50px;font-size:16px" onclick="ferRecibir('${m.id}')">✅ Ya lo recibí todo</button>`) : ''}</div>`;
+}
+function renderFer(D){
+  const R = 'renderAlmacen()', st = ferStock(D), camino = ferEnvios(D), rec = ferRecibidosSinVer(D);
+  const conExist = ferItems().filter(i=>(st[i.id]||0)>0), mes = new Date().toISOString().slice(0,7);
+  const entMes = (D.fer||[]).filter(m=>m.tipo==='ferEntrada' && (m.fecha||'').slice(0,7)===mes);
+  const tab = (k, t) => `<button class="${ferTab===k?'active':''}" onclick="ferTab='${k}';${R}">${t}</button>`;
+  let cuerpo = '';
+  if(ferTab==='stock') cuerpo = conExist.length ? FER_CATS.map(c=>{ const g = conExist.filter(i=>i.cat===c); if(!g.length) return '';
+      return `<div class="card" style="border-left:6px solid ${FER_COL[c]}"><div class="row" style="justify-content:space-between"><strong style="color:${FER_COL[c]};font-size:16px">${FER_IC[c]} ${c}</strong><span class="hint" style="margin:0">${g.length} artículo(s)</span></div>${g.map(i=>`<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:7px 0"><span>${herrEsc(i.nombre)}</span><span style="font-weight:900;font-size:17px;color:${FER_COL[c]}">${fmtNum(st[i.id])} <span class="hint" style="margin:0;font-weight:600">${i.unidad||''}</span></span></div>`).join('')}</div>`; }).join('')
+    : '<div class="card hint">Todavía no hay nada en la ferretería. Toca <strong>📥 Entrada</strong> para dar de alta lo que llegó.</div>';
+  else if(ferTab==='camino') cuerpo = `<div class="card"><strong>🚚 En camino (${camino.length})</strong><p class="hint" style="margin:2px 0 0">Ya se descontó de la ferretería. Al módulo le entra cuando toque "Ya lo recibí".</p>${camino.length?camino.map(m=>ferEnvioCard(m,true)).join(''):'<p class="hint">No hay nada en camino.</p>'}</div>`;
+  else if(ferTab==='ent'){ const xs = (D.fer||[]).filter(m=>m.tipo==='ferEntrada').slice(0,80);
+    cuerpo = `<div class="card" style="border-left:5px solid #16a34a"><strong>📥 Entradas a ferretería</strong>${xs.length?xs.map(m=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>🏭 ${herrEsc(m.datos.proveedor)}</strong> <span class="hint" style="margin:0">· ${herrFecha(m.fecha)} · ${fmtNum(ferPiezas(m))} pieza(s)</span></div>${m.datos.nota?`<div class="hint" style="margin:0">${herrEsc(m.datos.nota)}</div>`:''}${ferItemsLista(m)}</div>`).join(''):'<p class="hint">Todavía no hay entradas.</p>'}</div>`; }
+  else if(ferTab==='env'){ const xs = (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado!=='encamino').slice(0,80);
+    cuerpo = `<div class="card" style="border-left:5px solid #d97706"><strong>📤 Envíos a módulos</strong>${xs.length?xs.map(m=>ferEnvioCard(m,true)).join(''):'<p class="hint">Todavía no hay envíos recibidos.</p>'}</div>`; }
+  $('#main').innerHTML = `${ferToggleHtml()}<div class="card" style="border-left:6px solid #a16207"><div class="row" style="justify-content:space-between;gap:8px"><div><div style="font-size:17px;font-weight:800">🔩 Ferretería · Almacén general</div><p class="hint" style="margin:2px 0 0">Herrajes, stickers, PVC, cintilla y pegamento</p></div>
+      <button class="btn small" style="background:linear-gradient(135deg,#a16207,#854d0e)" onclick="generarFerPDF()">📄 PDF</button></div>
+      <div class="grid2" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px">${[[conExist.length,'con existencia','#facc15','stock'],[camino.length,'envíos en camino','#38bdf8','camino'],[entMes.length,'entradas del mes','#4ade80','ent']].map(k=>`<div onclick="ferTab='${k[3]}';${R}" style="cursor:pointer;background:rgba(127,127,127,.08);border-radius:10px;padding:7px 4px;text-align:center"><div style="font-size:19px;font-weight:800;color:${k[2]}">${k[0]}</div><div class="hint" style="margin:0;font-size:11px">${k[1]}</div></div>`).join('')}</div>
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="ferNuevaEntrada()">📥 Entrada</button><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="ferNuevoEnvio()">📤 Mandar a módulo</button></div></div>
+    ${rec.length?`<div class="card" style="border:2px solid var(--ok)"><div class="row" style="justify-content:space-between;gap:8px"><strong style="color:var(--ok)">📣 Ya recibieron la ferretería</strong>${btnLinea('Enterado','ferEnterado()')}</div>${rec.map(m=>`<div class="hint" style="margin:6px 0 0"><strong>${herrEsc(m.modulo)}</strong> recibió ${fmtNum(ferPiezas(m))} pieza(s) · ${herrFecha(m.fechaRecibido)} · ${herrEsc(String(m.recibidoPor||'').split('@')[0])}</div>`).join('')}</div>`:''}
+    ${ferForm ? ferFormHtml(D) : ''}${ferEnv ? ferEnvHtml(D) : ''}
+    <div class="subtabs" style="flex-wrap:wrap">${tab('stock','📦 Existencia')}${tab('camino',`🚚 En camino${camino.length?' ('+camino.length+')':''}`)}${tab('ent','📥 Entradas')}${tab('env','📤 Envíos')}</div>
+    ${cuerpo}`;
+}
+// Lo que le viene al módulo (lo ve el coordinador y también Dirección parada en ese módulo).
+async function renderFerRec(){
+  current = 'ferrec'; $('#main').innerHTML = '<div class="card hint">Cargando…</div>';
+  let D; try{ D = await herrCargar(true); }catch(e){ $('#main').innerHTML = '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
+  if(current!=='ferrec') return; const mod = modulo(), env = ferEnvios(D, mod);
+  const hechos = (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.modulo===mod && m.estado==='recibido').slice(0,20);
+  $('#main').innerHTML = `<div class="card" style="border-left:6px solid #0891b2"><div style="font-size:17px;font-weight:900">🚚 Ferretería del almacén general</div><p class="hint" style="margin:2px 0 0">Lo que Dirección le mandó a ${herrEsc(mod)}. Cuando lo tengas, toca <strong>✅ Ya lo recibí todo</strong> y se suma a tu inventario.</p>
+      ${env.length?env.map(m=>ferEnvioCard(m, false)).join(''):'<p class="hint" style="margin-top:8px">No viene nada en camino.</p>'}</div>
+    ${hechos.length?`<div class="card"><strong>✅ Ya recibido</strong>${hechos.map(m=>ferEnvioCard(m,false)).join('')}</div>`:''}
+    <button class="btn small" style="width:100%;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="irA('home')">← Inicio</button>`;
+}
+async function generarFerPDF(){
+  let D; try{ D = await herrCargar(true); }catch(e){ return alert('No se pudo cargar: '+e.message); }
+  const st = ferStock(D), mes = new Date().toISOString().slice(0,7), hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  const S = herrPdfBase('Ferretería · Almacén general', 'Herrajes, stickers, PVC, cintilla y pegamento · '+hoy, [161,98,7]);
+  const hex = h => [1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+  const ents = (D.fer||[]).filter(m=>m.tipo==='ferEntrada' && (m.fecha||'').slice(0,7)===mes), envs = (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado!=='cancelado' && (m.fecha||'').slice(0,7)===mes);
+  S.kpis([[ferItems().filter(i=>(st[i.id]||0)>0).length,'artículos con existencia'],[ents.length,'entradas del mes',[22,128,74]],[envs.length,'envíos del mes',[8,145,178]],[ferEnvios(D).length,'en camino',[37,99,235]]]);
+  FER_CATS.forEach(c=>{ const g = ferItems().filter(i=>i.cat===c && (st[i.id]||0)>0); if(!g.length) return; S.banda(c, g.length+' artículo(s)', hex(FER_COL[c])); S.tabla([{t:'Artículo',w:130},{t:'Hay',w:26},{t:'Unidad',w:26}], g.map(i=>[i.nombre, {t:fmtNum(st[i.id]), b:true}, i.unidad||'']), hex(FER_COL[c])); });
+  if(!ferItems().some(i=>(st[i.id]||0)>0)) S.vacio('No hay existencia en la ferretería.');
+  S.seccion('Entradas del mes', 'Lo que llegó de proveedores', [22,128,74]);
+  const fe = []; ents.forEach(m=>m.datos.items.forEach(x=>fe.push([herrFecha(m.fecha), m.datos.proveedor, x.nombre, {t:fmtNum(x.q), b:true}]))); fe.length ? S.tabla([{t:'Fecha',w:24},{t:'Proveedor',w:50},{t:'Artículo',w:84},{t:'Cant.',w:24}], fe, [22,128,74]) : S.vacio('Sin entradas este mes.');
+  S.seccion('Envíos del mes', 'Lo que salió a los módulos', [8,145,178]);
+  const fs = []; envs.forEach(m=>m.datos.items.forEach(x=>fs.push([herrFecha(m.fecha), m.modulo, x.nombre, {t:fmtNum(x.q), b:true}, m.estado==='recibido'?{t:'Recibido',col:[22,128,74],b:true}:{t:'En camino',col:[37,99,235],b:true}]))); fs.length ? S.tabla([{t:'Fecha',w:22},{t:'Módulo',w:30},{t:'Artículo',w:84},{t:'Cant.',w:20},{t:'Estado',w:26}], fs, [8,145,178]) : S.vacio('Sin envíos este mes.');
+  await S.fin('Ferreteria_almacen_general.pdf', 'Closets Vera · Ferretería del almacén general');
+}
 function herrPdfBase(titulo, sub, rgb){
   const { jsPDF } = window.jspdf; const doc = new jsPDF();
   const L = 14, W = 182, pageH = doc.internal.pageSize.getHeight();
@@ -2860,10 +3022,10 @@ function setAudTipo(v){
   const eraSim = audTipo==='simulacion', seraSim = v==='simulacion';
   if(eraSim!==seraSim){
     guardarBorradorAud();
-    const st = {auditCapturas, auditPiezas, auditArmados, audPaso, audHechas, auditCat};
-    if(seraSim){ _audRealStash = st; auditCapturas={}; auditPiezas={}; auditArmados=[]; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
-    else if(_audRealStash){ ({auditCapturas, auditPiezas, auditArmados, audPaso, audHechas, auditCat} = _audRealStash); _audRealStash=null; }
-    else { auditCapturas={}; auditPiezas={}; auditArmados=[]; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    const st = {auditCapturas, auditDesglose, auditPiezas, auditArmados, audPaso, audHechas, auditCat};
+    if(seraSim){ _audRealStash = st; auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    else if(_audRealStash){ ({auditCapturas, auditDesglose={}, auditPiezas, auditArmados, audPaso, audHechas, auditCat} = _audRealStash); _audRealStash=null; }
+    else { auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
     audTipo = v;
     _borradorRevisado[modulo()+(seraSim?'_sim':'')] = false;
   } else audTipo = v;
@@ -3011,7 +3173,7 @@ function renderAud(){
     cuerpo = `<div class="card" style="border:2px solid #5b6b7f"><h3>🧪 Resultado del simulador</h3>
       <p class="hint">Se compara solo lo que contaste contra lo que dice la app. <strong>No se guarda nada y el inventario no cambia.</strong> En melamina/MDF: las hojas completas se comparan con las completas, y las piezas y armados con lo cortado.</p>
       ${simResultadosHtml()}
-      <button class="btn" style="width:100%;margin-top:12px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar todo lo que llevas contado en el simulador?')){auditCapturas={};auditPiezas={};auditArmados=[];audHechas={};guardarBorradorAud();renderAud();}">🗑️ Borrar simulación y empezar de nuevo</button>
+      <button class="btn" style="width:100%;margin-top:12px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar todo lo que llevas contado en el simulador?')){auditCapturas={};auditPiezas={};auditArmados=[]; auditDesglose={}; audHUlt={};audHechas={};guardarBorradorAud();renderAud();}">🗑️ Borrar simulación y empezar de nuevo</button>
       <button class="btn" style="width:100%;margin-top:8px" onclick="setAudTipo('seguimiento')">Salir del simulador</button>
     </div>`;
   } else if(sec.k==='__revisar' && parcial){
@@ -3062,16 +3224,16 @@ function renderAud(){
     <h3>${AUD_ICONO[sec.k]||''} ${sec.t}</h3>
     ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va más adelante en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
     ${sec.k==='Herrajes'?'<p class="hint">🔩 <strong>Correderas:</strong> en "Juego de corredera" van los juegos completos (hembra + macho juntos). Las <strong>hembras y machos sueltos</strong> van en sus renglones "(sin pareja)", normal o de extensión. La app los junta con los de cajoneras y cajones armados y forma juegos donde hay pareja.</p>':''}
-    <p class="hint">Escribe cuánto hay de cada uno; si no hay, pon <strong>0</strong>. Si después aparece más, toca <strong>➕</strong> y se suma a lo que ya llevas.</p>
+    ${sec.k==='Herrajes'&&!comp?`<div style="border-radius:14px;padding:12px;background:linear-gradient(135deg,#a16207,#ca8a04);color:#fff;margin-top:8px"><div style="font-weight:900;font-size:15px">🔩 Cuenta primero el almacén y luego el taller</div><div style="font-size:13px;margin-top:4px;opacity:.95">En cada lugar escribe cuántas encontraste y toca <b>+ Agregar</b>; se van sumando. Si de algo no hay, toca <b>No hay (0)</b>.</div></div>`:'<p class="hint">Escribe cuánto hay de cada uno; si no hay, pon <strong>0</strong>. Si después aparece más, toca <strong>➕</strong> y se suma a lo que ya llevas.</p>'}
     ${comp?'<p class="hint" style="font-weight:700;color:var(--brand)">➕ Escribe SOLO lo que te faltó contar. Lo demás déjalo vacío.</p>':`<p class="hint" style="font-weight:700;${faltan?'color:#b3742c':'color:var(--ok)'}" id="aud-faltan">${faltan?`Faltan ${faltan} de ${items.length} por contar`:'✓ Todo contado en esta sección'}</p>`}
-    <div class="wrap-x"><table><tr><th>Artículo</th>${sinTeo?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
+    ${sec.k==='Herrajes' && !comp ? herrAudListaHtml(items, sinTeo, eq) : `<div class="wrap-x"><table><tr><th>Artículo</th>${sinTeo?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id); const v=auditCapturas[it.id];
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
         return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${sinTeo?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
           <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="decimal" style="min-width:70px" placeholder="—" value="${v??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value);actualizarFaltanAud()">
           <button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" title="Sumar" onclick="sumarAud('${it.id}')">➕</button></div>${extra}</td></tr>`;
       }).join('')}
-    </table></div>
+    </table></div>`}
   </div>`;
   }
 
@@ -3099,6 +3261,68 @@ function renderAud(){
     ${sec.k==='__revisar'?'':`<button class="btn" onclick="siguientePasoAud()">Siguiente →</button>`}
   </div>`;
 }
+// ===== Herrajes en la auditoría (confirmado por el usuario): se cuentan por partes — primero el
+// almacén y luego el taller —; cada lugar va sumando lo que se encuentra, con confirmación.
+const AUD_LUGARES = [{k:'alm', t:'Almacén', ic:'🏬'}, {k:'tal', t:'Taller', ic:'🛠️'}, {k:'otro', t:'Otro lugar', ic:'📍'}];
+let audHUlt = {};
+const HERR_AUD_COL = '#e3b341';
+function audDesg(id){ const d = auditDesglose[id] || {}; const tot = Number(auditCapturas[id])||0; const suma = AUD_LUGARES.reduce((s,l)=>s+(Number(d[l.k])||0),0);
+  return {d, tot, sinLugar: Math.max(0, tot - suma)}; }
+function herrAudFilaHtml(it, sinTeo, eq){
+  const v = auditCapturas[it.id], {d, tot, sinLugar} = audDesg(it.id), u = audHUlt[it.id], f = sinTeo ? null : calcFormula(it.id);
+  const contado = v!==undefined, C = HERR_AUD_COL;
+  return `<div id="audh-${it.id}" style="padding:10px;margin-top:10px;border-radius:14px;background:${contado?(tot?C+'1f':'rgba(22,163,74,.10)'):'rgba(224,121,26,.10)'};border:2px solid ${u?'#16a34a':contado?'transparent':'rgba(224,121,26,.45)'}">
+    <div style="display:flex;align-items:center;gap:8px"><div style="font-size:22px">🔩</div>
+      <div style="flex:1;min-width:0"><div style="color:${C};font-weight:800;font-size:15px">${contado?'✓ ':'⏳ '}${it.nombre}</div><span class="hint" style="margin:0">${it.unidad||''}${f?' · teórico '+fmtNum(f.final):''}</span>${eq&&eq[it.id]?`<div class="hint" style="margin:2px 0 0">+ ${fmtNum(eq[it.id])} en piezas/armados</div>`:''}</div>
+      <div style="text-align:center;min-width:64px"><div style="font-size:11px;color:var(--sub)">Total</div><div style="font-size:24px;font-weight:900;color:${u?'#4ade80':contado?C:'var(--sub)'}">${contado?fmtNum(tot):'—'}</div></div></div>
+    ${u?`<div style="margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(22,163,74,.22);color:#bbf7d0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>✅ ${u.txt}</span><button onclick="herrAudDeshacer('${it.id}')" style="border:1px solid #86efac;background:transparent;color:#bbf7d0;border-radius:8px;padding:4px 10px;font-weight:800;cursor:pointer">↩️ Deshacer</button></div>`:''}
+    ${AUD_LUGARES.map(l=>{ const n = Number(d[l.k])||0; return `<div style="display:flex;align-items:center;gap:6px;margin-top:8px">
+      <div style="flex:0 0 96px;font-size:13px">${l.ic} ${l.t}<div style="font-size:18px;font-weight:900">${fmtNum(n)}</div></div>
+      <input id="audh-${it.id}-${l.k}" type="number" min="0" inputmode="decimal" placeholder="+ cuántas" style="flex:1;min-width:0;text-align:center;font-size:16px;font-weight:800;margin:0" onkeydown="if(event.key==='Enter')herrAudPedir('${it.id}','${l.k}')">
+      <button class="btn small" style="margin:0;padding:10px 12px;background:${C};color:#111" onclick="herrAudPedir('${it.id}','${l.k}')">+ Agregar</button></div>`; }).join('')}
+    ${sinLugar?`<div class="hint" style="margin:6px 0 0">Sin lugar: ${fmtNum(sinLugar)} (contado antes)</div>`:''}
+    ${!contado?`<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrAudCero('${it.id}')">No hay (0)</button>`:''}
+  </div>`;
+}
+function herrAudListaHtml(items, sinTeo, eq){ return `<div id="audh-lista">${items.map(it=>herrAudFilaHtml(it, sinTeo, eq)).join('')}</div>`; }
+function herrAudRefrescar(id){
+  const el = document.getElementById('audh-'+id); const it = CATALOGO.find(x=>x.id===id); if(!el || !it) return;
+  const sinTeo = audTipo==='ciego' || (audOcultarTeo && audTipo!=='conteo') || (typeof modoConteoCoord==='function' && modoConteoCoord());
+  const tmp = document.createElement('div'); tmp.innerHTML = herrAudFilaHtml(it, sinTeo, piezasAuditAHojas()); el.replaceWith(tmp.firstElementChild);
+  actualizarFaltanAud(); guardarBorradorAud();
+}
+function cuentaConfirmar(o){
+  const d = o.despues - o.antes;
+  const ov = document.createElement('div'); ov.id = 'pz-confirm';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div style="width:100%;max-width:420px;background:var(--card);color:var(--ink);border:2px solid ${o.color};border-radius:18px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)">
+    <div style="font-size:18px;font-weight:900">${o.titulo}</div><div style="margin-top:8px">${o.cabecera}</div>
+    <div style="display:flex;gap:6px;margin-top:14px;text-align:center">
+      <div style="flex:1;background:rgba(127,127,127,.12);border-radius:12px;padding:8px"><div class="hint" style="margin:0">Llevabas</div><div style="font-size:24px;font-weight:900">${fmtNum(o.antes)}</div></div>
+      <div style="flex:1;background:${d>=0?'rgba(22,163,74,.25)':'rgba(220,38,38,.25)'};border-radius:12px;padding:8px"><div class="hint" style="margin:0">${d>=0?'Encontraste':'Quitas'}</div><div style="font-size:24px;font-weight:900;color:${d>=0?'#4ade80':'#f87171'}">${d>=0?'+ '+fmtNum(d):'− '+fmtNum(-d)}</div></div>
+      <div style="flex:1;background:rgba(37,99,235,.3);border-radius:12px;padding:8px"><div class="hint" style="margin:0">Quedan</div><div style="font-size:24px;font-weight:900">${fmtNum(o.despues)}</div></div></div>
+    <div class="row" style="gap:8px;margin-top:14px"><button class="btn" id="pzc-no" style="flex:1;margin:0;background:transparent;color:#fb923c;border:1px solid var(--line);box-shadow:none">Cancelar</button><button class="btn" id="pzc-si" style="flex:1;margin:0;background:linear-gradient(135deg,#16a34a,#15803d)">✅ Sí, agregar</button></div></div>`;
+  document.body.appendChild(ov);
+  const cerrar = () => ov.remove();
+  ov.querySelector('#pzc-no').onclick = cerrar; ov.addEventListener('click', e=>{ if(e.target===ov) cerrar(); });
+  ov.querySelector('#pzc-si').onclick = () => { cerrar(); o.onOk(); };
+}
+function herrAudPedir(id, lugar){
+  const inp = document.getElementById('audh-'+id+'-'+lugar); const n = Number(inp && inp.value)||0;
+  if(!(n>0)){ if(inp){ inp.focus(); inp.style.borderColor='var(--bad)'; } return toast('Escribe cuántas encontraste'); }
+  const it = CATALOGO.find(x=>x.id===id), L = AUD_LUGARES.find(x=>x.k===lugar), {d, tot} = audDesg(id), antesL = Number(d[lugar])||0;
+  cuentaConfirmar({titulo:'¿Agregar?', color:HERR_AUD_COL, antes:tot, despues:tot+n,
+    cabecera:`<strong style="color:${HERR_AUD_COL};font-size:16px">${it.nombre}</strong> <span class="hint" style="margin:0">· en ${L.ic} ${L.t} (${fmtNum(antesL)} → ${fmtNum(antesL+n)})</span>`,
+    onOk:()=>{ const prevV = auditCapturas[id], nd = Object.assign({}, d); nd[lugar] = antesL + n; auditDesglose[id] = nd; auditCapturas[id] = tot + n;
+      audHUlt[id] = {txt:`Sumaste ${fmtNum(n)} en ${L.t} (${fmtNum(tot)} → ${fmtNum(tot+n)})`, prevD:d, prevV};
+      herrAudRefrescar(id); }});
+}
+function herrAudCero(id){ auditCapturas[id] = 0; auditDesglose[id] = {}; delete audHUlt[id]; herrAudRefrescar(id); }
+function herrAudDeshacer(id){
+  const u = audHUlt[id]; if(!u) return; if(!confirm('¿Deshacer lo último que sumaste?')) return;
+  auditDesglose[id] = u.prevD || {}; auditCapturas[id] = u.prevV;
+  delete audHUlt[id]; herrAudRefrescar(id); toast('↩️ Deshecho');
+}
 function actualizarFaltanAud(){
   const sec = AUD_SECCIONES[audPaso]; const el = document.getElementById('aud-faltan'); if(!el || !sec) return;
   const n = faltanSeccionAud(sec.k).length, tot = itemsSeccionAud(sec.k).length;
@@ -3113,7 +3337,7 @@ function claveBorradorAud(){ return 'borradorAud_'+modulo()+(audTipo==='simulaci
 function guardarBorradorAud(){
   try{
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
-    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
+    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditDesglose, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
     else localStorage.removeItem(claveBorradorAud());
   }catch(e){}
 }
@@ -3128,7 +3352,7 @@ function recuperarBorradorAud(){
     const hayAhora = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
     if(hayAhora) return;
     const b = JSON.parse(raw);
-    auditCapturas = b.auditCapturas||{}; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
+    auditCapturas = b.auditCapturas||{}; auditDesglose = b.auditDesglose||{}; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
     audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
     toast('↩️ Se recuperó lo que ya habías contado.');
   }catch(e){}
@@ -3296,7 +3520,7 @@ function agregarArmado(){
 function quitarArmado(i){ auditArmados.splice(i,1); guardarBorradorAud(); renderAud(); }
 function vaciarConteoAud(){
   if(!confirm('¿Borrar TODO lo que llevas capturado en este conteo?\n\n(Hojas, herrajes, piezas cortadas y armados. No se toca el inventario.)')) return;
-  auditCapturas={}; auditPiezas={}; auditArmados=[]; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
+  auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
 }
 // ===== Lista de piezas para contar (confirmado por el usuario): agrupada por familia, con color por
 // familia (dibujo, nombre y franja), dibujo de la forma de la pieza, buscador, ✓ en lo contado y
@@ -3357,27 +3581,74 @@ function listaPiezasHtml(ctx){
     <div class="hint" style="margin:6px 0 0">${leyenda}</div>
     <div id="pz-lista-${ctx}">${bloques}</div>`;
 }
+// Fila de pieza (confirmado por el usuario): se ve "Llevas N"; se escribe cuántas se encontraron y
+// se toca Agregar; antes de sumar pide confirmación (llevabas / encontraste / quedan). Se puede
+// deshacer lo último que se sumó o corregir el total.
+let piezaUlt = {}, piezaCorr = {};
 function filaPiezaHtml(ctx, p, f, v){
-  const on = v>0;
-  return `<div class="pz-fila" data-txt="${(p.label+' '+p.dim+' '+f.t).toLowerCase().replace(/"/g,'')}" id="pzf-${ctx}-${p.key}" style="display:flex;align-items:center;gap:8px;padding:8px 6px;margin-top:6px;border-radius:10px;${on?`background:${f.c}22;`:''}">
-    ${dibujoPiezaSvg(p.dim, f.c)}
-    <div style="flex:1;min-width:0"><div class="pz-nombre" style="color:${f.c};font-weight:700;line-height:1.2">${on?'✓ ':''}${p.label}</div><span class="tag" style="color:#fff">${p.dim}</span></div>
-    <input type="number" min="0" inputmode="numeric" placeholder="—" value="${v??''}" style="width:64px;min-width:64px;text-align:center" oninput="piezaCambio('${ctx}','${p.key}',this.value)">
-    <div style="display:flex;flex-direction:column;gap:4px">
-      <button class="btn small" style="padding:4px 8px;min-height:0" onclick="piezaSumar('${ctx}','${p.key}',1)">+1</button>
-      <button class="btn small" style="padding:4px 8px;min-height:0;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="piezaSumar('${ctx}','${p.key}',5)">+5</button>
-    </div>
+  const tot = Number(v)||0, on = tot>0, k = ctx+'|'+p.key, u = piezaUlt[k], corr = piezaCorr[k];
+  return `<div class="pz-fila" data-txt="${(p.label+' '+p.dim+' '+f.t).toLowerCase().replace(/"/g,'')}" id="pzf-${ctx}-${p.key}" style="display:flex;flex-direction:column;padding:10px 8px;margin-top:8px;border-radius:12px;${on?`background:${f.c}22;`:''}border:2px solid ${u?'#16a34a':'transparent'}">
+    <div style="display:flex;align-items:center;gap:8px">${dibujoPiezaSvg(p.dim, f.c)}
+      <div style="flex:1;min-width:0"><div class="pz-nombre" style="color:${f.c};font-weight:800;line-height:1.2;font-size:15px">${on?'✓ ':''}${p.label}</div><span class="tag" style="color:#fff">${p.dim}</span></div>
+      <div style="text-align:center;min-width:60px"><div style="font-size:11px;color:var(--sub)">Llevas</div><div style="font-size:24px;font-weight:900;color:${u?'#4ade80':on?f.c:'var(--sub)'}">${tot}</div></div></div>
+    ${u?`<div style="margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(22,163,74,.22);color:#bbf7d0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>✅ ${u.n>=0?'Sumaste '+u.n:'Corregiste'} (${u.antes} → ${u.despues})</span><button onclick="piezaDeshacer('${ctx}','${p.key}')" style="border:1px solid #86efac;background:transparent;color:#bbf7d0;border-radius:8px;padding:4px 10px;font-weight:800;cursor:pointer">↩️ Deshacer</button></div>`:''}
+    ${corr?`<div style="display:flex;gap:6px;margin-top:8px;align-items:center"><span style="font-size:13px;color:var(--sub);flex:none">✏️ Total</span><input id="pzcor-${ctx}-${p.key}" type="number" min="0" inputmode="numeric" value="${tot}" style="flex:1;min-width:0;text-align:center;font-size:16px;font-weight:800;margin:0"><button class="btn small" style="margin:0;background:linear-gradient(135deg,#2563eb,#1d4ed8)" onclick="piezaPedirCorregir('${ctx}','${p.key}')">Guardar</button><button class="btn small" style="margin:0;background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--sub)" onclick="delete piezaCorr['${k}'];piezaRefrescar('${ctx}','${p.key}')">✕</button></div>`
+    :`<div style="display:flex;gap:6px;margin-top:8px;align-items:center"><span style="font-size:13px;color:var(--sub);flex:none">➕ Encontré</span><input id="pzadd-${ctx}-${p.key}" type="number" min="1" inputmode="numeric" placeholder="cuántas" style="flex:1;min-width:0;text-align:center;font-size:16px;font-weight:800;margin:0" onkeydown="if(event.key==='Enter')piezaPedirAgregar('${ctx}','${p.key}')"><button class="btn small" style="margin:0;padding:10px 14px;background:${f.c}" onclick="piezaPedirAgregar('${ctx}','${p.key}')">Agregar</button></div>
+      ${on?`<div style="text-align:right;margin-top:6px"><button onclick="piezaCorr['${k}']=1;piezaRefrescar('${ctx}','${p.key}')" style="all:unset;cursor:pointer;font-size:12.5px;color:#93c5fd">✏️ Corregir el total</button></div>`:''}`}
   </div>`;
 }
+function piezaRefrescar(ctx, key){
+  const row = document.getElementById('pzf-'+ctx+'-'+key); const p = PIEZAS_AUDIT.find(x=>x.key===key); if(!row || !p) return;
+  const tmp = document.createElement('div'); tmp.innerHTML = filaPiezaHtml(ctx, p, familiaDePieza(key), piezasCtx(ctx).counts[key]);
+  row.replaceWith(tmp.firstElementChild); marcarFilaPieza(ctx, key);
+}
+function piezaConfirmar(ctx, key, antes, despues, titulo, onOk){
+  const p = PIEZAS_AUDIT.find(x=>x.key===key), f = familiaDePieza(key), {grupo} = piezasCtx(ctx);
+  const d = despues - antes;
+  const ov = document.createElement('div'); ov.id = 'pz-confirm';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML = `<div style="width:100%;max-width:420px;background:var(--card);color:var(--ink);border:2px solid ${f.c};border-radius:18px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)">
+    <div style="font-size:18px;font-weight:900">${titulo}</div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:10px">${dibujoPiezaSvg(p.dim, f.c)}<div><strong style="color:${f.c};font-size:16px">${p.label}</strong><br><span class="tag" style="color:#fff">${p.dim}</span> <span class="hint" style="margin:0">${grupo===AUD_GRUPO_MDF?'MDF':'Melamina '+grupo}</span></div></div>
+    <div style="display:flex;gap:6px;margin-top:14px;text-align:center">
+      <div style="flex:1;background:rgba(127,127,127,.12);border-radius:12px;padding:8px"><div class="hint" style="margin:0">Llevabas</div><div style="font-size:24px;font-weight:900">${antes}</div></div>
+      <div style="flex:1;background:${d>=0?'rgba(22,163,74,.25)':'rgba(220,38,38,.25)'};border-radius:12px;padding:8px"><div class="hint" style="margin:0">${d>=0?'Encontraste':'Quitas'}</div><div style="font-size:24px;font-weight:900;color:${d>=0?'#4ade80':'#f87171'}">${d>=0?'+ '+d:'− '+(-d)}</div></div>
+      <div style="flex:1;background:rgba(37,99,235,.3);border-radius:12px;padding:8px"><div class="hint" style="margin:0">Quedan</div><div style="font-size:24px;font-weight:900">${despues}</div></div></div>
+    <div class="row" style="gap:8px;margin-top:14px"><button class="btn" id="pzc-no" style="flex:1;margin:0;background:transparent;color:#fb923c;border:1px solid var(--line);box-shadow:none">Cancelar</button><button class="btn" id="pzc-si" style="flex:1;margin:0;background:linear-gradient(135deg,#16a34a,#15803d)">✅ Sí, ${d>=0&&titulo.includes('Agregar')?'agregar':'guardar'}</button></div></div>`;
+  document.body.appendChild(ov);
+  const cerrar = () => ov.remove();
+  ov.querySelector('#pzc-no').onclick = cerrar; ov.addEventListener('click', e=>{ if(e.target===ov) cerrar(); });
+  ov.querySelector('#pzc-si').onclick = () => { cerrar(); onOk(); };
+}
+function piezaAplicar(ctx, key, antes, despues){
+  piezasCtx(ctx).set(key, String(despues));
+  piezaUlt[ctx+'|'+key] = {antes, despues, n: despues-antes};
+  delete piezaCorr[ctx+'|'+key];
+  piezaRefrescar(ctx, key);
+}
+function piezaPedirAgregar(ctx, key){
+  const inp = document.getElementById('pzadd-'+ctx+'-'+key); const n = Math.round(Number(inp && inp.value)||0);
+  if(!(n>0)){ if(inp){ inp.focus(); inp.style.borderColor = 'var(--bad)'; } return toast('Escribe cuántas encontraste'); }
+  const antes = Number(piezasCtx(ctx).counts[key])||0;
+  piezaConfirmar(ctx, key, antes, antes+n, '¿Agregar estas piezas?', ()=>piezaAplicar(ctx, key, antes, antes+n));
+}
+function piezaPedirCorregir(ctx, key){
+  const inp = document.getElementById('pzcor-'+ctx+'-'+key); const v = Math.max(0, Math.round(Number(inp && inp.value)||0));
+  const antes = Number(piezasCtx(ctx).counts[key])||0; if(v===antes){ delete piezaCorr[ctx+'|'+key]; return piezaRefrescar(ctx, key); }
+  piezaConfirmar(ctx, key, antes, v, '¿Corregir el total?', ()=>piezaAplicar(ctx, key, antes, v));
+}
+function piezaDeshacer(ctx, key){
+  const u = piezaUlt[ctx+'|'+key]; if(!u) return;
+  if(!confirm(`¿Deshacer? Regresa de ${u.despues} a ${u.antes}.`)) return;
+  piezasCtx(ctx).set(key, String(u.antes)); delete piezaUlt[ctx+'|'+key]; piezaRefrescar(ctx, key); toast('↩️ Deshecho');
+}
+// (compatibilidad) cambio directo del total
 function piezaCambio(ctx, key, val){
   piezasCtx(ctx).set(key, val);
   marcarFilaPieza(ctx, key);
 }
 function piezaSumar(ctx, key, n){
-  const c = piezasCtx(ctx); const actual = Number(c.counts[key])||0;
-  c.set(key, String(actual+n));
-  const row = document.getElementById('pzf-'+ctx+'-'+key); if(row){ const inp=row.querySelector('input'); if(inp) inp.value = actual+n; }
-  marcarFilaPieza(ctx, key);
+  const antes = Number(piezasCtx(ctx).counts[key])||0; piezaAplicar(ctx, key, antes, antes+n);
 }
 function marcarFilaPieza(ctx, key){
   const {counts} = piezasCtx(ctx); const f = familiaDePieza(key); const p = PIEZAS_AUDIT.find(x=>x.key===key);
@@ -3411,8 +3682,8 @@ function renderAudPiezasHtml(){
     return `<option value="${AUD_GRUPO_MDF}" ${esMDF?'selected':''}>MDF (fondos de cajón/cajonera)${n?' ✓'+n:''}</option>`; })();
   return `<div class="card">
     <h3>✂️ Piezas cortadas</h3>
-    <p class="hint">Cuenta las piezas que ya están cortadas y sueltas en el módulo. La app las convierte a hojas con los mismos rendimientos del despiece y las suma al conteo físico de esa hoja.</p>
-    <p class="hint">🧩 <strong>No cuentes</strong> lo que está apartado en <strong>Sobrantes</strong>: eso ya está fuera del inventario hasta que se transforme.</p>
+    <div style="border-radius:14px;padding:12px;background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;margin-top:8px"><div style="font-weight:900;font-size:15px">✂️ Cuenta las piezas cortadas y sueltas</div><div style="font-size:13px;margin-top:4px;opacity:.95">Escribe cuántas <b>encontraste</b> y toca <b>Agregar</b>. Se suman a las que ya llevas. La app las convierte a hojas y las suma al conteo de esa hoja.</div></div>
+    <div style="border-radius:14px;padding:12px;background:linear-gradient(135deg,#b45309,#d97706);color:#fff;margin-top:8px"><div style="font-weight:900;font-size:15px">⚠️ No cuentes lo de Sobrantes</div><div style="font-size:13px;margin-top:4px;opacity:.95">Lo apartado en Sobrantes ya está fuera del inventario hasta que se transforme.</div></div>
     <label class="hint">Color / material</label>
     <select onchange="auditPiezaGrupo=this.value;renderAud()" style="margin-top:4px;font-weight:700">${opciones}</select>
     ${listaPiezasHtml('aud')}
@@ -3491,7 +3762,7 @@ async function saveAudit(){
     if(bc.length) doc.correderas = bc;
     const audId = cryptoId();
     await db.collection('auditorias').doc(audId).set(doc);
-    auditCapturas={}; auditPiezas={}; auditArmados=[]; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
     borrarBorradorAud();
     if(ciego){
       try{ await db.collection('conteoAbierto').doc(modulo()).set({...(conteoMap[modulo()]||{}), modulo:modulo(), abierto:false, cerrado:new Date().toISOString(), cerradoPor:doc.creadoPor, auditoriaId:audId}); }catch(e){}
@@ -8153,8 +8424,8 @@ function renderPzEnc(){
       <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('enc');irA('mov')">Cancelar</button>
     </div>` : `<div class="card" style="border:2px solid #0e8a8a">
       <div style="font-size:17px;font-weight:800">✂️ Piezas encontradas · ${modulo()}</div>
-      <p class="hint">Piezas ya cortadas que <strong>no estaban en el inventario</strong> (sobrante que nunca se contó). La app las convierte a hojas con los mismos rendimientos del despiece y las <strong>SUMA</strong> al material cortado de su color.</p>
-      <p class="hint" style="margin:4px 0 0">No es para lo que regresó de una instalación (eso va en ↩️ Regresó un modelo completo o en 🧩 Sobrantes).</p>
+      <div style="border-radius:14px;padding:12px;background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;margin-top:8px"><div style="font-weight:900;font-size:15px">✂️ Piezas que no estaban en el inventario</div><div style="font-size:13px;margin-top:4px;opacity:.95">Sobrante que nunca se contó. Escribe cuántas <b>encontraste</b> y toca <b>Agregar</b>. La app las convierte a hojas y las <b>suma</b> al material cortado de su color.</div></div>
+      <div style="border-radius:14px;padding:12px;background:linear-gradient(135deg,#b45309,#d97706);color:#fff;margin-top:8px"><div style="font-weight:900;font-size:15px">⚠️ No es para lo que regresó de una instalación</div><div style="font-size:13px;margin-top:4px;opacity:.95">Eso va en ↩️ Regresó un modelo completo o en 🧩 Sobrantes.</div></div>
     </div>`) + `
     <div class="card" style="${esReg?'display:none':''}">
       <div class="paso">1</div><strong>¿De qué color?</strong>
@@ -9263,7 +9534,7 @@ async function borrarDatosModulo(mods){
     toast('Borrando… no cierres la app.');
     for(const [col,id] of aBorrar){ await db.collection(col).doc(id).delete(); }
     mods.forEach(m=>{ try{ localStorage.removeItem('borradorAud_'+m); }catch(e){} });
-    auditCapturas={}; auditPiezas={}; auditArmados=[];
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={};
     alert(`✅ Listo: se borraron ${aBorrar.length} registro(s). ${nombre} quedó en blanco.\n\nSi otros celulares tenían la app abierta, se limpian solos al sincronizar.`);
     setView('home');
   }catch(e){ alert('Error al borrar: '+e.message+'\n\nVuelve a intentarlo; lo que ya se borró no regresa.'); }
