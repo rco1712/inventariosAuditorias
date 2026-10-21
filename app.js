@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v163';
+const APP_VERSION = 'v164';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -2982,8 +2982,8 @@ function renderMov(){
     <div class="paso">3</div><strong>${info.ic} ${pregunta}</strong>
     ${ayuda?`<p class="hint">${ayuda}</p>`:''}
     ${movCat==='Herrajes'||movBuscar?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
-    ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint">¿Qué se dañó?</label>
-      <select id="mv-lado" style="margin-top:4px" onchange="movLado=this.value;renderMov()"><option value="completas" ${movLado==='completas'?'selected':''}>Hojas completas</option><option value="cortado" ${movLado==='cortado'?'selected':''}>Material ya cortado o armado</option></select>
+    ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint" style="font-weight:800">¿Qué se dañó?</label>
+      <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes, armados…','#e0791a']].map(([k,ic,t,sub,c])=>`<button onclick="movLado='${k}';renderMov()" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
       ${movLado==='cortado'?`<button class="btn" style="margin-top:10px;width:100%;min-height:50px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="pzSetModo('merma');irA('pzenc')">✂️ Contar las piezas dañadas (entrepaños, zóclos, paredes…)</button><p class="hint" style="margin:6px 0 0">La app convierte las piezas a hojas. O escribe abajo las hojas directo si ya las sabes.</p>`:''}</div>` : ''}
     <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
     <div class="movlist" id="mv-lista"></div>
@@ -3026,8 +3026,7 @@ function badgeEstado(estado){
 async function registrarMovLote(){
   const tipo = movTipo;
   const nota = ($('#mv-nota').value||'').trim();
-  const ladoEl = document.getElementById('mv-lado');
-  const lado = ladoEl ? ladoEl.value : 'completas';
+  const lado = (tipo==='merma' && esHoja(CATALOGO.find(i=>i.cat===movCat))) ? (movLado==='cortado'?'cortado':'completas') : 'completas';
   const items = CATALOGO.filter(i=>Number(movVals[i.id])>0 && (tipo!=='corte' || esHoja(i)));
   const decrece = tipo!=='entrada';
   const mod = modulo();
@@ -3387,7 +3386,7 @@ function herrAudFilaHtml(it, sinTeo, eq){
       <div style="text-align:center;min-width:64px"><div style="font-size:11px;color:var(--sub)">Total</div><div style="font-size:24px;font-weight:900;color:${u?'#4ade80':contado?C:'var(--sub)'}">${contado?fmtNum(tot):'—'}</div></div></div>
     ${u?`<div style="margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(22,163,74,.22);color:#bbf7d0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>✅ ${u.txt}</span><button onclick="herrAudDeshacer('${it.id}')" style="border:1px solid #86efac;background:transparent;color:#bbf7d0;border-radius:8px;padding:4px 10px;font-weight:800;cursor:pointer">↩️ Deshacer</button></div>`:''}
     ${AUD_LUGARES.map(l=>{ const n = Number(d[l.k])||0; return `<div style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <div style="flex:0 0 96px;font-size:13px">${l.ic} ${l.t}<div style="font-size:18px;font-weight:900">${fmtNum(n)}</div></div>
+      <div style="flex:0 0 96px;font-size:13px">${l.ic} ${l.t}<div style="font-size:18px;font-weight:900">${fmtNum(n)}${n?` <button onclick="herrAudCorregir('${it.id}','${l.k}')" title="Corregir" style="all:unset;cursor:pointer;font-size:12px;color:#93c5fd;font-weight:700">✏️</button>`:''}</div></div>
       <input id="audh-${it.id}-${l.k}" type="number" min="0" inputmode="decimal" placeholder="+ cuántas" style="flex:1;min-width:0;text-align:center;font-size:16px;font-weight:800;margin:0" onkeydown="if(event.key==='Enter')herrAudPedir('${it.id}','${l.k}')">
       <button class="btn small" style="margin:0;padding:10px 12px;background:${C};color:#111" onclick="herrAudPedir('${it.id}','${l.k}')">+ Agregar</button></div>`; }).join('')}
     ${sinLugar?`<div class="hint" style="margin:6px 0 0">Sin lugar: ${fmtNum(sinLugar)} (contado antes)</div>`:''}
@@ -3426,6 +3425,20 @@ function herrAudPedir(id, lugar){
     onOk:()=>{ const prevV = auditCapturas[id], nd = Object.assign({}, d); nd[lugar] = antesL + n; auditDesglose[id] = nd; auditCapturas[id] = tot + n;
       audHUlt[id] = {txt:`Sumaste ${fmtNum(n)} en ${L.t} (${fmtNum(tot)} → ${fmtNum(tot+n)})`, prevD:d, prevV};
       herrAudRefrescar(id); }});
+}
+// Corregir lo que se lleva en un lugar (ej. agregué 3 y solo hay 2): se escribe el número correcto.
+function herrAudCorregir(id, lugar){
+  const it = CATALOGO.find(x=>x.id===id), L = AUD_LUGARES.find(x=>x.k===lugar), {d, tot} = audDesg(id), antesL = Number(d[lugar])||0;
+  const v = prompt(`✏️ ${it.nombre} · ${L.ic} ${L.t}\n\nLlevas ${fmtNum(antesL)}. ¿Cuántas hay de verdad en ${L.t}?`, String(antesL));
+  if(v===null) return; const n = Number(String(v).replace(',','.'));
+  if(v.trim()==='' || isNaN(n) || n<0) return alert('Escribe un número (0 o más).');
+  if(Math.abs(n-antesL)<0.0005) return;
+  const nuevoTot = fmtNum(tot - antesL + n);
+  cuentaConfirmar({titulo:'¿Corregir?', color:HERR_AUD_COL, antes:tot, despues:nuevoTot,
+    cabecera:`<strong style="color:${HERR_AUD_COL};font-size:16px">${it.nombre}</strong> <span class="hint" style="margin:0">· en ${L.ic} ${L.t} (${fmtNum(antesL)} → ${fmtNum(n)})</span>`,
+    onOk:()=>{ const prevV = auditCapturas[id], nd = Object.assign({}, d); nd[lugar] = n; auditDesglose[id] = nd; auditCapturas[id] = nuevoTot;
+      audHUlt[id] = {txt:`Corregiste ${L.t}: ${fmtNum(antesL)} → ${fmtNum(n)} (total ${fmtNum(nuevoTot)})`, prevD:d, prevV}; herrAudRefrescar(id); }});
+  setTimeout(()=>{ const b = document.getElementById('pzc-si'); if(b) b.textContent = '✅ Sí, corregir'; }, 0);
 }
 function herrAudCero(id){ auditCapturas[id] = 0; auditDesglose[id] = {}; delete audHUlt[id]; herrAudRefrescar(id); }
 function herrAudDeshacer(id){
@@ -4119,9 +4132,11 @@ function renderHist(){
       <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
         <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 Reporte PDF</button>
         ${!a.aplicada && esAdmin() ? (a.complemento ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="sumarComplementoUI('${a.id}')">➕ Sumar al stock inicial</button>` : a.conteoInicial ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="usarConteoComoInicialUI('${a.id}')">✅ Usar como stock inicial</button>` : `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>`) : ''}
+        ${esAdmin() && !a.aplicada ? `<button class="btn small" style="background:linear-gradient(135deg,#d97706,#b45309)" onclick="audCorrAbrir('${a.id}')">✏️ Corregir un artículo</button>` : ''}
         ${esAdmin() && !a.conteoInicial && !a.complemento ? `<button class="btn small" style="background:transparent;color:#6b4bd6;border:1px solid var(--line);box-shadow:none" onclick="iniciarReconteo('${a.id}')">🔍 Volver a contar un material</button>` : ''}
         ${esAdmin() ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarAuditoria('${a.id}')">🗑️ Borrar</button>` : ''}
       </div>
+      ${(a.correcciones||[]).length ? `<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.4)"><strong style="color:#f59e0b">✏️ Correcciones de Dirección</strong>${a.correcciones.map(c=>`<div class="hint" style="margin:2px 0 0">• <strong>${c.nombre}</strong>: capturó ${fmtNum(c.antes)} → corregido a <strong>${fmtNum(c.despues)}</strong> ${c.unidad||''} · ${String(c.por||'').split('@')[0]} · ${new Date(c.fecha).toLocaleString('es-MX')}${c.nota?' · '+c.nota:''}</div>`).join('')}</div>` : ''}
       ${(a.reconteos||[]).length ? `<div style="margin-top:8px">${a.reconteos.map(rc=>`<p class="hint" style="margin:2px 0">🔍 Reconteo de ${rc.cat} (${new Date(rc.fecha).toLocaleString()}): ${rc.ok?'<span class="pos">✅ coincidió con la auditoría</span>':`<span class="neg">⚠️ no coincidió</span>${rc.corrigio?' · <strong>auditoría corregida</strong>':''}`}</p>`).join('')}</div>` : ''}
       ${a.conteoInicial||a.complemento ? resumenHojasConteoHtml(a) : ''}
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
@@ -4232,6 +4247,13 @@ async function generarReporteAuditoriaPDF(a){
     a.correderas.forEach(b=>{ [b.etiqueta, fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares), fmtNum(b.hembrasSinPareja), fmtNum(b.machosSinPareja)].forEach((v,i)=>doc.text(String(v), colX(i)+1.5, y+4)); y+=5.5; });
     y += 6;
   }
+  // Correcciones de Dirección (un artículo a la vez)
+  if((a.correcciones||[]).length){
+    if(y > pageH-40){ doc.addPage(); y=15; }
+    doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text('Correcciones de Dirección', marginL, y+4); doc.setFont(undefined,'normal'); y+=8; doc.setFontSize(9);
+    a.correcciones.forEach(c=>{ if(y > pageH-12){ doc.addPage(); y=15; } doc.text(`• ${c.nombre}: capturó ${fmtNum(c.antes)} → corregido a ${fmtNum(c.despues)} ${c.unidad||''} · ${String(c.por||'').split('@')[0]} · ${new Date(c.fecha).toLocaleString('es-MX')}${c.nota?' · '+c.nota:''}`, marginL+2, y); y+=4.5; });
+    y += 4;
+  }
   // Reconteos de verificación
   if((a.reconteos||[]).length){
     if(y > pageH-40){ doc.addPage(); y=15; }
@@ -4264,6 +4286,45 @@ async function generarReporteAuditoriaPDF(a){
 // ===== Borrar una auditoría (solo Dirección, pide el PIN de administrador) =====
 // Si la auditoría ya se aplicó al inventario, también se deshacen sus ajustes y se quitan los
 // faltantes (deuda) que generó, para que el inventario quede como si nunca se hubiera aplicado.
+// ===== Corregir un artículo de una auditoría sin aplicar (confirmado por el usuario) =====
+// Para cuando el coordinador capturó mal un número (ej. las pijas): Dirección busca el artículo,
+// escribe lo correcto y queda anotado quién, cuándo y de cuánto a cuánto. Solo artículos que no son
+// hojas (la melamina/MDF se corrige con "Volver a contar un material").
+let audCorr = null;
+function audCorrAbrir(id){ audCorr = {id, q:'', sel:''}; audCorrRender(); }
+function audCorrCerrar(){ audCorr = null; const o = document.getElementById('aud-corr'); if(o) o.remove(); }
+function audCorrRender(){
+  const a = auditorias.find(x=>x.id===audCorr.id); if(!a) return audCorrCerrar();
+  let ov = document.getElementById('aud-corr');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'aud-corr'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto'; document.body.appendChild(ov); ov.addEventListener('click', e=>{ if(e.target===ov) audCorrCerrar(); }); }
+  const res = (a.resultados||[]).filter(r=>{ const it = CATALOGO.find(i=>i.id===r.itemId); return !(it && esHoja(it)); });
+  const q = slug(audCorr.q||''), lista = res.filter(r=>!q || slug(r.nombre).includes(q)).slice(0,40), r = res.find(x=>x.itemId===audCorr.sel);
+  ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #d97706;border-radius:18px;padding:16px;margin-top:20px">
+    <div class="row" style="justify-content:space-between"><div style="font-size:18px;font-weight:900">✏️ Corregir un artículo</div><button onclick="audCorrCerrar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div class="hint" style="margin:2px 0 0">Auditoría del ${new Date(a.fecha).toLocaleDateString('es-MX')} · ${a.auditor||''}</div>
+    ${r ? `<div style="margin-top:12px;padding:12px;border-radius:14px;background:rgba(217,119,6,.12)"><div style="font-size:16px;font-weight:900;color:#f59e0b">${r.nombre}</div><div class="hint" style="margin:0">${r.cat} · ${r.unidad||''}</div>
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:center"><div style="flex:1;text-align:center;background:rgba(127,127,127,.12);border-radius:12px;padding:8px"><div class="hint" style="margin:0">Capturó</div><div style="font-size:24px;font-weight:900">${fmtNum(r.fisico)}</div></div><div style="font-size:22px">➜</div>
+        <div style="flex:1;text-align:center"><div class="hint" style="margin:0">Lo correcto</div><input id="aud-corr-v" type="number" min="0" inputmode="decimal" placeholder="?" style="margin:2px 0 0;text-align:center;font-size:22px;font-weight:900"></div></div>
+        <input id="aud-corr-n" placeholder="¿Por qué? (opcional) Ej. se equivocó al escribir" style="margin-top:10px">
+        <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;margin:0;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="audCorrGuardar()">✅ Guardar corrección</button><button class="btn small" style="margin:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="audCorr.sel='';audCorrRender()">← Otro</button></div></div>`
+    : `<input id="aud-corr-q" type="search" placeholder="🔍 Busca el artículo (ej. pijas)" value="${herrEsc(audCorr.q)}" oninput="audCorr.q=this.value;audCorrRender();const e=document.getElementById('aud-corr-q');e.focus();e.setSelectionRange(e.value.length,e.value.length)" style="margin-top:12px">
+      <div style="margin-top:6px">${lista.map(x=>`<div onclick="audCorr.sel='${x.itemId}';audCorrRender()" class="row" style="cursor:pointer;justify-content:space-between;border-bottom:1px solid var(--line);padding:9px 2px"><span><strong>${x.nombre}</strong><span class="hint" style="display:block;margin:0">${x.cat}</span></span><span style="font-weight:900;font-size:16px">${fmtNum(x.fisico)} <span class="hint" style="margin:0">${x.unidad||''}</span> ›</span></div>`).join('') || '<p class="hint">No se encontró.</p>'}</div>`}
+  </div>`;
+  if(r) setTimeout(()=>{ const e = document.getElementById('aud-corr-v'); if(e) e.focus(); }, 30);
+}
+async function audCorrGuardar(){
+  const a = auditorias.find(x=>x.id===audCorr.id); if(!a) return; if(a.aplicada) return alert('Esta auditoría ya se aplicó.');
+  const r = (a.resultados||[]).find(x=>x.itemId===audCorr.sel); const el = document.getElementById('aud-corr-v');
+  if(!r || !el || el.value==='' || isNaN(Number(el.value)) || Number(el.value)<0) return alert('Escribe la cantidad correcta.');
+  const v = fmtNum(Number(el.value)), antes = Number(r.fisico)||0, nota = (document.getElementById('aud-corr-n').value||'').trim();
+  if(Math.abs(v-antes)<0.0005) return alert('Es el mismo número que ya tenía.');
+  if(!confirm(`✏️ ${r.nombre}\n\nCapturó: ${fmtNum(antes)}\nLo correcto: ${fmtNum(v)}\n\n¿Guardar la corrección?`)) return;
+  const res = (a.resultados||[]).map(x=>{ if(x.itemId!==r.itemId) return x; const y = Object.assign({}, x, {fisico:v, diff:fmtNum(v - Number(x.teorico||0)), capturado:true, corregido:true}); delete y.hojasCompletas; delete y.hojasEnPiezas; return y; });
+  const corr = (a.correcciones||[]).concat([{fecha:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():'', itemId:r.itemId, nombre:r.nombre, unidad:r.unidad||'', antes, despues:v, nota}]);
+  const upd = {resultados:res, correcciones:corr, totalDiff:res.filter(x=>Math.abs(Number(x.diff)||0)>0.005).length};
+  try{ await db.collection('auditorias').doc(a.id).update(upd); Object.assign(a, upd); }catch(e){ return alert('Error: '+e.message); }
+  audCorrCerrar(); toast(`✏️ ${r.nombre}: ${fmtNum(antes)} → ${fmtNum(v)}`); if(current==='hist') renderHist();
+}
 async function borrarAuditoria(id){
   if(!esAdmin()) return alert('Solo Dirección puede borrar una auditoría.');
   const a = auditorias.find(x=>x.id===id); if(!a) return;
