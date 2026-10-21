@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v164';
+const APP_VERSION = 'v165';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3131,9 +3131,9 @@ function setAudTipo(v){
   if(eraSim!==seraSim){
     guardarBorradorAud();
     const st = {auditCapturas, auditDesglose, auditPiezas, auditArmados, audPaso, audHechas, auditCat};
-    if(seraSim){ _audRealStash = st; auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    if(seraSim){ _audRealStash = st; auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
     else if(_audRealStash){ ({auditCapturas, auditDesglose={}, auditPiezas, auditArmados, audPaso, audHechas, auditCat} = _audRealStash); _audRealStash=null; }
-    else { auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    else { auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
     audTipo = v;
     _borradorRevisado[modulo()+(seraSim?'_sim':'')] = false;
   } else audTipo = v;
@@ -3281,7 +3281,7 @@ function renderAud(){
     cuerpo = `<div class="card" style="border:2px solid #5b6b7f"><h3>🧪 Resultado del simulador</h3>
       <p class="hint">Se compara solo lo que contaste contra lo que dice la app. <strong>No se guarda nada y el inventario no cambia.</strong> En melamina/MDF: las hojas completas se comparan con las completas, y las piezas y armados con lo cortado.</p>
       ${simResultadosHtml()}
-      <button class="btn" style="width:100%;margin-top:12px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar todo lo que llevas contado en el simulador?')){auditCapturas={};auditPiezas={};auditArmados=[]; auditDesglose={}; audHUlt={};audHechas={};guardarBorradorAud();renderAud();}">🗑️ Borrar simulación y empezar de nuevo</button>
+      <button class="btn" style="width:100%;margin-top:12px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar todo lo que llevas contado en el simulador?')){auditCapturas={};auditPiezas={};auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null;audHechas={};guardarBorradorAud();renderAud();}">🗑️ Borrar simulación y empezar de nuevo</button>
       <button class="btn" style="width:100%;margin-top:8px" onclick="setAudTipo('seguimiento')">Salir del simulador</button>
     </div>`;
   } else if(sec.k==='__revisar' && parcial){
@@ -3373,7 +3373,7 @@ function renderAud(){
 // siguen con el cuadro normal): se cuentan por partes — primero el
 // almacén y luego el taller —; cada lugar va sumando lo que se encuentra, con confirmación.
 const AUD_LUGARES = [{k:'alm', t:'Almacén', ic:'🏬'}, {k:'tal', t:'Taller', ic:'🛠️'}, {k:'otro', t:'Otro lugar', ic:'📍'}];
-let audHUlt = {};
+let audHUlt = {}, audHCorr = null;
 const HERR_AUD_COL = '#e3b341';
 function audDesg(id){ const d = auditDesglose[id] || {}; const tot = Number(auditCapturas[id])||0; const suma = AUD_LUGARES.reduce((s,l)=>s+(Number(d[l.k])||0),0);
   return {d, tot, sinLugar: Math.max(0, tot - suma)}; }
@@ -3385,8 +3385,12 @@ function herrAudFilaHtml(it, sinTeo, eq){
       <div style="flex:1;min-width:0"><div style="color:${C};font-weight:800;font-size:15px">${contado?'✓ ':'⏳ '}${it.nombre}</div><span class="hint" style="margin:0">${it.unidad||''}${f?' · teórico '+fmtNum(f.final):''}</span>${eq&&eq[it.id]?`<div class="hint" style="margin:2px 0 0">+ ${fmtNum(eq[it.id])} en piezas/armados</div>`:''}</div>
       <div style="text-align:center;min-width:64px"><div style="font-size:11px;color:var(--sub)">Total</div><div style="font-size:24px;font-weight:900;color:${u?'#4ade80':contado?C:'var(--sub)'}">${contado?fmtNum(tot):'—'}</div></div></div>
     ${u?`<div style="margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(22,163,74,.22);color:#bbf7d0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>✅ ${u.txt}</span><button onclick="herrAudDeshacer('${it.id}')" style="border:1px solid #86efac;background:transparent;color:#bbf7d0;border-radius:8px;padding:4px 10px;font-weight:800;cursor:pointer">↩️ Deshacer</button></div>`:''}
-    ${AUD_LUGARES.map(l=>{ const n = Number(d[l.k])||0; return `<div style="display:flex;align-items:center;gap:6px;margin-top:8px">
-      <div style="flex:0 0 96px;font-size:13px">${l.ic} ${l.t}<div style="font-size:18px;font-weight:900">${fmtNum(n)}${n?` <button onclick="herrAudCorregir('${it.id}','${l.k}')" title="Corregir" style="all:unset;cursor:pointer;font-size:12px;color:#93c5fd;font-weight:700">✏️</button>`:''}</div></div>
+    ${AUD_LUGARES.map(l=>{ const n = Number(d[l.k])||0, ed = audHCorr && audHCorr.id===it.id && audHCorr.l===l.k;
+      const lado = `<div style="flex:0 0 96px;font-size:13px">${l.ic} ${l.t}<div style="font-size:18px;font-weight:900">${fmtNum(n)}</div>${n&&!ed?`<button onclick="audHCorr={id:'${it.id}',l:'${l.k}'};herrAudRefrescar('${it.id}');setTimeout(()=>{const e=document.getElementById('audhc-${it.id}');if(e)e.focus()},30)" style="cursor:pointer;margin-top:3px;padding:3px 8px;border-radius:8px;border:1px solid #60a5fa;background:rgba(37,99,235,.18);color:#bfdbfe;font-size:12px;font-weight:800">✏️ Corregir</button>`:''}</div>`;
+      if(ed) return `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;padding:6px;border-radius:12px;background:rgba(37,99,235,.15);border:1px solid #3b82f6">${lado}
+        <input id="audhc-${it.id}" type="number" min="0" inputmode="decimal" placeholder="Lo correcto" style="flex:1;min-width:0;text-align:center;font-size:16px;font-weight:800;margin:0;border-color:#3b82f6" onkeydown="if(event.key==='Enter')herrAudCorregir('${it.id}','${l.k}')">
+        <button class="btn small" style="margin:0;padding:10px 10px;background:#2563eb" onclick="herrAudCorregir('${it.id}','${l.k}')">Guardar</button><button onclick="audHCorr=null;herrAudRefrescar('${it.id}')" style="all:unset;cursor:pointer;padding:6px;color:var(--sub);font-size:18px">✕</button></div>`;
+      return `<div style="display:flex;align-items:center;gap:6px;margin-top:8px">${lado}
       <input id="audh-${it.id}-${l.k}" type="number" min="0" inputmode="decimal" placeholder="+ cuántas" style="flex:1;min-width:0;text-align:center;font-size:16px;font-weight:800;margin:0" onkeydown="if(event.key==='Enter')herrAudPedir('${it.id}','${l.k}')">
       <button class="btn small" style="margin:0;padding:10px 12px;background:${C};color:#111" onclick="herrAudPedir('${it.id}','${l.k}')">+ Agregar</button></div>`; }).join('')}
     ${sinLugar?`<div class="hint" style="margin:6px 0 0">Sin lugar: ${fmtNum(sinLugar)} (contado antes)</div>`:''}
@@ -3429,14 +3433,14 @@ function herrAudPedir(id, lugar){
 // Corregir lo que se lleva en un lugar (ej. agregué 3 y solo hay 2): se escribe el número correcto.
 function herrAudCorregir(id, lugar){
   const it = CATALOGO.find(x=>x.id===id), L = AUD_LUGARES.find(x=>x.k===lugar), {d, tot} = audDesg(id), antesL = Number(d[lugar])||0;
-  const v = prompt(`✏️ ${it.nombre} · ${L.ic} ${L.t}\n\nLlevas ${fmtNum(antesL)}. ¿Cuántas hay de verdad en ${L.t}?`, String(antesL));
-  if(v===null) return; const n = Number(String(v).replace(',','.'));
-  if(v.trim()==='' || isNaN(n) || n<0) return alert('Escribe un número (0 o más).');
-  if(Math.abs(n-antesL)<0.0005) return;
+  const inp = document.getElementById('audhc-'+id), v = inp ? inp.value : '';
+  const n = Number(String(v).replace(',','.'));
+  if(String(v).trim()==='' || isNaN(n) || n<0){ if(inp){ inp.focus(); inp.style.borderColor='var(--bad)'; } return toast('Escribe cuántas hay de verdad (0 o más)'); }
+  if(Math.abs(n-antesL)<0.0005){ audHCorr = null; return herrAudRefrescar(id); }
   const nuevoTot = fmtNum(tot - antesL + n);
   cuentaConfirmar({titulo:'¿Corregir?', color:HERR_AUD_COL, antes:tot, despues:nuevoTot,
     cabecera:`<strong style="color:${HERR_AUD_COL};font-size:16px">${it.nombre}</strong> <span class="hint" style="margin:0">· en ${L.ic} ${L.t} (${fmtNum(antesL)} → ${fmtNum(n)})</span>`,
-    onOk:()=>{ const prevV = auditCapturas[id], nd = Object.assign({}, d); nd[lugar] = n; auditDesglose[id] = nd; auditCapturas[id] = nuevoTot;
+    onOk:()=>{ audHCorr = null; const prevV = auditCapturas[id], nd = Object.assign({}, d); nd[lugar] = n; auditDesglose[id] = nd; auditCapturas[id] = nuevoTot;
       audHUlt[id] = {txt:`Corregiste ${L.t}: ${fmtNum(antesL)} → ${fmtNum(n)} (total ${fmtNum(nuevoTot)})`, prevD:d, prevV}; herrAudRefrescar(id); }});
   setTimeout(()=>{ const b = document.getElementById('pzc-si'); if(b) b.textContent = '✅ Sí, corregir'; }, 0);
 }
@@ -3643,7 +3647,7 @@ function agregarArmado(){
 function quitarArmado(i){ auditArmados.splice(i,1); guardarBorradorAud(); renderAud(); }
 function vaciarConteoAud(){
   if(!confirm('¿Borrar TODO lo que llevas capturado en este conteo?\n\n(Hojas, herrajes, piezas cortadas y armados. No se toca el inventario.)')) return;
-  auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
+  auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
 }
 // ===== Lista de piezas para contar (confirmado por el usuario): agrupada por familia, con color por
 // familia (dibujo, nombre y franja), dibujo de la forma de la pieza, buscador, ✓ en lo contado y
@@ -3885,7 +3889,7 @@ async function saveAudit(){
     if(bc.length) doc.correderas = bc;
     const audId = cryptoId();
     await db.collection('auditorias').doc(audId).set(doc);
-    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
     borrarBorradorAud();
     if(ciego){
       try{ await db.collection('conteoAbierto').doc(modulo()).set({...(conteoMap[modulo()]||{}), modulo:modulo(), abierto:false, cerrado:new Date().toISOString(), cerradoPor:doc.creadoPor, auditoriaId:audId}); }catch(e){}
@@ -9705,7 +9709,7 @@ async function borrarDatosModulo(mods){
     toast('Borrando… no cierres la app.');
     for(const [col,id] of aBorrar){ await db.collection(col).doc(id).delete(); }
     mods.forEach(m=>{ try{ localStorage.removeItem('borradorAud_'+m); }catch(e){} });
-    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={};
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null;
     alert(`✅ Listo: se borraron ${aBorrar.length} registro(s). ${nombre} quedó en blanco.\n\nSi otros celulares tenían la app abierta, se limpian solos al sincronizar.`);
     setView('home');
   }catch(e){ alert('Error al borrar: '+e.message+'\n\nVuelve a intentarlo; lo que ya se borró no regresa.'); }
