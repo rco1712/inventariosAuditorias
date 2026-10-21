@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v166';
+const APP_VERSION = 'v169';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1123,7 +1123,7 @@ function origenEntradaHtml(){
 function origenDeEntrada(m){
   if(m.origenTipo==='proveedor' || m.pedidoId) return {tipo:'proveedor', txt: m.proveedor ? 'Proveedor · '+m.proveedor : (/^Pedido de (.+?)( ·|$)/.test(m.nota||'') ? 'Proveedor · '+RegExp.$1 : 'Proveedor')};
   if(m.origenTipo==='almacen') return {tipo:'otro', txt:'🏢 Almacén general'};
-  if(m.origenTipo==='modulo') return {tipo:'modulo', txt:'Módulo '+(m.origenModulo||'')};
+  if(m.origenTipo==='modulo'){ const n = m.nota||''; return {tipo:'modulo', txt:'Módulo '+(m.origenModulo||'')+(/^Traspaso /.test(n)?' · traspaso (préstamo)':/^Devolución de préstamo /.test(n)?' · devolución de préstamo':' · entrada')}; }
   let x = /^Traspaso (.+?) → /.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[1]};
   x = /^Devolución de préstamo (.+?) → /.exec(m.nota||''); if(x) return {tipo:'modulo', txt:'Módulo '+x[1]+' (devolución)'};
   if(m.motivo==='tuboAhorrado') return {tipo:'otro', txt:'Tubos ahorrados'};
@@ -7306,7 +7306,13 @@ function renderTrasp(){
       <button class="${traspSub==='nuevo'?'active':''}" onclick="traspSub='nuevo';renderTrasp()">Nuevo traspaso</button>
       <button class="${traspSub==='historial'?'active':''}" onclick="traspSub='historial';renderTrasp()">Préstamos / Historial</button>
       <button class="${traspSub==='resumen'?'active':''}" onclick="traspSub='resumen';renderTrasp()">Resumen de deudas</button>
-    </div></div>
+    </div>
+    <div style="margin-top:10px;padding:10px;border-radius:12px;background:rgba(124,58,237,.10);border:1px solid rgba(124,58,237,.35)"><strong>📄 PDF de traspasos</strong>
+      <div class="grid2" style="margin-top:6px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div><label class="hint">Desde</label><input type="date" id="tp-desde" style="width:100%;min-width:0;box-sizing:border-box" value="${traspPdfDesde||fechaHoyLocal().slice(0,8)+'01'}" onchange="traspPdfDesde=this.value"></div><div><label class="hint">Hasta</label><input type="date" id="tp-hasta" style="width:100%;min-width:0;box-sizing:border-box" value="${traspPdfHasta||fechaHoyLocal()}" onchange="traspPdfHasta=this.value"></div></div>
+      <label class="hint" style="display:block;margin-top:6px">Módulos <span style="opacity:.8">(toca los que quieras; ninguno = todos)</span></label>
+      <div class="chips" style="margin-top:4px">${MODULOS.map(m=>{ const on = traspPdfMods.includes(m.nombre); return `<button class="chip ${on?'on':''}" style="${on?'background:#7c3aed;border-color:#7c3aed;color:#fff':''}" onclick="traspPdfToggle('${m.nombre}')">${on?'✓ ':''}${m.nombre}</button>`; }).join('')}</div>
+      ${traspPdfMods.length>1?`<label class="hint" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" style="width:auto;margin:0" ${traspPdfEntre?'checked':''} onchange="traspPdfEntre=this.checked"> Solo traspasos entre ellos (no con otros módulos)</label>`:''}
+      <button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#7c3aed,#6d28d9)" onclick="generarTraspasosPDF()">📄 Descargar PDF</button></div></div>
     <div id="trasp-body"></div>`;
   if(traspSub==='nuevo') renderTraspNuevo();
   else if(traspSub==='historial') renderTraspHistorial();
@@ -7462,6 +7468,46 @@ async function registrarDevolucion(prestamoId){
   }catch(e){ alert('Error: '+e.message); }
 }
 
+// ===== PDF de traspasos (confirmado por el usuario) =====
+// Deudas pendientes entre módulos (al día de hoy) + historial de traspasos y devoluciones del periodo.
+let traspPdfDesde = '', traspPdfHasta = '', traspPdfMods = [], traspPdfEntre = false;
+function traspPdfToggle(m){ const d = document.getElementById('tp-desde'), h = document.getElementById('tp-hasta'); if(d) traspPdfDesde = d.value; if(h) traspPdfHasta = h.value;
+  traspPdfMods = traspPdfMods.includes(m) ? traspPdfMods.filter(x=>x!==m) : traspPdfMods.concat([m]); renderTrasp(); }
+async function generarTraspasosPDF(){
+  await cargarPrestamos();
+  const d1 = (document.getElementById('tp-desde')||{}).value || traspPdfDesde || fechaHoyLocal().slice(0,8)+'01';
+  const d2 = (document.getElementById('tp-hasta')||{}).value || traspPdfHasta || fechaHoyLocal();
+  const mods = traspPdfMods.slice(), entre = traspPdfEntre && mods.length>1, mod = mods.join(', ');
+  const dia = f => diaLocal(f), enRango = f => dia(f)>=d1 && dia(f)<=d2;
+  const deMod = p => !mods.length || (entre ? (mods.includes(p.origen) && mods.includes(p.destino)) : (mods.includes(p.origen) || mods.includes(p.destino)));
+  const fTxt = f => new Date(f).toLocaleDateString('es-MX',{day:'numeric',month:'short'});
+  const fLargo = x => new Date(x+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'});
+  const ps = prestamos.filter(deMod);
+  const S = herrPdfBase('Traspasos entre módulos', `${mods.length?mod+(entre?' (entre ellos)':'')+' · ':'Todos los módulos · '}${fLargo(d1)} al ${fLargo(d2)}`, [109,40,217]);
+  const MOR=[109,40,217], VER=[22,128,74], ROJ=[185,28,28], AMB=[180,83,9];
+  const ev = [];
+  ps.forEach(p=>{ if(enRango(p.fecha)) ev.push({f:p.fecha, tipo:'t', p, q:p.cantidad, art:p.itemNombre});
+    (p.devoluciones||[]).forEach(d=>{ if(enRango(d.fecha)) ev.push({f:d.fecha, tipo:'d', p, q:d.cantidad, art:d.itemNombre||p.itemNombre}); }); });
+  ev.sort((a,b)=>(a.f||'').localeCompare(b.f||''));
+  const pend = ps.filter(p=>p.pendiente>0);
+  const grupos = {}; pend.forEach(p=>{ const k = p.destino+'||'+p.origen+'||'+grupoDeuda(p.itemId);
+    const g = grupos[k] || (grupos[k] = {deudor:p.destino, acreedor:p.origen, art:p.esMelamina?'Melamina (cualquier color)':p.itemNombre, cat:p.categoria||'', unidad:p.unidad, prest:0, dev:0, pend:0, desde:p.fecha});
+    g.prest += Number(p.cantidad)||0; g.dev += Number(p.devuelto)||0; g.pend += Number(p.pendiente)||0; if((p.fecha||'')<(g.desde||'')) g.desde = p.fecha; });
+  const pares = [...new Set(Object.values(grupos).map(g=>g.deudor+'||'+g.acreedor))];
+  S.kpis([[ev.filter(e=>e.tipo==='t').length,'traspasos en el periodo',MOR],[ev.filter(e=>e.tipo==='d').length,'devoluciones en el periodo',VER],[pend.length,'préstamos sin pagar',pend.length?ROJ:VER],[pares.length,'deudas entre módulos',AMB]]);
+  S.seccion('Deudas pendientes', 'Lo que se debe al día de hoy · en melamina se suman todos los colores', ROJ);
+  if(!pares.length) S.vacio('No hay deudas pendientes entre módulos.');
+  pares.forEach(k=>{ const [deu, acr] = k.split('||'); const g = Object.values(grupos).filter(x=>x.deudor===deu && x.acreedor===acr);
+    S.banda(`${deu} le debe a ${acr}`, g.length+' artículo(s)', ROJ);
+    S.tabla([{t:'Artículo',w:62},{t:'Desde',w:22},{t:'Prestado',w:32},{t:'Devuelto',w:32},{t:'Pendiente',w:34}],
+      g.map(x=>[{t:x.art,b:true}, fTxt(x.desde), fmtNum(x.prest)+' '+x.unidad, {t:fmtNum(x.dev)+' '+x.unidad, col:x.dev?VER:null}, {t:fmtNum(x.pend)+' '+x.unidad, b:true, col:ROJ}]), ROJ); });
+  S.seccion('Historial del periodo', 'Cada traspaso y cada devolución, en orden de fecha', MOR);
+  if(!ev.length) S.vacio('Sin traspasos ni devoluciones en estas fechas.');
+  else S.tabla([{t:'Fecha',w:18},{t:'Movimiento',w:30},{t:'De → A',w:44},{t:'Artículo',w:50},{t:'Cant.',w:18},{t:'Estado',w:22}],
+    ev.map(e=>{ const t = e.tipo==='t', est = e.p.estado==='cerrado'?{t:'Pagado',col:VER,b:true}:e.p.estado==='parcial'?{t:'Parcial',col:AMB,b:true}:{t:'Pendiente',col:ROJ,b:true};
+      return [fTxt(e.f), t?{t:'Préstamo',col:MOR,b:true}:{t:'Devolución',col:VER,b:true}, t?`${e.p.origen} → ${e.p.destino}`:`${e.p.destino} → ${e.p.origen}`, e.art+(e.p.nota&&t?' · '+e.p.nota:''), {t:fmtNum(e.q)+' '+(e.p.unidad||''),b:true}, t?est:{t:'—'}]; }), MOR);
+  await S.fin(`Traspasos_${mods.length?mods.join('-'):'todos'}_${d1}_a_${d2}.pdf`, 'Closets Vera · Traspasos entre módulos');
+}
 async function renderTraspResumen(){
   $('#trasp-body').innerHTML = `<div class="card hint">Calculando deudas…</div>`;
   await cargarPrestamos();
@@ -7919,7 +7965,111 @@ function refrescarDifCierre(id){
   const c = document.getElementById('cierre-cuenta'); if(c) c.textContent = cuentaCierreTxt();
 }
 function cuentaCierreTxt(){ const n = CATALOGO.filter(i=>esConsumibleCierre(i) && !vacioCierre(cierreVals[i.id])).length; return n ? `Llevas ${n} artículo(s) contados.` : ''; }
+// ===== Entradas y salidas del día, en 4 apartados (confirmado por el usuario) =====
+// 1. Proveedores · 2. Traspasos (préstamos), dicho con frases · 3. Salidas a otro módulo sin deuda ·
+// 4. Cómo quedan las deudas del módulo (nos deben / debemos). Se usa en el Cierre del turno y en el PDF del día.
+function movsDiaClasif(mod, dia){
+  const R = {provEnt:[], provSal:[], prestamos:[], nosPrestaron:[], nosRegresaron:[], regresamos:[], sinDeudaSal:[], otrosEnt:[], alm:[]};
+  movs.filter(m=>m.modulo===mod && diaLocal(m.fecha)===dia && m.estado!=='rechazado' && !m.cierreTurno && (m.tipo==='entrada'||m.tipo==='salida'))
+    .sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).forEach(m=>{
+      const n = m.nota||'', tr = /^Traspaso (.+?) → (.+?)( ·|$)/.exec(n), dv = /^Devolución de préstamo (.+?) → (.+?)( \(|$)/.exec(n);
+      const porque = n.replace(/^(Traspaso|Devolución de préstamo) .+? → [^·(]+(\([^)]*\))?\s*(·\s*)?/,'').trim();
+      if(m.tipo==='salida'){
+        if(tr) R.prestamos.push({m, quien:tr[2].trim(), porque});
+        else if(dv) R.regresamos.push({m, quien:dv[2].trim(), porque:''});
+        else if(m.destinoTipo==='modulo') R.sinDeudaSal.push({m, quien:m.destinoModulo||'', porque:n});
+        else if(m.destinoTipo==='proveedor') R.provSal.push({m, quien:m.proveedor||'Proveedor', porque:n});
+      } else {
+        if(tr) R.nosPrestaron.push({m, quien:tr[1].trim(), porque});
+        else if(dv) R.nosRegresaron.push({m, quien:dv[1].trim(), porque:''});
+        else if(m.origenTipo==='almacen') R.alm.push({m, quien:'Almacén general', porque:''});
+        else if(m.origenTipo==='proveedor' || m.pedidoId){ const o = origenDeEntrada(m); R.provEnt.push({m, quien:o.txt.replace(/^Proveedor · /,'').replace(/^Proveedor$/,'Proveedor'), porque:''}); }
+        else if(m.origenTipo==='modulo') R.otrosEnt.push({m, quien:m.origenModulo||'', porque:n});
+      }
+    });
+  return R;
+}
+function deudasDeModulo(mod){
+  const g = {}; (prestamos||[]).filter(p=>p.pendiente>0 && (p.origen===mod || p.destino===mod)).forEach(p=>{
+    const nos = p.origen===mod, otro = nos ? p.destino : p.origen, k = (nos?'N':'D')+'|'+otro+'|'+grupoDeuda(p.itemId);
+    const x = g[k] || (g[k] = {nos, otro, art: p.esMelamina ? 'Melamina (cualquier color)' : p.itemNombre, unidad:p.unidad, pend:0}); x.pend += Number(p.pendiente)||0; });
+  const xs = Object.values(g).sort((a,b)=>a.otro.localeCompare(b.otro) || a.art.localeCompare(b.art)); return {nosDeben: xs.filter(x=>x.nos), debemos: xs.filter(x=>!x.nos)};
+}
+let cierrePrestOk = false;
+function cierreMovsHoyHtml(){
+  const mod = modulo(), R = movsDiaClasif(mod, fechaHoyLocal()), D = deudasDeModulo(mod);
+  const hora = m => new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'});
+  const fila = (x, sale, txt) => `<div class="row" style="justify-content:space-between;gap:8px;border-top:1px solid rgba(127,127,127,.25);padding:7px 0;flex-wrap:nowrap"><span style="min-width:0"><strong>${x.m.itemNombre}</strong><span class="hint" style="display:block;margin:0">${hora(x.m)} · ${txt}${x.m.estado==='pendiente'?' · ⏳ por aprobar':''}</span></span><strong style="white-space:nowrap;font-size:15px;color:${sale?'#f87171':'#4ade80'}">${sale?'−':'+'} ${fmtNum(x.m.cantidad)} ${item2unidad(x.m.itemId)}</strong></div>`;
+  const caja = (ic, t, sub, col, cuerpo) => `<div style="margin-top:10px;border-radius:14px;border:2px solid ${col};background:${col}1a;padding:10px"><div style="font-weight:900;font-size:15px;color:${col}">${ic} ${t}</div><div class="hint" style="margin:0 0 2px">${sub}</div>${cuerpo}</div>`;
+  const b = s => `<b>${s}</b>`;
+  const prov = R.provEnt.map(x=>fila(x,false,'De '+b(x.quien))).concat(R.provSal.length ? [`<div style="margin-top:8px;padding:4px 8px;border-radius:8px;background:rgba(220,38,38,.25);color:#fca5a5;font-weight:800;font-size:13px">📤 Se regresó al proveedor (sale)</div>`].concat(R.provSal.map(x=>`<div style="background:rgba(220,38,38,.10);border-radius:8px;padding:0 6px">${fila(x,true,'A '+b(x.quien)+(x.porque?' · '+x.porque:''))}</div>`)) : []);
+  const tras = R.prestamos.map(x=>fila(x,true,`🤝 Le prestamos a ${b(x.quien)} (nos debe)${x.porque?' · '+x.porque:''}`))
+    .concat(R.nosPrestaron.map(x=>fila(x,false,`🤝 Nos prestó ${b(x.quien)} (le debemos)${x.porque?' · '+x.porque:''}`)))
+    .concat(R.nosRegresaron.map(x=>fila(x,false,`↩️ ${b(x.quien)} nos regresó lo que le prestamos`)))
+    .concat(R.regresamos.map(x=>fila(x,true,`↩️ Le regresamos a ${b(x.quien)} lo que nos prestó`)));
+  const sinD = R.sinDeudaSal.map(x=>fila(x,true,'➜ '+b(x.quien)+(x.porque?' · '+x.porque:''))).concat(R.otrosEnt.map(x=>fila(x,false,'De '+b(x.quien)+' (sin préstamo)'))).concat(R.alm.map(x=>fila(x,false,'De '+b('Almacén general'))));
+  const deu = (D.nosDeben.length||D.debemos.length) ? caja('⚖️', 'Cómo quedan las deudas de '+mod, 'Al día de hoy · en melamina cuenta cualquier color', '#0ea5e9',
+      (()=>{ const blk = (xs, t, col) => { if(!xs.length) return ''; const mods = [...new Set(xs.map(x=>x.otro))];
+          return `<div style="font-weight:800;color:${col};margin-top:6px">${t}</div>` + mods.map(md=>`<div style="padding:6px 0;border-top:1px solid rgba(127,127,127,.25)"><b>📍 ${md}</b><div class="hint" style="margin:2px 0 0">${xs.filter(x=>x.otro===md).map(x=>`• ${fmtNum(x.pend)} ${x.unidad} ${x.art}`).join(' &nbsp; ')}</div></div>`).join(''); };
+        return blk(D.nosDeben, '💰 Nos deben', '#4ade80') + blk(D.debemos, '🧾 Debemos', '#f87171'); })()) : '';
+  if(!prov.length && !tras.length && !sinD.length && !deu) return '<div id="cierre-movs"></div>';
+  return `<div class="card" id="cierre-movs"><strong style="font-size:16px">🔄 Lo que hoy ya se movió</strong>
+    <p class="hint" style="margin:2px 0 0">Ya está en el inventario: <strong>no lo cuentes como gastado</strong>.</p>
+    ${prov.length?caja('🏭','Proveedores','Material que compramos o que regresamos','#16a34a',prov.join('')):''}
+    ${tras.length?caja('🔄','Traspasos (préstamos)','Lo que prestamos o nos prestaron','#8b5cf6',tras.join('')):''}
+    ${sinD.length?caja('📤','Salidas a otro módulo (sin deuda)','Se fue y no regresa','#ea580c',sinD.join('')):''}
+    ${deu}</div>`;
+}
+// PDF: una sola hoja "Entradas y salidas del día" con los 4 apartados.
+function dibujarMovsDiaPDF(doc, R, D, o){
+  const L = o.marginL, W = o.W, pageH = o.pageH; let y = o.y;
+  const VER=[22,128,74], MOR=[109,40,217], NAR=[194,65,12], AZU=[3,105,161], ROJ=[185,28,28];
+  const tinte = (c,f) => c.map(v=>Math.round(v+(255-v)*f));
+  const salto = h => { if(y + h > pageH-14){ doc.addPage(); y = 15; } };
+  const banda = (t, sub, c) => { salto(26); doc.setFillColor(...c); doc.rect(L,y,W,13,'F'); doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.text(t, L+4, y+6); doc.setFont(undefined,'normal'); doc.setFontSize(8); doc.text(sub, L+4, y+10.8); doc.setTextColor(0,0,0); y += 16; };
+  const subt = (t, c) => { salto(16); doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(...c); doc.text(t, L, y+4); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); y += 6; };
+  const tabla = (cols, filas, c, x0=L, ancho=W) => { const tw = cols.reduce((s,k)=>s+k.w,0), f = ancho/tw, xs = []; let acc = x0; cols.forEach(k=>{ xs.push(acc); acc += k.w*f; });
+    const head = () => { doc.setFillColor(...c); doc.rect(x0,y,ancho,6,'F'); doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(7.8); cols.forEach((k,i)=>doc.text(k.t, xs[i]+1.5, y+4.2)); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 6; };
+    salto(14); head();
+    filas.forEach((fr,idx)=>{ doc.setFontSize(8.5); const ls = fr.map((v,i)=>doc.splitTextToSize(String(v.t!==undefined?v.t:v), cols[i].w*f-3).slice(0,3)); const h = Math.max(5.6, 1.9+Math.max(...ls.map(l=>l.length))*3.7);
+      if(y+h > pageH-14){ doc.addPage(); y = 15; head(); }
+      if(idx%2){ doc.setFillColor(...tinte(c,.92)); doc.rect(x0,y,ancho,h,'F'); }
+      fr.forEach((v,i)=>{ const ob = (v && typeof v==='object') ? v : {}; if(ob.col) doc.setTextColor(...ob.col); if(ob.b) doc.setFont(undefined,'bold'); ls[i].forEach((l,k)=>doc.text(l, xs[i]+1.5, y+4+k*3.7)); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); });
+      y += h; }); y += 3; };
+  const hora = m => new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'});
+  const q = (x, sale) => ({t:(sale?'−':'+')+fmtNum(x.m.cantidad)+' '+item2unidad(x.m.itemId), b:true, col: sale?ROJ:VER});
+  const fl = (xs, sale, conPorque) => xs.map(x=>[hora(x.m), x.m.itemNombre+(x.m.estado==='pendiente'?' (por aprobar)':''), q(x,sale), x.quien+(conPorque&&x.porque?' · '+x.porque:'')]);
+  const C4 = t => [{t:'Hora',w:20},{t:'Artículo',w:62},{t:'Cantidad',w:30},{t:t,w:70}];
+  // Totales arriba
+  const nTr = R.prestamos.length+R.nosPrestaron.length+R.nosRegresaron.length+R.regresamos.length;
+  const kp = [[R.provEnt.length+R.provSal.length,'de proveedores',VER],[nTr,'traspasos',MOR],[R.sinDeudaSal.length+R.otrosEnt.length+R.alm.length,'sin deuda / otros',NAR],[`${D.nosDeben.length} · ${D.debemos.length}`,'nos deben · debemos',AZU]];
+  const kw = (W-9)/4; kp.forEach((k,i)=>{ const x = L+i*(kw+3); doc.setFillColor(...tinte(k[2],.9)); doc.rect(x,y,kw,14,'F'); doc.setFillColor(...k[2]); doc.rect(x,y,1.4,14,'F'); doc.setFont(undefined,'bold'); doc.setFontSize(13); doc.setTextColor(...k[2]); doc.text(String(k[0]), x+3.5, y+6.5); doc.setFont(undefined,'normal'); doc.setFontSize(7.5); doc.setTextColor(90,96,112); doc.text(k[1], x+3.5, y+11.5); }); doc.setTextColor(0,0,0); y += 18;
+  const vacio = t => { doc.setFontSize(9); doc.setTextColor(120,124,136); doc.text(t, L+2, y+3); doc.setTextColor(0,0,0); y += 7; };
+  banda('1. Proveedores', 'Material que compramos (entra) o que regresamos al proveedor (sale)', VER);
+  if(!R.provEnt.length && !R.provSal.length) vacio(o.vacioTxt('Sin movimientos con proveedores'));
+  if(R.provEnt.length){ subt('Llegó (entra)', VER); tabla(C4('Proveedor'), fl(R.provEnt,false), VER); }
+  if(R.provSal.length){ subt('Se regresó al proveedor (sale)', ROJ); tabla(C4('Proveedor · por qué'), fl(R.provSal,true,true), ROJ); }
+  banda('2. Traspasos entre módulos (préstamos)', 'Lo prestado se debe regresar · en melamina cuenta cualquier color', MOR);
+  if(!nTr) vacio(o.vacioTxt('Sin traspasos'));
+  if(R.prestamos.length){ subt('Le prestamos a otro módulo (sale · nos deben)', MOR); tabla(C4('A quién · nota'), fl(R.prestamos,true,true), MOR); }
+  if(R.nosPrestaron.length){ subt('Nos prestaron (entra · debemos)', MOR); tabla(C4('Quién · nota'), fl(R.nosPrestaron,false,true), MOR); }
+  if(R.nosRegresaron.length){ subt('Nos regresaron lo que prestamos (entra · ya nos pagaron)', MOR); tabla(C4('Quién'), fl(R.nosRegresaron,false), MOR); }
+  if(R.regresamos.length){ subt('Regresamos lo que nos prestaron (sale · ya pagamos)', MOR); tabla(C4('A quién'), fl(R.regresamos,true), MOR); }
+  banda('3. Salidas a otro módulo (sin deuda) y otras entradas', 'Se fue y no se regresa · o llegó de otro lado sin préstamo', NAR);
+  if(!R.sinDeudaSal.length && !R.otrosEnt.length && !R.alm.length) vacio(o.vacioTxt('Sin salidas a otros módulos'));
+  if(R.sinDeudaSal.length){ subt('Salió (sin deuda)', NAR); tabla(C4('A dónde · por qué'), fl(R.sinDeudaSal,true,true), NAR); }
+  if(R.otrosEnt.length || R.alm.length){ subt('Entró (sin préstamo)', NAR); tabla(C4('De dónde'), fl(R.alm.concat(R.otrosEnt),false,true), NAR); }
+  banda('4. Cómo quedan las deudas de '+o.mod, 'Al día de hoy (no solo de este día) · en melamina cuenta cualquier color', AZU);
+  if(!D.nosDeben.length && !D.debemos.length) vacio('No hay deudas pendientes con otros módulos.');
+  else { const y0 = y, mitad = (W-6)/2; let yA = y0, yB = y0;
+    const blk = (xs, t, c, x0) => { y = y0; doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(...c); doc.text(t, x0, y+4); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); y += 6;
+      if(!xs.length){ doc.setFontSize(9); doc.setTextColor(120,124,136); doc.text('Nada', x0+2, y+3); doc.setTextColor(0,0,0); y += 7; }
+      else tabla([{t:'Módulo',w:24},{t:'Artículo',w:44},{t:'Pendiente',w:24}], xs.map(x=>[x.otro, x.art, {t:fmtNum(x.pend)+' '+x.unidad, b:true, col:c}]), c, x0, mitad); return y; };
+    yA = blk(D.nosDeben, 'Nos deben', VER, L); yB = blk(D.debemos, 'Debemos', ROJ, L+mitad+6); y = Math.max(yA, yB); }
+  return y;
+}
 function renderCierre(){
+  if(!cierrePrestOk){ cierrePrestOk = true; cargarPrestamos().then(()=>{ const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   const hojas = CATALOGO.filter(i=>esHoja(i));
   const cp = cortesPendientes();
@@ -7930,6 +8080,7 @@ function renderCierre(){
       <p class="hint">Tubos, bridas, correderas, jaladeras, bisagras, espejos, rieles, sistemas y bastidores <strong>ya se descontaron solos</strong> con las instalaciones y garantías. Aquí solo va lo demás.</p>
       ${cierreHechoHoy()?'<p class="hint" style="color:var(--ok)">✅ Ya capturaste un cierre hoy. Puedes agregar más si faltó algo.</p>':''}
     </div>
+    ${cierreMovsHoyHtml()}
     <div class="card">
       <div class="paso">1</div><strong>✂️ ¿Cuántas hojas completas te quedan?</strong>
       <p class="hint">Cuenta las hojas <strong>completas</strong> (sin cortar) de cada color y escríbelo. La app calcula sola cuántas se cortaron. El total del inventario no cambia: solo pasan de completas a cortadas.${cp.length?` <br>Pendiente de anotar: ${cp.map(x=>fmtNum(x.f.autoCortes)+' '+x.it.nombre.replace('Melamina ','')).join(', ')}.`:''}</p>
@@ -9762,7 +9913,8 @@ async function borrarDatosModulo(mods){
 }
 
 async function exportarRespaldo(){
-  const COLLECTIONS = ['inicial','movimientos','resets','auditorias','instalacionesLog','instalacionesPuertas','prestamos','config'];
+  // Todo lo que guarda la app (las fotos no, porque pesan mucho: se quedan en Supabase).
+  const COLLECTIONS = ['inicial','inicialHist','movimientos','resets','auditorias','deudasAuditoria','conteoAbierto','instalacionesLog','instalacionesPuertas','garantiasLog','prestamos','pedidos','sobrantes','cierres','gasolina','herramientas','herrMovs','herrInstaladores','config','versiones'];
   const data = {};
   for(const c of COLLECTIONS){
     const snap = await db.collection(c).get();
@@ -10062,58 +10214,13 @@ async function generarReporteDiarioPDF(modo, fechaDia){
     doc.setTextColor(0,0,0);
   }
 
-  // Hoja aparte (confirmado por el usuario): ENTRADAS del día, separadas por origen y material.
+  // Hoja aparte (confirmado por el usuario): ENTRADAS Y SALIDAS del día en 4 apartados — proveedores,
+  // traspasos (préstamos), salidas sin deuda y cómo quedan las deudas del módulo.
   if(!soloSinCortar){
     doc.addPage();
-    encabezado('Entradas de material', `${esPasado?'Lo que entró':'Lo que entró hoy'}  ·  Módulo ${mod}  ·  ${esPasado?diaStr:fechaStr}`);
-    const hoyL = diaSel;
-    const ents = entradasDe(movs).filter(m=>m.modulo===mod && diaLocal(m.fecha)===hoyL && (m._o.tipo==='proveedor' || m._o.tipo==='modulo')).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
-    if(!ents.length){
-      doc.setFontSize(11); doc.setTextColor(110,116,132); doc.text(esPasado ? 'Ese día no llegó material de proveedores ni de otros módulos.' : 'Hoy no llegó material de proveedores ni de otros módulos.', marginL, y+4); doc.setTextColor(0,0,0);
-    }
-    // Confirmado por el usuario: aquí solo lo que llegó de proveedores o de otros módulos.
-    const ORIG = [['proveedor','Proveedores',[22,128,74]],['modulo','De otros módulos',[180,110,10]]];
-    ORIG.forEach(([k, titulo, oc])=>{
-      const grupo = ents.filter(m=>m._o.tipo===k); if(!grupo.length) return;
-      if(y > pageH-40){ doc.addPage(); y=15; }
-      doc.setFillColor(...oc); doc.rect(marginL, y, W, 9, 'F');
-      doc.setTextColor(255,255,255); doc.setFont(undefined,'bold'); doc.setFontSize(11.5);
-      doc.text(titulo, marginL+3, y+6.2); doc.text(`${grupo.length} entrada(s)`, marginL+W-3, y+6.2, {align:'right'});
-      doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 12;
-      [...new Set(CATALOGO.map(i=>i.cat))].forEach(cat=>{
-        const ms = grupo.filter(m=>{ const it=CATALOGO.find(i=>i.id===m.itemId); return it && it.cat===cat; }); if(!ms.length) return;
-        color = PDF_CAT_COLOR[cat] || [55,65,81];
-        cols = [ {label:'Hora', w:18}, {label:cat, w:70}, {label:'Cantidad', w:28, r:1}, {label:'De dónde', w:66} ];
-        if(y > pageH-30){ doc.addPage(); y=15; }
-        doc.setFillColor(...color); doc.rect(marginL, y, tableW(), 6, 'F');
-        doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold');
-        cols.forEach((c,i)=> c.r ? doc.text(c.label, colX(i)+c.w-2, y+4.2, {align:'right'}) : doc.text(c.label, colX(i)+1.5, y+4.2));
-        doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 6;
-        ms.forEach((m,idx)=>{
-          if(y > pageH-14){ doc.addPage(); y=15; }
-          if(idx%2===1){ doc.setFillColor(...pdfTinte(color,.94)); doc.rect(marginL, y, tableW(), 5.5, 'F'); }
-          doc.setFontSize(8.5);
-          doc.text(new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}), colX(0)+1.5, y+3.9);
-          let nom = m.itemNombre + (m.estado==='pendiente'?' (por aprobar)':''); if(nom.length>44) nom = nom.slice(0,42)+'…';
-          doc.text(nom, colX(1)+1.5, y+3.9);
-          doc.setFont(undefined,'bold'); doc.text(`${fmtNum(m.cantidad)} ${item2unidad(m.itemId)}`, colX(2)+cols[2].w-2, y+3.9, {align:'right'}); doc.setFont(undefined,'normal');
-          let o = m._o.txt; if(o.length>40) o = o.slice(0,38)+'…'; doc.text(o, colX(3)+1.5, y+3.9);
-          y += 5.5;
-        });
-        y += 4;
-      });
-      y += 4;
-    });
-  }
-
-  // Hoja aparte (confirmado por el usuario): SALIDAS del día, separadas por destino y material.
-  if(!soloSinCortar){
-    doc.addPage();
-    encabezado('Salidas de material', `${esPasado?'Lo que salió':'Lo que salió hoy'}  ·  Módulo ${mod}  ·  ${esPasado?diaStr:fechaStr}`);
-    doc.setFontSize(8.5); doc.setTextColor(90,96,112); doc.text(`Lo que se fue ${esPasado?'ese día':'hoy'} a otros módulos o se regresó a proveedores.`, marginL, y); doc.setTextColor(0,0,0); y += 5;
-    const hoyL = diaSel;
-    const sals = salidasDe(movs).filter(m=>m.modulo===mod && diaLocal(m.fecha)===hoyL).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
-    y = dibujarSalidasPDF(doc, sals, {marginL, W, pageH, y, vacio: esPasado ? 'Ese día no salió material a otros módulos ni a proveedores.' : 'Hoy no salió material a otros módulos ni a proveedores.', conDia:false, sufijo: esPasado?' ese día':' hoy'});
+    encabezado('Entradas y salidas del día', `Módulo ${mod}  ·  ${esPasado?diaStr:fechaStr}`);
+    try{ await cargarPrestamos(); }catch(e){}
+    y = dibujarMovsDiaPDF(doc, movsDiaClasif(mod, diaSel), deudasDeModulo(mod), {marginL, W, pageH, y, mod, vacioTxt: t => t + (esPasado ? ' ese día.' : ' hoy.')});
   }
 
   const stamp = ahora.toISOString().slice(0,10);
