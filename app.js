@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v165';
+const APP_VERSION = 'v166';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -687,6 +687,50 @@ function barraHojasHtml(f){
   if(T<=0) return '';
   return `<div class="barra" title="Azul: completas · Rojo: ya cortadas"><i style="width:${a/T*100}%;background:var(--brand)"></i><i style="width:${k/T*100}%;background:var(--accent)"></i></div>`;
 }
+// ===== Corregir un artículo del inventario (confirmado por el usuario; SOLO Dirección) =====
+// Para malas capturas del coordinador: se escribe cuánto hay de verdad y el porqué; queda un ajuste
+// aprobado con quién y cuándo (sale en el historial como "Corrección de Dirección").
+let invCorr = null;
+function invCorrAbrir(){ if(!esAdmin()) return; invCorr = {q:'', sel:''}; invCorrRender(); }
+function invCorrCerrar(){ invCorr = null; const o = document.getElementById('inv-corr'); if(o) o.remove(); }
+function invCorrRender(){
+  let ov = document.getElementById('inv-corr');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'inv-corr'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto'; document.body.appendChild(ov); ov.addEventListener('click', e=>{ if(e.target===ov) invCorrCerrar(); }); }
+  const q = slug(invCorr.q||''), it = CATALOGO.find(i=>i.id===invCorr.sel);
+  const lista = q ? CATALOGO.filter(i=>slug(i.nombre).includes(q) || slug(i.cat).includes(q)).slice(0,40) : [];
+  const caja = (t, v, big) => `<div style="flex:1;text-align:center;background:rgba(127,127,127,.12);border-radius:12px;padding:8px"><div class="hint" style="margin:0">${t}</div><div style="font-size:${big?24:18}px;font-weight:900">${v}</div></div>`;
+  let cuerpo;
+  if(it){ const f = calcFormula(it.id), h = esHoja(it);
+    cuerpo = `<div style="margin-top:12px;padding:12px;border-radius:14px;background:rgba(217,119,6,.12)"><div style="font-size:16px;font-weight:900;color:#f59e0b">${it.nombre}</div><div class="hint" style="margin:0">${it.cat} · ${it.unidad}</div>
+      ${h ? `<div class="hint" style="margin:10px 0 4px;font-weight:800">La app dice que hay</div><div style="display:flex;gap:6px">${caja('Completas', fmtNum(f.completas))}${caja('Cortado', fmtNum(f.cortado))}${caja('Total', fmtNum(f.final), true)}</div>
+          <div class="hint" style="margin:10px 0 4px;font-weight:800">Lo correcto</div><div style="display:flex;gap:6px"><input id="inv-corr-c" type="number" min="0" inputmode="decimal" value="${fmtNum(f.completas)}" placeholder="Completas" style="margin:0;text-align:center;font-size:18px;font-weight:900"><input id="inv-corr-k" type="number" min="0" inputmode="decimal" value="${fmtNum(f.cortado)}" placeholder="Cortado" style="margin:0;text-align:center;font-size:18px;font-weight:900"></div><div class="hint" style="margin:2px 0 0">Hojas completas · material cortado (en hojas)</div>`
+        : `<div style="display:flex;gap:8px;margin-top:10px;align-items:center">${caja('La app dice', fmtNum(f.final)+' <span style="font-size:12px">'+it.unidad+'</span>', true)}<div style="font-size:22px">➜</div><div style="flex:1;text-align:center"><div class="hint" style="margin:0">Lo correcto</div><input id="inv-corr-v" type="number" min="0" inputmode="decimal" placeholder="?" style="margin:2px 0 0;text-align:center;font-size:22px;font-weight:900"></div></div>`}
+      <input id="inv-corr-n" placeholder="¿Por qué? Ej. el coordinador capturó 500 y eran 50" style="margin-top:10px">
+      <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;margin:0;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="invCorrGuardar()">✅ Guardar corrección</button><button class="btn small" style="margin:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="invCorr.sel='';invCorrRender()">← Otro</button></div></div>`;
+  } else cuerpo = `<input id="inv-corr-q" type="search" placeholder="🔍 Busca el artículo (ej. pijas, blanco, corredera)" value="${herrEsc(invCorr.q)}" oninput="invCorr.q=this.value;invCorrRender();const e=document.getElementById('inv-corr-q');e.focus();e.setSelectionRange(e.value.length,e.value.length)" style="margin-top:12px">
+      <div style="margin-top:6px">${q ? (lista.map(x=>`<div onclick="invCorr.sel='${x.id}';invCorrRender()" class="row" style="cursor:pointer;justify-content:space-between;border-bottom:1px solid var(--line);padding:9px 2px"><span><strong>${x.nombre}</strong><span class="hint" style="display:block;margin:0">${x.cat}</span></span><span style="font-weight:900;font-size:16px">${fmtNum(calcFormula(x.id).final)} <span class="hint" style="margin:0">${x.unidad}</span> ›</span></div>`).join('') || '<p class="hint">No se encontró.</p>') : '<p class="hint">Escribe parte del nombre para buscarlo.</p>'}</div>`;
+  ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #d97706;border-radius:18px;padding:16px;margin-top:20px">
+    <div class="row" style="justify-content:space-between"><div style="font-size:18px;font-weight:900">✏️ Corregir inventario</div><button onclick="invCorrCerrar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div class="hint" style="margin:2px 0 0">${modulo()} · solo Dirección · queda registrado en el historial</div>${cuerpo}</div>`;
+  if(it) setTimeout(()=>{ const e = document.getElementById('inv-corr-v') || document.getElementById('inv-corr-c'); if(e) e.focus(); }, 30);
+  else setTimeout(()=>{ const e = document.getElementById('inv-corr-q'); if(e && document.activeElement!==e) e.focus(); }, 30);
+}
+async function invCorrGuardar(){
+  if(!esAdmin()) return; const it = CATALOGO.find(i=>i.id===invCorr.sel); if(!it) return;
+  const f = calcFormula(it.id), h = esHoja(it), num = id => { const e = document.getElementById(id); return e && e.value!=='' && !isNaN(Number(e.value)) && Number(e.value)>=0 ? fmtNum(Number(e.value)) : null; };
+  const nota = (document.getElementById('inv-corr-n').value||'').trim();
+  let dC, dK, txt;
+  if(h){ const c = num('inv-corr-c'), k = num('inv-corr-k'); if(c===null || k===null) return alert('Escribe las hojas completas y el cortado (0 o más).');
+    dC = fmtNum(c - f.completas); dK = fmtNum(k - f.cortado); txt = `Completas: ${fmtNum(f.completas)} → ${fmtNum(c)}\nCortado: ${fmtNum(f.cortado)} → ${fmtNum(k)}`; }
+  else { const v = num('inv-corr-v'); if(v===null) return alert('Escribe cuánto hay de verdad (0 o más).'); dC = fmtNum(v - f.final); dK = 0; txt = `${fmtNum(f.final)} → ${fmtNum(v)} ${it.unidad}`; }
+  const tot = fmtNum(dC + dK); if(Math.abs(dC)<0.0005 && Math.abs(dK)<0.0005) return alert('Es lo mismo que ya dice la app.');
+  if(!nota) return alert('Escribe por qué se corrige (queda en el historial).');
+  if(!confirm(`✏️ Corregir ${it.nombre} en ${modulo()}\n\n${txt}\n(${tot>0?'+':''}${fmtNum(tot)} ${it.unidad})\n\nMotivo: ${nota}\n\n¿Guardar?`)) return;
+  try{ await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'ajuste', motivo:'correccionDireccion', cantidad:tot, completasDelta:dC, cortadoDelta:dK,
+      nota:'Corrección de Dirección · '+nota, fecha:new Date().toISOString(), estado:'aprobado', creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); }
+  catch(e){ return alert('Error: '+e.message); }
+  invCorrCerrar(); toast(`✏️ ${it.nombre} corregido`); if(current==='inv') setTimeout(renderInv, 300);
+}
 function renderInv(){
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!invCat) invCat = cats[0];
@@ -700,7 +744,8 @@ function renderInv(){
       <div style="font-size:17px;font-weight:800">📦 Inventario · ${modulo()}</div>
       ${esAdmin()?`<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="ceroModulo()">Poner en cero</button>`:''}
     </div>
-    ${esAdmin() ? `<button class="btn" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('ini')">🔒 Stock inicial (solo Dirección, con PIN)</button>` : ''}
+    ${esAdmin() ? `<button class="btn" style="margin-top:10px;width:100%;background:linear-gradient(135deg,#d97706,#b45309)" onclick="invCorrAbrir()">✏️ Corregir un artículo (mala captura)</button>` : ''}
+    ${esAdmin() ? `<button class="btn" style="margin-top:8px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('ini')">🔒 Stock inicial (solo Dirección, con PIN)</button>` : ''}
     <button class="btn" style="margin-top:8px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('movhist')">📜 Historial de entradas y salidas</button>
     <button class="btn" style="margin-top:8px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="pzSetModo('calc');irA('pzenc')">🧮 Calculadora de piezas (solo para checar)</button>
     ${esAdmin()?`<button class="btn" style="margin-top:8px;width:100%;background:transparent;color:#5b6b7f;border:1px solid var(--line);box-shadow:none" onclick="irA('aud');setAudTipo('simulacion')">🧪 Simulador de auditoría (piezas, armados y todo)</button>`:''}
@@ -1023,6 +1068,7 @@ let movCat = null;
 let movTipo='entrada', movLado='completas', movVals={}, movBuscar='';
 const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalación', merma:'Merma', corte:'Corte', ajuste:'Ajuste auditoría', garantia:'Garantía', devolucion:'Regresó de garantía', sobrante:'A sobrantes'};
 function etiquetaTipoMov(m){
+  if(m.motivo==='correccionDireccion') return '✏️ Corrección de Dirección';
   if(m.motivo==='cierreCompletasDeMas') return 'Hojas completas de más (cierre)';
   if(m.motivo==='armarJuegos') return 'Armado de juegos';
   if(m.motivo==='sobranteGarantia') return 'Sobrante de garantía';
