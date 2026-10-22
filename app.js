@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v170';
+const APP_VERSION = 'v171';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4130,10 +4130,10 @@ function renderMovHist(){
   if(!mhHasta) mhHasta = fechaHoyLocal();
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   const desdeISO = new Date(mhDesde+'T00:00:00').toISOString(), hastaISO = new Date(mhHasta+'T23:59:59.999').toISOString();
-  const lista = movs.filter(m=>m.tipo!=='nota' && m.fecha>=desdeISO && m.fecha<=hastaISO && m.estado!=='rechazado'
+  const lista = movs.filter(m=>m.tipo!=='nota' && m.fecha>=desdeISO && m.fecha<=hastaISO && (m.estado!=='rechazado' || m.anulado)
     && (mhTipo==='todos' || m.tipo===mhTipo)
     && (mhItem==='todos' ? (mhCat==='todas' || (CATALOGO.find(i=>i.id===m.itemId)||{}).cat===mhCat) : m.itemId===mhItem));
-  const aprob = lista.filter(m=>m.estado!=='pendiente');
+  const aprob = lista.filter(m=>m.estado!=='pendiente' && !m.anulado);
   // Totales por artículo
   const tot = {};
   aprob.forEach(m=>{ const t = tot[m.itemId] = tot[m.itemId] || {entrada:0, salida:0, instalacion:0, garantia:0, merma:0, otros:0};
@@ -4172,14 +4172,68 @@ function renderMovHist(){
   ${dias.map(d=>`<div class="card">
     <strong>${new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</strong>
     <div class="wrap-x" style="margin-top:6px"><table><tr><th>Hora</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Quién</th></tr>
-    ${porDia[d].map(m=>`<tr><td>${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemNombre||nom(m.itemId)}</td>
+    ${porDia[d].map(m=>`<tr style="${m.anulado?'opacity:.55;text-decoration:line-through':''}"><td>${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemNombre||nom(m.itemId)}</td>
       <td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}${m.estado==='pendiente'?' '+badgeEstado('pendiente'):''}</td>
-      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}${esAdmin() && m.tipo==='corte' && m.estado!=='rechazado' ? `<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="borrarCorte('${m.id}')">🗑️ Corte mal capturado</button>` : ''}</td></tr>`).join('')}
+      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}${esAdmin() && m.tipo==='corte' && m.estado!=='rechazado' ? `<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="borrarCorte('${m.id}')">🗑️ Corte mal capturado</button>` : ''}${movCorregible(m) ? `<button class="btn small" style="display:block;margin-top:4px;background:linear-gradient(135deg,#d97706,#b45309);white-space:nowrap" onclick="movCorrAbrir('${m.id}')">✏️ Corregir</button>` : ''}${m.anulado?`<div style="color:var(--bad);font-weight:800;font-size:12px">ANULADO</div>`:''}</td></tr>`).join('')}
     </table></div></div>`).join('')}`;
 }
 // Dirección puede borrar un corte mal capturado (p. ej. pusieron las hojas que TENÍAN en vez de las que
 // CORTARON). El corte solo mueve hojas de "completas" a "cortado"; al borrarlo regresan a completas y
 // después se captura el corte correcto. Pide PIN. No se permite si ya se aplicó una auditoría posterior.
+// ===== Corregir o anular una entrada/salida/merma ya aprobada (confirmado por el usuario; SOLO Dirección) =====
+// Ej. el coordinador dio salida a una melamina de otro color. Se cambia el artículo y/o la cantidad del
+// movimiento (o se anula) y queda anotado quién, cuándo y qué decía antes. Los traspasos y devoluciones
+// no (mueven dos módulos), ni lo de pedidos, envíos del almacén o el cierre del turno.
+function movCorregible(m){
+  if(!esAdmin() || m.anulado || m.estado==='pendiente' || m.estado==='rechazado') return false;
+  if(!['entrada','salida','merma'].includes(m.tipo)) return false;
+  if(m.cierreTurno || m.pedidoId || m.ferEnvioId || m.motivo) return false;
+  if(/^(Traspaso|Devolución de préstamo) /.test(m.nota||'') || m.origenTipo==='modulo') return false;
+  return true;
+}
+let movCorr = null;
+function movCorrCerrar(){ movCorr = null; const o = document.getElementById('mov-corr'); if(o) o.remove(); }
+function movCorrAbrir(id){
+  const m = movs.find(x=>x.id===id); if(!m || !movCorregible(m)) return;
+  const audDespues = (auditorias||[]).find(a=>a.aplicada && a.modulo===m.modulo && (a.fecha||'') > (m.fecha||''));
+  if(audDespues) return alert(`No se puede corregir: después de este movimiento ya se aplicó la auditoría del ${new Date(audDespues.fecha).toLocaleDateString('es-MX')}, que dejó el inventario como se contó.\n\nSi algo no cuadra, usa Inventario → ✏️ Corregir un artículo.`);
+  const it = CATALOGO.find(i=>i.id===m.itemId) || {cat:''};
+  movCorr = {id};
+  const ov = document.createElement('div'); ov.id = 'mov-corr'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto'; document.body.appendChild(ov);
+  ov.addEventListener('click', e=>{ if(e.target===ov) movCorrCerrar(); });
+  const opts = CATALOGO.filter(i=>i.cat===it.cat).map(i=>`<option value="${i.id}" ${i.id===m.itemId?'selected':''}>${i.nombre}</option>`).join('');
+  const tipoTxt = {entrada:'📥 Entrada', salida:'📤 Salida', merma:'⚠️ Merma'}[m.tipo];
+  ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #d97706;border-radius:18px;padding:16px;margin-top:20px">
+    <div class="row" style="justify-content:space-between"><div style="font-size:18px;font-weight:900">✏️ Corregir movimiento</div><button onclick="movCorrCerrar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div style="margin-top:10px;padding:10px;border-radius:12px;background:rgba(127,127,127,.12)"><div class="hint" style="margin:0">Así se capturó</div><div style="font-weight:900;font-size:16px">${tipoTxt} · ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} de ${m.itemNombre}</div><div class="hint" style="margin:2px 0 0">${new Date(m.fecha).toLocaleString('es-MX')} · ${(m.creadoPor||'').split('@')[0]}${m.nota?' · '+herrEsc(m.nota):''}</div></div>
+    <label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Qué artículo era en realidad?</label><select id="mc-item" style="margin-top:4px">${opts}</select>
+    <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Cuánto fue?</label><input id="mc-q" type="number" min="0" inputmode="decimal" value="${fmtNum(m.cantidad)}" style="margin-top:4px;font-size:18px;font-weight:900;text-align:center">
+    <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Por qué se corrige? <span style="color:var(--bad)">*</span></label><input id="mc-n" placeholder="Ej. capturó Nogal y era Roble" style="margin-top:4px">
+    <button class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="movCorrGuardar(false)">✅ Guardar corrección</button>
+    <button class="btn" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="movCorrGuardar(true)">🗑️ Anular este movimiento (no debió registrarse)</button>
+    <p class="hint" style="margin:8px 0 0">El inventario se recalcula solo. Queda anotado quién lo corrigió, cuándo y qué decía antes.</p></div>`;
+}
+async function movCorrGuardar(anular){
+  const m = movs.find(x=>x.id===(movCorr||{}).id); if(!m) return;
+  const nota = (document.getElementById('mc-n').value||'').trim(); if(!nota) return alert('Escribe por qué se corrige (queda en el historial).');
+  const quien = (getCurrentUserEmail?getCurrentUserEmail():''), ahora = new Date().toISOString(), antes = {itemId:m.itemId, itemNombre:m.itemNombre, cantidad:m.cantidad};
+  const tipoTxt = {entrada:'entrada', salida:'salida', merma:'merma'}[m.tipo];
+  let upd;
+  if(anular){
+    if(!confirm(`🗑️ Anular esta ${tipoTxt}:\n\n${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} de ${m.itemNombre}\n\nEl inventario regresa como si no se hubiera registrado.\n\nMotivo: ${nota}\n\n¿Anular?`)) return;
+    upd = {estado:'rechazado', anulado:true, correccion:{fecha:ahora, por:quien, anulado:true, motivo:nota, antes}, nota:(m.nota?m.nota+' · ':'')+`🗑️ Anulado por Dirección: ${nota}`};
+  } else {
+    const itemId = document.getElementById('mc-item').value, it = CATALOGO.find(i=>i.id===itemId), q = Number(document.getElementById('mc-q').value);
+    if(!it || isNaN(q) || q<=0) return alert('Revisa el artículo y la cantidad.');
+    if(itemId===m.itemId && Math.abs(q-Number(m.cantidad))<0.0005) return alert('No cambiaste nada.');
+    if(m.tipo!=='entrada'){ const f = calcFormula(itemId); const extra = itemId===m.itemId ? q-Number(m.cantidad) : q; const disp = esHoja(it) ? (m.tipo==='merma'&&m.lado==='cortado'?f.cortado:f.completas) : f.final;
+      if(extra > disp + 1e-9) return alert(`No alcanza: de ${it.nombre} hay ${fmtNum(disp)} y la corrección le quitaría ${fmtNum(extra)}.`); }
+    if(!confirm(`✏️ Corregir esta ${tipoTxt}:\n\nAntes: ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} de ${m.itemNombre}\nAhora: ${fmtNum(q)} ${it.unidad} de ${it.nombre}\n\nMotivo: ${nota}\n\n¿Guardar?`)) return;
+    upd = {itemId, itemNombre:it.nombre, cantidad:q, correccion:{fecha:ahora, por:quien, motivo:nota, antes}, nota:(m.nota?m.nota+' · ':'')+`✏️ Corregido por Dirección (antes: ${fmtNum(antes.cantidad)} ${antes.itemNombre}): ${nota}`};
+  }
+  try{ await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); }catch(e){ return alert('Error: '+e.message); }
+  movCorrCerrar(); entrCache = null; salCache = null; toast(anular?'🗑️ Movimiento anulado':'✏️ Movimiento corregido'); renderMovHist();
+}
 async function borrarCorte(id){
   if(!esAdmin()) return;
   const m = movs.find(x=>x.id===id); if(!m) return;
