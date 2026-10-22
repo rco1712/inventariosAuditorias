@@ -10,7 +10,7 @@
 
 const $=s=>document.querySelector(s);
 let inicialMap={}, inicialCortadoMap={}, inicialFechaMap={}, movs=[], resetMap={}, auditorias=[], deudas=[], histTab='aud', current='inv', conteoMap={}, pedidos=[], minimosMap={};
-let auditCat=null, auditCapturas={}, auditDesglose={}; // desglose de herrajes por lugar {id:{alm,tal,otro}}
+let auditCat=null, auditCapturas={}, auditDesglose={}, auditMelFuera=[]; // auditMelFuera: melaminas que ya no se usan, escritas a mano (solo registro) // desglose de herrajes por lugar {id:{alm,tal,otro}}
 // Piezas cortadas contadas en la auditoría: { 'Blanco': {pared:3, ...}, 'MDF': {fondocajon:10} }
 let auditPiezas={}, auditPiezaGrupo=null, audTipo='seguimiento', audAuditor='', audPaso=0, audHechas={};
 // Contar a ciegas (confirmado por el usuario): oculta el teórico mientras se cuenta; se puede prender o
@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v169';
+const APP_VERSION = 'v170';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1720,12 +1720,14 @@ const HERR_LISTA_TALLER = ['Taladro','Atornillador','Martillo','Pinzas','Sargent
 const HERR_MARCAS = [
   {n:'Bosch',bg:'#1e6fb8',fg:'#fff',rgb:[30,111,184]},
   {n:'Bostitch',bg:'#4b5563',fg:'#facc15',rgb:[75,85,99],fgRgb:[250,204,21],alias:['bostich','stanley bostitch','bostitch stanley']},
+  {n:'BYP',bg:'#f1f1f1',fg:'#e53935',rgb:[241,241,241],fgRgb:[229,57,53],alias:['b y p','b.y.p','byp']},
   {n:'DeWalt',bg:'#febd17',fg:'#111',rgb:[254,189,23]},
   {n:'Makita',bg:'#008c95',fg:'#fff',rgb:[0,140,149]},
   {n:'Mikels',bg:'#9b1b1f',fg:'#fff',rgb:[155,27,31],alias:["mikel's",'mikel']},
   {n:'Milwaukee',bg:'#db011c',fg:'#fff',rgb:[219,1,28]},
   {n:'Pretul',bg:'#f28c00',fg:'#111',rgb:[242,140,0]},
   {n:'Ryobi',bg:'#c4d600',fg:'#111',rgb:[196,214,0]},
+  {n:'Trimaq',bg:'#1e3a8a',fg:'#fff',rgb:[30,58,138],alias:['tri maq','trimac']},
   {n:'Truper',bg:'#f26522',fg:'#fff',rgb:[242,101,34]},
   {n:'Yellow Power',bg:'#111111',fg:'#ffd200',rgb:[17,17,17],fgRgb:[255,210,0],alias:['yellowpower','yelow power']},
   {n:'Genérico',bg:'#8b93a3',fg:'#fff',rgb:[139,147,163],alias:['generico','sin marca']}];
@@ -3176,10 +3178,10 @@ function setAudTipo(v){
   const eraSim = audTipo==='simulacion', seraSim = v==='simulacion';
   if(eraSim!==seraSim){
     guardarBorradorAud();
-    const st = {auditCapturas, auditDesglose, auditPiezas, auditArmados, audPaso, audHechas, auditCat};
-    if(seraSim){ _audRealStash = st; auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
-    else if(_audRealStash){ ({auditCapturas, auditDesglose={}, auditPiezas, auditArmados, audPaso, audHechas, auditCat} = _audRealStash); _audRealStash=null; }
-    else { auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    const st = {auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audPaso, audHechas, auditCat};
+    if(seraSim){ _audRealStash = st; auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[]; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
+    else if(_audRealStash){ ({auditCapturas, auditDesglose={}, auditMelFuera=[], auditPiezas, auditArmados, audPaso, audHechas, auditCat} = _audRealStash); _audRealStash=null; }
+    else { auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[]; audPaso=0; audHechas={}; auditCat=AUD_SECCIONES[0].k; }
     audTipo = v;
     _borradorRevisado[modulo()+(seraSim?'_sim':'')] = false;
   } else audTipo = v;
@@ -3327,7 +3329,7 @@ function renderAud(){
     cuerpo = `<div class="card" style="border:2px solid #5b6b7f"><h3>🧪 Resultado del simulador</h3>
       <p class="hint">Se compara solo lo que contaste contra lo que dice la app. <strong>No se guarda nada y el inventario no cambia.</strong> En melamina/MDF: las hojas completas se comparan con las completas, y las piezas y armados con lo cortado.</p>
       ${simResultadosHtml()}
-      <button class="btn" style="width:100%;margin-top:12px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar todo lo que llevas contado en el simulador?')){auditCapturas={};auditPiezas={};auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null;audHechas={};guardarBorradorAud();renderAud();}">🗑️ Borrar simulación y empezar de nuevo</button>
+      <button class="btn" style="width:100%;margin-top:12px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="if(confirm('¿Borrar todo lo que llevas contado en el simulador?')){auditCapturas={};auditPiezas={};auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[];audHechas={};guardarBorradorAud();renderAud();}">🗑️ Borrar simulación y empezar de nuevo</button>
       <button class="btn" style="width:100%;margin-top:8px" onclick="setAudTipo('seguimiento')">Salir del simulador</button>
     </div>`;
   } else if(sec.k==='__revisar' && parcial){
@@ -3388,6 +3390,7 @@ function renderAud(){
           <button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" title="Sumar" onclick="sumarAud('${it.id}')">➕</button></div>${extra}</td></tr>`;
       }).join('')}
     </table></div>`}
+    ${sec.k==='Melamina' && !comp ? melFueraHtml() : ''}
   </div>`;
   }
 
@@ -3496,6 +3499,33 @@ function herrAudDeshacer(id){
   auditDesglose[id] = u.prevD || {}; auditCapturas[id] = u.prevV;
   delete audHUlt[id]; herrAudRefrescar(id); toast('↩️ Deshecho');
 }
+// ===== Melaminas que ya no se usan (confirmado por el usuario) =====
+// Colores que ya no se trabajan y no están en la lista: se escriben a mano con cuántas hojas hay.
+// SOLO quedan de registro en la auditoría y su PDF; NO entran al inventario.
+function melFueraHtml(){
+  const ult = (auditorias||[]).find(a=>(a.melaminasFuera||[]).length);
+  return `<div id="mel-fuera" style="margin-top:14px;border-radius:14px;border:2px solid #64748b;background:rgba(100,116,139,.15);padding:12px">
+    <div style="font-weight:900;font-size:15px">🗃️ Melaminas que ya no se usan</div>
+    <div class="hint" style="margin:2px 0 6px">Colores que ya no se trabajan y no están en la lista. Escribe el color y cuántas hojas hay. <strong>Solo queda de registro: no entra al inventario.</strong></div>
+    ${auditMelFuera.map((x,i)=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:8px 0;flex-wrap:nowrap"><span style="min-width:0"><strong>${herrEsc(x.nombre)}</strong><span class="hint" style="display:block;margin:0">hojas</span></span><span style="display:flex;align-items:center;gap:10px"><strong style="font-size:18px">${fmtNum(x.hojas)}</strong><button onclick="melFueraQuitar(${i})" style="all:unset;cursor:pointer;font-size:18px" title="Quitar">🗑️</button></span></div>`).join('')}
+    <div style="display:flex;gap:6px;margin-top:8px;align-items:center"><input id="mf-nom" placeholder="Color (ej. Cerezo)" style="flex:1;min-width:0;margin:0" onkeydown="if(event.key==='Enter')document.getElementById('mf-q').focus()"><input id="mf-q" type="number" min="0" inputmode="decimal" placeholder="hojas" style="width:74px;margin:0;text-align:center;font-weight:800" onkeydown="if(event.key==='Enter')melFueraAgregar()"><button class="btn small" style="margin:0;padding:10px 12px;background:linear-gradient(135deg,#d97706,#b45309)" onclick="melFueraAgregar()">➕ Agregar</button></div>
+    ${!auditMelFuera.length && ult ? `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:#93c5fd;border:1px solid var(--line);box-shadow:none" onclick="melFueraCopiar()">📋 Usar los colores de la auditoría del ${new Date(ult.fecha).toLocaleDateString('es-MX')} (${ult.melaminasFuera.map(x=>x.nombre).join(', ')})</button>` : ''}
+  </div>`;
+}
+function melFueraRefrescar(){ const el = document.getElementById('mel-fuera'); if(el){ const t = document.createElement('div'); t.innerHTML = melFueraHtml(); el.replaceWith(t.firstElementChild); } guardarBorradorAud(); }
+function melFueraAgregar(){
+  const n = (document.getElementById('mf-nom').value||'').trim().replace(/\s+/g,' '), qEl = document.getElementById('mf-q'), q = Number(qEl.value);
+  if(!n) return toast('Escribe el color');
+  if(qEl.value==='' || isNaN(q) || q<0) return toast('Escribe cuántas hojas hay');
+  const nom = /^melamina /i.test(n) ? n : 'Melamina '+n;
+  const ex = auditMelFuera.find(x=>slug(x.nombre)===slug(nom));
+  if(ex){ if(!confirm(`${ex.nombre} ya está con ${fmtNum(ex.hojas)} hojas.\n\n¿Sumarle ${fmtNum(q)}? (quedaría en ${fmtNum(Number(ex.hojas)+q)})`)) return; ex.hojas = fmtNum(Number(ex.hojas)+q); }
+  else auditMelFuera.push({nombre:nom, hojas:fmtNum(q)});
+  melFueraRefrescar(); setTimeout(()=>{ const e = document.getElementById('mf-nom'); if(e) e.focus(); }, 30);
+}
+function melFueraQuitar(i){ const x = auditMelFuera[i]; if(!x || !confirm(`¿Quitar ${x.nombre} (${fmtNum(x.hojas)} hojas)?`)) return; auditMelFuera.splice(i,1); melFueraRefrescar(); }
+function melFueraCopiar(){ const ult = (auditorias||[]).find(a=>(a.melaminasFuera||[]).length); if(!ult) return;
+  auditMelFuera = ult.melaminasFuera.map(x=>({nombre:x.nombre, hojas:0})); melFueraRefrescar(); toast('Se copiaron los colores. Revisa cuántas hojas hay de cada uno.'); }
 function actualizarFaltanAud(){
   const sec = AUD_SECCIONES[audPaso]; const el = document.getElementById('aud-faltan'); if(!el || !sec) return;
   const n = faltanSeccionAud(sec.k).length, tot = itemsSeccionAud(sec.k).length;
@@ -3509,8 +3539,8 @@ function selectAuditCat(c){ auditCat=c; renderAud(); }
 function claveBorradorAud(){ return 'borradorAud_'+modulo()+(audTipo==='simulacion'?'_sim':''); }
 function guardarBorradorAud(){
   try{
-    const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
-    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditDesglose, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
+    const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length || auditMelFuera.length;
+    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
     else localStorage.removeItem(claveBorradorAud());
   }catch(e){}
 }
@@ -3525,7 +3555,7 @@ function recuperarBorradorAud(){
     const hayAhora = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
     if(hayAhora) return;
     const b = JSON.parse(raw);
-    auditCapturas = b.auditCapturas||{}; auditDesglose = b.auditDesglose||{}; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
+    auditCapturas = b.auditCapturas||{}; auditDesglose = b.auditDesglose||{}; auditMelFuera = b.auditMelFuera||[]; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
     audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
     toast('↩️ Se recuperó lo que ya habías contado.');
   }catch(e){}
@@ -3693,7 +3723,7 @@ function agregarArmado(){
 function quitarArmado(i){ auditArmados.splice(i,1); guardarBorradorAud(); renderAud(); }
 function vaciarConteoAud(){
   if(!confirm('¿Borrar TODO lo que llevas capturado en este conteo?\n\n(Hojas, herrajes, piezas cortadas y armados. No se toca el inventario.)')) return;
-  auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
+  auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[]; audHechas={}; audPaso=0; auditCat='Melamina'; borrarBorradorAud(); renderAud(); toast('Conteo en blanco.');
 }
 // ===== Lista de piezas para contar (confirmado por el usuario): agrupada por familia, con color por
 // familia (dibujo, nombre y franja), dibujo de la forma de la pieza, buscador, ✓ en lo contado y
@@ -3930,12 +3960,13 @@ async function saveAudit(){
     if(tipo==='conteo') doc.conteoInicial = true;
     if(comp){ doc.complemento = true; doc.totalDiff = 0; }
     if(piezasContadas.length) doc.piezasContadas = piezasContadas;
+    if(auditMelFuera.length) doc.melaminasFuera = auditMelFuera.map(x=>({nombre:x.nombre, hojas:Number(x.hojas)||0}));
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
     const bc = balanceCorrederas();
     if(bc.length) doc.correderas = bc;
     const audId = cryptoId();
     await db.collection('auditorias').doc(audId).set(doc);
-    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[]; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
     borrarBorradorAud();
     if(ciego){
       try{ await db.collection('conteoAbierto').doc(modulo()).set({...(conteoMap[modulo()]||{}), modulo:modulo(), abierto:false, cerrado:new Date().toISOString(), cerradoPor:doc.creadoPor, auditoriaId:audId}); }catch(e){}
@@ -4186,6 +4217,7 @@ function renderHist(){
         ${esAdmin() && !a.conteoInicial && !a.complemento ? `<button class="btn small" style="background:transparent;color:#6b4bd6;border:1px solid var(--line);box-shadow:none" onclick="iniciarReconteo('${a.id}')">🔍 Volver a contar un material</button>` : ''}
         ${esAdmin() ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarAuditoria('${a.id}')">🗑️ Borrar</button>` : ''}
       </div>
+      ${(a.melaminasFuera||[]).length ? `<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(100,116,139,.15);border:1px solid rgba(100,116,139,.5)"><strong>🗃️ Melaminas que ya no se usan</strong> <span class="hint" style="margin:0">(solo registro, no entran al inventario)</span><div class="hint" style="margin:2px 0 0">${a.melaminasFuera.map(x=>`${x.nombre}: <strong>${fmtNum(x.hojas)}</strong> ${Number(x.hojas)===1?'hoja':'hojas'}`).join(' · ')}</div></div>` : ''}
       ${(a.correcciones||[]).length ? `<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.4)"><strong style="color:#f59e0b">✏️ Correcciones de Dirección</strong>${a.correcciones.map(c=>`<div class="hint" style="margin:2px 0 0">• <strong>${c.nombre}</strong>: capturó ${fmtNum(c.antes)} → corregido a <strong>${fmtNum(c.despues)}</strong> ${c.unidad||''} · ${String(c.por||'').split('@')[0]} · ${new Date(c.fecha).toLocaleString('es-MX')}${c.nota?' · '+c.nota:''}</div>`).join('')}</div>` : ''}
       ${(a.reconteos||[]).length ? `<div style="margin-top:8px">${a.reconteos.map(rc=>`<p class="hint" style="margin:2px 0">🔍 Reconteo de ${rc.cat} (${new Date(rc.fecha).toLocaleString()}): ${rc.ok?'<span class="pos">✅ coincidió con la auditoría</span>':`<span class="neg">⚠️ no coincidió</span>${rc.corrigio?' · <strong>auditoría corregida</strong>':''}`}</p>`).join('')}</div>` : ''}
       ${a.conteoInicial||a.complemento ? resumenHojasConteoHtml(a) : ''}
@@ -4296,6 +4328,13 @@ async function generarReporteAuditoriaPDF(a){
     header(); doc.setFontSize(9);
     a.correderas.forEach(b=>{ [b.etiqueta, fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares), fmtNum(b.hembrasSinPareja), fmtNum(b.machosSinPareja)].forEach((v,i)=>doc.text(String(v), colX(i)+1.5, y+4)); y+=5.5; });
     y += 6;
+  }
+  // Melaminas que ya no se usan (escritas a mano, solo registro)
+  if((a.melaminasFuera||[]).length){
+    if(y > pageH-40){ doc.addPage(); y=15; }
+    doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text('Melaminas que ya no se usan (solo registro, no entran al inventario)', marginL, y+4); doc.setFont(undefined,'normal'); y+=8; doc.setFontSize(9);
+    a.melaminasFuera.forEach(x=>{ if(y > pageH-12){ doc.addPage(); y=15; } doc.text(`• ${x.nombre}: ${fmtNum(x.hojas)} ${Number(x.hojas)===1?'hoja':'hojas'}`, marginL+2, y); y+=4.5; });
+    y += 4;
   }
   // Correcciones de Dirección (un artículo a la vez)
   if((a.correcciones||[]).length){
@@ -9906,7 +9945,7 @@ async function borrarDatosModulo(mods){
     toast('Borrando… no cierres la app.');
     for(const [col,id] of aBorrar){ await db.collection(col).doc(id).delete(); }
     mods.forEach(m=>{ try{ localStorage.removeItem('borradorAud_'+m); }catch(e){} });
-    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null;
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[];
     alert(`✅ Listo: se borraron ${aBorrar.length} registro(s). ${nombre} quedó en blanco.\n\nSi otros celulares tenían la app abierta, se limpian solos al sincronizar.`);
     setView('home');
   }catch(e){ alert('Error al borrar: '+e.message+'\n\nVuelve a intentarlo; lo que ya se borró no regresa.'); }
