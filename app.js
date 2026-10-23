@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v171';
+const APP_VERSION = 'v172';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -2770,9 +2770,14 @@ async function ferCancelarEnvio(id){
   m.estado = 'cancelado'; m.fechaCancelado = new Date().toISOString(); await db.collection('herrMovs').doc(m.id).set(m);
   herrCache = null; toast('Envío cancelado'); renderAlmacen();
 }
+let ferRecibiendoId = '';
 async function ferRecibir(id){
-  const D = await herrCargar(true), m = (D.fer||[]).find(x=>x.id===id); if(!m || m.estado!=='encamino') { toast('Ya estaba recibido'); herrCache=null; return current==='home'?renderHome():renderFerRec(); }
+  if(ferRecibiendoId===id) return; // evita que un doble toque lo reciba dos veces
+  const D = await herrCargar(true), m = (D.fer||[]).find(x=>x.id===id);
+  if(m && m.estado==='encamino' && movs.some(x=>x.ferEnvioId===id && x.estado!=='rechazado')){ m.estado='recibido'; m.fechaRecibido = m.fechaRecibido||new Date().toISOString(); try{ await db.collection('herrMovs').doc(m.id).set(m); }catch(e){} }
+  if(!m || m.estado!=='encamino') { toast('Ya estaba recibido'); herrCache=null; return current==='home'?renderHome():renderFerRec(); }
   if(!confirm(`¿Ya recibiste todo?\n\n${m.datos.items.map(ferTxtItem).join('\n')}\n\nSe suma a tu inventario de ${m.modulo}.`)) return;
+  if(ferRecibiendoId===id) return; ferRecibiendoId = id; setTimeout(()=>{ if(ferRecibiendoId===id) ferRecibiendoId=''; }, 15000);
   const fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
   try{
     for(const x of m.datos.items) await db.collection('movimientos').doc(cryptoId()).set({modulo:m.modulo, itemId:x.itemId, itemNombre:x.nombre, tipo:'entrada', cantidad:Number(x.q), nota:'Del Almacén general (ferretería)', fecha, estado:'aprobado', loteId:m.id, ferEnvioId:m.id, origenTipo:'almacen', creadoPor});
@@ -3071,7 +3076,9 @@ function badgeEstado(estado){
   return '<span class="tag pos" style="border-color:var(--ok)">Aprobado</span>';
 }
 
+let movGuardando = false;
 async function registrarMovLote(){
+  if(movGuardando) return; // evita guardar dos veces la misma captura con un doble toque
   const tipo = movTipo;
   const nota = ($('#mv-nota').value||'').trim();
   const lado = (tipo==='merma' && esHoja(CATALOGO.find(i=>i.cat===movCat))) ? (movLado==='cortado'?'cortado':'completas') : 'completas';
@@ -3117,8 +3124,18 @@ async function registrarMovLote(){
   const destinoTxt = tipo==='salida' ? (movDestino==='modulo' ? 'A '+movDestMod+' (solo salida, sin deuda)' : movDestino==='proveedor' ? 'Regresa a proveedor: '+movDestProv.trim() : 'A: '+movDestOtro.trim()) : '';
   const verbo = (TIPO_INFO[tipo]||{}).verbo || tipo;
   const resumen = aplicar.map(a=>`• ${fmtNum(a.cantidad)} ${item2unidad(a.itemId)} de ${a.itemNombre}`).join('\n');
+  if(tipo==='entrada'){
+    const hace3 = new Date(Date.now()-3*86400000).toISOString(), ids = new Set(aplicar.map(a=>a.itemId));
+    const conPedido = (pedidos||[]).filter(p=>p.modulo===mod && p.estado!=='cancelado' && (p.items||[]).some(i=>ids.has(i.itemId)) && (pedidoEnCamino(p) || recepcionesDe(p).some(r=>(r.fecha||'')>=hace3)));
+    const recien = movs.filter(m=>m.modulo===mod && m.tipo==='entrada' && m.estado!=='rechazado' && ids.has(m.itemId) && (m.fecha||'')>=new Date(Date.now()-2*86400000).toISOString());
+    const av = [];
+    if(conPedido.length) av.push('📦 Hay un pedido en "Por llegar" con este material'+(conPedido.some(p=>!pedidoEnCamino(p))?' (o que ya se recibió estos días)':'')+'. Si llegó por ese pedido, recíbelo AHÍ y no aquí, o se va a sumar dos veces.');
+    if(recien.length) av.push('🔁 En los últimos 2 días ya se anotó entrada de:\n'+[...new Set(recien.map(m=>`• ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} ${m.itemNombre} (${new Date(m.fecha).toLocaleDateString('es-MX')})`))].slice(0,8).join('\n'));
+    if(av.length && !confirm('⚠️ Revisa antes de guardar:\n\n'+av.join('\n\n')+'\n\n¿De todos modos es una entrada NUEVA y quieres guardarla?')) return;
+  }
   if(!confirm(`¿Todo está bien?\n\n${origenTxt?'📍 '+origenTxt+'\n\n':''}${destinoTxt?'📍 '+destinoTxt+'\n\n':''}${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
   if(avisosAuto.length && !confirm('Todavía no se anota el corte de hoy:\n\n'+avisosAuto.join('\n')+'\n\nNo pasa nada: cuando se registre el corte del día se ajusta solo. ¿Continuar?')) return;
+  movGuardando = true; setTimeout(()=>{ movGuardando = false; }, 4000);
   try{
     // Confirmado por el usuario: el Corte del día NO requiere aprobación (se aplica directo,
     // aunque lo registre un coordinador). Lo demás sigue el flujo normal de aprobación.
@@ -4172,9 +4189,9 @@ function renderMovHist(){
   ${dias.map(d=>`<div class="card">
     <strong>${new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</strong>
     <div class="wrap-x" style="margin-top:6px"><table><tr><th>Hora</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Quién</th></tr>
-    ${porDia[d].map(m=>`<tr style="${m.anulado?'opacity:.55;text-decoration:line-through':''}"><td>${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemNombre||nom(m.itemId)}</td>
+    ${porDia[d].map(m=>`<tr style="${m.anulado?'opacity:.55;text-decoration:line-through':(movPosibleDuplicado(m)?'background:rgba(220,38,38,.12)':'')}"><td>${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemNombre||nom(m.itemId)}</td>
       <td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}${m.estado==='pendiente'?' '+badgeEstado('pendiente'):''}</td>
-      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}${esAdmin() && m.tipo==='corte' && m.estado!=='rechazado' ? `<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="borrarCorte('${m.id}')">🗑️ Corte mal capturado</button>` : ''}${movCorregible(m) ? `<button class="btn small" style="display:block;margin-top:4px;background:linear-gradient(135deg,#d97706,#b45309);white-space:nowrap" onclick="movCorrAbrir('${m.id}')">✏️ Corregir</button>` : ''}${m.anulado?`<div style="color:var(--bad);font-weight:800;font-size:12px">ANULADO</div>`:''}</td></tr>`).join('')}
+      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}${esAdmin() && m.tipo==='corte' && m.estado!=='rechazado' ? `<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="borrarCorte('${m.id}')">🗑️ Corte mal capturado</button>` : ''}${movCorregible(m) ? `<button class="btn small" style="display:block;margin-top:4px;background:linear-gradient(135deg,#d97706,#b45309);white-space:nowrap" onclick="movCorrAbrir('${m.id}')">✏️ Corregir</button>` : ''}${m.anulado?`<div style="color:var(--bad);font-weight:800;font-size:12px">ANULADO</div>`:''}${!m.anulado&&movPosibleDuplicado(m)?`<div style="color:#f87171;font-weight:800;font-size:12px;white-space:nowrap">⚠️ ¿Repetida?</div>`:''}</td></tr>`).join('')}
     </table></div></div>`).join('')}`;
 }
 // Dirección puede borrar un corte mal capturado (p. ej. pusieron las hojas que TENÍAN en vez de las que
@@ -4184,10 +4201,16 @@ function renderMovHist(){
 // Ej. el coordinador dio salida a una melamina de otro color. Se cambia el artículo y/o la cantidad del
 // movimiento (o se anula) y queda anotado quién, cuándo y qué decía antes. Los traspasos y devoluciones
 // no (mueven dos módulos), ni lo de pedidos, envíos del almacén o el cierre del turno.
+// Entrada que parece repetida: mismo artículo y misma cantidad en el mismo módulo, con menos de 3 días de diferencia.
+function movPosibleDuplicado(m){
+  if(m.tipo!=='entrada' || m.anulado || m.estado==='rechazado') return false;
+  const t = new Date(m.fecha).getTime();
+  return movs.some(x=>x.id!==m.id && x.tipo==='entrada' && !x.anulado && x.estado!=='rechazado' && x.modulo===m.modulo && x.itemId===m.itemId && Math.abs(Number(x.cantidad)-Number(m.cantidad))<0.0005 && Math.abs(new Date(x.fecha).getTime()-t) < 3*86400000);
+}
 function movCorregible(m){
   if(!esAdmin() || m.anulado || m.estado==='pendiente' || m.estado==='rechazado') return false;
   if(!['entrada','salida','merma'].includes(m.tipo)) return false;
-  if(m.cierreTurno || m.pedidoId || m.ferEnvioId || m.motivo) return false;
+  if(m.cierreTurno || m.motivo) return false;
   if(/^(Traspaso|Devolución de préstamo) /.test(m.nota||'') || m.origenTipo==='modulo') return false;
   return true;
 }
@@ -4197,7 +4220,7 @@ function movCorrAbrir(id){
   const m = movs.find(x=>x.id===id); if(!m || !movCorregible(m)) return;
   const audDespues = (auditorias||[]).find(a=>a.aplicada && a.modulo===m.modulo && (a.fecha||'') > (m.fecha||''));
   if(audDespues) return alert(`No se puede corregir: después de este movimiento ya se aplicó la auditoría del ${new Date(audDespues.fecha).toLocaleDateString('es-MX')}, que dejó el inventario como se contó.\n\nSi algo no cuadra, usa Inventario → ✏️ Corregir un artículo.`);
-  const it = CATALOGO.find(i=>i.id===m.itemId) || {cat:''};
+  const it = CATALOGO.find(i=>i.id===m.itemId) || {cat:''}, soloAnular = !!(m.pedidoId || m.ferEnvioId);
   movCorr = {id};
   const ov = document.createElement('div'); ov.id = 'mov-corr'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto'; document.body.appendChild(ov);
   ov.addEventListener('click', e=>{ if(e.target===ov) movCorrCerrar(); });
@@ -4206,12 +4229,23 @@ function movCorrAbrir(id){
   ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #d97706;border-radius:18px;padding:16px;margin-top:20px">
     <div class="row" style="justify-content:space-between"><div style="font-size:18px;font-weight:900">✏️ Corregir movimiento</div><button onclick="movCorrCerrar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <div style="margin-top:10px;padding:10px;border-radius:12px;background:rgba(127,127,127,.12)"><div class="hint" style="margin:0">Así se capturó</div><div style="font-weight:900;font-size:16px">${tipoTxt} · ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} de ${m.itemNombre}</div><div class="hint" style="margin:2px 0 0">${new Date(m.fecha).toLocaleString('es-MX')} · ${(m.creadoPor||'').split('@')[0]}${m.nota?' · '+herrEsc(m.nota):''}</div></div>
-    <label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Qué artículo era en realidad?</label><select id="mc-item" style="margin-top:4px">${opts}</select>
-    <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Cuánto fue?</label><input id="mc-q" type="number" min="0" inputmode="decimal" value="${fmtNum(m.cantidad)}" style="margin-top:4px;font-size:18px;font-weight:900;text-align:center">
-    <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Por qué se corrige? <span style="color:var(--bad)">*</span></label><input id="mc-n" placeholder="Ej. capturó Nogal y era Roble" style="margin-top:4px">
-    <button class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="movCorrGuardar(false)">✅ Guardar corrección</button>
+    ${soloAnular ? `<p class="hint" style="margin:10px 0 0;padding:8px 10px;border-radius:10px;background:rgba(217,119,6,.15)">Esta entrada vino de ${m.pedidoId?'un <strong>pedido</strong> (Por llegar)':'un <strong>envío del almacén general</strong>'}. Si está <strong>repetida</strong>, anúlala aquí abajo.</p>` : `<label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Qué artículo era en realidad?</label><select id="mc-item" style="margin-top:4px">${opts}</select>
+    <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Cuánto fue?</label><input id="mc-q" type="number" min="0" inputmode="decimal" value="${fmtNum(m.cantidad)}" style="margin-top:4px;font-size:18px;font-weight:900;text-align:center">`}
+    <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Por qué se corrige? <span style="color:var(--bad)">*</span></label><input id="mc-n" placeholder="${soloAnular?'Ej. entrada repetida, solo llegó una vez':'Ej. capturó Nogal y era Roble'}" style="margin-top:4px">
+    ${soloAnular?'':`<button class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="movCorrGuardar(false)">✅ Guardar corrección</button>`}
     <button class="btn" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="movCorrGuardar(true)">🗑️ Anular este movimiento (no debió registrarse)</button>
+    ${(()=>{ const lote = m.loteId ? movs.filter(x=>x.loteId===m.loteId && movCorregible(x)) : []; return lote.length>1 ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#b91c1c,#7f1d1d)" onclick="movCorrAnularLote('${m.loteId}')">🗑️ Anular TODA esta captura (${lote.length} artículos, ${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})})</button><p class="hint" style="margin:4px 0 0">Útil si se guardó dos veces: anula todos los artículos que se capturaron juntos en esta vez.</p>` : ''; })()}
     <p class="hint" style="margin:8px 0 0">El inventario se recalcula solo. Queda anotado quién lo corrigió, cuándo y qué decía antes.</p></div>`;
+}
+async function movCorrAnularLote(loteId){
+  const lote = movs.filter(x=>x.loteId===loteId && movCorregible(x)); if(!lote.length) return;
+  const nota = (document.getElementById('mc-n').value||'').trim(); if(!nota) return alert('Escribe por qué se anula (ej. se guardó dos veces).');
+  if(!confirm(`🗑️ Anular TODA esta captura (${lote.length} artículos):\n\n${lote.map(m=>`• ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} ${m.itemNombre}`).join('\n')}\n\nMotivo: ${nota}\n\n¿Anular todo?`)) return;
+  const quien = (getCurrentUserEmail?getCurrentUserEmail():''), ahora = new Date().toISOString();
+  try{ for(const m of lote){ const upd = {estado:'rechazado', anulado:true, correccion:{fecha:ahora, por:quien, anulado:true, motivo:nota, antes:{itemId:m.itemId, itemNombre:m.itemNombre, cantidad:m.cantidad}}, nota:(m.nota?m.nota+' · ':'')+`🗑️ Anulado por Dirección: ${nota}`};
+      await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); } }
+  catch(e){ return alert('Error: '+e.message); }
+  movCorrCerrar(); entrCache = null; salCache = null; toast(`🗑️ ${lote.length} movimientos anulados`); renderMovHist();
 }
 async function movCorrGuardar(anular){
   const m = movs.find(x=>x.id===(movCorr||{}).id); if(!m) return;
@@ -9823,7 +9857,9 @@ function pedRecibirHtml(id){
     </div>
   </div>`;
 }
+let pedGuardando = false;
 async function confirmarRecepcion(id){
+  if(pedGuardando) return; // evita guardar dos veces lo mismo con un doble toque
   const p = pedidos.find(x=>x.id===id); if(!p) return;
   const r0 = resumenPedido(p);
   const items = r0.filas.filter(f=>f.cantidad>0).map(f=>({itemId:f.itemId, itemNombre:f.itemNombre, unidad:f.unidad, cantidad:Math.max(0, Number(document.getElementById('rec-'+f.itemId).value)||0)}));
@@ -9832,6 +9868,7 @@ async function confirmarRecepcion(id){
   if(!llegan.length) return alert('No escribiste ninguna cantidad. Si no llegó nada, toca Cancelar.');
   const quedan = r0.filas.filter(f=>f.cantidad>0).map(f=>({f, falta: fmtNum(f.falta - ((items.find(i=>i.itemId===f.itemId)||{}).cantidad||0))})).filter(x=>x.falta>0);
   if(!confirm(`Llegó:\n\n${llegan.map(i=>`• ${fmtNum(i.cantidad)} ${i.unidad} ${i.itemNombre}`).join('\n')}${quedan.length?`\n\n⏳ Seguirá pendiente:\n${quedan.map(x=>`• ${fmtNum(x.falta)} ${x.f.unidad} ${x.f.itemNombre}`).join('\n')}`:'\n\n✅ Con esto el pedido queda completo.'}\n\n¿Guardar?`)) return;
+  pedGuardando = true; setTimeout(()=>{ pedGuardando = false; }, 15000);
   try{
     const estado = estadoNuevoMovimiento();
     const loteId = cryptoId(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString();
