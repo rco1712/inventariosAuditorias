@@ -171,7 +171,7 @@ function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
   // Coordinadores: solo lo que usan en el día (se ocultan Catálogo e Historial, que son de consulta avanzada).
   // Coordinador: menú corto (confirmado por el usuario) con lo del día; lo demás queda en "☰ Más".
-  const ocultarTabs = miPerfil.rol==='administracion' ? ['mov','aud','inst','trasp','usr','apr','mas','gar','cat','desp','hist']
+  const ocultarTabs = miPerfil.rol==='administracion' ? ['veh','mov','aud','inst','trasp','usr','apr','mas','gar','cat','desp','hist']
     : (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente'||miPerfil.rol==='auditor') ? ['mov','aud','inst','trasp','usr','apr','ped','mas'] : (miPerfil.rol==='coordinador' ? ['aud','usr','apr','cat','hist','gar','trasp','rep','desp'] : ['mas']);
   document.querySelectorAll('#nav button[data-v]').forEach(b=>{
     b.style.display = ocultarTabs.includes(b.dataset.v) ? 'none' : '';
@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v174';
+const APP_VERSION = 'v175';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -637,6 +637,7 @@ function setView(v){
   if(v==='herr'){ herrCache=null; renderHerr(); }
   if(v==='alm'){ herrCache=null; renderAlmacen(); }
   if(v==='herrapr'){ herrCache=null; renderHerrApr(); }
+  if(v==='veh'){ vehCache=null; renderVeh(); }
   if(v==='ferrec') renderFerRec();
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
@@ -947,15 +948,277 @@ const HOME_IC = {
 function homeIcon(k){ return `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${HOME_IC[k]||HOME_IC.cajas}</svg>`; }
 // Secciones de Inicio: cada una con su familia de color; dentro de Material, una etiqueta
 // distingue lo que ENTRA (verde) de lo que SALE (rojo).
+// ===== Vehículos por módulo (confirmado por el usuario) =====
+// Cada módulo tiene sus vehículos: instalador, carro, color, placas; mantenimiento cada 2 meses y
+// seguro semestral, con aviso 15 días antes; y lo que trae, por secciones (guantera, carga,
+// ponchadura, cobro). El coordinador captura y Dirección aprueba; Dirección cambia directo y ve
+// todos los módulos. PDF por módulo.
+const VEH_SECS = [
+  {k:'guantera', t:'Documentos en la guantera', ic:'📂', c:'#8b5cf6', items:[['poliza','Póliza del seguro'],['tarjeta','Tarjeta de circulación']]},
+  {k:'carga', t:'Para la carga', ic:'📦', c:'#ea580c', items:[['lona','Lona'],['bandas','Bandas']]},
+  {k:'ponch', t:'Para una ponchadura', ic:'🛞', c:'#dc2626', items:[['llanta','Llanta de refacción'],['gato','Gato'],['cruceta','Cruceta']]},
+  {k:'cobro', t:'Cobro', ic:'💳', c:'#16a34a', items:[['terminal','Terminal de cobro']]}];
+const VEH_ITEMS = VEH_SECS.flatMap(s=>s.items);
+const VEH_CAMPOS = [['instalador','👷 Instalador','Ej. Juan Pérez'],['carro','🚗 Carro','Ej. Nissan NP300'],['color','🎨 Color','Ej. Blanco'],['placas','🔖 Placas','Ej. RFP-12-34']];
+const VEH_MANT_MESES = 2, VEH_SEG_MESES = 6, VEH_AVISO = 15;
+let vehCache = null, vehMod = '', vehAbierto = '', vehForm = null, vehAcc = null;
+const puedeEditarVeh = () => esAdmin() || esCoordinador();
+const vehFmt = s => s ? new Date(s+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'}) : '—';
+const vehMas = (s, n) => { const d = new Date(s+'T12:00:00'); d.setMonth(d.getMonth()+n); return d.toISOString().slice(0,10); };
+const vehDias = s => s ? Math.round((new Date(s+'T12:00:00') - new Date(fechaHoyLocal()+'T12:00:00'))/86400000) : null;
+function vehEst(fecha){
+  const d = vehDias(fecha);
+  if(d===null) return {k:'sin', c:'#6b7280', t:'Sin fecha', d};
+  if(d<0) return {k:'venc', c:'#dc2626', t:`Vencido hace ${-d} día${d===-1?'':'s'}`, d};
+  if(d<=VEH_AVISO) return {k:'pronto', c:'#f59e0b', t: d===0 ? 'Es hoy' : `En ${d} día${d===1?'':'s'}`, d};
+  return {k:'ok', c:'#16a34a', t:'Al corriente', d};
+}
+const vehProxMant = v => v.mantUltimo ? vehMas(v.mantUltimo, VEH_MANT_MESES) : '';
+const vehEstMant = v => vehEst(vehProxMant(v));
+const vehEstSeg = v => vehEst(v.seguroHasta||'');
+const vehFaltan = v => VEH_ITEMS.filter(([k])=>(v.checks||{})[k]===false).map(x=>x[1]);
+const vehBadge = (t, c) => `<span style="display:inline-block;font-size:11.5px;font-weight:800;padding:3px 8px;border-radius:8px;margin:3px 4px 0 0;background:${c}26;color:${c};border:1px solid ${c}">${t}</span>`;
+const vehNombre = v => `${v.carro||'Vehículo'}${v.placas?' · '+v.placas:''}`;
+async function vehCargar(force){
+  if(vehCache && !force) return vehCache;
+  const [a, b] = await Promise.all(['vehiculos','vehMovs'].map(c=>db.collection(c).get()));
+  const rows = s => s.docs.map(d=>({id:d.id, ...d.data()}));
+  vehCache = {vehs: rows(a).filter(v=>!v.baja).sort((x,y)=>(x.instalador||'').localeCompare(y.instalador||'')), movs: rows(b).sort((x,y)=>(y.fecha||'').localeCompare(x.fecha||''))};
+  return vehCache;
+}
+const vehPendientes = (D, mod) => D.movs.filter(m=>m.estado==='pendiente' && (!mod || m.modulo===mod));
+function vehAvisos(D, mod){
+  const out = [];
+  D.vehs.filter(v=>!mod || v.modulo===mod).forEach(v=>{
+    const m = vehEstMant(v), s = vehEstSeg(v);
+    if(m.k==='venc'||m.k==='pronto') out.push({v, que:'🔧 mantenimiento', e:m});
+    if(s.k==='venc'||s.k==='pronto') out.push({v, que:'🛡️ seguro', e:s});
+  });
+  return out.sort((a,b)=>a.e.d-b.e.d);
+}
+const VEH_TIPO_TXT = {alta:'🆕 Alta de vehículo', editar:'✏️ Cambio de datos', mant:'🔧 Mantenimiento hecho', seguro:'🛡️ Pago de seguro', baja:'🗑️ Dar de baja', mantPend:'⏳ Mantenimiento pendiente'};
+function vehMovDesc(m, v){
+  const d = m.datos||{};
+  if(m.tipo==='alta') return `${herrEsc(d.carro||'')} · ${herrEsc(d.placas||'')} · ${herrEsc(d.instalador||'')}`;
+  if(m.tipo==='mant') return `Se hizo el ${vehFmt(d.fecha)}${d.nota?' · '+herrEsc(d.nota):''}`;
+  if(m.tipo==='mantPend') return `Sigue pendiente${d.nota?' · '+herrEsc(d.nota):''}`;
+  if(m.tipo==='seguro') return `Pagado hasta ${vehFmt(d.hasta)}${d.aseguradora?' · '+herrEsc(d.aseguradora):''}`;
+  if(m.tipo==='baja') return d.nota ? herrEsc(d.nota) : 'Ya no está en el módulo';
+  if(m.tipo==='editar'){ const a = m.antes||{}, ch = [];
+    VEH_CAMPOS.forEach(([k,t])=>{ if(k in d && d[k]!==a[k]) ch.push(`${t.replace(/^\S+\s/,'')}: ${herrEsc(a[k]||'—')} → <b>${herrEsc(d[k]||'—')}</b>`); });
+    ['mantUltimo','seguroHasta'].forEach(k=>{ if(k in d && d[k]!==a[k]) ch.push(`${k==='mantUltimo'?'Último mantenimiento':'Seguro hasta'}: ${vehFmt(a[k])} → <b>${vehFmt(d[k])}</b>`); });
+    if('aseguradora' in d && d.aseguradora!==a.aseguradora) ch.push(`Aseguradora: ${herrEsc(a.aseguradora||'—')} → <b>${herrEsc(d.aseguradora||'—')}</b>`);
+    VEH_ITEMS.forEach(([k,t])=>{ const n = (d.checks||{})[k], o = (a.checks||{})[k]; if(d.checks && n!==o) ch.push(`${t}: ${o===true?'Sí':o===false?'No':'—'} → <b>${n===true?'Sí':n===false?'No':'—'}</b>`); });
+    return ch.join('<br>') || 'Sin cambios';
+  }
+  return '';
+}
+// Aplica un cambio aprobado al vehículo.
+async function vehAplicar(m){
+  const d = m.datos||{}, ahora = new Date().toISOString(), quien = (getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0];
+  if(m.tipo==='alta'){
+    const id = m.vehId || cryptoId();
+    const v = {id, modulo:m.modulo, instalador:d.instalador||'', carro:d.carro||'', color:d.color||'', placas:d.placas||'', mantUltimo:d.mantUltimo||'', seguroHasta:d.seguroHasta||'', aseguradora:d.aseguradora||'', checks:d.checks||{}, fecha:ahora, creadoPor:m.creadoPor||'', hist:[{f:ahora, t:'🆕 Alta', por:quien}]};
+    await db.collection('vehiculos').doc(id).set(v); m.vehId = id; return;
+  }
+  const ref = db.collection('vehiculos').doc(m.vehId), snap = await ref.get(); if(!snap || !snap.exists) return;
+  const v = Object.assign({id:m.vehId}, snap.data()); let t = '';
+  if(m.tipo==='editar'){ Object.keys(d).forEach(k=>{ v[k] = k==='checks' ? Object.assign({}, v.checks||{}, d.checks) : d[k]; }); t = '✏️ Cambio de datos'; }
+  else if(m.tipo==='mant'){ v.mantUltimo = d.fecha; v.mantPend = null; t = `🔧 Mantenimiento hecho el ${vehFmt(d.fecha)}`+(d.nota?' · '+d.nota:''); }
+  else if(m.tipo==='seguro'){ v.seguroHasta = d.hasta; if(d.aseguradora) v.aseguradora = d.aseguradora; t = `🛡️ Seguro pagado hasta ${vehFmt(d.hasta)}`; }
+  else if(m.tipo==='baja'){ v.baja = true; v.fechaBaja = ahora; t = '🗑️ Baja'+(d.nota?' · '+d.nota:''); }
+  else if(m.tipo==='mantPend'){ v.mantPend = {f:ahora, nota:d.nota||'', por:quien}; t = '⏳ Mantenimiento sigue pendiente'+(d.nota?' · '+d.nota:''); }
+  v.hist = (v.hist||[]).concat([{f:ahora, t, por:quien}]);
+  await ref.set(v);
+}
+// Registra un cambio: Dirección lo aplica directo; el coordinador lo deja por aprobar.
+async function vehRegistrar(tipo, mod, vehId, datos, antes){
+  const directo = esAdmin() || tipo==='mantPend';
+  const m = {id:cryptoId(), tipo, modulo:mod, vehId:vehId||'', datos, antes:antes||null, fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', estado: directo ? 'aprobado' : 'pendiente'};
+  if(directo){ await vehAplicar(m); m.fechaAprob = m.fecha; m.aprobPor = m.creadoPor; }
+  await db.collection('vehMovs').doc(m.id).set(m);
+  vehCache = null;
+  toast(directo ? '✅ Guardado' : '✅ Enviado. <br><small>Dirección lo tiene que aprobar.</small>');
+  return m;
+}
+async function vehAprobar(id, ok){
+  if(!esAdmin()) return; const D = await vehCargar(true), m = D.movs.find(x=>x.id===id); if(!m || m.estado!=='pendiente') return;
+  if(!ok && !confirm('¿Rechazar este cambio? No se aplica.')) return;
+  try{ if(ok) await vehAplicar(m); Object.assign(m, {estado: ok?'aprobado':'rechazado', fechaAprob:new Date().toISOString(), aprobPor:getCurrentUserEmail?getCurrentUserEmail():''}); await db.collection('vehMovs').doc(m.id).set(m); }
+  catch(e){ return alert('Error: '+e.message); }
+  vehCache = null; toast(ok?'✅ Aprobado':'Rechazado'); renderVeh();
+}
+async function vehCancelarPend(id){
+  const D = await vehCargar(true), m = D.movs.find(x=>x.id===id); if(!m || m.estado!=='pendiente') return;
+  if(!confirm('¿Cancelar este cambio que enviaste?')) return;
+  m.estado = 'cancelado'; await db.collection('vehMovs').doc(m.id).set(m); vehCache = null; renderVeh();
+}
+// ---- Pantallas ----
+function vehSecCaja(ic, t, c, cuerpo, sub){ return `<div style="margin-top:12px;border-radius:14px;border:2px solid ${c};background:${c}14;padding:12px"><div style="font-weight:900;font-size:16px;color:${c}">${ic} ${t}</div>${sub?`<div class="hint" style="margin:2px 0 4px">${sub}</div>`:''}${cuerpo}</div>`; }
+function vehSiNo(val, onSi, onNo){
+  const b = (on, txt, col, js) => `<button ${js?`onclick="${js}"`:'disabled'} style="cursor:${js?'pointer':'default'};padding:7px 14px;border-radius:10px;font-weight:800;font-size:13px;${on?`background:${col};color:#fff;border:1px solid ${col}`:'background:transparent;color:var(--sub);border:1px solid var(--line)'}">${txt}</button>`;
+  return `<span style="display:flex;gap:4px">${b(val===true,'Sí','#16a34a',onSi)}${b(val===false,'No','#dc2626',onNo)}</span>`;
+}
+function vehCardHtml(v, D){
+  const m = vehEstMant(v), s = vehEstSeg(v), pend = D.movs.filter(x=>x.estado==='pendiente' && x.vehId===v.id);
+  const mini = VEH_SECS.map(sc=>{ const f = sc.items.filter(([k])=>(v.checks||{})[k]===false), sin = sc.items.filter(([k])=>(v.checks||{})[k]===undefined);
+    return f.length ? vehBadge(`${sc.ic} falta ${f.map(x=>x[1].toLowerCase()).join(', ')}`,'#dc2626') : sin.length===sc.items.length ? vehBadge(`${sc.ic} sin revisar`,'#6b7280') : vehBadge(`${sc.ic} ✓`,'#16a34a'); }).join('');
+  return `<div class="card" onclick="vehAbierto='${v.id}';vehForm=null;vehAcc=null;renderVeh();window.scrollTo(0,0)" style="cursor:pointer;border-left:6px solid #0ea5e9">
+    <div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:17px;font-weight:900">🚐 ${herrEsc(v.carro||'Vehículo')}</div><div class="hint" style="margin:0">👷 ${herrEsc(v.instalador||'—')} · ${herrEsc(v.color||'')} · <b style="color:var(--ink)">${herrEsc(v.placas||'')}</b></div></div><span style="font-size:20px;color:var(--sub)">›</span></div>
+    <div style="margin-top:6px">${vehBadge('🔧 '+(m.k==='ok'?'✓':m.t), m.c)}${vehBadge('🛡️ '+(s.k==='ok'?'✓':s.t), s.c)}${pend.length?vehBadge('⏳ '+pend.length+' por aprobar','#a855f7'):''}</div>
+    <div style="margin-top:2px">${mini}</div></div>`;
+}
+function vehPendHtml(lista, D){
+  if(!lista.length) return '';
+  return `<div class="card" style="border:2px solid #a855f7"><strong style="color:#c084fc">⏳ ${esAdmin()?'Por aprobar':'Esperando aprobación de Dirección'} (${lista.length})</strong>
+    ${lista.map(m=>{ const v = D.vehs.find(x=>x.id===m.vehId); const mio = m.creadoPor===(getCurrentUserEmail?getCurrentUserEmail():'');
+      return `<div style="border-top:1px solid var(--line);padding:9px 0;margin-top:6px"><div><strong>${VEH_TIPO_TXT[m.tipo]||m.tipo}</strong>${esAdmin()&&vehMod==='__todos'?` <span class="hint" style="margin:0">· ${herrEsc(m.modulo)}</span>`:''}</div>
+        <div class="hint" style="margin:2px 0 0">${v?'🚐 '+herrEsc(vehNombre(v))+' · ':''}${herrFecha(m.fecha)} · ${herrEsc(String(m.creadoPor||'').split('@')[0])}</div>
+        <div style="margin-top:4px;font-size:13.5px">${vehMovDesc(m, v)}</div>
+        ${esAdmin() ? `<div class="row" style="gap:8px;margin-top:8px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="vehAprobar('${m.id}',true)">✅ Aprobar</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="vehAprobar('${m.id}',false)">Rechazar</button></div>`
+          : mio ? `<button class="btn small" style="margin-top:6px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="vehCancelarPend('${m.id}')">Cancelar</button>` : ''}</div>`; }).join('')}</div>`;
+}
+function vehAvisosHtml(av){
+  if(!av.length) return '';
+  const venc = av.some(a=>a.e.k==='venc'), c = venc ? '#dc2626' : '#f59e0b';
+  return `<div class="card" style="border:2px solid ${c};background:${c}18"><strong style="color:${c}">${venc?'🚨':'⚠️'} ${av.length} aviso${av.length===1?'':'s'}</strong>
+    ${av.map(a=>`<div onclick="vehMod='${a.v.modulo}';vehAbierto='${a.v.id}';renderVeh();window.scrollTo(0,0)" style="cursor:pointer;padding:5px 0;font-size:14px">${a.que} · <b>${herrEsc(a.v.carro||'')}</b> <span class="hint" style="margin:0">(${herrEsc(a.v.instalador||'')}${vehMod==='__todos'?' · '+herrEsc(a.v.modulo):''})</span> · <b style="color:${a.e.c}">${a.e.t.toLowerCase()}</b></div>`).join('')}</div>`;
+}
+function vehFichaHtml(v, D){
+  const m = vehEstMant(v), s = vehEstSeg(v), ed = puedeEditarVeh(), pend = D.movs.filter(x=>x.estado==='pendiente' && x.vehId===v.id);
+  const fila = (t, val) => `<div class="row" style="justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid var(--line)"><span style="font-size:15px">${t}</span>${vehSiNo(val)}</div>`;
+  const caja = (t, sub, e, extra) => `<div style="margin-top:8px;padding:10px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid ${e.c}"><div class="row" style="justify-content:space-between;gap:6px"><b>${t}</b>${vehBadge(e.k==='ok'?'✓ Al corriente':e.t, e.c)}</div><div class="hint" style="margin:3px 0 0">${sub}</div>${extra||''}</div>`;
+  const acc = vehAcc && vehAcc.id===v.id ? vehAcc : null;
+  const formAcc = acc ? `<div style="margin-top:8px;padding:10px;border-radius:12px;background:rgba(14,165,233,.12);border:1px solid #0ea5e9">
+      ${acc.tipo==='mant'?`<label class="hint" style="display:block;font-weight:800">¿Qué día se hizo el mantenimiento?</label><input type="date" id="va-f" value="${acc.fecha}" max="${fechaHoyLocal()}" style="margin-top:4px">`
+        : acc.tipo==='seguro'?`<label class="hint" style="display:block;font-weight:800">¿Hasta cuándo quedó pagado? (semestral)</label><input type="date" id="va-f" value="${acc.fecha}" style="margin-top:4px"><input id="va-a" value="${herrEsc(v.aseguradora||'')}" placeholder="Aseguradora (opcional)" style="margin-top:6px">`
+        : `<label class="hint" style="display:block;font-weight:800">¿Por qué sigue pendiente?</label>`}
+      <input id="va-n" placeholder="${acc.tipo==='mantPend'?'Ej. no hay cita en el taller hasta el lunes':'Nota (opcional): taller, km, folio…'}" style="margin-top:6px">
+      <div class="row" style="gap:8px;margin-top:8px"><button class="btn" style="flex:1;margin:0;background:#16a34a" onclick="vehGuardarAcc()">${esAdmin()||acc.tipo==='mantPend'?'✅ Guardar':'📤 Enviar a aprobación'}</button><button class="btn small" style="margin:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="vehAcc=null;renderVeh()">Cancelar</button></div></div>` : '';
+  const btnAcc = (tipo, txt, col) => ed ? `<button class="btn" style="flex:1;margin:0;padding:10px 6px;background:${col}" onclick="vehAbrirAcc('${v.id}','${tipo}')">${txt}</button>` : '';
+  return `<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="vehAbierto='';vehAcc=null;renderVeh()">← Vehículos de ${herrEsc(v.modulo)}</button>
+    ${pend.length?`<div class="card" style="border:2px solid #a855f7"><strong style="color:#c084fc">⏳ Este vehículo tiene ${pend.length} cambio(s) esperando aprobación</strong>${pend.map(p=>`<div class="hint" style="margin:6px 0 0"><b>${VEH_TIPO_TXT[p.tipo]}</b>: ${vehMovDesc(p, v)}</div>`).join('')}${esAdmin()?pend.map(p=>`<div class="row" style="gap:8px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="vehAprobar('${p.id}',true)">✅ Aprobar ${VEH_TIPO_TXT[p.tipo].replace(/^\S+\s/,'').toLowerCase()}</button><button class="btn small" style="margin:0;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="vehAprobar('${p.id}',false)">Rechazar</button></div>`).join(''):''}</div>`:''}
+    ${vehSecCaja('🚐','Datos del vehículo','#0ea5e9', `<div style="margin-top:4px;line-height:1.85;font-size:15px">${VEH_CAMPOS.map(([k,t])=>`${t}: <b>${herrEsc(v[k]||'—')}</b>`).join('<br>')}</div>`)}
+    ${vehSecCaja('📅','Seguro y mantenimiento','#f59e0b',
+      caja(`🔧 Mantenimiento · cada ${VEH_MANT_MESES} meses`, `Último: <b style="color:var(--ink)">${vehFmt(v.mantUltimo)}</b> · Le toca: <b style="color:${m.c}">${vehFmt(vehProxMant(v))}</b>${v.mantPend?`<br>⏳ Marcado pendiente el ${herrFecha(v.mantPend.f)}${v.mantPend.nota?': '+herrEsc(v.mantPend.nota):''}`:''}`, m,
+        ed?`<div class="row" style="gap:6px;margin-top:8px">${btnAcc('mant','✅ Ya se hizo','#16a34a')}${btnAcc('mantPend','⏳ Sigue pendiente','#4b5563')}</div>`:'')
+      + caja(`🛡️ Seguro · semestral`, `Pagado hasta: <b style="color:${s.c}">${vehFmt(v.seguroHasta)}</b>${v.aseguradora?' · '+herrEsc(v.aseguradora):''}`, s,
+        ed?`<div class="row" style="gap:6px;margin-top:8px">${btnAcc('seguro','💵 Ya se pagó el seguro','#0284c7')}</div>`:'')
+      + formAcc, `Te avisa ${VEH_AVISO} días antes`)}
+    ${VEH_SECS.map(sc=>vehSecCaja(sc.ic, sc.t, sc.c, sc.items.map(([k,t])=>fila(t, (v.checks||{})[k])).join(''))).join('')}
+    ${ed?`<button class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#0284c7,#0369a1)" onclick="vehEditar('${v.id}')">✏️ Editar datos y lo que trae</button>`:''}
+    <div class="card"><strong>📜 Historial</strong>${(v.hist||[]).slice().reverse().slice(0,30).map(h=>`<div class="hint" style="margin:5px 0 0">${herrFecha(h.f)} · ${herrEsc(h.t)}${h.por?' · '+herrEsc(h.por):''}</div>`).join('') || '<p class="hint">Sin movimientos.</p>'}</div>
+    ${esAdmin()?`<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="vehBaja('${v.id}')">🗑️ Dar de baja este vehículo</button>`:''}`;
+}
+function vehFormHtml(){
+  const f = vehForm, nuevo = !f.id;
+  const fila = (k, t) => `<div class="row" style="justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid var(--line)"><span style="font-size:15px">${t}</span>${vehSiNo(f.checks[k], `vehForm.checks['${k}']=true;renderVeh()`, `vehForm.checks['${k}']=false;renderVeh()`)}</div>`;
+  return `<div class="card" style="border:2px solid #0ea5e9"><div style="font-size:18px;font-weight:900">${nuevo?'➕ Agregar vehículo':'✏️ Editar vehículo'}</div><div class="hint" style="margin:0">📍 ${herrEsc(f.modulo)}${esAdmin()?'':' · Dirección lo tiene que aprobar'}</div></div>
+    ${vehSecCaja('🚐','Datos del vehículo','#0ea5e9', VEH_CAMPOS.map(([k,t,ph])=>`<label class="hint" style="display:block;margin-top:8px;font-weight:800">${t}</label><input value="${herrEsc(f[k]||'')}" placeholder="${ph}" oninput="vehForm['${k}']=this.value" style="margin-top:4px">`).join(''))}
+    ${vehSecCaja('📅','Seguro y mantenimiento','#f59e0b', `<label class="hint" style="display:block;margin-top:8px;font-weight:800">🔧 ¿Cuándo fue el último mantenimiento?</label><input type="date" value="${f.mantUltimo||''}" max="${fechaHoyLocal()}" onchange="vehForm.mantUltimo=this.value" style="margin-top:4px">
+      <label class="hint" style="display:block;margin-top:8px;font-weight:800">🛡️ ¿Hasta cuándo está pagado el seguro?</label><input type="date" value="${f.seguroHasta||''}" onchange="vehForm.seguroHasta=this.value" style="margin-top:4px">
+      <input value="${herrEsc(f.aseguradora||'')}" placeholder="Aseguradora (opcional)" oninput="vehForm.aseguradora=this.value" style="margin-top:6px">`, 'Si no sabes la fecha, déjala vacía')}
+    ${VEH_SECS.map(sc=>vehSecCaja(sc.ic, sc.t, sc.c, sc.items.map(([k,t])=>fila(k,t)).join(''), 'Toca Sí o No')).join('')}
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn" style="flex:1;margin:0;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="vehGuardarForm()">${esAdmin()?'✅ Guardar':'📤 Enviar a aprobación'}</button><button class="btn small" style="margin:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="vehForm=null;renderVeh()">Cancelar</button></div>`;
+}
+const vehNuevo = mod => { vehAbierto = ''; vehForm = {modulo:mod, instalador:'', carro:'', color:'', placas:'', mantUltimo:'', seguroHasta:'', aseguradora:'', checks:{}}; renderVeh(); window.scrollTo(0,0); };
+async function vehEditar(id){ const D = await vehCargar(); const v = D.vehs.find(x=>x.id===id); if(!v) return;
+  vehForm = {id, modulo:v.modulo, instalador:v.instalador||'', carro:v.carro||'', color:v.color||'', placas:v.placas||'', mantUltimo:v.mantUltimo||'', seguroHasta:v.seguroHasta||'', aseguradora:v.aseguradora||'', checks:Object.assign({}, v.checks||{})}; renderVeh(); window.scrollTo(0,0); }
+async function vehGuardarForm(){
+  const f = vehForm; if(!f) return;
+  if(!String(f.carro).trim() || !String(f.placas).trim()) return alert('Escribe por lo menos el carro y las placas.');
+  const datos = {instalador:f.instalador.trim(), carro:f.carro.trim(), color:f.color.trim(), placas:f.placas.trim().toUpperCase(), mantUltimo:f.mantUltimo||'', seguroHasta:f.seguroHasta||'', aseguradora:(f.aseguradora||'').trim(), checks:Object.assign({}, f.checks)};
+  try{
+    if(!f.id){ await vehRegistrar('alta', f.modulo, '', datos); }
+    else { const D = await vehCargar(true), v = D.vehs.find(x=>x.id===f.id); if(!v) return;
+      const cambios = {}, antes = {};
+      Object.keys(datos).forEach(k=>{ if(k==='checks'){ if(VEH_ITEMS.some(([c])=>datos.checks[c]!==(v.checks||{})[c])){ cambios.checks = datos.checks; antes.checks = v.checks||{}; } } else if((v[k]||'')!==datos[k]){ cambios[k] = datos[k]; antes[k] = v[k]||''; } });
+      if(!Object.keys(cambios).length) return alert('No cambiaste nada.');
+      await vehRegistrar('editar', v.modulo, v.id, cambios, antes); vehAbierto = v.id; }
+  }catch(e){ return alert('Error: '+e.message); }
+  vehForm = null; renderVeh();
+}
+async function vehAbrirAcc(id, tipo){
+  const D = await vehCargar(), v = D.vehs.find(x=>x.id===id); if(!v) return;
+  if(D.movs.some(m=>m.estado==='pendiente' && m.vehId===id && m.tipo===tipo)) return alert('Ya hay uno igual esperando la aprobación de Dirección.');
+  const base = tipo==='seguro' ? (v.seguroHasta && vehDias(v.seguroHasta) > -60 ? vehMas(v.seguroHasta, VEH_SEG_MESES) : vehMas(fechaHoyLocal(), VEH_SEG_MESES)) : fechaHoyLocal();
+  vehAcc = {id, tipo, fecha:base}; renderVeh();
+}
+async function vehGuardarAcc(){
+  const a = vehAcc; if(!a) return; const D = await vehCargar(), v = D.vehs.find(x=>x.id===a.id); if(!v) return;
+  const nota = (document.getElementById('va-n').value||'').trim(), f = (document.getElementById('va-f')||{}).value || '';
+  if(a.tipo==='mantPend' && !nota) return alert('Escribe por qué sigue pendiente.');
+  if((a.tipo==='mant'||a.tipo==='seguro') && !f) return alert('Pon la fecha.');
+  if(a.tipo==='mant' && f>fechaHoyLocal()) return alert('La fecha del mantenimiento no puede ser después de hoy.');
+  const datos = a.tipo==='mant' ? {fecha:f, nota} : a.tipo==='seguro' ? {hasta:f, aseguradora:((document.getElementById('va-a')||{}).value||'').trim(), nota} : {nota};
+  try{ await vehRegistrar(a.tipo, v.modulo, v.id, datos); }catch(e){ return alert('Error: '+e.message); }
+  vehAcc = null; renderVeh();
+}
+async function vehBaja(id){ const D = await vehCargar(), v = D.vehs.find(x=>x.id===id); if(!v) return;
+  const nota = prompt(`🗑️ Dar de baja ${vehNombre(v)}\n\n¿Por qué? (se vendió, cambió de módulo…)`); if(nota===null) return;
+  try{ await vehRegistrar('baja', v.modulo, v.id, {nota:nota.trim()}); }catch(e){ return alert('Error: '+e.message); }
+  vehAbierto = ''; renderVeh(); }
+async function renderVeh(){
+  current = 'veh';
+  if(esAdministracion()){ $('#main').innerHTML = '<div class="card">Tu cuenta no maneja vehículos.</div>'; return; }
+  if(!vehMod || (!esAdmin() && vehMod!==modulo())) vehMod = esAdmin() ? (vehMod||modulo()) : modulo();
+  let D; try{ D = await vehCargar(); }catch(e){ $('#main').innerHTML = '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
+  if(current!=='veh') return;
+  if(vehForm){ $('#main').innerHTML = vehFormHtml(); return; }
+  const v = vehAbierto && D.vehs.find(x=>x.id===vehAbierto);
+  if(v){ $('#main').innerHTML = vehFichaHtml(v, D); return; }
+  const todos = esAdmin() || esSoloLectura(), chips = todos ? `<div class="chips" style="margin-top:10px">${[['__todos','🌎 Todos']].concat(MODULOS.map(m=>[m.nombre,'📍 '+m.nombre])).map(([k,t])=>`<button class="chip ${vehMod===k?'on':''}" style="${vehMod===k?'background:#0369a1;border-color:#0369a1;color:#fff':''}" onclick="vehMod='${k}';renderVeh()">${t}</button>`).join('')}</div>` : '';
+  const head = (t, mods) => `<div class="card" style="border-left:6px solid #0369a1"><div class="row" style="justify-content:space-between;gap:8px"><div style="font-size:17px;font-weight:900">🚐 ${t}</div><button class="btn small" style="background:linear-gradient(135deg,#b91c1c,#7f1d1d)" onclick="generarVehPDF(${JSON.stringify(mods).replace(/"/g,"'")})">📄 PDF</button></div>${chips}</div>`;
+  if(vehMod==='__todos'){
+    const pend = vehPendientes(D), av = vehAvisos(D);
+    $('#main').innerHTML = head('Vehículos · Todos los módulos', MODULOS.map(m=>m.nombre)) + vehAvisosHtml(av) + (esAdmin()?vehPendHtml(pend, D):'') +
+      `<div class="card">${MODULOS.map(md=>{ const vs = D.vehs.filter(x=>x.modulo===md.nombre), a = vehAvisos(D, md.nombre), nv = a.filter(x=>x.e.k==='venc').length, np = a.length-nv, nPend = vehPendientes(D, md.nombre).length;
+        return `<div class="row" onclick="vehMod='${md.nombre}';renderVeh()" style="cursor:pointer;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)"><span>📍 <b>${md.nombre}</b> <span class="hint" style="margin:0">· ${vs.length} vehículo${vs.length===1?'':'s'}</span></span><span>${nv?vehBadge(nv+' vencido'+(nv===1?'':'s'),'#dc2626'):''}${np?vehBadge(np+' pronto','#f59e0b'):''}${nPend?vehBadge(nPend+' por aprobar','#a855f7'):''}${!nv&&!np&&!nPend&&vs.length?vehBadge('Al corriente','#16a34a'):''} ›</span></div>`; }).join('')}</div>`;
+    return;
+  }
+  const vs = D.vehs.filter(x=>x.modulo===vehMod), pend = vehPendientes(D, vehMod);
+  $('#main').innerHTML = head('Vehículos de '+vehMod, [vehMod]) + vehAvisosHtml(vehAvisos(D, vehMod)) + vehPendHtml(pend, D)
+    + (vs.length ? vs.map(x=>vehCardHtml(x, D)).join('') : '<div class="card hint">Todavía no hay vehículos en este módulo.</div>')
+    + (puedeEditarVeh() ? `<button class="btn" style="width:100%;margin-top:10px;min-height:52px;background:linear-gradient(135deg,#0284c7,#0369a1)" onclick="vehNuevo('${vehMod}')">➕ Agregar vehículo</button>` : '');
+}
+async function generarVehPDF(mods){
+  let D; try{ D = await vehCargar(true); }catch(e){ return alert('No se pudo cargar: '+e.message); }
+  mods = (mods||[]).filter(Boolean);
+  const hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  const S = herrPdfBase('Vehículos', `${mods.length>1?'Todos los módulos':'Módulo '+mods[0]} · ${hoy}`, [3,105,161]);
+  const ROJ=[220,38,38], AMB=[217,119,6], VER=[22,128,74], GRI=[107,114,128];
+  const col = e => e.k==='venc'?ROJ:e.k==='pronto'?AMB:e.k==='ok'?VER:GRI;
+  const vsAll = D.vehs.filter(v=>mods.includes(v.modulo)), avAll = vsAll.length ? vehAvisos({vehs:vsAll}) : [];
+  S.kpis([[vsAll.length,'vehículos',[3,105,161]],[avAll.filter(a=>a.e.k==='venc').length,'vencidos',ROJ],[avAll.filter(a=>a.e.k==='pronto').length,`en ${VEH_AVISO} días o menos`,AMB],[vsAll.filter(v=>vehFaltan(v).length).length,'con algo faltante',[124,58,237]]]);
+  mods.forEach((md, i)=>{
+    const vs = D.vehs.filter(v=>v.modulo===md);
+    S.seccion('Módulo '+md, `${vs.length} vehículo${vs.length===1?'':'s'}`, [3,105,161], i>0);
+    if(!vs.length){ S.vacio('Sin vehículos registrados.'); return; }
+    S.banda('Datos, mantenimiento y seguro', '', [3,105,161]);
+    S.tabla([{t:'Vehículo',w:36},{t:'Instalador',w:30},{t:'Color',w:18},{t:'Placas',w:22},{t:'Mantenimiento\n(último → toca)',w:40},{t:'Seguro\n(pagado hasta)',w:36}],
+      vs.map(v=>{ const m = vehEstMant(v), s = vehEstSeg(v); return [{t:v.carro||'—', b:true}, v.instalador||'—', v.color||'', v.placas||'', {t:`${vehFmt(v.mantUltimo)} → ${vehFmt(vehProxMant(v))}\n${m.t}`, col:col(m), b:m.k!=='ok'}, {t:`${vehFmt(v.seguroHasta)}\n${s.t}`, col:col(s), b:s.k!=='ok'}]; }), [3,105,161]);
+    VEH_SECS.forEach(sc=>{ const hex = [1,3,5].map(k=>parseInt(sc.c.slice(k,k+2),16));
+      S.banda(sc.t, '', hex);
+      S.tabla([{t:'Vehículo',w:60}].concat(sc.items.map(([,t])=>({t, w:Math.floor(122/sc.items.length)}))),
+        vs.map(v=>[{t:`${v.carro||''} · ${v.placas||''}`, b:true}].concat(sc.items.map(([k])=>{ const x = (v.checks||{})[k]; return x===true?{t:'Sí',col:VER,b:true}:x===false?{t:'NO',col:ROJ,b:true}:{t:'—',col:GRI}; }))), hex); });
+    const pend = vehPendientes(D, md);
+    if(pend.length){ S.banda('Cambios esperando aprobación', pend.length+'', [124,58,237]);
+      S.tabla([{t:'Fecha',w:22},{t:'Qué',w:40},{t:'Vehículo',w:50},{t:'Quién',w:30},{t:'Estado',w:40}], pend.map(m=>{ const v = D.vehs.find(x=>x.id===m.vehId) || {carro:(m.datos||{}).carro, placas:(m.datos||{}).placas};
+        return [herrFecha(m.fecha), (VEH_TIPO_TXT[m.tipo]||m.tipo).replace(/^\S+\s/,''), vehNombre(v), String(m.creadoPor||'').split('@')[0], {t:'Por aprobar',col:[124,58,237],b:true}]; }), [124,58,237]); }
+  });
+  await S.fin(`Vehiculos_${mods.length>1?'todos':mods[0]}.pdf`, 'Closets Vera · Vehículos');
+}
+
 const HOME_SECCIONES = {
   mat:{t:'Material', c:'#2348b5'},
   dia:{t:'Trabajo del día', c:'#0d7468'},
   dir:{t:'Dirección', c:'#4a3b8f'},
   ped:{t:'Pedidos', c:'#2348b5'},
-  herr:{t:'Herramienta', c:'#c2410c'}
+  herr:{t:'Herramienta', c:'#c2410c'},
+  veh:{t:'Vehículos', c:'#0369a1'}
 };
 function renderHome(){
-  const sec = {mat:[], dia:[], dir:[], ped:[], herr:[]};
+  const sec = {mat:[], dia:[], dir:[], ped:[], herr:[], veh:[]};
   const t = (icon, titulo, sub, js, s, badge) => sec[s].push(`<button class="tile" style="--tc:${HOME_SECCIONES[s].c}" onclick="${js}" title="${String(sub).replace(/"/g,'&quot;')}">${badge?`<span class="tile-b ${badge.k}">${badge.t}</span>`:''}<span class="tile-ic">${homeIcon(icon)}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`);
   const ENTRA = {k:'ent', t:'↓ Entra'}, SALE = {k:'sal', t:'↑ Sale'}, MUEVE = {k:'mov', t:'⇄ Mueve'};
   let destacado = '';
@@ -1012,7 +1275,15 @@ function renderHome(){
     if(puedeCapturarHerr()) t('entrada','Compré herramienta','Pasa por el almacén y llega a tu módulo',"irA('herr');setTimeout(()=>herrNuevoForm('',false,true),50)",'herr');
     if(puedeAprobarHerr()) t('almacen','Almacén general', nRec ? nRec+' por recibir' : 'Entregas, regresos y mermas',"irA('alm')",'herr', nRec?{k:'num',t:String(nRec)}:null);
   }
-  const orden = esAdministracion() ? ['ped','mat','dia','dir','herr'] : ['mat','dia','dir','herr','ped'];
+  if(!esAdministracion()){
+    // Vehículos (confirmado por el usuario): avisos de mantenimiento y seguro 15 días antes.
+    const V = vehCache; if(!V) vehCargar().then(()=>{ if(current==='home') renderHome(); }).catch(()=>{});
+    const vmod = esAdmin()||esSoloLectura() ? '' : modulo();
+    const vAv = V ? vehAvisos(V, vmod) : [], vPend = V && (esAdmin()||esCoordinador()) ? vehPendientes(V, vmod).length : 0;
+    if(vAv.length){ const venc = vAv.filter(a=>a.e.k==='venc').length; destacado += `<button class="tile tile-ancho" style="--tc:${venc?'#dc2626':'#d97706'};grid-column:1/-1" onclick="vehAbierto='';vehForm=null;vehMod='${vmod||'__todos'}';irA('veh')"><span class="tile-ic">${homeIcon('camion')}</span><span><span class="tile-t">Vehículos con pendientes</span><span class="tile-s">${vAv.length} aviso(s)${venc?' · '+venc+' vencido(s)':''}: ${vAv.slice(0,3).map(a=>a.que.replace(/^\S+\s/,'')+' '+(a.v.carro||'')).join(', ')}${vAv.length>3?'…':''}</span></span></button>`; }
+    t('camion','Vehículos', vPend ? vPend+' por aprobar' : (V ? (vmod ? V.vehs.filter(x=>x.modulo===vmod).length : V.vehs.length)+' vehículo(s)' : 'Mantenimiento, seguro y equipo'),"vehAbierto='';vehForm=null;irA('veh')",'veh', vPend?{k:'num',t:String(vPend)}:(vAv.length?{k:'num',t:String(vAv.length)}:null));
+  }
+  const orden = esAdministracion() ? ['ped','mat','dia','dir','herr','veh'] : ['mat','dia','dir','herr','veh','ped'];
   const tilesHtml = destacado + orden.filter(k=>sec[k].length).map(k=>`<div class="home-sec" style="--tc:${HOME_SECCIONES[k].c}"><div class="home-sec-t">${HOME_SECCIONES[k].t}</div><div class="tiles">${sec[k].join('')}</div></div>`).join('');
 
   const pend = [];

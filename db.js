@@ -23,7 +23,9 @@ const COLLECTIONS_V6 = [...COLLECTIONS_V5, 'versiones'];
 const COLLECTIONS_V7 = [...COLLECTIONS_V6, 'gasolina'];
 const COLLECTIONS_V8 = [...COLLECTIONS_V7, 'cierres'];
 // v9: herramienta (herramientas, movimientos de herramienta e instaladores).
-const COLLECTIONS = [...COLLECTIONS_V8, 'herramientas', 'herrMovs', 'herrInstaladores'];
+const COLLECTIONS_V9 = [...COLLECTIONS_V8, 'herramientas', 'herrMovs', 'herrInstaladores'];
+// v10: vehículos por módulo y sus cambios (con aprobación de Dirección).
+const COLLECTIONS = [...COLLECTIONS_V9, 'vehiculos', 'vehMovs'];
 const NO_DESCARGAR = new Set(['fotos']);
 
 const ddb = new Dexie('auditoriamodulos');
@@ -36,7 +38,8 @@ ddb.version(5).stores(storesDe(COLLECTIONS_V5));
 ddb.version(6).stores(storesDe(COLLECTIONS_V6));
 ddb.version(7).stores(storesDe(COLLECTIONS_V7));
 ddb.version(8).stores(storesDe(COLLECTIONS_V8));
-ddb.version(9).stores(storesDe(COLLECTIONS));
+ddb.version(9).stores(storesDe(COLLECTIONS_V9));
+ddb.version(10).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 
