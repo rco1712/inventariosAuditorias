@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v175';
+const APP_VERSION = 'v176';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1186,26 +1186,55 @@ async function generarVehPDF(mods){
   mods = (mods||[]).filter(Boolean);
   const hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
   const S = herrPdfBase('Vehículos', `${mods.length>1?'Todos los módulos':'Módulo '+mods[0]} · ${hoy}`, [3,105,161]);
-  const ROJ=[220,38,38], AMB=[217,119,6], VER=[22,128,74], GRI=[107,114,128];
+  const doc = S.doc, L = S.L, W = S.W, pageH = S.pageH;
+  const AZ=[3,105,161], ROJ=[220,38,38], AMB=[217,119,6], VER=[22,128,74], GRI=[107,114,128], NEG=[17,24,39];
   const col = e => e.k==='venc'?ROJ:e.k==='pronto'?AMB:e.k==='ok'?VER:GRI;
-  const vsAll = D.vehs.filter(v=>mods.includes(v.modulo)), avAll = vsAll.length ? vehAvisos({vehs:vsAll}) : [];
-  S.kpis([[vsAll.length,'vehículos',[3,105,161]],[avAll.filter(a=>a.e.k==='venc').length,'vencidos',ROJ],[avAll.filter(a=>a.e.k==='pronto').length,`en ${VEH_AVISO} días o menos`,AMB],[vsAll.filter(v=>vehFaltan(v).length).length,'con algo faltante',[124,58,237]]]);
-  mods.forEach((md, i)=>{
+  const hex = h => [1,3,5].map(k=>parseInt(h.slice(k,k+2),16));
+  const fill = (c, x, y, w, h) => { doc.setFillColor(...c); doc.rect(x, y, w, h, 'F'); };
+  const txt = (t, x, y, o) => { o = o||{}; doc.setFont(undefined, o.b?'bold':'normal'); doc.setFontSize(o.s||9); doc.setTextColor(...(o.c||NEG)); doc.text(String(t), x, y, o.r?{align:'right'}:undefined); };
+  const vsAll = D.vehs.filter(v=>mods.includes(v.modulo)), avAll = vehAvisos({vehs:vsAll});
+  S.kpis([[vsAll.length,'vehículos',AZ],[avAll.filter(a=>a.e.k==='venc').length,'vencidos',ROJ],[avAll.filter(a=>a.e.k==='pronto').length,`en ${VEH_AVISO} días o menos`,AMB],[vsAll.filter(v=>vehFaltan(v).length).length,'con algo faltante',[124,58,237]]]);
+  const H = 118; // alto de cada ficha
+  mods.forEach((md, mi)=>{
     const vs = D.vehs.filter(v=>v.modulo===md);
-    S.seccion('Módulo '+md, `${vs.length} vehículo${vs.length===1?'':'s'}`, [3,105,161], i>0);
+    S.seccion('Módulo '+md, `${vs.length} vehículo${vs.length===1?'':'s'}`, AZ, mi>0);
     if(!vs.length){ S.vacio('Sin vehículos registrados.'); return; }
-    S.banda('Datos, mantenimiento y seguro', '', [3,105,161]);
-    S.tabla([{t:'Vehículo',w:36},{t:'Instalador',w:30},{t:'Color',w:18},{t:'Placas',w:22},{t:'Mantenimiento\n(último → toca)',w:40},{t:'Seguro\n(pagado hasta)',w:36}],
-      vs.map(v=>{ const m = vehEstMant(v), s = vehEstSeg(v); return [{t:v.carro||'—', b:true}, v.instalador||'—', v.color||'', v.placas||'', {t:`${vehFmt(v.mantUltimo)} → ${vehFmt(vehProxMant(v))}\n${m.t}`, col:col(m), b:m.k!=='ok'}, {t:`${vehFmt(v.seguroHasta)}\n${s.t}`, col:col(s), b:s.k!=='ok'}]; }), [3,105,161]);
-    VEH_SECS.forEach(sc=>{ const hex = [1,3,5].map(k=>parseInt(sc.c.slice(k,k+2),16));
-      S.banda(sc.t, '', hex);
-      S.tabla([{t:'Vehículo',w:60}].concat(sc.items.map(([,t])=>({t, w:Math.floor(122/sc.items.length)}))),
-        vs.map(v=>[{t:`${v.carro||''} · ${v.placas||''}`, b:true}].concat(sc.items.map(([k])=>{ const x = (v.checks||{})[k]; return x===true?{t:'Sí',col:VER,b:true}:x===false?{t:'NO',col:ROJ,b:true}:{t:'—',col:GRI}; }))), hex); });
-    const pend = vehPendientes(D, md);
-    if(pend.length){ S.banda('Cambios esperando aprobación', pend.length+'', [124,58,237]);
-      S.tabla([{t:'Fecha',w:22},{t:'Qué',w:40},{t:'Vehículo',w:50},{t:'Quién',w:30},{t:'Estado',w:40}], pend.map(m=>{ const v = D.vehs.find(x=>x.id===m.vehId) || {carro:(m.datos||{}).carro, placas:(m.datos||{}).placas};
-        return [herrFecha(m.fecha), (VEH_TIPO_TXT[m.tipo]||m.tipo).replace(/^\S+\s/,''), vehNombre(v), String(m.creadoPor||'').split('@')[0], {t:'Por aprobar',col:[124,58,237],b:true}]; }), [124,58,237]); }
+    vs.forEach((v, i)=>{
+      if(S.y + H > pageH-14){ doc.addPage(); S.y = 15; }
+      let y = S.y; const m = vehEstMant(v), s = vehEstSeg(v);
+      // Encabezado de la ficha
+      fill(AZ, L, y, W, 11); txt(`${i+1}. ${v.carro||'Vehículo'}`, L+4, y+7.4, {b:true, s:13, c:[255,255,255]}); txt(`Placas: ${v.placas||'—'}`, L+W-4, y+7.4, {b:true, s:11, c:[255,255,255], r:true});
+      y += 14;
+      // Datos: 4 casillas
+      const cw = (W-9)/4;
+      [['Instalador',v.instalador],['Carro',v.carro],['Color',v.color],['Placas',v.placas]].forEach(([t,val],k)=>{ const x = L + k*(cw+3);
+        fill(pdfTinte(AZ,.92), x, y, cw, 14); fill(AZ, x, y, 1.2, 14); txt(t, x+3.5, y+5, {s:7.5, c:[90,96,112]}); txt(val||'—', x+3.5, y+11, {b:true, s:10.5}); });
+      y += 18;
+      // Mantenimiento y seguro
+      const hw = (W-4)/2;
+      const caja = (x, titulo, l1, l2, e) => { const c = col(e); fill(pdfTinte(c,.9), x, y, hw, 24); fill(c, x, y, 1.6, 24);
+        txt(titulo, x+4, y+6, {b:true, s:10}); txt(l1, x+4, y+12, {s:9}); txt(l2, x+4, y+17.5, {s:9}); txt(e.k==='ok'?'Al corriente':e.t, x+4, y+22.5, {b:true, s:9, c}); };
+      caja(L, `Mantenimiento (cada ${VEH_MANT_MESES} meses)`, `Último: ${vehFmt(v.mantUltimo)}`, `Le toca: ${vehFmt(vehProxMant(v))}`, m);
+      caja(L+hw+4, 'Seguro (semestral)', `Pagado hasta: ${vehFmt(v.seguroHasta)}`, `Aseguradora: ${v.aseguradora||'—'}`, s);
+      y += 28;
+      // Lo que trae: 4 secciones en 2 columnas
+      const filas = sc => sc.items.length;
+      const alto = sc => 7 + filas(sc)*5.2 + 2;
+      const fila1 = Math.max(alto(VEH_SECS[0]), alto(VEH_SECS[1])), fila2 = Math.max(alto(VEH_SECS[2]), alto(VEH_SECS[3]));
+      VEH_SECS.forEach((sc, k)=>{ const x = L + (k%2)*(hw+4), yy = y + (k<2?0:fila1+3), c = hex(sc.c), h = k<2?fila1:fila2;
+        fill(pdfTinte(c,.93), x, yy, hw, h); fill(c, x, yy, hw, 6.5); txt(sc.t, x+3, yy+4.6, {b:true, s:9, c:[255,255,255]});
+        sc.items.forEach(([key,t],j)=>{ const val = (v.checks||{})[key], yl = yy+11.5+j*5.2;
+          txt(t, x+4, yl, {s:9}); txt(val===true?'Sí':val===false?'NO':'Sin revisar', x+hw-4, yl, {b:true, s:9, c: val===true?VER:val===false?ROJ:GRI, r:true}); }); });
+      y += fila1 + fila2 + 3;
+      const pend = D.movs.filter(x=>x.estado==='pendiente' && x.vehId===v.id);
+      if(pend.length){ y += 3; txt(`Por aprobar: ${pend.map(p=>(VEH_TIPO_TXT[p.tipo]||p.tipo).replace(/^\S+\s/,'')).join(', ')}`, L, y+3, {b:true, s:8.5, c:[124,58,237]}); y += 5; }
+      S.y = y + 8;
+    });
+    const altas = vehPendientes(D, md).filter(x=>x.tipo==='alta');
+    if(altas.length){ S.banda('Altas esperando aprobación', String(altas.length), [124,58,237]);
+      S.tabla([{t:'Carro',w:50},{t:'Placas',w:30},{t:'Instalador',w:50},{t:'Capturó',w:52}], altas.map(a=>[(a.datos||{}).carro||'', (a.datos||{}).placas||'', (a.datos||{}).instalador||'', String(a.creadoPor||'').split('@')[0]]), [124,58,237]); }
   });
+  doc.setTextColor(0,0,0);
   await S.fin(`Vehiculos_${mods.length>1?'todos':mods[0]}.pdf`, 'Closets Vera · Vehículos');
 }
 
