@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v172';
+const APP_VERSION = 'v174';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4210,7 +4210,7 @@ function movPosibleDuplicado(m){
 function movCorregible(m){
   if(!esAdmin() || m.anulado || m.estado==='pendiente' || m.estado==='rechazado') return false;
   if(!['entrada','salida','merma'].includes(m.tipo)) return false;
-  if(m.cierreTurno || m.motivo) return false;
+  if(m.motivo || (m.cierreTurno && m.tipo!=='salida')) return false;
   if(/^(Traspaso|Devolución de préstamo) /.test(m.nota||'') || m.origenTipo==='modulo') return false;
   return true;
 }
@@ -4220,7 +4220,10 @@ function movCorrAbrir(id){
   const m = movs.find(x=>x.id===id); if(!m || !movCorregible(m)) return;
   const audDespues = (auditorias||[]).find(a=>a.aplicada && a.modulo===m.modulo && (a.fecha||'') > (m.fecha||''));
   if(audDespues) return alert(`No se puede corregir: después de este movimiento ya se aplicó la auditoría del ${new Date(audDespues.fecha).toLocaleDateString('es-MX')}, que dejó el inventario como se contó.\n\nSi algo no cuadra, usa Inventario → ✏️ Corregir un artículo.`);
-  const it = CATALOGO.find(i=>i.id===m.itemId) || {cat:''}, soloAnular = !!(m.pedidoId || m.ferEnvioId);
+  const it = CATALOGO.find(i=>i.id===m.itemId) || {cat:''}, soloAnular = !!(m.pedidoId || m.ferEnvioId), esCierre = !!m.cierreTurno;
+  // Si antes de este cierre se anuló una entrada repetida del mismo artículo ese día, el cierre la "absorbió" como gasto: se sugiere restarla.
+  const anuladaAntes = esCierre ? movs.filter(x=>x.anulado && x.tipo==='entrada' && x.modulo===m.modulo && x.itemId===m.itemId && diaLocal(x.fecha)===diaLocal(m.fecha) && (x.fecha||'')<(m.fecha||'')).reduce((a,x)=>a+(Number(x.cantidad)||0),0) : 0;
+  const sugerido = anuladaAntes && !m.correccion && Number(m.cantidad)-anuladaAntes>=0 ? fmtNum(Number(m.cantidad)-anuladaAntes) : null;
   movCorr = {id};
   const ov = document.createElement('div'); ov.id = 'mov-corr'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto'; document.body.appendChild(ov);
   ov.addEventListener('click', e=>{ if(e.target===ov) movCorrCerrar(); });
@@ -4229,12 +4232,15 @@ function movCorrAbrir(id){
   ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #d97706;border-radius:18px;padding:16px;margin-top:20px">
     <div class="row" style="justify-content:space-between"><div style="font-size:18px;font-weight:900">✏️ Corregir movimiento</div><button onclick="movCorrCerrar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <div style="margin-top:10px;padding:10px;border-radius:12px;background:rgba(127,127,127,.12)"><div class="hint" style="margin:0">Así se capturó</div><div style="font-weight:900;font-size:16px">${tipoTxt} · ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} de ${m.itemNombre}</div><div class="hint" style="margin:2px 0 0">${new Date(m.fecha).toLocaleString('es-MX')} · ${(m.creadoPor||'').split('@')[0]}${m.nota?' · '+herrEsc(m.nota):''}</div></div>
-    ${soloAnular ? `<p class="hint" style="margin:10px 0 0;padding:8px 10px;border-radius:10px;background:rgba(217,119,6,.15)">Esta entrada vino de ${m.pedidoId?'un <strong>pedido</strong> (Por llegar)':'un <strong>envío del almacén general</strong>'}. Si está <strong>repetida</strong>, anúlala aquí abajo.</p>` : `<label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Qué artículo era en realidad?</label><select id="mc-item" style="margin-top:4px">${opts}</select>
+    ${esCierre ? `<p class="hint" style="margin:10px 0 0;padding:8px 10px;border-radius:10px;background:rgba(124,58,237,.15)">Esta salida la calculó el <strong>Cierre del turno</strong> (lo que había − lo que quedó). Corrige solo <strong>cuánto se gastó de verdad</strong>.</p>
+      ${sugerido!==null?`<div style="margin-top:8px;padding:10px;border-radius:12px;background:rgba(22,163,74,.15);border:1px solid #16a34a"><div style="font-weight:800">💡 Ese día se anuló una entrada repetida de ${fmtNum(anuladaAntes)} ${item2unidad(m.itemId)}</div><div class="hint" style="margin:2px 0 6px">El cierre la contó como gasto. Lo real sería ${fmtNum(m.cantidad)} − ${fmtNum(anuladaAntes)} = <strong>${sugerido}</strong>.</div><button class="btn small" style="margin:0;background:#16a34a" onclick="document.getElementById('mc-q').value='${sugerido}';document.getElementById('mc-n').value='El cierre contó como gasto la entrada repetida que se anuló'">Usar ${sugerido}</button></div>`:''}
+      ${(()=>{ const fx = cierreFixes(m.loteId); return fx.length>1 ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="cierreCorregirTodo('${m.loteId}')">✅ Corregir TODO este cierre de una vez (${fx.length} artículos)</button><p class="hint" style="margin:4px 0 0">Resta la entrada repetida que se anuló en cada artículo de este cierre.</p>` : ''; })()}
+      <input type="hidden" id="mc-item" value="${m.itemId}"><label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Cuánto se gastó de verdad?</label><input id="mc-q" type="number" min="0" inputmode="decimal" value="${fmtNum(m.cantidad)}" style="margin-top:4px;font-size:18px;font-weight:900;text-align:center">` : soloAnular ? `<p class="hint" style="margin:10px 0 0;padding:8px 10px;border-radius:10px;background:rgba(217,119,6,.15)">Esta entrada vino de ${m.pedidoId?'un <strong>pedido</strong> (Por llegar)':'un <strong>envío del almacén general</strong>'}. Si está <strong>repetida</strong>, anúlala aquí abajo.</p>` : `<label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Qué artículo era en realidad?</label><select id="mc-item" style="margin-top:4px">${opts}</select>
     <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Cuánto fue?</label><input id="mc-q" type="number" min="0" inputmode="decimal" value="${fmtNum(m.cantidad)}" style="margin-top:4px;font-size:18px;font-weight:900;text-align:center">`}
     <label class="hint" style="display:block;margin-top:8px;font-weight:800">¿Por qué se corrige? <span style="color:var(--bad)">*</span></label><input id="mc-n" placeholder="${soloAnular?'Ej. entrada repetida, solo llegó una vez':'Ej. capturó Nogal y era Roble'}" style="margin-top:4px">
     ${soloAnular?'':`<button class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="movCorrGuardar(false)">✅ Guardar corrección</button>`}
-    <button class="btn" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="movCorrGuardar(true)">🗑️ Anular este movimiento (no debió registrarse)</button>
-    ${(()=>{ const lote = m.loteId ? movs.filter(x=>x.loteId===m.loteId && movCorregible(x)) : []; return lote.length>1 ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#b91c1c,#7f1d1d)" onclick="movCorrAnularLote('${m.loteId}')">🗑️ Anular TODA esta captura (${lote.length} artículos, ${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})})</button><p class="hint" style="margin:4px 0 0">Útil si se guardó dos veces: anula todos los artículos que se capturaron juntos en esta vez.</p>` : ''; })()}
+    ${esCierre?'':`<button class="btn" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="movCorrGuardar(true)">🗑️ Anular este movimiento (no debió registrarse)</button>`}
+    ${esCierre?'':(()=>{ const lote = m.loteId ? movs.filter(x=>x.loteId===m.loteId && movCorregible(x)) : []; return lote.length>1 ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#b91c1c,#7f1d1d)" onclick="movCorrAnularLote('${m.loteId}')">🗑️ Anular TODA esta captura (${lote.length} artículos, ${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})})</button><p class="hint" style="margin:4px 0 0">Útil si se guardó dos veces: anula todos los artículos que se capturaron juntos en esta vez.</p>` : ''; })()}
     <p class="hint" style="margin:8px 0 0">El inventario se recalcula solo. Queda anotado quién lo corrigió, cuándo y qué decía antes.</p></div>`;
 }
 async function movCorrAnularLote(loteId){
@@ -4247,6 +4253,23 @@ async function movCorrAnularLote(loteId){
   catch(e){ return alert('Error: '+e.message); }
   movCorrCerrar(); entrCache = null; salCache = null; toast(`🗑️ ${lote.length} movimientos anulados`); renderMovHist();
 }
+// Salidas de un mismo Cierre del turno que absorbieron una entrada repetida (ya anulada) del mismo día.
+function cierreFixes(loteId){
+  if(!loteId) return [];
+  return movs.filter(m=>m.loteId===loteId && m.cierreTurno && m.tipo==='salida' && !m.anulado && m.estado!=='rechazado').map(m=>{
+    const an = movs.filter(x=>x.anulado && x.tipo==='entrada' && x.modulo===m.modulo && x.itemId===m.itemId && diaLocal(x.fecha)===diaLocal(m.fecha) && (x.fecha||'')<(m.fecha||'')).reduce((a,x)=>a+(Number(x.cantidad)||0),0);
+    return {m, an, nuevo: fmtNum(Number(m.cantidad)-an)};
+  }).filter(x=>x.an>0 && x.nuevo>=0 && !x.m.correccion); // si ya se corrigió, no se vuelve a restar
+}
+async function cierreCorregirTodo(loteId){
+  const fx = cierreFixes(loteId); if(!fx.length) return alert('No hay nada que corregir en este cierre.');
+  if(!confirm(`✅ Corregir el cierre del turno (${fx.length} artículos):\n\n${fx.map(x=>`• ${x.m.itemNombre}: ${fmtNum(x.m.cantidad)} → ${fmtNum(x.nuevo)} ${item2unidad(x.m.itemId)}`).join('\n')}\n\nA cada uno se le resta la entrada repetida que se anuló. ¿Guardar?`)) return;
+  const quien = (getCurrentUserEmail?getCurrentUserEmail():''), ahora = new Date().toISOString(), motivo = 'El cierre contó como gasto la entrada repetida que se anuló';
+  try{ for(const x of fx){ const m = x.m, upd = {cantidad:x.nuevo, correccion:{fecha:ahora, por:quien, motivo, antes:{itemId:m.itemId, itemNombre:m.itemNombre, cantidad:m.cantidad}}, nota:(m.nota?m.nota+' · ':'')+`✏️ Corregido por Dirección (antes: ${fmtNum(m.cantidad)}): ${motivo}`};
+      await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); } }
+  catch(e){ return alert('Error: '+e.message); }
+  movCorrCerrar(); salCache = null; toast(`✅ Cierre corregido: ${fx.length} artículos`); renderMovHist();
+}
 async function movCorrGuardar(anular){
   const m = movs.find(x=>x.id===(movCorr||{}).id); if(!m) return;
   const nota = (document.getElementById('mc-n').value||'').trim(); if(!nota) return alert('Escribe por qué se corrige (queda en el historial).');
@@ -4258,7 +4281,7 @@ async function movCorrGuardar(anular){
     upd = {estado:'rechazado', anulado:true, correccion:{fecha:ahora, por:quien, anulado:true, motivo:nota, antes}, nota:(m.nota?m.nota+' · ':'')+`🗑️ Anulado por Dirección: ${nota}`};
   } else {
     const itemId = document.getElementById('mc-item').value, it = CATALOGO.find(i=>i.id===itemId), q = Number(document.getElementById('mc-q').value);
-    if(!it || isNaN(q) || q<=0) return alert('Revisa el artículo y la cantidad.');
+    if(!it || isNaN(q) || q<0 || (q===0 && !m.cierreTurno)) return alert('Revisa el artículo y la cantidad.');
     if(itemId===m.itemId && Math.abs(q-Number(m.cantidad))<0.0005) return alert('No cambiaste nada.');
     if(m.tipo!=='entrada'){ const f = calcFormula(itemId); const extra = itemId===m.itemId ? q-Number(m.cantidad) : q; const disp = esHoja(it) ? (m.tipo==='merma'&&m.lado==='cortado'?f.cortado:f.completas) : f.final;
       if(extra > disp + 1e-9) return alert(`No alcanza: de ${it.nombre} hay ${fmtNum(disp)} y la corrección le quitaría ${fmtNum(extra)}.`); }
