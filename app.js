@@ -218,7 +218,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v178';
+const APP_VERSION = 'v179';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3707,7 +3707,7 @@ function renderAud(){
         else { const f=faltanSeccionAud(x.k); falta = `Faltan: ${f.slice(0,6).map(i=>i.nombre).join(', ')}${f.length>6?' y '+(f.length-6)+' más':''}`; } }
       return `<div class="movitem" style="flex-wrap:wrap;gap:6px"><span style="min-width:0;flex:1 1 60%"><span class="invname">${ok?'✅':'⏳'} ${AUD_ICONO[x.k]||''} ${x.t}</span><span class="hint" style="display:block;margin:2px 0 0">${det}</span>${falta?`<span class="hint" style="display:block;margin:2px 0 0;color:#b3742c">${falta}</span>`:''}</span>${ok?'':`<button class="btn small" onclick="irPasoAud(${idx})">Ir a contar</button>`}</div>`; }).join('');
     const listo = primerPasoPendienteAud()===AUD_SECCIONES.length-1;
-    cuerpo = (ciego || audTipo==='conteo' ? '' : audAntesDeGuardarHtml()) + `<div class="card"><h3>✅ Revisar y enviar</h3>
+    cuerpo = (ciego ? '' : audTipo==='conteo' ? audAntesConteoHtml() : audAntesDeGuardarHtml()) + `<div class="card"><h3>✅ Revisar y enviar</h3>
       <div class="movlist" style="margin-top:8px">${filas}</div>
       ${listo?'<p class="hint" style="margin-top:8px">Todo está contado. Si encontraste algo más, regresa a su sección y usa ➕ para sumarlo.</p>':'<p class="neg" style="margin-top:8px">Todavía hay secciones pendientes. Termínalas para poder guardar; si de verdad no hay de lo que falta, entra a la sección y ponlo en 0.</p>'}
       <button class="btn" style="width:100%;min-height:54px;font-size:16px;margin-top:10px" ${listo?'':'disabled'} onclick="saveAudit()">${ciego?'📤 Enviar conteo a Dirección':(audTipo==='conteo'?'Guardar conteo inicial':'Guardar auditoría')}</button>
@@ -3890,19 +3890,26 @@ function audMarcarCambios(){
   Object.keys(auditCapturas).forEach(k=>{ const v = auditCapturas[k];
     if(v===undefined || v===null){ delete auditCapTs[k]; delete _audValPrev[k]; return; }
     if(_audValPrev[k]!==v || !auditCapTs[k]){ auditCapTs[k] = ahora; _audValPrev[k] = v; } });
-  Object.keys(auditCapTs).forEach(k=>{ if(auditCapturas[k]===undefined || auditCapturas[k]===null){ delete auditCapTs[k]; delete _audValPrev[k]; } });
+  Object.keys(auditCapTs).forEach(k=>{ if(!k.startsWith('pz:') && (auditCapturas[k]===undefined || auditCapturas[k]===null)){ delete auditCapTs[k]; delete _audValPrev[k]; } });
+  // Piezas cortadas y armados (v179): se siguen por la hoja a la que equivalen ("pz:" + hoja).
+  let eq = {}; try{ eq = piezasAuditAHojas() || {}; }catch(e){}
+  Object.keys(eq).forEach(id=>{ const v = fmtNum(Number(eq[id])||0), k = 'pz:'+id;
+    if(!(v>0)){ delete auditCapTs[k]; delete _audValPrev[k]; return; }
+    if(_audValPrev[k]!==v || !auditCapTs[k]){ auditCapTs[k] = ahora; _audValPrev[k] = v; } });
+  Object.keys(auditCapTs).forEach(k=>{ if(k.startsWith('pz:') && !(Number(eq[k.slice(3)])>0)){ delete auditCapTs[k]; delete _audValPrev[k]; } });
 }
 let _audMovCache = null, _audMovT = 0;
 function audMovidosDespues(){
   if(_audMovCache && Date.now()-_audMovT < 1500) return _audMovCache;
   const mod = modulo(), out = [];
-  const porItem = {}; movs.forEach(m=>{ if(m.itemId && auditCapTs[m.itemId]) (porItem[m.itemId]=porItem[m.itemId]||[]).push(m); });
-  Object.keys(auditCapTs).forEach(id=>{
-    if(auditCapturas[id]===undefined || auditCapturas[id]===null) return;
-    const t = auditCapTs[id];
+  const porItem = {}; movs.forEach(m=>{ if(m.itemId && (auditCapTs[m.itemId] || auditCapTs['pz:'+m.itemId])) (porItem[m.itemId]=porItem[m.itemId]||[]).push(m); });
+  Object.keys(auditCapTs).forEach(k=>{
+    const pz = k.startsWith('pz:'), id = pz ? k.slice(3) : k;
+    if(!pz && (auditCapturas[id]===undefined || auditCapturas[id]===null)) return;
+    const t = auditCapTs[k];
     const ms = (porItem[id]||[]).filter(m=>(!m.modulo || m.modulo===mod) && m.tipo!=='nota' && !m.anulado && m.estado!=='rechazado' && ((m.fecha||'')>t || (m.estado==='aprobado' && (m.revisadoEn||'')>t)));
-    const it = CATALOGO.find(i=>i.id===id);
-    if(ms.length && it) out.push({id, it, ms});
+    const it0 = CATALOGO.find(i=>i.id===id), it = it0 && pz ? Object.assign({}, it0, {nombre:'✂️ Piezas cortadas / armados · '+it0.nombre.replace(/^Melamina /,'')}) : it0;
+    if(ms.length && it) out.push({id:k, it, ms, pz});
   });
   _audMovCache = out; _audMovT = Date.now();
   return out;
@@ -3927,13 +3934,57 @@ function audAntesDeGuardar(){
   if(!dom) out.push(cierreHechoHoy() ? {ok:true, t:`${modulo()} ya hizo su cierre del turno de hoy`} : {ok:false, t:`${modulo()} todavía no hace su cierre del turno de hoy`, d:'Si ya se trabajó hoy, lo que se usó de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta. Lo mejor es guardar después de su cierre.'});
   return out;
 }
+// "Antes de guardar" del CONTEO INICIAL (confirmado por el usuario, v179).
+function audAntesConteoHtml(){
+  const secs = AUD_SECCIONES.filter(x=>x.k!=='__revisar');
+  const lista = secs.filter(x=>!String(x.k).startsWith('__')), extra = secs.filter(x=>String(x.k).startsWith('__'));
+  const falt = lista.map(x=>({x, f:faltanSeccionAud(x.k)})).filter(o=>o.f.length);
+  const ceros = CATALOGO.filter(it=>auditCapturas[it.id]===0 || auditCapturas[it.id]==='0');
+  const mov = audMovidosDespues().length;
+  const filas = [];
+  if(!falt.length) filas.push({ok:true, t:'Todo lo de la lista está contado'});
+  falt.forEach(o=>filas.push({ok:false, t:`${o.x.t}: faltan ${o.f.length}`, d: o.f.length<=4 ? o.f.map(i=>i.nombre).join(', ') : '', btn:`<button class="btn small" onclick="irPasoAud(${AUD_SECCIONES.findIndex(z=>z.k===o.x.k)})">Ir</button>`}));
+  extra.forEach(x=>{ if(!seccionCompletaAud(x.k)) filas.push({ok:false, t:`${x.t} sin confirmar`, d:'Si no hay, entra y toca "No hay".', btn:`<button class="btn small" onclick="irPasoAud(${AUD_SECCIONES.findIndex(z=>z.k===x.k)})">Ir</button>`}); });
+  if(ceros.length) filas.push({ok:false, t:`${ceros.length} artículo${ceros.length===1?'':'s'} quedaron en 0`, d:'Revisa que de verdad no haya: <details style="margin-top:4px"><summary style="cursor:pointer;color:var(--brand)">Ver lista</summary>'+ceros.map(i=>i.nombre).join(', ')+'</details>'});
+  filas.push(mov ? {ok:false, t:`${mov} para recontar`, d:'Se movieron después de que los contaste (arriba te dice cuáles).'} : {ok:true, t:'Nada se movió después de contarlo'});
+  const mal = filas.filter(x=>!x.ok).length;
+  return `<div class="card" style="padding:12px;border:2px solid ${mal?'#d97706':'var(--ok)'}"><strong style="font-size:16px">${mal?'⏳':'✅'} Antes de guardar el conteo inicial</strong>
+    ${filas.map(x=>`<div class="movitem" style="align-items:center"><span style="min-width:0"><span class="invname">${x.ok?'✅':'⏳'} ${x.t}</span>${x.d?`<span class="hint" style="display:block;margin:2px 0 0">${x.d}</span>`:''}</span>${x.btn||''}</div>`).join('')}</div>`;
+}
+// PDF del CONTEO INICIAL (confirmado por el usuario, v179): lo que quedó como inventario de arranque.
+async function conteoPdfUI(id){ const a = (auditorias||[]).find(x=>x.id===id); if(!a) return alert('No se encontró el conteo.'); try{ await generarConteoInicialPDF(a); }catch(e){ alert('No se pudo generar el PDF: '+e.message); } }
+async function generarConteoInicialPDF(a){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  const f = new Date(a.fecha), fTxt = f.toLocaleDateString('es-MX',{day:'numeric', month:'long', year:'numeric'})+', '+f.toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'});
+  const AZ = [35,72,181], S = herrPdfBase('Closets Vera · Conteo inicial', `Módulo ${a.modulo}  ·  ${fTxt}  ·  Contó: ${a.auditor||'—'}`, AZ), doc = S.doc;
+  const res = (a.resultados||[]).filter(r=>Math.abs(Number(r.fisico)||0)>0.005).map(r=>Object.assign({}, r, {cat: r.cat || (CATALOGO.find(i=>i.id===r.itemId)||{}).cat || 'Otros'}));
+  const suma = cats => fmtNum(res.filter(r=>cats.includes(r.cat)).reduce((s,r)=>s+(Number(r.fisico)||0),0));
+  S.kpis([[suma(['Melamina','MDF']),'hojas (melamina y MDF)',PDF_CAT_COLOR.Melamina],[suma(['PVC','Cintilla']),'metros de PVC y cintilla',PDF_CAT_COLOR.PVC],[suma(['Herrajes']),'piezas de herrajes',PDF_CAT_COLOR.Herrajes],[String(res.length),'artículos con existencia',[22,101,52]]]);
+  const orden = ['Melamina','MDF','Cintilla','PVC','Pegamento','Stickers','Herrajes'];
+  const cats = [...new Set(res.map(r=>r.cat))].sort((x,y)=>(orden.indexOf(x)<0?99:orden.indexOf(x))-(orden.indexOf(y)<0?99:orden.indexOf(y)));
+  if(!cats.length) S.vacio('No se contó nada con existencia.');
+  cats.forEach(c=>{ const col = PDF_CAT_COLOR[c] || [71,85,105], xs = res.filter(r=>r.cat===c);
+    S.banda(c, `${xs.length} artículo${xs.length===1?'':'s'}`, col);
+    S.tabla([{t:'Artículo',w:78},{t:'Cantidad',w:28},{t:'Unidad',w:24},{t:'Detalle',w:52}], xs.map(r=>[r.nombre, {t:fmtNum(r.fisico), b:true}, r.unidad||'', r.hojasEnPiezas ? `${fmtNum(r.hojasCompletas)} completas + ${fmtNum(r.hojasEnPiezas)} en piezas` : '']), col); });
+  if((a.piezasContadas||[]).length){ const col = [13,116,104]; S.banda('Piezas cortadas', `${a.piezasContadas.length} tipo(s)`, col);
+    S.tabla([{t:'Color',w:50},{t:'Pieza',w:62},{t:'Medida',w:40},{t:'Cantidad',w:30}], a.piezasContadas.map(p=>[p.grupo||'', p.pieza||'', p.dim||'', {t:fmtNum(p.cantidad), b:true}]), col); }
+  if((a.armadosContados||[]).length){ const col = [124,58,237]; S.banda('Armados', `${a.armadosContados.length}`, col);
+    S.tabla([{t:'Armado',w:152},{t:'Cantidad',w:30}], a.armadosContados.map(x=>[x.descripcion||'', {t:fmtNum(x.cantidad), b:true}]), col); }
+  if((a.melaminasFuera||[]).length){ const col = [100,116,139]; S.banda('Melaminas que ya no se usan (solo registro)', '', col);
+    S.tabla([{t:'Color',w:152},{t:'Hojas',w:30}], a.melaminasFuera.map(x=>[x.nombre, fmtNum(x.hojas)]), col); }
+  if(S.y > S.pageH-40){ doc.addPage(); S.y = 20; }
+  S.y += 18; const fw = (S.W-16)/3;
+  ['Contó','Coordinador','Dirección'].forEach((t,i)=>{ const x = S.L + i*(fw+8); doc.setDrawColor(60,60,60); doc.line(x, S.y, x+fw, S.y); doc.setFontSize(9); doc.setTextColor(60,60,60); doc.text(t, x+fw/2, S.y+5, {align:'center'}); });
+  doc.setTextColor(0,0,0);
+  await S.fin(`conteo-inicial-${String(a.modulo).replace(/\s+/g,'_')}-${diaLocal(a.fecha)}.pdf`, 'Closets Vera · Conteo inicial · '+a.modulo);
+}
 function audAntesDeGuardarHtml(){
   const xs = audAntesDeGuardar(), mal = xs.filter(x=>!x.ok).length;
   return `<div class="card" style="padding:12px;border:2px solid ${mal?'#d97706':'var(--ok)'}"><strong style="font-size:16px">${mal?'⏳':'✅'} Antes de guardar</strong>
     ${xs.map(x=>`<div class="movitem" style="align-items:center"><span style="min-width:0"><span class="invname">${x.ok?'✅':'⏳'} ${x.t}</span>${x.d?`<span class="hint" style="display:block;margin:2px 0 0">${x.d}</span>`:''}</span>${x.btn||''}</div>`).join('')}</div>`;
 }
-function audSigueIgual(id){ auditCapTs[id] = new Date().toISOString(); _audValPrev[id] = auditCapturas[id]; _audMovCache = null; guardarBorradorAud(); renderAud(); toast('✅ Listo, queda como lo contaste.'); }
-function audIrItem(id){ const i = AUD_SECCIONES.findIndex(s=>!String(s.k).startsWith('__') && itemsSeccionAud(s.k).some(x=>x.id===id)); if(i>=0) irPasoAud(i); }
+function audSigueIgual(id){ auditCapTs[id] = new Date().toISOString(); _audMovCache = null; guardarBorradorAud(); renderAud(); toast('✅ Listo, queda como lo contaste.'); }
+function audIrItem(id){ if(String(id).startsWith('pz:')){ const j = AUD_SECCIONES.findIndex(s=>s.k==='__piezas'); if(j>=0) irPasoAud(j); return; } const i = AUD_SECCIONES.findIndex(s=>!String(s.k).startsWith('__') && itemsSeccionAud(s.k).some(x=>x.id===id)); if(i>=0) irPasoAud(i); }
 function audMovidosHtml(){
   const xs = audMovidosDespues(); if(!xs.length) return '';
   return `<div class="card" style="padding:12px;border:2px solid var(--bad);background:linear-gradient(0deg,rgba(220,38,38,.10),rgba(220,38,38,.10)),var(--card)">
@@ -4411,7 +4462,8 @@ async function saveAudit(){
       if(esAdmin() && confirm('¿SUMAR ahora este complemento al stock inicial de '+doc.modulo+'?\n\nTambién lo puedes hacer después desde el Historial.')) await sumarComplementoInicial(audId, {...doc, id:audId});
       return;
     }
-    if(confirm('¿Quieres descargar el REPORTE DE AUDITORÍA en PDF (teórico vs. físico de cada artículo)?')){
+    if(tipo==='conteo'){ if(confirm('¿Quieres descargar el PDF del CONTEO INICIAL de '+doc.modulo+'?')){ try{ await generarConteoInicialPDF({...doc, id:audId}); }catch(e){ alert('No se pudo generar el PDF: '+e.message); } } }
+    else if(confirm('¿Quieres descargar el REPORTE DE AUDITORÍA en PDF (teórico vs. físico de cada artículo)?')){
       try{ await generarReporteAuditoriaPDF({...doc, id:audId}); }catch(e){ alert('No se pudo generar el PDF: '+e.message); }
     }
     if(esAdmin() && tipo==='conteo'){
@@ -4736,7 +4788,7 @@ function renderHist(){
         ${a.complemento ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).length} artículo(s) a sumar</div>` : a.conteoInicial ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).filter(r=>Math.abs(Number(r.fisico)||0)>0.005).length} artículo(s) con existencia</div>` : `<div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>`}
       </div>
       <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
-        <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 Reporte PDF</button>
+        <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="${a.conteoInicial?`conteoPdfUI('${a.id}')`:`reporteAuditoriaUI('${a.id}')`}">📄 ${a.conteoInicial?'PDF del conteo':'Reporte PDF'}</button>
         ${!a.aplicada && esAdmin() ? (a.complemento ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="sumarComplementoUI('${a.id}')">➕ Sumar al stock inicial</button>` : a.conteoInicial ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="usarConteoComoInicialUI('${a.id}')">✅ Usar como stock inicial</button>` : `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>`) : ''}
         ${esAdmin() && !a.aplicada ? `<button class="btn small" style="background:linear-gradient(135deg,#d97706,#b45309)" onclick="audCorrAbrir('${a.id}')">✏️ Corregir un artículo</button>` : ''}
         ${esAdmin() && !a.conteoInicial && !a.complemento ? `<button class="btn small" style="background:transparent;color:#6b4bd6;border:1px solid var(--line);box-shadow:none" onclick="iniciarReconteo('${a.id}')">🔍 Volver a contar un material</button>` : ''}
