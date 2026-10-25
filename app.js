@@ -160,6 +160,12 @@ function inicialKey(mod,itemId){return mod+'__'+itemId;}
 
 function renderModBar(){
   const m = MODULOS.find(x=>x.nombre===moduloActual);
+  if(esAdmin()){ // Dirección (v178): "Dirección · los 5 módulos" o "📍 Módulo · ‹ Volver a Dirección"
+    $('#modbar').innerHTML = (dirModo || !m)
+      ? `<button class="modpill" style="background:#5b21b6" onclick="irElegirModulo('home')">🏢 Dirección · los 5 módulos</button>`
+      : `<button class="modpill" style="background:${m.color}" onclick="setView('home')">📍 ${m.nombre}</button><button class="modpill" style="background:#fff;color:#4c1d95;margin-left:6px" onclick="volverDireccion()">‹ Volver a Dirección</button>`;
+    return;
+  }
   const puedeCambiar = !miPerfil || miPerfil.rol!=='coordinador';
   $('#modbar').innerHTML = m
     ? `<button class="modpill" style="background:${m.color}" ${puedeCambiar?'onclick="showPicker()"':'disabled'}>📍 ${m.nombre}${puedeCambiar?' · cambiar módulo':' (tu módulo asignado)'}</button>`
@@ -246,7 +252,7 @@ setInterval(revisarVersion, 10*60*1000);
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') revisarVersion(); });
 
 async function init(){
-  document.querySelectorAll('#nav button[data-v]').forEach(b=>b.onclick=()=>setView(b.dataset.v));
+  document.querySelectorAll('#nav button[data-v]').forEach(b=>b.onclick=()=>{ if(b.dataset.v==='home' && esAdmin() && !dirModo) return volverDireccion(); setView(b.dataset.v); });
   document.getElementById('logoutBtn').onclick = doLogout;
   initSync();
   unsubscribeSyncBadge = onSyncStateChange(renderSyncBadge);
@@ -261,6 +267,7 @@ async function init(){
     moduloActual = miPerfil.modulo;
     localStorage.setItem('am_modulo', moduloActual);
   }
+  if(!moduloActual && esAdmin() && MODULOS.length){ moduloActual = MODULOS[0].nombre; localStorage.setItem('am_modulo', moduloActual); }
   renderModBar();
   if(!moduloActual){ showPicker(); return; }
   // Al iniciar sesión por primera vez el menú quedaba oculto (lo esconde la pantalla de login) y
@@ -400,6 +407,7 @@ async function loadStock(){
       conteoMap={}; snap.docs.forEach(d=>{ conteoMap[d.id]=d.data(); });
       if(current==='home') renderHome();
       if(current==='aud') renderAud();
+      if(current==='conteo') renderConteoDir();
     }));
   }catch(e){}
   try{
@@ -629,6 +637,7 @@ async function editInicial(itemId){
 }
 
 function setView(v){
+  if(enDirModo() && VISTAS_MODULO.includes(v)) return renderElegirModulo(v); // Dirección: primero ¿de qué módulo?
   current=v;
   if(esSoloLectura() && ['mov','inst','trasp','pend','mas','pzenc','gas'].includes(v)){
     document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
@@ -666,6 +675,7 @@ function setView(v){
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
   if(v==='repver'){ document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v==='rep')); renderRepVer(); }
   if(v==='conf') renderConf();
+  if(v==='conteo') renderConteoDir();
 }
 
 let invCat = null, invDetalle = false;
@@ -1257,6 +1267,7 @@ const HOME_SECCIONES = {
   veh:{t:'Vehículos', c:'#0369a1'}
 };
 function renderHome(){
+  if(esAdmin()) return dirModo ? renderHomeDir() : renderHomeModDir(); // Dirección (v178)
   const sec = {mat:[], dia:[], dir:[], ped:[], herr:[], veh:[]};
   const t = (icon, titulo, sub, js, s, badge) => sec[s].push(`<button class="tile" style="--tc:${HOME_SECCIONES[s].c}" onclick="${js}" title="${String(sub).replace(/"/g,'&quot;')}">${badge?`<span class="tile-b ${badge.k}">${badge.t}</span>`:''}<span class="tile-ic">${homeIcon(icon)}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`);
   const ENTRA = {k:'ent', t:'↓ Entra'}, SALE = {k:'sal', t:'↑ Sale'}, MUEVE = {k:'mov', t:'⇄ Mueve'};
@@ -3391,6 +3402,7 @@ function badgeEstado(estado){
 let movGuardando = false;
 async function registrarMovLote(){
   if(movGuardando) return; // evita guardar dos veces la misma captura con un doble toque
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const tipo = movTipo;
   const nota = ($('#mv-nota').value||'').trim();
   const lado = (tipo==='merma' && esHoja(CATALOGO.find(i=>i.cat===movCat))) ? (movLado==='cortado'?'cortado':'completas') : 'completas';
@@ -3633,6 +3645,7 @@ function renderAud(){
   const ciego = modoConteoCoord();
   if(esCoordinador() && !ciego){ $('#main').innerHTML = '<div class="card">📋 El conteo del almacén solo se abre cuando Dirección lo activa, y solo ese día.</div>'; return; }
   if(esSoloLectura()){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  audAsegurarModulo();
   recuperarBorradorAud();
   if(ciego){ audTipo='conteo'; if(!audAuditor) audAuditor=(getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0]; }
   if(audTipo==='inicial') audTipo='seguimiento';
@@ -3866,12 +3879,12 @@ function actualizarFaltanAud(){
 function selectAuditCat(c){ auditCat=c; renderAud(); }
 // Borrador del conteo/auditoría: se guarda en el teléfono cada pocos segundos, para no perder lo
 // contado si se cierra la app, se acaba la pila o llega una actualización.
-function claveBorradorAud(){ return 'borradorAud_'+modulo()+(audTipo==='simulacion'?'_sim':''); }
-function guardarBorradorAud(){
+function claveBorradorAud(mod){ return 'borradorAud_'+(mod||modulo())+(audTipo==='simulacion'?'_sim':''); }
+function guardarBorradorAud(mod){
   try{
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length || auditMelFuera.length;
-    if(hay) localStorage.setItem(claveBorradorAud(), JSON.stringify({auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
-    else localStorage.removeItem(claveBorradorAud());
+    if(hay) localStorage.setItem(claveBorradorAud(mod), JSON.stringify({auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
+    else localStorage.removeItem(claveBorradorAud(mod));
   }catch(e){}
 }
 function borrarBorradorAud(){ try{ localStorage.removeItem(claveBorradorAud()); }catch(e){} }
@@ -3890,7 +3903,19 @@ function recuperarBorradorAud(){
     toast('↩️ Se recuperó lo que ya habías contado.');
   }catch(e){}
 }
-setInterval(()=>{ if(current==='aud') guardarBorradorAud(); }, 4000);
+setInterval(()=>{ if(current==='aud' && _audMod===modulo()) guardarBorradorAud(_audMod); }, 4000);
+// Cada módulo guarda su propio conteo (confirmado por el usuario, v178): si se cambia de módulo sin
+// cerrar la app, lo contado del módulo anterior se guarda aparte y NO pasa al módulo nuevo.
+let _audMod = '';
+function audAsegurarModulo(){
+  const m = modulo();
+  if(_audMod && _audMod!==m){
+    guardarBorradorAud(_audMod);
+    auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[]; audHechas={}; audPaso=0; auditCat=AUD_SECCIONES[0].k;
+    delete _borradorRevisado[m]; delete _borradorRevisado[m+'_sim'];
+  }
+  _audMod = m;
+}
 
 // ----- Piezas cortadas (auditoría) -----
 function contarPiezasSueltas(){
@@ -4352,7 +4377,7 @@ async function abrirConteo(mods, abrir){
         : {...(conteoMap[m]||{}), modulo:m, abierto:false, cerrado:new Date().toISOString(), cerradoPor:quien});
     }
     toast(abrir ? '✅ Conteo abierto para hoy.' : 'Conteo cerrado.');
-    renderAud();
+    if(current==='conteo') renderConteoDir(); else renderAud();
   }catch(e){ alert('Error: '+e.message); }
 }
 // Resumen de hojas del conteo: completas + cortado = total, por color.
@@ -6925,6 +6950,7 @@ function previewGar(){
 }
 async function confirmarGar(){
   if(!garPreview || garPreview.bloqueado) return;
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const cliente = ($('#g-cliente').value||'').trim();
   const motivo = ($('#g-motivo').value||'').trim();
   const fechaDia = $('#g-fecha').value;
@@ -7170,6 +7196,7 @@ function avisoAutoCorteHtml(consumo){
 
 async function confirmarInst(){
   if(!instPreview || instPreview.bloqueado) return;
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = ($('#i-nota').value||'').trim();
   if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[], consumo:instPreview.consumo});
   const fechaDia = $('#i-fecha').value || new Date().toISOString().slice(0,10);
@@ -8308,22 +8335,222 @@ function renderConf(){
 // ===== 📋 Auditoría en el Inicio de Dirección (confirmado por el usuario, v178): aparte y arriba =====
 function audHomeCardHtml(){
   if(!esAdmin()) return '';
-  const nDeuda = deudas.filter(d=>d.estado!=='saldada').length;
+  const nDeuda = enDirModo() ? (_dirDeudas||[]).length : deudas.filter(d=>d.estado!=='saldada').length;
   const abiertos = MODULOS.filter(m=>conteoAbiertoHoy(m.nombre)).length;
   const b = (t, js, extra) => `<button onclick="${js}" style="position:relative;text-align:left;padding:11px 10px;border-radius:12px;border:0;background:rgba(255,255,255,.16);color:#fff;font:inherit;font-weight:800;font-size:14px;cursor:pointer">${t}${extra?`<span style="position:absolute;top:-7px;right:-5px;background:#facc15;color:#111;font-size:11px;font-weight:900;border-radius:10px;padding:2px 7px">${extra}</span>`:''}</button>`;
   return `<div class="card" style="background:linear-gradient(135deg,#5b21b6,#7c3aed);color:#fff;border:0">
     <div style="font-size:19px;font-weight:900">📋 Auditoría</div><div style="opacity:.9;font-size:13px">Lo más importante · solo Dirección</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
       ${b('🔍 Hacer auditoría', "irA('aud')")}
-      ${b('🔓 Abrir conteo', 'audIrConteo()', abiertos ? abiertos+' abierto' : '')}
+      ${b('🔓 Abrir conteo', "irA('conteo')", abiertos ? abiertos+' abierto' : '')}
       ${b('🗂️ Auditorías pasadas', "irA('hist',{tab:'aud'})")}
       ${b('📉 Faltantes (deuda)', "irA('hist',{tab:'deuda'})", nDeuda ? String(nDeuda) : '')}
-    </div></div>`;
+    </div>${audBorradoresHtml()}</div>`;
 }
-function audIrConteo(){
-  irA('aud');
-  setTimeout(()=>{ const d = document.getElementById('conteo-admin'); if(d){ d.open = true; d.scrollIntoView({behavior:'smooth', block:'start'}); } }, 120);
+function audIrConteo(){ irA('conteo'); }
+// ===== Modo Dirección (confirmado por el usuario, v178) =====
+// Dirección entra a la app en "🏢 Dirección · los 5 módulos", no dentro de un módulo. Su Inicio tiene
+// pendientes y alertas, la Auditoría y lo de Dirección. Para ver un inventario, auditar o capturar
+// "como coordinador" entra a un módulo; arriba sale "📍 Módulo · ‹ Volver a Dirección".
+let dirModo = true;
+const VISTAS_MODULO = ['inv','mov','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
+function enDirModo(){ return esAdmin() && dirModo; }
+async function entrarModulo(n, v){
+  dirModo = false;
+  if(n!==moduloActual){
+    const m0 = _snapMovsN, i0 = _snapIniN;
+    moduloActual = n; localStorage.setItem('am_modulo', n);
+    renderModBar(); ajustarNavSticky();
+    current = 'cargando'; $('#main').innerHTML = `<div class="card">Entrando a ${n}…</div>`;
+    try{ catSync(await herrCargar(true)); }catch(e){}
+    await loadStock();
+    const t0 = Date.now(); while((_snapMovsN===m0 || _snapIniN===i0) && Date.now()-t0<6000) await new Promise(r=>setTimeout(r,80));
+  } else { renderModBar(); ajustarNavSticky(); }
+  if(v==='herr') herrTab = 'inst';
+  setView(v||'home'); window.scrollTo(0,0);
 }
+function volverDireccion(){ dirModo = true; renderModBar(); ajustarNavSticky(); setView('home'); window.scrollTo(0,0); }
+function irElegirModulo(v){ renderElegirModulo(v||'home'); window.scrollTo(0,0); }
+// Cómo va cada módulo, en pocas palabras (para los botones de "Entrar a un módulo").
+let _dirAprPorMod = null, _dirDeudas = null, _dirCargando = false, _dirCargadoT = 0;
+function modEstados(){
+  const out = {}, hoy = fechaHoyLocal(), tarde = esHoraDeCierre();
+  const V = vehCache;
+  MODULOS.forEach(m=>{
+    const p = [];
+    const nApr = (_dirAprPorMod||{})[m.nombre]||0; if(nApr) p.push(nApr+' por aprobar');
+    if(tarde && !(cierresCache.some(x=>x.modulo===m.nombre && x.dia===hoy) || cierresMovHoy[m.nombre])) p.push('falta cierre');
+    const nVeh = V ? vehAvisos(V, m.nombre).length : 0; if(nVeh) p.push(nVeh+' aviso'+(nVeh===1?'':'s')+' de vehículo');
+    out[m.nombre] = p.length ? p.join(' · ') : 'al día';
+  });
+  return out;
+}
+const VISTA_ELEGIR_TXT = {
+  home:['🏪 Entrar a un módulo', 'Para ver su inventario o capturar algo como coordinador.'],
+  inv:['📦 Inventario', 'Estás en Dirección: ¿de qué módulo?'],
+  aud:['📋 Hacer auditoría', '¿Qué módulo vas a contar?'],
+  hist:['🗂️ Auditorías y faltantes', '¿De qué módulo?'],
+  herr:['🧰 Herramienta', '¿De qué módulo?'],
+  ped:['🚚 Pedidos', '¿De qué módulo?']
+};
+function renderElegirModulo(v){
+  current = 'elegirmod';
+  document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active', b.dataset.v===v));
+  const [t, s] = VISTA_ELEGIR_TXT[v] || ['📍 Elige un módulo', '¿En qué módulo?'];
+  const est = modEstados();
+  $('#main').innerHTML = `<div class="card" style="padding:12px">
+      <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="volverDireccion()">‹ Dirección</button>
+      <div style="font-size:18px;font-weight:900;margin-top:10px">${t}</div><p class="hint" style="margin:2px 0 0">${s}</p></div>
+    <div style="display:grid;gap:8px;margin-top:10px">${MODULOS.map(m=>`<button onclick="entrarModulo('${m.nombre}','${v}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;border:0;border-radius:14px;padding:14px 16px;background:${m.color};color:#fff;font:inherit;cursor:pointer;text-align:left;box-shadow:0 2px 8px rgba(0,0,0,.18)"><strong style="font-size:17px">📍 ${m.nombre}</strong><span style="font-size:12.5px;opacity:.92">${est[m.nombre]} ›</span></button>`).join('')}</div>
+    ${v==='inv'?`<div class="card" style="padding:12px"><strong>🌎 ¿Los 5 juntos?</strong><p class="hint" style="margin:2px 0 8px">Cuánto hay de cada cosa en cada módulo.</p><button class="btn small" onclick="irA('todos')">Ver los 5 módulos</button></div>`:''}
+    ${v==='aud'?`<div class="card" style="padding:12px"><strong>🔓 ¿Abrir conteo para los coordinadores?</strong><p class="hint" style="margin:2px 0 8px">Para que ellos cuenten su almacén hoy.</p><button class="btn small" onclick="irA('conteo')">Abrir conteo</button></div>`:''}`;
+}
+// Abrir el conteo de los coordinadores sin entrar a un módulo.
+function renderConteoDir(){
+  $('#main').innerHTML = `<div class="card" style="padding:12px"><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="setView('home')">‹ Inicio</button>
+    <div style="font-size:18px;font-weight:900;margin-top:10px">🔓 Abrir conteo</div><p class="hint" style="margin:2px 0 0">El coordinador lo ve en su Inicio solo el día de hoy.</p></div>${conteoAdminCardHtml().replace('<details class="card" id="conteo-admin"', '<details class="card" id="conteo-admin" open')}`;
+}
+// Auditorías a medias guardadas en este celular (mejora 2, confirmado por el usuario v178).
+function audBorradoresHtml(){
+  const out = [];
+  MODULOS.forEach(m=>{ try{
+    const raw = localStorage.getItem('borradorAud_'+m.nombre); if(!raw) return;
+    const b = JSON.parse(raw), n = Object.keys(b.auditCapturas||{}).filter(k=>b.auditCapturas[k]!==undefined && b.auditCapturas[k]!==null).length;
+    if(!n && !(b.auditArmados||[]).length) return;
+    const f = b.fecha ? new Date(b.fecha).toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'}) : '';
+    out.push(`<button onclick="entrarModulo('${m.nombre}','aud')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;margin-top:8px;padding:11px 12px;border-radius:12px;border:2px solid #facc15;background:rgba(250,204,21,.18);color:#fff;font:inherit;font-weight:800;font-size:14px;cursor:pointer;text-align:left"><span>▶ Continuar auditoría de ${m.nombre}</span><span style="font-size:12px;font-weight:700;opacity:.95;white-space:nowrap">${n} contado${n===1?'':'s'}${f?' · '+f:''}</span></button>`);
+  }catch(e){} });
+  return out.join('');
+}
+// Recordatorio de respaldo (mejora 3, confirmado por el usuario v178): cada 7 días, en este aparato.
+function diasSinRespaldo(){
+  try{ const f = localStorage.getItem('am_ultimoRespaldo'); if(!f) return Infinity; return Math.floor((Date.now()-new Date(f).getTime())/86400000); }catch(e){ return 0; }
+}
+async function respaldoDesdeInicio(){ try{ await exportarRespaldo(); toast('💾 Respaldo descargado.'); }catch(e){ alert('No se pudo descargar: '+e.message); } if(current==='home') renderHome(); }
+// Datos que tarda en juntar (aprobaciones y faltantes de los 5 módulos).
+async function cargarPendDir(forzar){
+  if(_dirCargando || (!forzar && Date.now()-_dirCargadoT < 3000)) return;
+  _dirCargando = true;
+  try{
+    const [snapMov, snapLog, snapDeu] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]}))]);
+    const porMod = {}, lotesVistos = new Set();
+    snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ const k = m.loteId||Math.random(); if(lotesVistos.has(k)) return; lotesVistos.add(k); porMod[m.modulo] = (porMod[m.modulo]||0) + 1; });
+    snapLog.docs.map(d=>d.data()).filter(l=>l.estado==='pendiente').forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
+    const deudas = snapDeu.docs.map(d=>d.data()).filter(x=>x.estado!=='saldada');
+    const antes = JSON.stringify([_dirAprPorMod, _dirDeudas]);
+    _dirAprPorMod = porMod; _dirDeudas = deudas; _dirCargadoT = Date.now();
+    if(JSON.stringify([_dirAprPorMod, _dirDeudas])!==antes && current==='home' && enDirModo()) renderHomeDir();
+  }catch(e){}
+  _dirCargando = false;
+}
+function pendDirHtml(){
+  const fila = (ic, t, sub, c, btn, js) => `<div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:linear-gradient(0deg,${c}1f,${c}1f),var(--card);border:1px solid ${c};margin-top:8px"><span style="font-size:20px">${ic}</span><div style="flex:1;min-width:0"><strong style="font-size:14px">${t}</strong>${sub?`<div class="hint" style="margin:1px 0 0;font-size:12.5px">${sub}</div>`:''}</div><button class="btn small" style="background:${c};box-shadow:none;white-space:nowrap" onclick="${js}">${btn}</button></div>`;
+  const rows = [];
+  const apr = _dirAprPorMod ? Object.keys(_dirAprPorMod).filter(k=>_dirAprPorMod[k]) : [];
+  const nApr = apr.reduce((s,k)=>s+_dirAprPorMod[k],0);
+  if(nApr) rows.push(fila('✅', `${nApr} captura${nApr===1?'':'s'} por aprobar`, apr.map(k=>k+' '+_dirAprPorMod[k]).join(' · '), '#16a34a', 'Aprobar', "irA('apr')"));
+  const H = herrCache;
+  if(H){
+    const nP = herrPendientes(H).length, nRec = herrPorRecibir(H).length, avD = herrAvisosDir(H), fR = ferRecibidosSinVer(H), nRecEnv = herrEnviosRecibidos(H).length;
+    if(nP) rows.push(fila('🧰', `${nP} de herramienta por aprobar`, 'Compras, altas y correcciones', '#c2410c', 'Aprobar', "irA('herrapr')"));
+    if(nRec) rows.push(fila('🏢', `${nRec} herramienta${nRec===1?'':'s'} en camino al almacén`, 'Toca "Ya la recibí" cuando la tengas', '#0891b2', 'Ver', "herrAlmSec='herr';herrAlmTab='recibir';irA('alm')"));
+    if(avD.length) rows.push(fila('🏢', `El Auditor recogió ${avD.length} herramienta${avD.length===1?'':'s'}`, 'Ya regresaron al almacén general', '#0891b2', 'Ver', "herrAlmSec='herr';herrAlmTab='buenas';irA('alm')"));
+    if(fR.length) rows.push(fila('📦', 'Ya recibieron la ferretería', [...new Set(fR.map(m=>m.modulo))].join(', '), '#16a34a', 'Ver', "herrAlmSec='fer';irA('alm')"));
+    if(nRecEnv) rows.push(fila('📦', `Ya recibieron ${nRecEnv} envío${nRecEnv===1?'':'s'} de herramienta`, 'Confirmado por el módulo', '#16a34a', 'Ver', "irA('alm')"));
+  } else herrCargar().then(()=>{ if(current==='home' && enDirModo()) renderHomeDir(); }).catch(()=>{});
+  if(esHoraDeCierre()){
+    cargarCierresMovHoy();
+    const hoy = fechaHoyLocal(), faltan = MODULOS.filter(m=>!(cierresCache.some(x=>x.modulo===m.nombre && x.dia===hoy) || cierresMovHoy[m.nombre])).map(m=>m.nombre);
+    if(faltan.length) rows.push(fila('📝', `Cierres del turno: ${MODULOS.length-faltan.length} de ${MODULOS.length}`, 'Falta'+(faltan.length>1?'n ':' ')+faltan.join(', '), '#d97706', 'Ver', "repCierresDia=fechaHoyLocal();repCierreAbierto='';repCierresCache=null;repAbrir('cierres')"));
+  }
+  const V = vehCache;
+  if(V){
+    const av = vehAvisos(V, ''), vp = vehPendientes(V, '').length;
+    if(av.length || vp){ const venc = av.filter(a=>a.e.k==='venc').length;
+      rows.push(fila('🚐', av.length ? `${av.length} aviso${av.length===1?'':'s'} de vehículos${venc?' · '+venc+' vencido'+(venc===1?'':'s'):''}` : `${vp} cambio${vp===1?'':'s'} de vehículos por aprobar`, av.slice(0,2).map(a=>a.que.replace(/^\S+\s/,'')+' '+(a.v.carro||'')+' ('+a.v.modulo+')').join(' · ')+(vp&&av.length?` · ${vp} por aprobar`:''), venc?'#dc2626':'#0284c7', 'Ver', "vehMod='__todos';vehAbierto='';vehForm=null;irA('veh')")); }
+  } else vehCargar().then(()=>{ if(current==='home' && enDirModo()) renderHomeDir(); }).catch(()=>{});
+  if(_dirDeudas && _dirDeudas.length){ const ms = [...new Set(_dirDeudas.map(d=>d.modulo).filter(Boolean))];
+    rows.push(fila('📉', `${_dirDeudas.length} faltante${_dirDeudas.length===1?'':'s'} de auditoría sin saldar`, ms.join(', '), '#7c3aed', 'Ver', ms.length===1 ? `histTab='deuda';entrarModulo('${ms[0]}','hist')` : "histTab='deuda';irElegirModulo('hist')")); }
+  const dR = diasSinRespaldo();
+  if(dR>=7) rows.push(fila('💾', dR===Infinity ? 'No has descargado un respaldo en este aparato' : `Hace ${dR} días que no descargas un respaldo`, 'Un archivo con toda la información, por si acaso', '#16a34a', 'Descargar', 'respaldoDesdeInicio()'));
+  const cargando = _dirAprPorMod===null;
+  if(!rows.length) return `<div class="card" style="padding:14px;border:2px solid var(--ok);background:linear-gradient(0deg,rgba(22,163,74,.12),rgba(22,163,74,.12)),var(--card)"><div style="font-weight:900;font-size:16px">${cargando?'🔔 Revisando pendientes…':'✅ Todo al día'}</div><p class="hint" style="margin:2px 0 0">${cargando?'Un momento.':'No hay nada por aprobar ni alertas.'}</p></div>`;
+  return `<div class="card" style="padding:12px"><div class="row" style="justify-content:space-between"><strong style="font-size:16px">🔔 Pendientes y alertas</strong><span style="background:var(--bad);color:#fff;border-radius:10px;padding:1px 9px;font-size:13px;font-weight:800">${rows.length}</span></div>${rows.join('')}</div>`;
+}
+function renderHomeDir(){
+  current = 'home';
+  cargarPendDir();
+  const nombre = (getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0];
+  const tile = (icon, titulo, sub, js, color, badge) => `<button class="tile" style="--tc:${color}" onclick="${js}" title="${String(sub).replace(/"/g,'&quot;')}">${badge?`<span class="tile-b num">${badge}</span>`:''}<span class="tile-ic">${homeIcon(icon)}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`;
+  const nApr = _dirAprPorMod ? Object.values(_dirAprPorMod).reduce((s,n)=>s+n,0) : 0;
+  const H = herrCache, nRec = H ? herrPorRecibir(H).length : 0;
+  const V = vehCache, nVeh = V ? vehAvisos(V,'').length + vehPendientes(V,'').length : 0;
+  const tiles = [
+    tile('aprobar','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#16a34a', nApr||''),
+    tile('barras','Reportes','Del día, material, módulos…',"irA('rep')",'#b91c1c'),
+    tile('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#4b5563'),
+    tile('camion','Vehículos','Los 5 módulos',"vehMod='__todos';vehAbierto='';vehForm=null;irA('veh')",'#0369a1', nVeh||''),
+    tile('llave','Herramienta','Por módulo',"irA('herr')",'#c2410c'),
+    tile('almacen','Almacén general', nRec ? nRec+' por recibir' : 'Entregas, regresos y ferretería',"irA('alm')",'#9a3412', nRec||''),
+    tile('lista','Pedidos','Material que va a llegar',"irA('ped')",'#2348b5'),
+    tile('tendencia','Resumen semanal','Cómo va cada módulo',"irA('resumen')",'#0d7468'),
+    tile('engrane','Configuración','Usuarios, catálogo, PIN y respaldo',"irA('conf')",'#4b5563')
+  ];
+  const est = modEstados();
+  $('#main').innerHTML = `
+    <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">Esto es lo que necesita tu atención hoy</div></div>
+    ${pendDirHtml()}
+    ${avisosCardHtml()}
+    ${avisoInstalarHtml()}
+    ${audHomeCardHtml()}
+    <div class="home-sec" style="--tc:#7c3aed"><div class="home-sec-t">Dirección</div><div class="tiles">${tiles.join('')}</div></div>
+    <div class="card" style="padding:12px"><strong style="font-size:16px">🏪 Entrar a un módulo</strong><p class="hint" style="margin:2px 0 0">Para ver su inventario o capturar algo como coordinador.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">${MODULOS.map(m=>`<button onclick="entrarModulo('${m.nombre}','home')" style="border:0;border-radius:14px;padding:12px 8px;background:${m.color};color:#fff;font:inherit;cursor:pointer;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.18)"><div style="font-weight:900;font-size:15px">${m.nombre}</div><div style="font-size:11.5px;opacity:.92;margin-top:2px">${est[m.nombre]}</div></button>`).join('')}</div></div>
+    <p class="hint" style="text-align:center;margin:14px 0 4px">Versión ${APP_VERSION}${versionServidor && numVersion(versionServidor)>numVersion(APP_VERSION)?` · <a href="#" onclick="actualizarApp();return false;">hay una nueva (${versionServidor})</a>`:' · ✅ al día'}</p>`;
+}
+// Inicio de Dirección DENTRO de un módulo: todo lo de ese módulo, con "‹ Volver a Dirección".
+function renderHomeModDir(){
+  current = 'home';
+  const mod = modulo(), M = MODULOS.find(x=>x.nombre===mod) || {color:'#2f8f4e'};
+  const sec = (t, c, xs) => `<div class="home-sec" style="--tc:${c}"><div class="home-sec-t">${t}</div><div class="tiles">${xs.join('')}</div></div>`;
+  const tile = (icon, titulo, sub, js, color, badge) => `<button class="tile" style="--tc:${color}" onclick="${js}" title="${String(sub).replace(/"/g,'&quot;')}">${badge?`<span class="tile-b ${badge.k||'num'}">${badge.t}</span>`:''}<span class="tile-ic">${homeIcon(icon)}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`;
+  const ENTRA = {k:'ent', t:'↓ Entra'}, SALE = {k:'sal', t:'↑ Sale'}, MUEVE = {k:'mov', t:'⇄ Mueve'};
+  const enCamino = pedidos.filter(p=>p.modulo===mod && pedidoEnCamino(p)).length;
+  const V = vehCache, nVeh = V ? vehAvisos(V, mod).length + vehPendientes(V, mod).length : 0;
+  const cp = cortesPendientes();
+  $('#main').innerHTML = `
+    <div class="card" style="padding:12px;border:2px solid ${M.color};background:linear-gradient(0deg,${M.color}26,${M.color}26),var(--card)">
+      <div style="font-size:17px;font-weight:900">📍 Estás dentro de ${mod}</div>
+      <p class="hint" style="margin:2px 0 0">Todo lo que veas o anotes aquí es de ${mod}.</p>
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:#5b21b6" onclick="volverDireccion()">‹ Volver a Dirección</button><button class="btn" style="flex:1;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="irElegirModulo('home')">🔄 Otro módulo</button></div>
+    </div>
+    ${cp.length?`<div class="card" style="padding:12px"><div class="pend"><div>✂️ <strong>Corte sin anotar</strong>: ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}</div><button class="btn small" onclick="irA('cierre')">Cierre</button></div></div>`:''}
+    ${stockBajoHtml()}
+    ${sec(mod, M.color, [
+      tile('cajas','Inventario','Cuánto hay de cada cosa',"irA('inv')",M.color),
+      tile('llave','Herramienta','De '+mod,"herrTab='inst';irA('herr')",'#c2410c'),
+      tile('camion','Vehículos','De '+mod,`vehMod='${mod}';vehAbierto='';vehForm=null;irA('veh')`,'#0369a1', nVeh?{t:String(nVeh)}:null)])}
+    ${sec('Material','#2348b5', [
+      tile('entrada','Llegó material','Hojas, herrajes, etc. que entraron',"irA('mov',{tipo:'entrada'})",'#2348b5',ENTRA),
+      tile('salida','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#2348b5',SALE),
+      tile('traspaso','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#2348b5',MUEVE),
+      tile('camion','Por llegar', enCamino ? enCamino+' pedido(s) en camino' : 'Subir material pedido',"irA('ped')",'#2348b5', enCamino?{t:String(enCamino)}:null),
+      tile('reciclar','Tubos ahorrados','Tubos que regresan los instaladores',"irA('tubos')",'#2348b5',ENTRA),
+      tile('capas','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#2348b5')])}
+    ${sec('Trabajo del día','#0d7468', [
+      tile('cierre','Cierre del turno','Corte de hojas, PVC, cintilla…',"irA('cierre')",'#0d7468'),
+      tile('herramienta','Instalación','Un clóset o puerta instalada',"irA('inst')",'#0d7468'),
+      tile('escudo','Garantía','Material que se da en garantía',"irA('gar')",'#0d7468'),
+      tile('gasolina','Gasolina','Cargas y presupuesto',"irA('gas')",'#0d7468')])}`;
+  if(!V) vehCargar().then(()=>{ if(current==='home' && esAdmin() && !dirModo) renderHomeModDir(); }).catch(()=>{});
+}
+// Mejora 1 (confirmado por el usuario, v178): cuando Dirección anota algo dentro de un módulo,
+// antes de guardar confirma en cuál, para que no quede en el módulo equivocado.
+function confirmarModuloDir(){
+  if(!esAdmin() || esSoloLectura()) return true;
+  return confirm(`📍 Esto se va a anotar en ${String(modulo()).toUpperCase()}.\n\n¿Es el módulo correcto?`);
+}
+
 
 // ===== Aprobaciones (solo admin) =====
 // Lo que captura un coordinador (entradas/salidas e instalaciones — los traspasos NO, esos
@@ -8849,6 +9076,7 @@ function renderCierreConsumibles(){
   el.innerHTML = (cons.map(filaCierreConteo).join('') || `<p class="hint">${q ? 'No se encontró.' : 'La app no tiene '+nombreCat+' en '+modulo()+'.'}</p>`) + boton;
 }
 async function guardarCierre(){
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = (document.getElementById('cierre-nota').value||'').trim();
   const hojasContadas = CATALOGO.filter(i=>esHoja(i) && !vacioCierre(cierreVals[i.id]));
   for(const it of hojasContadas){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
@@ -9171,6 +9399,7 @@ function renderTubos(){
       ${lista.slice(0,30).map(m=>`<tr><td>${new Date(m.fecha).toLocaleDateString('es-MX')}</td><td>${m.instalador||'—'}</td><td>${fmtNum(m.cantidad)}</td><td>${badgeEstado(m.estado)}</td></tr>`).join('')}</table></div></details>`:''}`;
 }
 async function guardarTubos(){
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const it = itemByName(TUBO_ITEM);
   const cantidad = Number(document.getElementById('tb-cant').value);
   const instalador = (document.getElementById('tb-inst').value||'').trim();
@@ -9260,6 +9489,7 @@ function pintarPreviewSobrante(){
 }
 async function confirmarSobrante(destino){
   if(!sobPreview || !sobPreview.length) return;
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = (sobNota||'').trim();
   const aMerma = destino==='merma';
   if(aMerma && !confirm('🗑️ Mandar a MERMA:\n\n'+sobPreview.map(c=>`• ${fmtNum(c.cantidad)} ${CATALOGO.find(i=>i.id===c.itemId).nombre}`).join('\n')+'\n\nSale del inventario y ya no se aprovecha. ¿Continuar?')) return;
@@ -9564,6 +9794,7 @@ function renderPzEnc(){
     </div>`;
 }
 async function guardarPzEnc(){
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const pool = pzPool(), cons = pzConsumo();
   if((!pool.length && !pzMedidas.length) || !cons.length) return alert('Primero escribe cuántas piezas encontraste.');
   const detalle = pool.map(p=>`${p.cantidad} × ${p.label} (${p.dim}) · ${p.grupo===AUD_GRUPO_MDF?'MDF':p.grupo}`).concat(pzMedidasDetalle());
@@ -9903,6 +10134,7 @@ async function renderGas(){
       </div>` : `<div class="card hint">No hay cargas registradas ${gasSemana==='esta'?'esta semana':'la semana pasada'}.</div>`}`;
 }
 async function guardarGas(){
+  if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const f = gasForm, monto = Number(f.monto);
   if(!f.fecha) return alert('Elige el día.');
   if(f.fecha > fechaHoyLocal()) return alert('El día no puede ser después de hoy.');
@@ -10677,6 +10909,7 @@ async function exportarRespaldo(){
   a.href = url; a.download = `respaldo-auditoriamodulos-${stamp}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+  try{ localStorage.setItem('am_ultimoRespaldo', new Date().toISOString()); }catch(e){}
 }
 
 // ===== Cerrar inventario diario: genera un PDF con el inventario completo del módulo =====
