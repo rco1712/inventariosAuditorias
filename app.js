@@ -210,7 +210,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v176';
+const APP_VERSION = 'v177';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -373,8 +373,9 @@ async function loadStock(){
   }catch(e){}
   try{
     // Cierres del turno de los módulos (aviso para Dirección, confirmado por el usuario).
-    if(esAdmin()) sub(db.collection('cierres').onSnapshot(snap=>{
-      cierresCache = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+    if(esAdmin() || esCoordinador()) sub((esAdmin() ? db.collection('cierres') : db.collection('cierres').where('modulo','==',modulo())).onSnapshot(snap=>{
+      const _c = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+      cierresCache = _c.filter(c=>!c.tipo); avisosRepCache = _c.filter(c=>c.tipo==='avisoRepetida');
       if(current==='home') renderHome();
       revisarAvisosNuevos();
     }));
@@ -3695,6 +3696,7 @@ function renderAud(){
     const faltan = faltanSeccionAud(sec.k).length;
     cuerpo = `<div class="card">
     <h3>${AUD_ICONO[sec.k]||''} ${sec.t}</h3>
+    ${!comp ? apartadosAudHtml(items) : ''}
     ${catHoja?'<p class="hint">Aquí captura solo las <strong>hojas completas</strong>. Lo cortado o armado va más adelante en ✂️ Piezas cortadas y 📦 Armados.</p>':''}
     ${sec.k==='Herrajes'?'<p class="hint">🔩 <strong>Correderas:</strong> en "Juego de corredera" van los juegos completos (hembra + macho juntos). Las <strong>hembras y machos sueltos</strong> van en sus renglones "(sin pareja)", normal o de extensión. La app los junta con los de cajoneras y cajones armados y forma juegos donde hay pareja.</p>':''}
     ${sec.k==='Herrajes'&&!comp&&!esCoordinador()?`<div style="border-radius:14px;padding:12px;background:linear-gradient(135deg,#a16207,#ca8a04);color:#fff;margin-top:8px"><div style="font-weight:900;font-size:15px">🔩 Cuenta primero el almacén y luego el taller</div><div style="font-size:13px;margin-top:4px;opacity:.95">En cada lugar escribe cuántas encontraste y toca <b>+ Agregar</b>; se van sumando. Si de algo no hay, toca <b>No hay (0)</b>.</div></div>`:'<p class="hint">Escribe cuánto hay de cada uno; si no hay, pon <strong>0</strong>. Si después aparece más, toca <strong>➕</strong> y se suma a lo que ya llevas.</p>'}
@@ -3702,7 +3704,7 @@ function renderAud(){
     ${sec.k==='Herrajes' && !comp && !esCoordinador() ? herrAudListaHtml(items, sinTeo, eq) : `<div class="wrap-x"><table><tr><th>Artículo</th>${sinTeo?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id); const v=auditCapturas[it.id];
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
-        return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div></td>${sinTeo?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
+        return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div>${comp?'':apartadoBadge(it.id)}</td>${sinTeo?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
           <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="decimal" style="min-width:70px" placeholder="—" value="${v??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value);actualizarFaltanAud()">
           <button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" title="Sumar" onclick="sumarAud('${it.id}')">➕</button></div>${extra}</td></tr>`;
       }).join('')}
@@ -3748,7 +3750,7 @@ function herrAudFilaHtml(it, sinTeo, eq){
   const contado = v!==undefined, C = HERR_AUD_COL;
   return `<div id="audh-${it.id}" style="padding:10px;margin-top:10px;border-radius:14px;background:${contado?(tot?C+'1f':'rgba(22,163,74,.10)'):'rgba(224,121,26,.10)'};border:2px solid ${u?'#16a34a':contado?'transparent':'rgba(224,121,26,.45)'}">
     <div style="display:flex;align-items:center;gap:8px"><div style="font-size:22px">🔩</div>
-      <div style="flex:1;min-width:0"><div style="color:${C};font-weight:800;font-size:15px">${contado?'✓ ':'⏳ '}${it.nombre}</div><span class="hint" style="margin:0">${it.unidad||''}${f?' · teórico '+fmtNum(f.final):''}</span>${eq&&eq[it.id]?`<div class="hint" style="margin:2px 0 0">+ ${fmtNum(eq[it.id])} en piezas/armados</div>`:''}</div>
+      <div style="flex:1;min-width:0"><div style="color:${C};font-weight:800;font-size:15px">${contado?'✓ ':'⏳ '}${it.nombre}</div><span class="hint" style="margin:0">${it.unidad||''}${f?' · teórico '+fmtNum(f.final):''}</span>${apartadoBadge(it.id)?'<div>'+apartadoBadge(it.id)+'</div>':''}${eq&&eq[it.id]?`<div class="hint" style="margin:2px 0 0">+ ${fmtNum(eq[it.id])} en piezas/armados</div>`:''}</div>
       <div style="text-align:center;min-width:64px"><div style="font-size:11px;color:var(--sub)">Total</div><div style="font-size:24px;font-weight:900;color:${u?'#4ade80':contado?C:'var(--sub)'}">${contado?fmtNum(tot):'—'}</div></div></div>
     ${u?`<div style="margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(22,163,74,.22);color:#bbf7d0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>✅ ${u.txt}</span><button onclick="herrAudDeshacer('${it.id}')" style="border:1px solid #86efac;background:transparent;color:#bbf7d0;border-radius:8px;padding:4px 10px;font-weight:800;cursor:pointer">↩️ Deshacer</button></div>`:''}
     ${AUD_LUGARES.map(l=>{ const n = Number(d[l.k])||0, ed = audHCorr && audHCorr.id===it.id && audHCorr.l===l.k;
@@ -8404,7 +8406,8 @@ function vacioCierre(v){ return v===undefined || v===null || String(v).trim()===
 function filaCierreConteo(it){
   const esp = stockEsperadoCierre(it.id); const v = cierreVals[it.id];
   let dif = '';
-  if(!vacioCierre(v)){ const d = fmtNum(esp - Number(v)); dif = d>0 ? `<span class="neg"> → se usó ${fmtNum(d)}</span>` : (d<0 ? `<span style="color:#b3742c"> → tienes ${fmtNum(-d)} de más</span>` : '<span class="pos"> → sin cambio</span>'); }
+  if(!vacioCierre(v)){ const d = fmtNum(esp - Number(v)), raro = d>0 ? usoRaroCierre(it.id, d, esp) : null;
+    dif = d>0 ? (raro ? `<span style="display:block;margin-top:3px;color:#f59e0b;font-weight:700">⚠️ Se usó ${fmtNum(d)} ${it.unidad} — <b>es mucho para un día</b>. ${raro.txt}. ¿Se anotó doble una entrada o salió material sin anotar?</span>` : `<span class="neg"> → se usó ${fmtNum(d)}</span>`) : (d<0 ? `<span style="color:#b3742c"> → tienes ${fmtNum(-d)} de más</span>` : '<span class="pos"> → sin cambio</span>'); }
   return `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0" id="cdif-${it.id}">La app dice: ${fmtNum(esp)} ${it.unidad}${dif}</span></span>
     <input type="number" min="0" inputmode="decimal" placeholder="Hay" value="${vacioCierre(v)?'':v}" oninput="cierreVals['${it.id}']=this.value;refrescarDifCierre('${it.id}')"></label>`;
 }
@@ -8446,6 +8449,68 @@ function deudasDeModulo(mod){
   const xs = Object.values(g).sort((a,b)=>a.otro.localeCompare(b.otro) || a.art.localeCompare(b.art)); return {nosDeben: xs.filter(x=>x.nos), debemos: xs.filter(x=>!x.nos)};
 }
 let cierrePrestOk = false;
+// ===== Avisos para que los errores no lleguen al inventario (confirmado por el usuario) =====
+// 1) Cierre: entradas de hoy que parecen repetidas (mismo artículo y cantidad) → "no hagas el cierre todavía".
+// 2) Cierre: si lo que se gastó es mucho más de lo normal (promedio de los cierres del último mes).
+// 3) Auditoría: material de instalaciones/garantías de los últimos 3 días que ya se descontó.
+function entradasRepetidasHoy(mod){
+  const hoy = fechaHoyLocal();
+  const ents = movs.filter(m=>m.modulo===mod && m.tipo==='entrada' && !m.anulado && m.estado!=='rechazado' && diaLocal(m.fecha)===hoy);
+  const g = {}; ents.forEach(m=>{ const k = m.itemId+'|'+fmtNum(Number(m.cantidad)); (g[k] = g[k]||[]).push(m); });
+  return Object.values(g).filter(xs=>xs.length>1 && new Set(xs.map(x=>x.loteId||x.id)).size>1).map(xs=>xs.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')));
+}
+let avisosRepCache = [];
+function avisoRepHoy(mod){ const hoy = fechaHoyLocal(); return avisosRepCache.find(a=>a.modulo===mod && a.dia===hoy); }
+function cierreRepetidasHtml(){
+  const mod = modulo(), reps = entradasRepetidasHoy(mod); if(!reps.length) return '';
+  const hora = m => new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'});
+  const av = avisoRepHoy(mod), lista = reps.slice(0,5).map(xs=>`• <b>${xs[0].itemNombre}</b> ${xs.map(x=>`+${fmtNum(x.cantidad)} ${item2unidad(x.itemId)} (${hora(x)})`).join(' y ')}`).join('<br>');
+  return `<div class="card" style="border:2px solid #dc2626;background:rgba(220,38,38,.12)"><strong style="color:#f87171;font-size:16px">🔁 Hoy se anotó dos veces la misma entrada</strong>
+    <div class="hint" style="margin:6px 0 0;line-height:1.6">${lista}${reps.length>5?`<br>… y ${reps.length-5} más`:''}</div>
+    <div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.25);font-size:13.5px">👉 <b>No hagas el cierre todavía.</b> ${esAdmin()?'Anula la captura repetida en el Historial de entradas y salidas':'Avisa a Dirección para que anule la repetida'}; si cuentas ahora, la app lo toma como gastado.</div>
+    ${esAdmin() ? `<button class="btn" style="width:100%;margin-top:10px;background:#dc2626" onclick="mhDesde=fechaHoyLocal();mhHasta=fechaHoyLocal();mhTipo='entrada';mhCat='todas';mhItem='todos';irA('movhist')">🗑️ Ir a anular la repetida</button>`
+      : av ? `<p class="hint" style="margin:8px 0 0;color:#4ade80;font-weight:800">✅ Ya le avisaste a Dirección (${hora(av)}). Espera a que lo corrija.</p>`
+      : `<button class="btn" style="width:100%;margin-top:10px;background:#dc2626" onclick="avisarRepetidas()">📲 Avisar a Dirección</button>`}</div>`;
+}
+async function avisarRepetidas(){
+  const mod = modulo(), reps = entradasRepetidasHoy(mod); if(!reps.length) return;
+  const doc = {tipo:'avisoRepetida', modulo:mod, dia:fechaHoyLocal(), fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():'',
+    items:reps.map(xs=>({nombre:xs[0].itemNombre, cantidad:Number(xs[0].cantidad), unidad:item2unidad(xs[0].itemId), veces:xs.length}))};
+  try{ await db.collection('cierres').doc(cryptoId()).set(doc); avisosRepCache.push(doc); }catch(e){ return alert('Error: '+e.message); }
+  toast('📲 Listo, Dirección ya tiene el aviso.'); renderCierre();
+}
+// Cuánto se gasta normalmente al día de un consumible (salidas del cierre del último mes).
+function usoNormalCierre(itemId){
+  const desde = new Date(Date.now()-30*86400000).toISOString(), mod = modulo();
+  const cierres = movs.filter(m=>m.modulo===mod && m.cierreTurno && (m.fecha||'')>=desde && diaLocal(m.fecha)!==fechaHoyLocal());
+  const dias = new Set(cierres.map(m=>diaLocal(m.fecha))).size;
+  const total = cierres.filter(m=>m.itemId===itemId && m.tipo==='salida' && !m.anulado && m.estado!=='rechazado').reduce((s,m)=>s+(Number(m.cantidad)||0),0);
+  return {dias, prom: dias ? total/dias : 0};
+}
+// ¿Lo que se usó hoy es raro? Con historial: más de 3 veces lo normal. Sin historial: más de la mitad de lo que había.
+function usoRaroCierre(itemId, uso, esp){
+  if(!(uso>0)) return null;
+  const {dias, prom} = usoNormalCierre(itemId);
+  if(dias>=5){ if(prom>0 ? (uso > prom*3 && uso-prom >= 2) : (esp>0 && uso > esp*0.25)) return {prom, txt: prom>0 ? `Normalmente se usan ~${fmtNum(Math.round(prom*10)/10)} al día` : 'Normalmente no se usa'}; return null; }
+  return esp>0 && uso > esp*0.5 ? {prom:0, txt:`Es más de la mitad de lo que había`} : null;
+}
+// Material de instalaciones y garantías recientes (ya descontado) por artículo.
+function materialApartado(dias){
+  const desde = new Date(Date.now()-(dias||3)*86400000).toISOString(), mod = modulo();
+  return movs.filter(m=>m.modulo===mod && (m.tipo==='instalacion'||m.tipo==='garantia') && !m.anulado && m.estado!=='pendiente' && m.estado!=='rechazado' && (m.fecha||'')>=desde);
+}
+function apartadoDe(itemId){ return materialApartado(3).filter(m=>m.itemId===itemId).reduce((s,m)=>s+(Number(m.cantidad)||0),0); }
+const apartadoBadge = itemId => { const q = apartadoDe(itemId); return q>0 ? `<span title="De instalaciones de los últimos 3 días" style="display:inline-block;font-size:11px;font-weight:800;padding:2px 7px;border-radius:8px;margin-top:3px;background:rgba(124,58,237,.2);color:#c4b5fd;border:1px solid #7c3aed">📦 ${fmtNum(q)} apartado${q===1?'':'s'}</span>` : ''; };
+function apartadosAudHtml(items){
+  const ids = new Set(items.map(i=>i.id)), ms = materialApartado(3).filter(m=>ids.has(m.itemId)); if(!ms.length) return '';
+  const lotes = {}; ms.forEach(m=>{ const k = m.loteId||m.id; (lotes[k] = lotes[k]||[]).push(m); });
+  const ls = Object.values(lotes).sort((a,b)=>(b[0].fecha||'').localeCompare(a[0].fecha||''));
+  const cuando = f => { const d = diaLocal(f), h = new Date(f).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}); return (d===fechaHoyLocal()?'hoy':d===diaLocal(new Date(Date.now()-86400000).toISOString())?'ayer':new Date(f).toLocaleDateString('es-MX',{day:'numeric',month:'short'}))+' '+h; };
+  return `<div style="margin-top:10px;border-radius:14px;border:2px solid #7c3aed;background:rgba(124,58,237,.12);padding:12px"><div style="font-weight:900;font-size:15px;color:#c4b5fd">📦 Material de instalaciones recientes</div>
+    <div class="hint" style="margin:3px 0 6px">Ya se descontó del inventario. Si <b>todavía está en el almacén</b> esperando que se lo lleven, <b>NO lo cuentes</b>.</div>
+    ${ls.slice(0,12).map(g=>`<div style="padding:7px 0;border-top:1px solid rgba(124,58,237,.35)"><b>${g[0].tipo==='garantia'?'🛡️':'🏠'} ${herrEsc(String(g[0].nota||'Instalación').split(' · ')[0])}</b> <span class="hint" style="margin:0">${cuando(g[0].fecha)}</span><div class="hint" style="margin:2px 0 0">${g.map(m=>`${fmtNum(m.cantidad)} ${m.itemNombre}`).join(' · ')}</div></div>`).join('')}
+    <div class="hint" style="margin:6px 0 0">Muestra lo de los últimos 3 días.</div></div>`;
+}
 function cierreMovsHoyHtml(){
   const mod = modulo(), R = movsDiaClasif(mod, fechaHoyLocal()), D = deudasDeModulo(mod);
   const hora = m => new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'});
@@ -8530,6 +8595,7 @@ function renderCierre(){
       <p class="hint">Tubos, bridas, correderas, jaladeras, bisagras, espejos, rieles, sistemas y bastidores <strong>ya se descontaron solos</strong> con las instalaciones y garantías. Aquí solo va lo demás.</p>
       ${cierreHechoHoy()?'<p class="hint" style="color:var(--ok)">✅ Ya capturaste un cierre hoy. Puedes agregar más si faltó algo.</p>':''}
     </div>
+    ${cierreRepetidasHtml()}
     ${cierreMovsHoyHtml()}
     <div class="card">
       <div class="paso">1</div><strong>✂️ ¿Cuántas hojas completas te quedan?</strong>
@@ -8569,6 +8635,10 @@ async function guardarCierre(){
   const salidas = [], deMas = [], iguales = [];
   contados.forEach(it=>{ const esp = stockEsperadoCierre(it.id), hay = Number(cierreVals[it.id]); const d = fmtNum(esp - hay);
     if(d>0) salidas.push({it, q:d, esp, hay}); else if(d<0) deMas.push({it, esp, hay}); else iguales.push(it); });
+  const repsHoy = entradasRepetidasHoy(modulo());
+  if(repsHoy.length && !confirm(`🔁 Hoy hay ${repsHoy.length} entrada(s) que parecen anotadas dos veces (${repsHoy.slice(0,3).map(xs=>xs[0].itemNombre).join(', ')}${repsHoy.length>3?'…':''}).\n\nSi haces el cierre así, lo repetido se toma como gastado.\n\n¿Hacer el cierre de todos modos?`)) return;
+  const raros = salidas.map(x=>Object.assign({}, x, {raro:usoRaroCierre(x.it.id, x.q, x.esp)})).filter(x=>x.raro);
+  if(raros.length && !confirm(`⚠️ Revisa, esto es mucho más de lo normal:\n\n${raros.map(x=>`• ${x.it.nombre}: se usaron ${fmtNum(x.q)} ${x.it.unidad} · ${x.raro.txt}`).join('\n')}\n\n¿Estás seguro? Si llegó material o se anotó una entrada doble, corrígelo antes.\n\nAceptar = sí, está bien · Cancelar = revisar`)) return;
   if(!hojasContadas.length && !contados.length){
     if(!confirm('No escribiste nada.\n\n¿Hoy no se cortaron hojas y no quieres contar consumibles?\n\nAceptar = sí, guardar "sin movimiento" para que no te lo vuelva a recordar hoy.')) return;
   }
@@ -9943,6 +10013,8 @@ function calcularAvisos(){
   } else {
     pedidos.forEach(p=>recepcionesDe(p).forEach((r,idx)=>{ if(r.fecha>visto && (p.modulo!==modulo() || estadoRecepcion(r)==='pendiente')) out.push({id:'pedrec_'+p.id+'_'+idx, fecha:r.fecha, ic:'📦',
       titulo:`${p.modulo} recibió material`, texto:'Revisa lo que llegó y apruébalo para sumarlo al inventario.'}); }));
+    if(esAdmin()) avisosRepCache.filter(c=>c.fecha>visto).forEach(c=>out.push({id:'rep_'+c.id, fecha:c.fecha, ic:'🔁',
+      titulo:`${c.modulo}: entrada anotada dos veces`, texto:(c.items||[]).slice(0,4).map(x=>`${x.nombre} +${fmtNum(x.cantidad)} ${x.unidad||''}`).join(', ')+((c.items||[]).length>4?'…':'')+' · anula la repetida antes de su cierre'}));
     if(esAdmin()) cierresCache.filter(c=>c.fecha>visto).forEach(c=>out.push({id:'cierre_'+c.id, fecha:c.fecha, ic:'📝',
       titulo:`${c.modulo} hizo su cierre del turno`, texto:resumenCierreTxt(c)}));
   }
