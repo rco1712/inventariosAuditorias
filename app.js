@@ -218,7 +218,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v179';
+const APP_VERSION = 'v180';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -399,6 +399,14 @@ async function loadStock(){
       pedidos = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
       if(current==='ped') renderPed(); if(current==='home') renderHome();
       revisarAvisosNuevos();
+    }));
+  }catch(e){}
+  try{
+    // Avance de auditoría en internet (v180): Dirección ve los suyos; el coordinador, el de su módulo.
+    if(esAdmin() || esCoordinador()) sub(db.collection('borradores').where('modulo','==', esCoordinador() ? modulo() : '_direccion').onSnapshot(snap=>{
+      borradoresNube = {}; snap.docs.forEach(d=>{ borradoresNube[d.id] = {id:d.id, ...d.data()}; });
+      if(current==='aud' && audRevisarNube()) renderAud();
+      if(current==='home') renderHome();
     }));
   }catch(e){}
   try{
@@ -3647,6 +3655,7 @@ function renderAud(){
   if(esSoloLectura()){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   audAsegurarModulo();
   recuperarBorradorAud();
+  if(_borradorRevisado[modulo()+(audTipo==='simulacion'?'_sim':'')]) audRevisarNube();
   audMarcarCambios(); _audMovCache = null;
   if(ciego){ audTipo='conteo'; if(!audAuditor) audAuditor=(getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0]; }
   if(audTipo==='inicial') audTipo='seguimiento';
@@ -3739,6 +3748,7 @@ function renderAud(){
   }
 
   $('#main').innerHTML = `
+  ${!esSimAud() ? audOtroAparatoHtml() : ''}
   ${!ciego && !esSimAud() ? audMovidosHtml() : ''}
   ${esAdmin() ? conteoAdminCardHtml() : ''}
   ${ciego ? `<div class="card" style="border:2px solid var(--bad)"><div style="font-size:17px;font-weight:800">📋 Conteo del almacén · ${modulo()}</div>
@@ -3994,29 +4004,86 @@ function audMovidosHtml(){
   </div>`;
 }
 function claveBorradorAud(mod){ return 'borradorAud_'+(mod||modulo())+(audTipo==='simulacion'?'_sim':''); }
+// ===== El avance de la auditoría también se guarda en internet (confirmado por el usuario, v180) =====
+// Así se puede empezar en un aparato y seguir en otro con la misma cuenta, y no se pierde si le pasa
+// algo al celular. Un registro por módulo que se reemplaza (no se acumula) y se borra al guardar.
+// Dirección: lo ve solo Dirección. Coordinador (conteo a ciegas): lo ven él y Dirección.
+const AUD_DEV = (()=>{ try{ let d = localStorage.getItem('am_device'); if(!d){ d = 'd'+Math.random().toString(36).slice(2,10); localStorage.setItem('am_device', d); } return d; }catch(e){ return 'd0'; } })();
+let borradoresNube = {}, _audContenido = {}, _audCambioT = {}, _nubeTimer = {}, _nubeUlt = {}, _nubePend = {};
+function idBorradorNube(mod){ return (esCoordinador()?'coord_':'dir_')+(mod||modulo()); }
+function audDatosBorrador(){ return {auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, auditCapTs}; }
+function subirBorradorNube(mod, datos){
+  if(datos.audTipo==='simulacion' || esSoloLectura()) return;
+  const id = idBorradorNube(mod);
+  _nubePend[id] = {modulo: esCoordinador() ? mod : '_direccion', mod, datos: JSON.stringify(datos), cambio: datos.cambio, device: AUD_DEV, quien: (getCurrentUserEmail?getCurrentUserEmail():'')};
+  if(_nubeTimer[id]) return;
+  _nubeTimer[id] = setTimeout(()=>subirBorradorNubeYa(id), Math.max(0, 20000 - (Date.now()-(_nubeUlt[id]||0))));
+}
+function subirBorradorNubeYa(id){
+  if(_nubeTimer[id]){ clearTimeout(_nubeTimer[id]); _nubeTimer[id] = null; }
+  const doc = _nubePend[id]; if(!doc) return; delete _nubePend[id]; _nubeUlt[id] = Date.now();
+  try{ db.collection('borradores').doc(id).set(doc).catch(()=>{}); }catch(e){}
+}
+function subirBorradoresPendientes(){ Object.keys(_nubePend).forEach(subirBorradorNubeYa); }
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ try{ if(current==='aud' && _audMod) guardarBorradorAud(_audMod); }catch(e){} subirBorradoresPendientes(); } });
+function borrarBorradorNube(mod){
+  const id = idBorradorNube(mod); delete _nubePend[id]; if(_nubeTimer[id]){ clearTimeout(_nubeTimer[id]); _nubeTimer[id] = null; }
+  if(borradoresNube[id]) try{ db.collection('borradores').doc(id).delete().catch(()=>{}); }catch(e){}
+}
 function guardarBorradorAud(mod){
   try{
     audMarcarCambios();
+    const m = mod || modulo();
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length || auditMelFuera.length;
-    if(hay) localStorage.setItem(claveBorradorAud(mod), JSON.stringify({auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, auditCapTs, fecha:new Date().toISOString()}));
-    else localStorage.removeItem(claveBorradorAud(mod));
+    if(hay){
+      const datos = audDatosBorrador(), txt = JSON.stringify(datos), sim = audTipo==='simulacion';
+      const cambio = !sim && txt!==_audContenido[m];
+      if(cambio){ _audContenido[m] = txt; _audCambioT[m] = new Date().toISOString(); }
+      localStorage.setItem(claveBorradorAud(mod), JSON.stringify(Object.assign({}, datos, {fecha:new Date().toISOString(), cambio:_audCambioT[m]||new Date().toISOString()})));
+      if(cambio) subirBorradorNube(m, Object.assign({}, datos, {fecha:_audCambioT[m], cambio:_audCambioT[m]}));
+    } else {
+      localStorage.removeItem(claveBorradorAud(mod));
+      if(audTipo!=='simulacion' && _audContenido[m]){ delete _audContenido[m]; borrarBorradorNube(m); }
+    }
   }catch(e){}
 }
-function borrarBorradorAud(){ try{ localStorage.removeItem(claveBorradorAud()); }catch(e){} }
+function borrarBorradorAud(){ try{ localStorage.removeItem(claveBorradorAud()); }catch(e){} if(audTipo!=='simulacion'){ delete _audContenido[modulo()]; borrarBorradorNube(modulo()); } }
+// El borrador más nuevo entre este aparato y lo guardado en internet.
+function audBorradorNubeDe(mod){ const n = borradoresNube[idBorradorNube(mod)]; if(!n) return null; try{ const b = JSON.parse(n.datos); b.cambio = b.cambio || n.cambio; b._device = n.device; b._quien = n.quien; return b; }catch(e){ return null; } }
+function audOtroAparatoHtml(){
+  const n = borradoresNube[idBorradorNube(modulo())]; if(!n || n.device===AUD_DEV) return '';
+  let min = Math.floor((Date.now()-new Date(n.cambio||0).getTime())/60000); if(!(min>-5 && min<10)) return ''; min = Math.max(0, min); // tolera relojes un poco distintos
+  return `<div class="card" style="padding:12px;border:2px solid #d97706;background:linear-gradient(0deg,rgba(217,119,6,.12),rgba(217,119,6,.12)),var(--card)"><strong>📱 Este conteo se movió en otro aparato hace ${min<1?'menos de 1 minuto':min+' min'}</strong><p class="hint" style="margin:4px 0 0">Ya tienes aquí lo que se contó allá. Cuenta en <strong>un solo aparato a la vez</strong> para que no se pise lo que capturas.</p></div>`;
+}
+function audCargarBorrador(b){
+  auditCapturas = b.auditCapturas||{}; auditDesglose = b.auditDesglose||{}; auditMelFuera = b.auditMelFuera||[]; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
+  audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
+  auditCapTs = b.auditCapTs||{}; _audValPrev = Object.assign({}, auditCapturas);
+  const m = modulo(); _audContenido[m] = JSON.stringify(audDatosBorrador()); _audCambioT[m] = b.cambio || b.fecha || new Date().toISOString();
+}
+// Si en otro aparato se avanzó el conteo de este módulo, se trae (si aquí no hay nada más nuevo).
+function audRevisarNube(){
+  if(audTipo==='simulacion' || current!=='aud' || _audMod!==modulo()) return false;
+  guardarBorradorAud(_audMod); // lo de este aparato primero, para comparar bien
+  const bn = audBorradorNubeDe(modulo()); if(!bn || bn._device===AUD_DEV) return false;
+  if((bn.cambio||'') <= (_audCambioT[modulo()]||'')) return false;
+  audCargarBorrador(bn); try{ localStorage.setItem(claveBorradorAud(), JSON.stringify(Object.assign({}, audDatosBorrador(), {fecha:new Date().toISOString(), cambio:_audCambioT[modulo()]}))); }catch(e){}
+  _audMovCache = null; toast('☁️ Se trajo lo que contaste en otro aparato.'); return true;
+}
 let _borradorRevisado = {};
 function recuperarBorradorAud(){
   try{
     // Solo se recupera UNA vez al abrir el conteo (no cada vez que se redibuja la pantalla); si no,
     // al quitar lo último capturado regresaba el borrador y no se podía dejar en blanco.
     const _bk = modulo()+(audTipo==='simulacion'?'_sim':''); if(_borradorRevisado[_bk]) return; _borradorRevisado[_bk] = true;
-    const raw = localStorage.getItem(claveBorradorAud()); if(!raw) return;
+    const raw = localStorage.getItem(claveBorradorAud());
+    let b = raw ? JSON.parse(raw) : null, deNube = false;
+    if(audTipo!=='simulacion'){ const bn = audBorradorNubeDe(modulo()); if(bn && (!b || (bn.cambio||'') > (b.cambio||b.fecha||''))){ b = bn; deNube = bn._device!==AUD_DEV; } }
+    if(!b) return;
     const hayAhora = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length;
     if(hayAhora) return;
-    const b = JSON.parse(raw);
-    auditCapturas = b.auditCapturas||{}; auditDesglose = b.auditDesglose||{}; auditMelFuera = b.auditMelFuera||[]; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
-    audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
-    auditCapTs = b.auditCapTs||{}; _audValPrev = Object.assign({}, auditCapturas);
-    toast('↩️ Se recuperó lo que ya habías contado.');
+    audCargarBorrador(b);
+    toast(deNube ? '☁️ Se trajo lo que llevabas contado en otro aparato.' : '↩️ Se recuperó lo que ya habías contado.');
   }catch(e){}
 }
 setInterval(()=>{ if(current==='aud' && _audMod===modulo()) guardarBorradorAud(_audMod); }, 4000);
@@ -8542,10 +8609,11 @@ function renderConteoDir(){
 function audBorradoresHtml(){
   const out = [];
   MODULOS.forEach(m=>{ try{
-    const raw = localStorage.getItem('borradorAud_'+m.nombre); if(!raw) return;
-    const b = JSON.parse(raw), n = Object.keys(b.auditCapturas||{}).filter(k=>b.auditCapturas[k]!==undefined && b.auditCapturas[k]!==null).length;
+    const raw = localStorage.getItem('borradorAud_'+m.nombre), bl = raw ? JSON.parse(raw) : null, bn = audBorradorNubeDe(m.nombre);
+    const b = (bn && (!bl || (bn.cambio||'') > (bl.cambio||bl.fecha||''))) ? bn : bl; if(!b) return;
+    const n = Object.keys(b.auditCapturas||{}).filter(k=>b.auditCapturas[k]!==undefined && b.auditCapturas[k]!==null).length;
     if(!n && !(b.auditArmados||[]).length) return;
-    const f = b.fecha ? new Date(b.fecha).toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'}) : '';
+    const f0 = b.cambio || b.fecha, f = f0 ? new Date(f0).toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'}) : '';
     out.push(`<button onclick="entrarModulo('${m.nombre}','aud')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;margin-top:8px;padding:11px 12px;border-radius:12px;border:2px solid #facc15;background:rgba(250,204,21,.18);color:#fff;font:inherit;font-weight:800;font-size:14px;cursor:pointer;text-align:left"><span>▶ Continuar auditoría de ${m.nombre}</span><span style="font-size:12px;font-weight:700;opacity:.95;white-space:nowrap">${n} contado${n===1?'':'s'}${f?' · '+f:''}</span></button>`);
   }catch(e){} });
   return out.join('');
