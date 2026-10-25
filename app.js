@@ -3647,6 +3647,7 @@ function renderAud(){
   if(esSoloLectura()){ $('#main').innerHTML = '<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   audAsegurarModulo();
   recuperarBorradorAud();
+  audMarcarCambios(); _audMovCache = null;
   if(ciego){ audTipo='conteo'; if(!audAuditor) audAuditor=(getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0]; }
   if(audTipo==='inicial') audTipo='seguimiento';
   // auditCat puede venir de fuera (selectAuditCat); se alinea con el paso.
@@ -3728,7 +3729,7 @@ function renderAud(){
     ${sec.k==='Herrajes' && !comp && !esCoordinador() ? herrAudListaHtml(items, sinTeo, eq) : `<div class="wrap-x"><table><tr><th>Artículo</th>${sinTeo?'':'<th>Teórico</th>'}<th>${catHoja?'Hojas completas':'Contado'}</th></tr>
       ${items.map(it=>{ const f=calcFormula(it.id); const v=auditCapturas[it.id];
         const extra = eq[it.id] ? `<div class="hint" style="margin-top:3px">+ ${fmtNum(eq[it.id])} ${it.unidad||''} en piezas/armados</div>` : '';
-        return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div>${comp?'':apartadoBadge(it.id)}</td>${sinTeo?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
+        return `<tr style="${v===undefined&&!comp?'background:rgba(224,121,26,.08)':''}"><td>${it.nombre}<div class="tag">${it.unidad}</div>${comp?'':apartadoBadge(it.id)}${comp||ciego?'':audMovidoBadge(it.id)}</td>${sinTeo?'':`<td>${fmtNum(f.final)}${f.esHoja?`<div class="hint" style="margin-top:2px">${fmtNum(f.completas)} compl. · ${fmtNum(f.cortado)} cort.</div>`:''}</td>`}
           <td><div class="row" style="gap:6px;flex-wrap:nowrap"><input type="number" min="0" inputmode="decimal" style="min-width:70px" placeholder="—" value="${v??''}" oninput="auditCapturas['${it.id}']=this.value===''?undefined:Number(this.value);actualizarFaltanAud()">
           <button class="btn small" style="padding:6px 10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" title="Sumar" onclick="sumarAud('${it.id}')">➕</button></div>${extra}</td></tr>`;
       }).join('')}
@@ -3738,6 +3739,7 @@ function renderAud(){
   }
 
   $('#main').innerHTML = `
+  ${!ciego && !esSimAud() ? audMovidosHtml() : ''}
   ${esAdmin() ? conteoAdminCardHtml() : ''}
   ${ciego ? `<div class="card" style="border:2px solid var(--bad)"><div style="font-size:17px;font-weight:800">📋 Conteo del almacén · ${modulo()}</div>
     <p class="hint">Cuenta <strong>todo</strong> lo que hay en el módulo, también lo del taller, en cajas o en esquinas. Ve sección por sección; la app no te deja avanzar si algo quedó sin contar.</p></div>` : ''}
@@ -3774,7 +3776,7 @@ function herrAudFilaHtml(it, sinTeo, eq){
   const contado = v!==undefined, C = HERR_AUD_COL;
   return `<div id="audh-${it.id}" style="padding:10px;margin-top:10px;border-radius:14px;background:${contado?(tot?C+'1f':'rgba(22,163,74,.10)'):'rgba(224,121,26,.10)'};border:2px solid ${u?'#16a34a':contado?'transparent':'rgba(224,121,26,.45)'}">
     <div style="display:flex;align-items:center;gap:8px"><div style="font-size:22px">🔩</div>
-      <div style="flex:1;min-width:0"><div style="color:${C};font-weight:800;font-size:15px">${contado?'✓ ':'⏳ '}${it.nombre}</div><span class="hint" style="margin:0">${it.unidad||''}${f?' · teórico '+fmtNum(f.final):''}</span>${apartadoBadge(it.id)?'<div>'+apartadoBadge(it.id)+'</div>':''}${eq&&eq[it.id]?`<div class="hint" style="margin:2px 0 0">+ ${fmtNum(eq[it.id])} en piezas/armados</div>`:''}</div>
+      <div style="flex:1;min-width:0"><div style="color:${C};font-weight:800;font-size:15px">${contado?'✓ ':'⏳ '}${it.nombre}</div><span class="hint" style="margin:0">${it.unidad||''}${f?' · teórico '+fmtNum(f.final):''}</span>${apartadoBadge(it.id)?'<div>'+apartadoBadge(it.id)+'</div>':''}${audMovidoBadge(it.id)}${eq&&eq[it.id]?`<div class="hint" style="margin:2px 0 0">+ ${fmtNum(eq[it.id])} en piezas/armados</div>`:''}</div>
       <div style="text-align:center;min-width:64px"><div style="font-size:11px;color:var(--sub)">Total</div><div style="font-size:24px;font-weight:900;color:${u?'#4ade80':contado?C:'var(--sub)'}">${contado?fmtNum(tot):'—'}</div></div></div>
     ${u?`<div style="margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(22,163,74,.22);color:#bbf7d0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>✅ ${u.txt}</span><button onclick="herrAudDeshacer('${it.id}')" style="border:1px solid #86efac;background:transparent;color:#bbf7d0;border-radius:8px;padding:4px 10px;font-weight:800;cursor:pointer">↩️ Deshacer</button></div>`:''}
     ${AUD_LUGARES.map(l=>{ const n = Number(d[l.k])||0, ed = audHCorr && audHCorr.id===it.id && audHCorr.l===l.k;
@@ -3879,11 +3881,57 @@ function actualizarFaltanAud(){
 function selectAuditCat(c){ auditCat=c; renderAud(); }
 // Borrador del conteo/auditoría: se guarda en el teléfono cada pocos segundos, para no perder lo
 // contado si se cierra la app, se acaba la pila o llega una actualización.
+// ===== Auditoría: avisar si algo se movió DESPUÉS de contarlo (confirmado por el usuario, v178) =====
+// Se guarda la hora en que se contó cada artículo; si después hubo una entrada, salida, instalación,
+// cierre del turno, corte… de ese artículo, lo contado ya no es igual a lo de ahora: hay que recontarlo.
+let auditCapTs = {}, _audValPrev = {};
+function audMarcarCambios(){
+  const ahora = new Date().toISOString();
+  Object.keys(auditCapturas).forEach(k=>{ const v = auditCapturas[k];
+    if(v===undefined || v===null){ delete auditCapTs[k]; delete _audValPrev[k]; return; }
+    if(_audValPrev[k]!==v || !auditCapTs[k]){ auditCapTs[k] = ahora; _audValPrev[k] = v; } });
+  Object.keys(auditCapTs).forEach(k=>{ if(auditCapturas[k]===undefined || auditCapturas[k]===null){ delete auditCapTs[k]; delete _audValPrev[k]; } });
+}
+let _audMovCache = null, _audMovT = 0;
+function audMovidosDespues(){
+  if(_audMovCache && Date.now()-_audMovT < 1500) return _audMovCache;
+  const mod = modulo(), out = [];
+  const porItem = {}; movs.forEach(m=>{ if(m.itemId && auditCapTs[m.itemId]) (porItem[m.itemId]=porItem[m.itemId]||[]).push(m); });
+  Object.keys(auditCapTs).forEach(id=>{
+    if(auditCapturas[id]===undefined || auditCapturas[id]===null) return;
+    const t = auditCapTs[id];
+    const ms = (porItem[id]||[]).filter(m=>(!m.modulo || m.modulo===mod) && m.tipo!=='nota' && !m.anulado && m.estado!=='rechazado' && ((m.fecha||'')>t || (m.estado==='aprobado' && (m.revisadoEn||'')>t)));
+    const it = CATALOGO.find(i=>i.id===id);
+    if(ms.length && it) out.push({id, it, ms});
+  });
+  _audMovCache = out; _audMovT = Date.now();
+  return out;
+}
+const MOV_TXT_CORTO = {entrada:'📥 entró', salida:'📤 salió', instalacion:'🏠 instalación', garantia:'🛡️ garantía', merma:'⚠️ merma', corte:'✂️ corte', ajuste:'🔧 ajuste', devolucion:'↩️ regresó', sobrante:'🧩 sobrante'};
+function movDescCorta(m){
+  const hoy = diaLocal(m.fecha)===fechaHoyLocal(), f = new Date(m.fecha);
+  const cuando = (hoy ? '' : f.toLocaleDateString('es-MX',{day:'numeric', month:'short'})+' ') + f.toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'});
+  return `${m.cierreTurno?'📝 cierre del turno':(MOV_TXT_CORTO[m.tipo]||m.tipo)} ${fmtNum(m.cantidad)} (${cuando})${m.estado==='pendiente'?' · por aprobar':''}`;
+}
+function audMovidoBadge(id){
+  if(!auditCapTs[id]) return '';
+  return audMovidosDespues().some(x=>x.id===id) ? '<div style="display:inline-block;margin-top:3px;padding:2px 7px;border-radius:7px;background:rgba(220,38,38,.15);border:1px solid var(--bad);color:var(--bad);font-size:11.5px;font-weight:800">⚠️ Se movió · recuéntalo</div>' : '';
+}
+function audIrItem(id){ const i = AUD_SECCIONES.findIndex(s=>!String(s.k).startsWith('__') && itemsSeccionAud(s.k).some(x=>x.id===id)); if(i>=0) irPasoAud(i); }
+function audMovidosHtml(){
+  const xs = audMovidosDespues(); if(!xs.length) return '';
+  return `<div class="card" style="padding:12px;border:2px solid var(--bad);background:linear-gradient(0deg,rgba(220,38,38,.10),rgba(220,38,38,.10)),var(--card)">
+    <div style="font-size:16px;font-weight:900">⚠️ ${xs.length} artículo${xs.length===1?'':'s'} se movi${xs.length===1?'ó':'eron'} después de que lo${xs.length===1?'':'s'} contaste</div>
+    <p class="hint" style="margin:4px 0 6px">Lo que contaste ya no es igual a lo de ahora. Vuelve a contar${xs.length===1?'lo':'los'} y escribe el número nuevo.</p>
+    ${xs.map(x=>`<div class="movitem" style="align-items:center"><span style="min-width:0"><strong>${x.it.nombre}</strong><span class="hint" style="display:block;margin:2px 0 0">${x.ms.slice(0,3).map(movDescCorta).join(' · ')}${x.ms.length>3?' …':''}</span></span><button class="btn small" style="background:var(--bad);white-space:nowrap" onclick="audIrItem('${x.id}')">Recontar</button></div>`).join('')}
+  </div>`;
+}
 function claveBorradorAud(mod){ return 'borradorAud_'+(mod||modulo())+(audTipo==='simulacion'?'_sim':''); }
 function guardarBorradorAud(mod){
   try{
+    audMarcarCambios();
     const hay = Object.keys(auditCapturas).some(k=>auditCapturas[k]!==undefined) || contarPiezasSueltas() || auditArmados.length || auditMelFuera.length;
-    if(hay) localStorage.setItem(claveBorradorAud(mod), JSON.stringify({auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, fecha:new Date().toISOString()}));
+    if(hay) localStorage.setItem(claveBorradorAud(mod), JSON.stringify({auditCapturas, auditDesglose, auditMelFuera, auditPiezas, auditArmados, audAuditor, audPaso, audHechas, audTipo, audOcultarTeo, auditCapTs, fecha:new Date().toISOString()}));
     else localStorage.removeItem(claveBorradorAud(mod));
   }catch(e){}
 }
@@ -3900,6 +3948,7 @@ function recuperarBorradorAud(){
     const b = JSON.parse(raw);
     auditCapturas = b.auditCapturas||{}; auditDesglose = b.auditDesglose||{}; auditMelFuera = b.auditMelFuera||[]; auditPiezas = b.auditPiezas||{}; auditArmados = b.auditArmados||[]; if(b.audAuditor) audAuditor = b.audAuditor;
     audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
+    auditCapTs = b.auditCapTs||{}; _audValPrev = Object.assign({}, auditCapturas);
     toast('↩️ Se recuperó lo que ya habías contado.');
   }catch(e){}
 }
@@ -3912,6 +3961,7 @@ function audAsegurarModulo(){
   if(_audMod && _audMod!==m){
     guardarBorradorAud(_audMod);
     auditCapturas={}; auditPiezas={}; auditArmados=[]; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[]; audHechas={}; audPaso=0; auditCat=AUD_SECCIONES[0].k;
+    auditCapTs={}; _audValPrev={};
     delete _borradorRevisado[m]; delete _borradorRevisado[m+'_sim'];
   }
   _audMod = m;
@@ -4267,6 +4317,9 @@ async function saveAudit(){
   const resultados=[]; let totalDiff=0;
   const capturados = Object.keys(auditCapturas).filter(k=>auditCapturas[k]!==undefined);
   if(!capturados.length && !Object.keys(eq).length) return alert('No has capturado ningún artículo, pieza ni armado todavía.');
+  audMarcarCambios(); _audMovCache = null;
+  const movidos = modoConteoCoord() ? [] : audMovidosDespues();
+  if(movidos.length && !confirm(`⚠️ ${movidos.length} artículo(s) se movieron DESPUÉS de que los contaste:\n\n${movidos.slice(0,8).map(x=>'• '+x.it.nombre+': '+x.ms.slice(0,2).map(movDescCorta).join(', ')).join('\n')}${movidos.length>8?'\n…':''}\n\nLo que contaste ya no es igual a lo de ahora. Lo mejor es recontarlos antes de guardar.\n\n¿Guardar la auditoría así de todos modos?`)) return;
   // Confirmado por el usuario: el reporte de auditoría lleva TODOS los artículos, aunque estén en
   // cero. Lo que no se capturó se toma como 0 físico; antes se avisa de los que sí tenían existencia.
   const ciego = modoConteoCoord();
