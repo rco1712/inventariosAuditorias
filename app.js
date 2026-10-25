@@ -3679,7 +3679,7 @@ function renderAud(){
     const eqP = piezasAuditAHojas(); const lin = [];
     CATALOGO.forEach(it=>{ if(auditCapturas[it.id]===undefined) return; const f=calcFormula(it.id); const v=(Number(auditCapturas[it.id])||0)+(Number(eqP[it.id])||0);
       lin.push(`${it.nombre}: contado <strong>${fmtNum(f.esHoja && !eqP[it.id] ? (Number(auditCapturas[it.id])||0) : v)}</strong>${f.esHoja?(eqP[it.id]?' (completas + piezas)':' hojas completas (el cortado no se toca)'):' '+(it.unidad||'')}`); });
-    cuerpo = `<div class="card"><h3>✅ Revisar auditoría de un material</h3>
+    cuerpo = audAntesDeGuardarHtml() + `<div class="card"><h3>✅ Revisar auditoría de un material</h3>
       <p class="hint">Solo se compara lo que <strong>escribiste</strong>; todo lo demás se queda como está (otros colores, herrajes, etc.). En melamina/MDF escribe las hojas completas de ese color (aunque sea <strong>0</strong>) y, si quieres corregir también el cortado, cuenta sus piezas en ✂️ Piezas cortadas. Si no cuentas piezas de ese color, solo se corrigen las <strong>hojas completas</strong>.</p>
       ${lin.length?`<div class="movlist" style="margin-top:8px">${lin.map(x=>`<div class="movitem"><span>${x}</span></div>`).join('')}</div>`:'<p class="neg">Todavía no capturas nada. Ve a la sección del material y escribe lo que contaste.</p>'}
       <button class="btn" style="width:100%;min-height:54px;font-size:16px;margin-top:10px" ${lin.length?'':'disabled'} onclick="saveAudit()">Guardar auditoría</button>
@@ -3707,7 +3707,7 @@ function renderAud(){
         else { const f=faltanSeccionAud(x.k); falta = `Faltan: ${f.slice(0,6).map(i=>i.nombre).join(', ')}${f.length>6?' y '+(f.length-6)+' más':''}`; } }
       return `<div class="movitem" style="flex-wrap:wrap;gap:6px"><span style="min-width:0;flex:1 1 60%"><span class="invname">${ok?'✅':'⏳'} ${AUD_ICONO[x.k]||''} ${x.t}</span><span class="hint" style="display:block;margin:2px 0 0">${det}</span>${falta?`<span class="hint" style="display:block;margin:2px 0 0;color:#b3742c">${falta}</span>`:''}</span>${ok?'':`<button class="btn small" onclick="irPasoAud(${idx})">Ir a contar</button>`}</div>`; }).join('');
     const listo = primerPasoPendienteAud()===AUD_SECCIONES.length-1;
-    cuerpo = `<div class="card"><h3>✅ Revisar y enviar</h3>
+    cuerpo = (ciego || audTipo==='conteo' ? '' : audAntesDeGuardarHtml()) + `<div class="card"><h3>✅ Revisar y enviar</h3>
       <div class="movlist" style="margin-top:8px">${filas}</div>
       ${listo?'<p class="hint" style="margin-top:8px">Todo está contado. Si encontraste algo más, regresa a su sección y usa ➕ para sumarlo.</p>':'<p class="neg" style="margin-top:8px">Todavía hay secciones pendientes. Termínalas para poder guardar; si de verdad no hay de lo que falta, entra a la sección y ponlo en 0.</p>'}
       <button class="btn" style="width:100%;min-height:54px;font-size:16px;margin-top:10px" ${listo?'':'disabled'} onclick="saveAudit()">${ciego?'📤 Enviar conteo a Dirección':(audTipo==='conteo'?'Guardar conteo inicial':'Guardar auditoría')}</button>
@@ -3917,13 +3917,29 @@ function audMovidoBadge(id){
   if(!auditCapTs[id]) return '';
   return audMovidosDespues().some(x=>x.id===id) ? '<div style="display:inline-block;margin-top:3px;padding:2px 7px;border-radius:7px;background:rgba(220,38,38,.15);border:1px solid var(--bad);color:var(--bad);font-size:11.5px;font-weight:800">⚠️ Se movió · recuéntalo</div>' : '';
 }
+// Si al recontar sale el mismo número (el material ya se había ido antes de contarlo), se confirma así.
+// Lista "antes de guardar" (confirmado por el usuario, v178): lo que todavía no está en el inventario.
+function audPendAprobMod(){ return new Set(movs.filter(m=>m.estado==='pendiente' && (!m.modulo || m.modulo===modulo())).map(m=>m.loteId||m.id)).size; }
+function audAntesDeGuardar(){
+  const out = [], mov = audMovidosDespues().length, nP = audPendAprobMod(), dom = new Date().getDay()===0;
+  out.push(mov ? {ok:false, t:`${mov} artículo${mov===1?'':'s'} para recontar`, d:'Se movieron después de que los contaste (arriba te dice cuáles).'} : {ok:true, t:'Nada se movió después de contarlo'});
+  out.push(nP ? {ok:false, t:`${nP} captura${nP===1?'':'s'} de ${modulo()} esperando tu aprobación`, d:'Lo que no está aprobado (entradas, salidas, instalaciones…) todavía no cuenta en el inventario.', btn:`<button class="btn small" onclick="irA('apr')">Ir a aprobar</button>`} : {ok:true, t:'No hay capturas esperando aprobación'});
+  if(!dom) out.push(cierreHechoHoy() ? {ok:true, t:`${modulo()} ya hizo su cierre del turno de hoy`} : {ok:false, t:`${modulo()} todavía no hace su cierre del turno de hoy`, d:'Si ya se trabajó hoy, lo que se usó de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta. Lo mejor es guardar después de su cierre.'});
+  return out;
+}
+function audAntesDeGuardarHtml(){
+  const xs = audAntesDeGuardar(), mal = xs.filter(x=>!x.ok).length;
+  return `<div class="card" style="padding:12px;border:2px solid ${mal?'#d97706':'var(--ok)'}"><strong style="font-size:16px">${mal?'⏳':'✅'} Antes de guardar</strong>
+    ${xs.map(x=>`<div class="movitem" style="align-items:center"><span style="min-width:0"><span class="invname">${x.ok?'✅':'⏳'} ${x.t}</span>${x.d?`<span class="hint" style="display:block;margin:2px 0 0">${x.d}</span>`:''}</span>${x.btn||''}</div>`).join('')}</div>`;
+}
+function audSigueIgual(id){ auditCapTs[id] = new Date().toISOString(); _audValPrev[id] = auditCapturas[id]; _audMovCache = null; guardarBorradorAud(); renderAud(); toast('✅ Listo, queda como lo contaste.'); }
 function audIrItem(id){ const i = AUD_SECCIONES.findIndex(s=>!String(s.k).startsWith('__') && itemsSeccionAud(s.k).some(x=>x.id===id)); if(i>=0) irPasoAud(i); }
 function audMovidosHtml(){
   const xs = audMovidosDespues(); if(!xs.length) return '';
   return `<div class="card" style="padding:12px;border:2px solid var(--bad);background:linear-gradient(0deg,rgba(220,38,38,.10),rgba(220,38,38,.10)),var(--card)">
     <div style="font-size:16px;font-weight:900">⚠️ ${xs.length} artículo${xs.length===1?'':'s'} se movi${xs.length===1?'ó':'eron'} después de que lo${xs.length===1?'':'s'} contaste</div>
-    <p class="hint" style="margin:4px 0 6px">Lo que contaste ya no es igual a lo de ahora. Vuelve a contar${xs.length===1?'lo':'los'} y escribe el número nuevo.</p>
-    ${xs.map(x=>`<div class="movitem" style="align-items:center"><span style="min-width:0"><strong>${x.it.nombre}</strong><span class="hint" style="display:block;margin:2px 0 0">${x.ms.slice(0,3).map(movDescCorta).join(' · ')}${x.ms.length>3?' …':''}</span></span><button class="btn small" style="background:var(--bad);white-space:nowrap" onclick="audIrItem('${x.id}')">Recontar</button></div>`).join('')}
+    <p class="hint" style="margin:4px 0 6px">Después de contar${xs.length===1?'lo':'los'} se anotó algo en la app. Vuelve a contar: si sale otro número escríbelo; si sale igual (el material ya se había ido antes de que contaras), toca <strong>✓ Sigue igual</strong>.</p>
+    ${xs.map(x=>`<div class="movitem" style="align-items:center"><span style="min-width:0"><strong>${x.it.nombre}</strong><span class="hint" style="display:block;margin:2px 0 0">${x.ms.slice(0,3).map(movDescCorta).join(' · ')}${x.ms.length>3?' …':''}</span></span><span style="display:flex;flex-direction:column;gap:6px"><button class="btn small" style="background:var(--bad);white-space:nowrap" onclick="audIrItem('${x.id}')">Recontar</button><button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="audSigueIgual('${x.id}')">✓ Sigue igual</button></span></div>`).join('')}
   </div>`;
 }
 function claveBorradorAud(mod){ return 'borradorAud_'+(mod||modulo())+(audTipo==='simulacion'?'_sim':''); }
@@ -4318,8 +4334,15 @@ async function saveAudit(){
   const capturados = Object.keys(auditCapturas).filter(k=>auditCapturas[k]!==undefined);
   if(!capturados.length && !Object.keys(eq).length) return alert('No has capturado ningún artículo, pieza ni armado todavía.');
   audMarcarCambios(); _audMovCache = null;
-  const movidos = modoConteoCoord() ? [] : audMovidosDespues();
-  if(movidos.length && !confirm(`⚠️ ${movidos.length} artículo(s) se movieron DESPUÉS de que los contaste:\n\n${movidos.slice(0,8).map(x=>'• '+x.it.nombre+': '+x.ms.slice(0,2).map(movDescCorta).join(', ')).join('\n')}${movidos.length>8?'\n…':''}\n\nLo que contaste ya no es igual a lo de ahora. Lo mejor es recontarlos antes de guardar.\n\n¿Guardar la auditoría así de todos modos?`)) return;
+  if(!modoConteoCoord()){
+    const movidos = audMovidosDespues(), av = [];
+    if(movidos.length) av.push(`⚠️ ${movidos.length} artículo(s) se movieron DESPUÉS de que los contaste:\n${movidos.slice(0,8).map(x=>'• '+x.it.nombre+': '+x.ms.slice(0,2).map(movDescCorta).join(', ')).join('\n')}${movidos.length>8?'\n…':''}`);
+    if(tipo!=='conteo' && tipo!=='complemento'){
+      const nP = audPendAprobMod(); if(nP) av.push(`⏳ ${nP} captura(s) de ${modulo()} esperan tu aprobación: todavía no cuentan en el inventario.`);
+      if(new Date().getDay()!==0 && !cierreHechoHoy()) av.push(`📝 ${modulo()} todavía no hace su cierre del turno de hoy: lo que se usó hoy de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta.`);
+    }
+    if(av.length && !confirm(`Antes de guardar, revisa:\n\n${av.join('\n\n')}\n\n¿Guardar la auditoría así de todos modos?`)) return;
+  }
   // Confirmado por el usuario: el reporte de auditoría lleva TODOS los artículos, aunque estén en
   // cero. Lo que no se capturó se toma como 0 físico; antes se avisa de los que sí tenían existencia.
   const ciego = modoConteoCoord();
