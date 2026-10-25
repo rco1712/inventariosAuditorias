@@ -218,7 +218,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v180';
+const APP_VERSION = 'v181';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -684,6 +684,7 @@ function setView(v){
   if(v==='repver'){ document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v==='rep')); renderRepVer(); }
   if(v==='conf') renderConf();
   if(v==='conteo') renderConteoDir();
+  if(v==='mermaarm') renderMermaArm();
 }
 
 let invCat = null, invDetalle = false;
@@ -1406,6 +1407,7 @@ function etiquetaTipoMov(m){
   if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
   if(m.motivo==='deSobrante') return 'Sobrante transformado';
   if(m.motivo==='regresoMerma') return 'Merma (regresó sin instalar)';
+  if(m.motivo==='mermaArmado') return 'Merma de mueble armado';
   if(m.motivo==='regresoInstalacion') return 'Regresó de instalación';
   if(m.motivo==='cambioModelo') return 'Cambio de modelo (regresa)';
   if(m.motivo==='regresoPiezasInst') return 'Regresó de instalación (ya descontado)';
@@ -3367,7 +3369,7 @@ function renderMov(){
     ${ayuda?`<p class="hint">${ayuda}</p>`:''}
     ${movCat==='Herrajes'||movBuscar?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint" style="font-weight:800">¿Qué se dañó?</label>
-      <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes, armados…','#e0791a']].map(([k,ic,t,sub,c])=>`<button onclick="movLado='${k}';renderMov()" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
+      <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes…','#e0791a'],['armado','📦','Mueble armado','Cajonera, cajón, espejo…','#7c3aed']].map(([k,ic,t,sub,c])=>`<button onclick="${k==='armado'?`maf=null;irA('mermaarm')`:`movLado='${k}';renderMov()`}" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
       ${movLado==='cortado'?`<button class="btn" style="margin-top:10px;width:100%;min-height:50px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="pzSetModo('merma');irA('pzenc')">✂️ Contar las piezas dañadas (entrepaños, zóclos, paredes…)</button><p class="hint" style="margin:6px 0 0">La app convierte las piezas a hojas. O escribe abajo las hojas directo si ya las sabes.</p>`:''}</div>` : ''}
     <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
     <div class="movlist" id="mv-lista"></div>
@@ -4112,6 +4114,20 @@ function textoContadorAudit(){
 // Convierte piezas sueltas + armados a su equivalente en artículos del catálogo
 // (hojas de melamina/MDF y herrajes): {itemId: cantidad}. Todo se junta por color antes de
 // convertir, para que paredes y entrepaños se combinen igual que en el despiece (3+3 por hoja).
+// Material de un conjunto de piezas (hojas por color + herrajes + correderas), como en la auditoría.
+function consumoDePool(pool){
+  const porColor = {}, out = {};
+  pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
+  Object.keys(porColor).forEach(c=>{ piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; }); });
+  balanceCorrederas(pool).forEach(b=>{
+    if(b.pares>0){ const it=itemByName(b.item); if(it) out[it.id]=(out[it.id]||0)+b.pares; }
+    const t = CORR_TIPOS.find(x=>x.juego===b.item);
+    if(t && b.hembrasSinPareja>0){ const it=itemByName(t.hembra); if(it) out[it.id]=(out[it.id]||0)+b.hembrasSinPareja; }
+    if(t && b.machosSinPareja>0){ const it=itemByName(t.macho); if(it) out[it.id]=(out[it.id]||0)+b.machosSinPareja; }
+  });
+  Object.keys(out).forEach(k=>{ out[k] = fmtNum(out[k]); if(!(out[k]>0)) delete out[k]; });
+  return out;
+}
 function piezasAuditAHojas(){
   const pool = [];
   Object.keys(auditPiezas).forEach(grupo=>{
@@ -8548,7 +8564,7 @@ function audIrConteo(){ irA('conteo'); }
 // pendientes y alertas, la Auditoría y lo de Dirección. Para ver un inventario, auditar o capturar
 // "como coordinador" entra a un módulo; arriba sale "📍 Módulo · ‹ Volver a Dirección".
 let dirModo = true;
-const VISTAS_MODULO = ['inv','mov','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
+const VISTAS_MODULO = ['inv','mov','mermaarm','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
 function enDirModo(){ return esAdmin() && dirModo; }
 async function entrarModulo(n, v){
   dirModo = false;
@@ -10126,6 +10142,101 @@ async function guardarReconteo(corregir){
   }catch(e){ alert('Error: '+e.message); }
 }
 
+// ===== Merma de un MUEBLE ARMADO (confirmado por el usuario, v181) =====
+// Cajonera, cajón, cuadro, cajonera de espejo, puerta de espejo o de zapatera. Usa el mismo despiece
+// que la auditoría. Se pregunta si los herrajes (y el espejo) también se dañaron: si no, no se descuentan.
+let maf = null, mafNota = '';
+function mafNuevo(){ return {tipo:'cajonera', variante:'3', color:MEL_COLORES[0], colorFrente:'', colorCuadro:MEL_COLORES[0], cantidad:'1', ext:false, puertitas:false, herrDanados:true, espejoRoto:true, bisDanadas:true, jalDanada:true, sinFondo:false}; }
+function mafArmado(){
+  const f = maf, n = Number(f.cantidad)||0;
+  const a = {tipo:f.tipo, variante:f.variante, color:f.color, cantidad:n};
+  if(f.tipo==='cajon') a.colorCuadro = f.colorCuadro;
+  if((f.tipo==='cajonera'||f.tipo==='cajonera_espejo') && f.colorFrente && f.colorFrente!==f.color) a.colorFrente = f.colorFrente;
+  if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)) a.puertitas = !!f.puertitas;
+  if((f.tipo==='cajonera'||f.tipo==='cajonera_espejo') && f.sinFondo) a.sinFondo = true;
+  if(f.tipo==='puerta_espejo' || f.tipo==='puerta_zapatera'){
+    if(!f.bisDanadas) a.sinBisagras = true; if(!f.jalDanada) a.sinJaladera = true;
+    if(f.tipo==='puerta_espejo' && !f.espejoRoto) a.sinEspejo = true;
+  } else if(!f.herrDanados) a.sinHerrajes = true;
+  if(armadoUsaCorredera(f) && f.herrDanados) a.ext = !!f.ext;
+  return a;
+}
+function mafSiNo(pregunta, campo, siT, siS, noT, noS, cSi, cNo){
+  const v = !!maf[campo];
+  const b = (on, t, sub, c, val) => `<button onclick="maf.${campo}=${val};renderMermaArm()" style="flex:1;cursor:pointer;text-align:left;border-radius:12px;padding:10px;border:2px solid ${on?c:'var(--line)'};background:${on?c+'26':'transparent'};color:var(--ink);font:inherit"><strong style="font-size:14px">${t}</strong><span class="hint" style="display:block;margin:2px 0 0;font-size:12px">${sub}</span></button>`;
+  return `<div style="margin-top:12px"><strong style="font-size:14px">${pregunta}</strong><div style="display:flex;gap:8px;margin-top:6px">${b(v, siT, siS, cSi||'#dc2626', 'true')}${b(!v, noT, noS, cNo||'#16a34a', 'false')}</div></div>`;
+}
+function renderMermaArm(){
+  current = 'mermaarm';
+  if(!maf) maf = mafNuevo();
+  const f = maf, esCaj = f.tipo==='cajonera';
+  const variantes = esCaj ? ARMADO_CAJONERAS : (ARMADO_SIN_VARIANTE(f.tipo) ? {normal:'Normal'} : {normal:'Normal', max:'Max'});
+  if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
+  const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
+  const labelColor = (esCaj||f.tipo==='cajonera_espejo') ? 'Color de la cajonera' : ((f.tipo==='cajon'||f.tipo==='puerta_espejo') ? (f.tipo==='puerta_espejo'?'Color de los marcos':'Color del frente') : (f.tipo==='puerta_zapatera' ? 'Color de la puerta' : 'Color del cuadro'));
+  const tipos = {cajonera:'Cajonera', cajon:'Cajón completo', cuadro_fondo:'Cuadro de cajón con fondo', cuadro_sin:'Cuadro de cajón sin fondo', cajonera_espejo:'Cajonera de espejo', puerta_espejo:'Puerta de espejo', puerta_zapatera:'Puerta de zapatera'};
+  const esPuerta = f.tipo==='puerta_espejo' || f.tipo==='puerta_zapatera';
+  const llevaHerr = ['cajonera','cajon'].includes(f.tipo);
+  const a = mafArmado(), cons = Number(a.cantidad)>0 ? consumoDePool(piezasDeArmado(a)) : {};
+  const filas = Object.keys(cons).map(id=>{ const it = CATALOGO.find(i=>i.id===id)||{nombre:id, unidad:''}; return `<div class="movitem"><span>${it.nombre}${esHoja(it)?' <span class="hint" style="margin:0">(cortado)</span>':''}</span><strong style="white-space:nowrap">${fmtNum(cons[id])} ${it.unidad||''}</strong></div>`; }).join('');
+  const sinDescontar = [];
+  if(llevaHerr && !f.herrDanados) sinDescontar.push('herrajes');
+  if(f.tipo==='puerta_espejo' && !f.espejoRoto) sinDescontar.push('espejo');
+  if(esPuerta && !f.bisDanadas) sinDescontar.push('bisagras');
+  if(esPuerta && !f.jalDanada) sinDescontar.push('jaladera');
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #7c3aed">
+      <div class="row" style="justify-content:space-between"><div style="font-size:17px;font-weight:800">📦 Merma de mueble armado · ${modulo()}</div><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="maf=null;irA('mov',{tipo:'merma'})">Salir</button></div>
+      <p class="hint" style="margin:4px 0 0">Un mueble armado que se dañó. La app calcula el material con el mismo despiece de la auditoría.</p>
+      <label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Qué mueble?</label>
+      <div class="chips" style="margin-top:6px">${Object.keys(tipos).map(k=>`<button class="chip ${k===f.tipo?'on':''}" onclick="maf.tipo='${k}';renderMermaArm()">${tipos[k]}</button>`).join('')}</div>
+      <div class="grid2" style="margin-top:10px">
+        ${ARMADO_SIN_VARIANTE(f.tipo)?'':`<div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="maf.variante=this.value;renderMermaArm()">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>`}
+        <div><label class="hint">¿Cuántos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="maf.cantidad=this.value" onchange="renderMermaArm()"></div>
+        <div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="maf.color=this.value;renderMermaArm()">${colorOpts(f.color)}</select></div>
+        ${(esCaj||f.tipo==='cajonera_espejo')?`<div><label class="hint">Color de ${f.tipo==='cajonera_espejo'?'los zóclos':'frentes y zóclos'}</label><select style="margin-top:4px" onchange="maf.colorFrente=this.value;renderMermaArm()">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
+        ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="maf.colorCuadro=this.value;renderMermaArm()">${colorOpts(f.colorCuadro)}</select></div>`:''}
+      </div>
+      ${esCaj && armadoTienePuertitas(f.variante) ? mafSiNo('¿Lleva puertitas?', 'puertitas', 'Sí', 'con sus puertitas', 'No', 'solo la cajonera', '#2563eb', '#2563eb') : ''}
+      ${llevaHerr ? mafSiNo('¿Los herrajes también se dañaron?', 'herrDanados', 'Sí, también se tiran', `correderas, jaladeras${esCaj?', bisagras':''} van a merma`, 'No, se quitan y se guardan', 'solo la melamina va a merma') : ''}
+      ${f.tipo==='puerta_espejo' ? mafSiNo('¿El espejo también se rompió?', 'espejoRoto', 'Sí', 'el espejo va a merma', 'No', 'el espejo se guarda') : ''}
+      ${esPuerta ? mafSiNo('¿Las bisagras también se dañaron?', 'bisDanadas', 'Sí', 'van a merma', 'No', 'se guardan') : ''}
+      ${esPuerta ? mafSiNo('¿La jaladera también se dañó?', 'jalDanada', 'Sí', 'va a merma', 'No', 'se guarda') : ''}
+      ${armadoUsaCorredera(f) && llevaHerr && f.herrDanados ? `<label class="row" style="margin-top:12px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="maf.ext=this.checked;renderMermaArm()"> Lleva corredera de extensión</label>` : ''}
+      ${(esCaj||f.tipo==='cajonera_espejo') ? `<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinFondo?'checked':''} onchange="maf.sinFondo=this.checked;renderMermaArm()"> Sin fondo (no tenía el fondo de MDF)</label>` : ''}
+    </div>
+    <div class="card" style="border:2px solid #e0791a;background:linear-gradient(0deg,rgba(224,121,26,.10),rgba(224,121,26,.10)),var(--card)">
+      <strong>⚠️ Esto se va a merma</strong>
+      <div class="movlist" style="margin-top:6px">${filas || '<p class="hint" style="margin:4px 0">Escribe cuántos.</p>'}</div>
+      ${sinDescontar.length ? `<p class="hint" style="margin:8px 0 0">✅ No se descuenta: ${sinDescontar.join(', ')} (se guardan).</p>` : ''}
+    </div>
+    <div class="card">
+      ${fotoPickerHtml('merma','Foto de lo dañado (opcional)')}
+      <input placeholder="Nota (opcional)" style="margin-top:10px" value="${String(mafNota).replace(/"/g,'&quot;')}" oninput="mafNota=this.value">
+      <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarMermaArm()">Revisar y guardar</button>
+    </div>`;
+}
+async function guardarMermaArm(){
+  if(!confirmarModuloDir()) return;
+  const a = mafArmado(); if(!(Number(a.cantidad)>0)) return alert('Escribe cuántos se dañaron.');
+  const consM = consumoDePool(piezasDeArmado(a)), cons = Object.keys(consM).map(id=>({itemId:id, cantidad:consM[id]}));
+  if(!cons.length) return alert('No hay material que descontar.');
+  const falta = cons.filter(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return esHoja(it) && c.cantidad > calcFormula(c.itemId).cortado + 1e-9; });
+  if(falta.length && !confirm(`⚠️ Según la app no hay suficiente material cortado/armado:\n\n${falta.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `• ${it.nombre}: hay ${fmtNum(calcFormula(c.itemId).cortado)} y el mueble equivale a ${fmtNum(c.cantidad)}`; }).join('\n')}\n\nRevisa el color. Si de verdad se dañó, guárdalo y Dirección lo revisa al aprobar.\n\n¿Guardar de todos modos?`)) return;
+  const desc = describirArmado(a);
+  if(!confirm(`⚠️ Merma de mueble armado en ${modulo()}:\n\n${a.cantidad} × ${desc}\n\nSe descuenta:\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `− ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (de cortado)':''}`; }).join('\n')}\n\n¿Guardar?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    const nota = 'Merma de mueble armado · '+a.cantidad+' × '+desc+(mafNota.trim()?' · '+mafNota.trim():'');
+    const fotos = (fotosTmp.merma||[]).length;
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', ...(esHoja(it)?{lado:'cortado'}:{}), motivo:'mermaArmado', cantidad:c.cantidad, nota, armado:a, fecha, estado, loteId, creadoPor, ...(fotos?{fotos, fotosRef:loteId}:{})});
+    }
+    if(fotos) await guardarFotos('merma', 'merma', loteId, modulo());
+    maf = null; mafNota = '';
+    toast(estado==='pendiente' ? '✅ Merma guardada.<br><small>Dirección la aprueba y se descuenta.</small>' : '⚠️ Merma registrada.');
+    irA('mov',{tipo:'merma'}); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
 async function guardarMermaPiezas(cons, detalle){
   for(const c of cons){ const f=calcFormula(c.itemId); const it=CATALOGO.find(i=>i.id===c.itemId);
     if(c.cantidad > f.cortado + 1e-9) return alert(`No alcanza: de ${it.nombre} hay ${fmtNum(f.cortado)} hojas ya cortadas y las piezas equivalen a ${fmtNum(c.cantidad)}.\n\nRevisa las piezas. No se guardó nada.`); }
