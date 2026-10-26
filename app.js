@@ -6657,7 +6657,7 @@ async function confirmarRegresoInst(){
 //    la diferencia y Dirección aprueba.
 // Al coordinador le sale un aviso con cuántas instalaciones no se aprobaron y por qué.
 const VERIF_DESDE = '2026-10-23', VERIF_DIAS_ROJO = 2;
-let verifLogs = null, verifRegresadas = new Set(), verifDia = '', verifPanel = null, verifFlujo = null;
+let verifLogs = null, verifRegresadas = new Set(), verifDia = '', verifMod = '', verifPanel = null, verifFlujo = null;
 let _dirVerif = null, _verifCoord = null, _verifCoordT = 0;
 function verifDiasAtras(dia){ return Math.round((new Date(fechaHoyLocal()+'T12:00:00') - new Date(dia+'T12:00:00'))/86400000); }
 function verifDesde(){ const d = new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-14); const s = d.toISOString().slice(0,10); return s > VERIF_DESDE ? s : VERIF_DESDE; }
@@ -6698,12 +6698,12 @@ function verifEsperando(logs){
 function verifPendRowAtr(fila){
   const V = _dirVerif; if(!V || !(V.atr||[]).length) return null;
   const por = {}; V.atr.forEach(a=>{ const k = a.modulo+': '+a.que; por[k]=(por[k]||0)+1; });
-  return fila('⏳', `Sin resolver: ${V.atr.length}`, Object.keys(por).map(k=>por[k]>1?k.replace(': ',': '+por[k]+' '):k).join(' · '), '#b45309', 'Ver', "verifDia='';verifPanel=null;irA('verif')");
+  return fila('⏳', `Sin resolver: ${V.atr.length}`, Object.keys(por).map(k=>por[k]>1?k.replace(': ',': '+por[k]+' '):k).join(' · '), '#b45309', 'Ver', "verifDia='';verifMod='';verifPanel=null;irA('verif')");
 }
 function verifPendRow(fila){
   const V = _dirVerif; if(!V || !V.n) return null;
   const rojo = V.masViejo > VERIF_DIAS_ROJO;
-  return fila('🔍', `Verificar instalaciones: ${V.n}`, (rojo?`⚠️ Hay de hace ${V.masViejo} días sin revisar · `:'')+Object.keys(V.porMod).map(k=>k+' '+V.porMod[k]).join(' · ')+' · con el reporte del grupo', rojo?'#dc2626':'#0e7490', 'Verificar', "verifDia='';verifPanel=null;irA('verif')");
+  return fila('🔍', `Verificar instalaciones: ${V.n}`, (rojo?`⚠️ Hay de hace ${V.masViejo} días sin revisar · `:'')+Object.keys(V.porMod).map(k=>k+' '+V.porMod[k]).join(' · ')+' · con el reporte del grupo', rojo?'#dc2626':'#0e7490', 'Verificar', "verifDia='';verifMod='';verifPanel=null;irA('verif')");
 }
 async function verifCargar(){
   const [snapLog, snapMov] = await Promise.all([db.collection('instalacionesLog').get(), db.collection('movimientos').get()]);
@@ -6753,7 +6753,16 @@ async function renderVerif(){
 }
 function verifPintar(){
   if(current!=='verif') return;
-  const todas = verifRevisables(verifLogs, verifRegresadas);
+  // Un módulo a la vez (confirmado por el usuario, v182): cada módulo se compara con su reporte del grupo.
+  const todasAll = verifRevisables(verifLogs, verifRegresadas), sinRevAll = todasAll.filter(verifPorRevisar);
+  const otrosMod = n => verifEsperando(verifLogs).some(e=>e.l.modulo===n);
+  const modsCon = MODULOS.map(m=>m.nombre).filter(n=>todasAll.some(l=>l.modulo===n) || otrosMod(n));
+  const primeroPend = MODULOS.map(m=>m.nombre).find(n=>sinRevAll.some(l=>l.modulo===n));
+  if(!verifMod || !modsCon.includes(verifMod)) verifMod = primeroPend || modsCon[0] || '';
+  const modChips = MODULOS.filter(m=>modsCon.includes(m.nombre)).map(m=>{ const xs = sinRevAll.filter(l=>l.modulo===m.nombre), on = m.nombre===verifMod, rojoM = xs.some(l=>verifDiasAtras(diaValorInst(l))>VERIF_DIAS_ROJO);
+    return `<button onclick="verifMod='${m.nombre}';verifDia='';verifPanel=null;verifPintar();window.scrollTo(0,0)" style="border-radius:12px;padding:8px 12px;border:2px solid ${rojoM&&!on?'#dc2626':m.color};background:${on?m.color:'transparent'};color:${on?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${m.nombre}${xs.length?` · ${xs.length}`:' ✓'}</button>`; }).join('');
+  const sigMod = MODULOS.map(m=>m.nombre).find(n=>n!==verifMod && sinRevAll.some(l=>l.modulo===n));
+  const todas = todasAll.filter(l=>l.modulo===verifMod);
   const sinRev = todas.filter(verifPorRevisar);
   const diasPend = [...new Set(sinRev.map(l=>diaValorInst(l)))].sort();
   const diasTodos = [...new Set(todas.map(l=>diaValorInst(l)))].sort();
@@ -6764,7 +6773,6 @@ function verifPintar(){
   const delDia = todas.filter(l=>(diaValorInst(l))===verifDia);
   const pend = delDia.filter(verifPorRevisar), hechas = delDia.filter(l=>!verifPorRevisar(l));
   const rojo = pend.length && verifDiasAtras(verifDia)>VERIF_DIAS_ROJO;
-  const porMod = {}; pend.forEach(l=>{ (porMod[l.modulo]=porMod[l.modulo]||[]).push(l); });
   const btn = (id, acc, t, c) => `<button class="btn small" style="min-height:44px;padding:6px 8px;${verifPanel&&verifPanel.id===id&&verifPanel.acc===acc?`background:${c}`:`background:transparent;color:${c};border:1.5px solid ${c};box-shadow:none`}" onclick="verifAccion('${id}','${acc}')">${t}</button>`;
   const tarjeta = l => { const M = MODULOS.find(m=>m.nombre===l.modulo)||{color:'#666'};
     if(verifReinstPend(l)) return `<div class="card" style="padding:12px;border-left:6px solid ${M.color};border-top:2px solid #0e7490;border-right:2px solid #0e7490;border-bottom:2px solid #0e7490">
@@ -6787,19 +6795,20 @@ function verifPintar(){
   $('#main').innerHTML = `
     <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
       <div style="font-size:17px;font-weight:900">🔍 Verificar instalaciones</div>
-      <p class="hint" style="margin:2px 0 0">${verifDia?`Instaladas el <strong>${nomDia(verifDia)}</strong>`:'No hay instalaciones'} · compáralas con el reporte del grupo de instalaciones de ese día.</p>
+      ${modChips?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${modChips}</div>`:''}
+      <p class="hint" style="margin:10px 0 0">${verifDia?`<strong>${verifMod}</strong> · instaladas el <strong>${nomDia(verifDia)}</strong>`:'No hay instalaciones'} · compáralas con el reporte del grupo de instalaciones de ese día.</p>
       ${rojo?`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:700">⚠️ Estas tienen ${verifDiasAtras(verifDia)} días sin revisar.</div>`:''}
       ${chips?`<div class="chips" style="margin-top:8px;flex-wrap:wrap">${chips}</div>`:''}
     </div>
-    ${verifReinstHtml()}
-    ${verifEsperandoHtml()}
-    ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste todas las de este día.</strong></div>` : ''}
-    ${Object.keys(porMod).map(mod=>`<div class="home-sec-t" style="margin:12px 4px 4px">${mod} · ${porMod[mod].length}</div>${porMod[mod].map(tarjeta).join('')}`).join('')}
-    ${pend.length>1 || (pend.length===1 && hechas.length) ? `<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás sí se instalaron (${pend.length})</button>` : ''}
+    ${verifReinstHtml(verifMod)}
+    ${verifEsperandoHtml(verifMod)}
+    ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste las de ${verifMod} de este día.</strong>${sinRev.length?`<p class="hint" style="margin:4px 0 0">Faltan ${sinRev.length} de otro(s) día(s): elígelos arriba.</p>`:''}${sigMod?`<button class="btn" style="width:100%;margin-top:10px;background:${(MODULOS.find(m=>m.nombre===sigMod)||{}).color||'var(--brand)'}" onclick="verifMod='${sigMod}';verifDia='';verifPanel=null;verifPintar();window.scrollTo(0,0)">Siguiente: ${sigMod} (${sinRevAll.filter(l=>l.modulo===sigMod).length}) ›</button>`:''}</div>` : ''}
+    ${pend.map(tarjeta).join('')}
+    ${pend.length>1 || (pend.length===1 && hechas.length) ? `<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás de ${verifMod} sí se instalaron (${pend.length})</button>` : ''}
     ${hechas.length?`<div class="card" style="padding:12px"><strong>Ya revisadas · ${hechas.length}</strong>${hechas.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span><span class="hint" style="display:block;margin:2px 0 0">${l.modulo}${(l.verif||{}).nota?' · “'+l.verif.nota+'”':''}</span><span style="display:block;margin-top:4px">${verifEstadoTxt(l)}</span></span>${(l.verif||{}).estado==='ok'?`<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDeshacer('${l.id}')">Deshacer</button>`:''}</div>`).join('')}</div>`:''}`;
 }
-function verifReinstHtml(){
-  const xs = (verifLogs||[]).filter(l=>l.verif && l.verif.puertas==='reinstalar').map(l=>({l, dias:verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha))})).sort((a,b)=>b.dias-a.dias);
+function verifReinstHtml(mod){
+  const xs = (verifLogs||[]).filter(l=>l.verif && l.verif.puertas==='reinstalar' && (!mod || l.modulo===mod)).map(l=>({l, dias:verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha))})).sort((a,b)=>b.dias-a.dias);
   if(!xs.length) return '';
   const ayer = (()=>{ const d=new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
   return `<div class="card" style="padding:12px;border:2px solid #0e7490"><strong style="font-size:15px">🔁 Por volver a instalar · ${xs.length}</strong>
@@ -6824,8 +6833,8 @@ async function verifDirRedecidir(id){
     await verifGuardar(id, v); l.verif = v; toast('📨 Regresan al coordinador.'); verifTrasCambio();
   }catch(e){ alert('Error: '+e.message); }
 }
-function verifEsperandoHtml(){
-  const xs = verifEsperando(verifLogs).filter(e=>e.l.verif.puertas!=='reinstalar'); if(!xs.length) return '';
+function verifEsperandoHtml(mod){
+  const xs = verifEsperando(verifLogs).filter(e=>e.l.verif.puertas!=='reinstalar' && (!mod || e.l.modulo===mod)); if(!xs.length) return '';
   const nA = xs.filter(e=>e.atrasada).length;
   return `<div class="card" style="padding:12px;border:2px solid ${nA?'#dc2626':'#b45309'}"><strong style="font-size:15px">⏳ Esperando al coordinador · ${xs.length}</strong>
     <p class="hint" style="margin:2px 0 0">Se marca en rojo si pasan más de ${VERIF_DIAS_DECIDIR} días sin que decida.</p>
@@ -6873,10 +6882,10 @@ async function verifAccion(id, acc){
 }
 function verifTrasCambio(){ if(verifLogs) _dirVerif = verifCalcDir(verifLogs, []); cargarPendDir(true); verifPintar(); }
 async function verifTodasOk(){
-  const xs = verifRevisables(verifLogs, verifRegresadas).filter(l=>verifPorRevisar(l) && diaValorInst(l)===verifDia);
+  const xs = verifRevisables(verifLogs, verifRegresadas).filter(l=>verifPorRevisar(l) && diaValorInst(l)===verifDia && l.modulo===verifMod);
   if(!xs.length) return;
   const nP = xs.filter(l=>l.estado==='pendiente').length;
-  if(!confirm(`✅ Marcar como instaladas las ${xs.length} que faltan de este día?\n\n${xs.map(l=>'• '+l.modulo+': '+l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.estado==='pendiente'?' (se aprueba)':'')).join('\n')}${nP?`\n\n${nP} aún no estaba(n) aprobada(s): también se aprueban.`:''}`)) return;
+  if(!confirm(`✅ ${verifMod}: ¿marcar como instaladas las ${xs.length} que faltan de este día?\n\n${xs.map(l=>'• '+l.modulo+': '+l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.estado==='pendiente'?' (se aprueba)':'')).join('\n')}${nP?`\n\n${nP} aún no estaba(n) aprobada(s): también se aprueban.`:''}`)) return;
   try{ for(const l of xs){ if(verifReinstPend(l)){ await verifGuardar(l.id, {reEstado:'ok', reFecha:new Date().toISOString()}); l.verif = Object.assign({}, l.verif, {reEstado:'ok'}); continue; }
       await verifAprobarSiPend(l); await verifGuardar(l.id, {estado:'ok'}); l.verif={estado:'ok'}; } verifPanel=null; toast('✅ Listo, '+xs.length+' verificada(s).'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
 }
@@ -9280,7 +9289,7 @@ async function renderAprobacionesBase(){
 
   const logsPendientes = todosLogs.filter(instEnAprobaciones).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
   const nVerif = todosLogs.filter(instSeVerifica).length;
-  const avisoVerif = nVerif ? `<div class="card" style="padding:12px;border:2px solid #0e7490"><div class="row" style="justify-content:space-between;gap:10px;align-items:center"><div style="flex:1;min-width:0"><strong>🔍 ${nVerif} instalaci${nVerif===1?'ón':'ones'} sin aprobar</strong><p class="hint" style="margin:2px 0 0">Ya están descontadas. Se aprueban en <strong>Verificar instalaciones</strong> con el reporte del grupo (✅ Se instaló), no aquí.</p></div><button class="btn small" style="background:#0e7490;white-space:nowrap" onclick="verifDia='';verifPanel=null;irA('verif')">Verificar</button></div></div>` : '';
+  const avisoVerif = nVerif ? `<div class="card" style="padding:12px;border:2px solid #0e7490"><div class="row" style="justify-content:space-between;gap:10px;align-items:center"><div style="flex:1;min-width:0"><strong>🔍 ${nVerif} instalaci${nVerif===1?'ón':'ones'} sin aprobar</strong><p class="hint" style="margin:2px 0 0">Ya están descontadas. Se aprueban en <strong>Verificar instalaciones</strong> con el reporte del grupo (✅ Se instaló), no aquí.</p></div><button class="btn small" style="background:#0e7490;white-space:nowrap" onclick="verifDia='';verifMod='';verifPanel=null;irA('verif')">Verificar</button></div></div>` : '';
   // Movimientos pendientes que NO son de una instalación (esos ya se muestran agrupados arriba
   // por su instalacionesLog) — se agrupan por loteId (una sola captura de Entradas/Salidas).
   const movsSueltosPendientes = todosMovs.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo);
