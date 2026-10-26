@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v185';
+const APP_VERSION = 'v186';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6756,7 +6756,7 @@ const VERIF_TAG = {ok:['✅ Se instaló','#16a34a'], modelo:['✏️ Cambió el 
 function verifEstadoTxt(l){
   const v = l.verif||{}; const t = VERIF_TAG[v.estado]; if(!t) return '';
   let extra = '';
-  if(v.estado==='no') extra = {regreso:' · ↩️ regresó al inventario', pendiente:' · esperando al coordinador', reinstalar:' · 🔁 se vuelven a instalar', reinstalada: v.reEstado==='ok' ? ' · ✅ reinstalación verificada' : ' · 🔁 reinstaladas, por verificar', sobrantes:' · 🧩 a sobrantes', merma:' · 🗑️ a merma'}[v.puertas]||'';
+  if(v.estado==='no') extra = {otrolado:' · ✔ ya se había regresado por otro lado', regreso:' · ↩️ regresó al inventario', pendiente:' · esperando al coordinador', reinstalar:' · 🔁 se vuelven a instalar', reinstalada: v.reEstado==='ok' ? ' · ✅ reinstalación verificada' : ' · 🔁 reinstaladas, por verificar', sobrantes:' · 🧩 a sobrantes', merma:' · 🗑️ a merma'}[v.puertas]||'';
   if(v.estado==='modelo') extra = v.resuelto ? ' · ya se corrigió' : ' · esperando al coordinador';
   return `<span class="tag" style="color:${t[1]};border-color:${t[1]}">${t[0]}${extra}</span>`;
 }
@@ -6853,7 +6853,7 @@ function verifEsperandoHtml(mod){
   const nA = xs.filter(e=>e.atrasada).length;
   return `<div class="card" style="padding:12px;border:2px solid ${nA?'#dc2626':'#b45309'}"><strong style="font-size:15px">⏳ Esperando al coordinador · ${xs.length}</strong>
     <p class="hint" style="margin:2px 0 0">Se marca en rojo si pasan más de ${VERIF_DIAS_DECIDIR} días sin que decida.</p>
-    ${xs.map(e=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;${e.atrasada?'border-color:#dc2626;':''}"><span style="min-width:0;flex:1"><span class="invname">${e.l.categoria==='Puerta'?'🚪':'🗄️'} ${e.l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(e.l)}<span class="hint" style="display:block;margin:2px 0 0">${e.l.modulo} · ${e.que}${(e.l.verif||{}).nota?' · “'+e.l.verif.nota+'”':''}</span></span><strong style="white-space:nowrap;color:${e.atrasada?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>`).join('')}</div>`;
+    ${xs.map(e=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;${e.atrasada?'border-color:#dc2626;':''}"><span style="min-width:0;flex:1"><span class="invname">${e.l.categoria==='Puerta'?'🚪':'🗄️'} ${e.l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(e.l)}<span class="hint" style="display:block;margin:2px 0 0">${e.l.modulo} · ${e.que}${(e.l.verif||{}).nota?' · “'+e.l.verif.nota+'”':''}</span>${e.l.verif.estado==='no'&&e.l.verif.puertas==='pendiente'?`<button class="btn small" style="margin-top:6px;background:transparent;color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="verifYaRegresado('${e.l.id}')">✔ Ya se regresó por otro lado</button>`:''}</span><strong style="white-space:nowrap;color:${e.atrasada?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>`).join('')}</div>`;
 }
 function verifNotaVal(){ return ((document.getElementById('verif-nota')||{}).value||'').trim(); }
 function verifPanelHtml(l){
@@ -6968,7 +6968,15 @@ function verifCancelarFlujo(){
 // Verificación que hereda la instalación nueva cuando se cambia el modelo de una ya revisada.
 function verifParaNuevo(L){ return (L.verif || verifFlujo) ? {verif:{estado:'ok', auto:'cambio', fecha:new Date().toISOString()}} : {}; }
 // Las puertas que esperan la decisión del coordinador no cuentan como instalación todavía.
-function verifNoCuenta(l){ return !!(l.verif && l.verif.estado==='no' && (l.verif.puertas==='pendiente' || l.verif.puertas==='reinstalar')); }
+function verifNoCuenta(l){ return !!(l.verif && l.verif.estado==='no' && ['pendiente','reinstalar','otrolado'].includes(l.verif.puertas)); }
+// v186 (confirmado por el usuario): si el coordinador ya regresó el material "a mano" (Regresó un modelo
+// completo), Dirección cierra el pendiente SIN mover material, para que no se regrese dos veces.
+async function verifYaRegresado(id){
+  const l = verifLog(id); if(!l) return;
+  if(!confirm(`✔ ${l.descripcion.split(' · ').slice(0,2).join(' · ')}\n\nMarcar que su material YA se regresó por otro lado (por ejemplo con "Regresó un modelo completo").\n\nNo se mueve nada del inventario y al coordinador ya no le pide decidir.`)) return;
+  try{ const v = Object.assign({}, l.verif, {puertas:'otrolado', visto:true, fechaDecision:new Date().toISOString()});
+    await verifGuardar(id, v); l.verif = v; toast('✔ Listo. No se movió material.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
+}
 // ⭐ Las puertas que se volvieron a instalar cuentan en la semana en que de verdad se instalaron.
 function diaValorInst(x){ const v = x.verif; return (v && v.puertas==='reinstalada' && v.fechaReinst) ? v.fechaReinst : (x.fechaDia||diaLocal(x.fecha)); }
 
@@ -7121,6 +7129,9 @@ async function confirmarRegresoLibre(){
   const nota = ($('#i-nota').value||'').trim();
   const desc = `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`;
   const cons = instPreview.consumo.filter(c=>Number(c.cantidad)>0);
+  // v186: si Dirección marcó ese modelo como NO instalado, el regreso se hace desde el aviso del Inicio.
+  try{ await cargarInstLog(); const pend = (instLog||[]).filter(l=>l.verif && l.verif.estado==='no' && l.verif.puertas==='pendiente' && l.descripcion.split(' · ')[0]===instPreview.modeloNombre);
+    if(pend.length && !confirm(`⚠️ Dirección marcó como NO instalado ${pend.length===1?'un':pend.length} ${instPreview.modeloNombre}:\n\n${pend.slice(0,4).map(l=>'• '+l.descripcion+(l.calle?' · '+l.calle:'')+' ('+fCorta(l.fechaDia)+')').join('\n')}\n\nSi es ${pend.length===1?'ese':'uno de esos'}, NO lo regreses aquí: en Inicio, en el aviso, toca "↩️ Regresa". Si lo regresas aquí también, se suma dos veces.\n\n¿Es otro modelo distinto y quieres regresarlo aquí?`)) return; }catch(e){}
   if(!confirm(`↩️ Regresar al inventario:\n${desc}\n\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n')}\n\n¿Continuar?`)) return;
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
