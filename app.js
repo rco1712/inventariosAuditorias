@@ -6835,6 +6835,7 @@ function verifPintar(){
   const rojo = pend.length && verifDiasAtras(verifDia)>VERIF_DIAS_ROJO;
   const btn = (id, acc, t, c) => `<button class="btn small" style="min-height:44px;padding:6px 8px;${verifPanel&&verifPanel.id===id&&verifPanel.acc===acc?`background:${c}`:`background:transparent;color:${c};border:1.5px solid ${c};box-shadow:none`}" onclick="verifAccion('${id}','${acc}')">${t}</button>`;
   const tarjeta = l => { const M = MODULOS.find(m=>m.nombre===l.modulo)||{color:'#666'};
+    if(verifOcupadas.has(l.id)) return verifOcupadaHtml(l);
     if(verifReinstPend(l)) return `<div class="card" style="padding:12px;border-left:6px solid ${M.color};border-top:2px solid #0e7490;border-right:2px solid #0e7490;border-bottom:2px solid #0e7490">
       <span class="tag" style="color:#0e7490;border-color:#0e7490">🔁 Reinstalación${(l.verif.intentos||0)>0?' · intento '+(l.verif.intentos+1):''}</span>
       <div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px"><span style="font-size:22px">🚪</span><div style="flex:1;min-width:0">
@@ -6865,7 +6866,7 @@ function verifPintar(){
     ${verifEsperandoHtml(verifMod)}
     ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste las de ${verifMod} de este día.</strong>${sinRev.length?`<p class="hint" style="margin:4px 0 0">Faltan ${sinRev.length} de otro(s) día(s): elígelos arriba.</p>`:''}${sigMod?`<button class="btn" style="width:100%;margin-top:10px;background:${(MODULOS.find(m=>m.nombre===sigMod)||{}).color||'var(--brand)'}" onclick="verifMod='${sigMod}';verifDia='';verifPanel=null;verifPintar();window.scrollTo(0,0)">Siguiente: ${sigMod} (${sinRevAll.filter(l=>l.modulo===sigMod).length}) ›</button>`:''}</div>` : ''}
     ${pend.map(tarjeta).join('')}
-    ${pend.length>1 || (pend.length===1 && hechas.length) ? `<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás de ${verifMod} sí se instalaron (${pend.length})</button>` : ''}
+    ${pend.length>1 || (pend.length===1 && hechas.length) ? `${verifTodasEnCurso?`<button class="btn" disabled style="width:100%;min-height:54px;background:#0e7490;opacity:.8">⏳ Verificando… no lo toques otra vez</button>`:`<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás de ${verifMod} sí se instalaron (${pend.length})</button>`}` : ''}
     ${hechas.length?`<div class="card" style="padding:12px"><strong>Ya revisadas · ${hechas.length}</strong>${hechas.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">${l.modulo}${(l.verif||{}).nota?' · “'+l.verif.nota+'”':''}</span><span style="display:block;margin-top:4px">${verifEstadoTxt(l)}</span></span>${(l.verif||{}).estado==='ok'?`<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDeshacer('${l.id}')">Deshacer</button>`:''}</div>`).join('')}</div>`:''}`;
 }
 function verifReinstHtml(mod){
@@ -6903,7 +6904,7 @@ function verifReverifHtml(xs){
   const btn = (fn, id, t, c) => `<button class="btn small" style="min-height:46px;padding:6px 8px;background:transparent;color:${c};border:1.5px solid ${c};box-shadow:none" onclick="${fn}('${id}')">${t}</button>`;
   return `<div class="card" style="padding:12px;border:2px solid #3E5CDE"><strong style="font-size:15px">✏️ Para volver a verificar · ${xs.length}</strong>
     <p class="hint" style="margin:2px 0 0">El coordinador corrigió el modelo. Revisa con el reporte del grupo si se instaló el modelo nuevo.</p>
-    ${xs.map(l=>`<div style="padding:10px;border-radius:12px;border:1px solid var(--line);margin-top:8px">
+    ${xs.map(l=>verifOcupadas.has(l.id) ? verifOcupadaHtml(l) : `<div style="padding:10px;border-radius:12px;border:1px solid var(--line);margin-top:8px">
       <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:20px">${l.categoria==='Puerta'?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
         ${calleHtml(l,true)}<div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''} · instalación del ${fCorta(l.fechaDia)}</div></div></div>
       ${verifCorrDetalleHtml(l)}
@@ -6962,7 +6963,8 @@ function verifEsperandoHtml(mod){
     <p class="hint" style="margin:2px 0 0">Se marca en rojo si pasan más de ${VERIF_DIAS_DECIDIR} días sin que decida.</p>
     ${xs.map(e=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;${e.atrasada?'border-color:#dc2626;':''}"><span style="min-width:0;flex:1"><span class="invname">${e.l.categoria==='Puerta'?'🚪':'🗄️'} ${e.l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(e.l)}<span class="hint" style="display:block;margin:2px 0 0">${e.l.modulo} · ${e.que}${(e.l.verif||{}).nota?' · “'+e.l.verif.nota+'”':''}</span>${e.l.verif.estado==='no'&&e.l.verif.puertas==='pendiente'?`<button class="btn small" style="margin-top:6px;background:transparent;color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="verifYaRegresado('${e.l.id}')">✔ Ya se regresó por otro lado</button>`:''}</span><strong style="white-space:nowrap;color:${e.atrasada?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>`).join('')}</div>`;
 }
-function verifNotaVal(){ return ((document.getElementById('verif-nota')||{}).value||'').trim(); }
+function verifNotaVal(){ const el = document.getElementById('verif-nota'); return (el ? el.value : verifNotaCaptura||'').trim(); }
+let verifNotaCaptura = ''; // la nota escrita, por si la tarjeta ya cambió a "Verificando…"
 function verifPanelHtml(l){
   const acc = verifPanel.acc, M = l.modulo;
   const nota = ph => `<input id="verif-nota" placeholder="${ph}" style="margin-top:8px">`;
@@ -7007,9 +7009,53 @@ async function verifTodasOk(){
   if(!xs.length) return;
   const nP = xs.filter(l=>l.estado==='pendiente').length;
   if(!confirm(`✅ ${verifMod}: ¿marcar como instaladas las ${xs.length} que faltan de este día?\n\n${xs.map(l=>'• '+l.modulo+': '+l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.estado==='pendiente'?' (se aprueba)':'')).join('\n')}${nP?`\n\n${nP} aún no estaba(n) aprobada(s): también se aprueban.`:''}`)) return;
-  try{ for(const l of xs){ if(verifReinstPend(l)){ await verifGuardar(l.id, {reEstado:'ok', reFecha:new Date().toISOString()}); l.verif = Object.assign({}, l.verif, {reEstado:'ok'}); continue; }
-      await verifAprobarSiPend(l); await verifGuardar(l.id, {estado:'ok'}); l.verif={estado:'ok'}; } verifPanel=null; toast('✅ Listo, '+xs.length+' verificada(s).'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
+  if(verifTodasEnCurso) return toast('⏳ Ya se están verificando. Espera un momento.');
+  verifTodasEnCurso = true; const libres = xs.filter(l=>!verifOcupadas.has(l.id)); libres.forEach(l=>verifOcupadas.add(l.id)); verifPintar();
+  let hechas = 0, yaEstaban = 0;
+  try{ for(const l of libres){ const f = await verifFresco(l.id); // v187: si ya se verificó (otro toque u otro celular), no se vuelve a hacer
+      if(verifReinstPend(l)){ if(verifYaHecha(f,'reinst')){ yaEstaban++; if(f) Object.assign(l,f); continue; } await verifGuardar(l.id, {reEstado:'ok', reFecha:new Date().toISOString()}); l.verif = Object.assign({}, l.verif, {reEstado:'ok'}); hechas++; continue; }
+      if(verifYaHecha(f,'normal')){ yaEstaban++; if(f) Object.assign(l,f); continue; }
+      await verifAprobarSiPend(l); await verifGuardar(l.id, {estado:'ok'}); l.verif={estado:'ok'}; hechas++; }
+    verifPanel=null; toast('✅ Listo, '+hechas+' verificada(s).'+(yaEstaban?`<br><small>${yaEstaban} ya estaba(n) verificada(s): no se tocaron.</small>`:''));
+  }catch(e){ alert('Error: '+e.message); }
+  finally{ verifTodasEnCurso = false; libres.forEach(l=>verifOcupadas.delete(l.id)); verifTrasCambio(); }
 }
+// ===== Candado de verificación (confirmado por el usuario, v187) =====
+// Para que una instalación no se verifique dos veces: al tocar un botón la tarjeta queda en
+// "⏳ Verificando…" y no se puede volver a tocar, y antes de guardar se revisa en la base si ya se
+// verificó (otro toque, otra pestaña u otro celular). Si ya estaba, no se mueve nada.
+let verifOcupadas = new Set(), verifTodasEnCurso = false;
+async function verifFresco(id){ try{ const d = await db.collection('instalacionesLog').doc(id).get(); return d && d.data ? Object.assign({id}, d.data()) : null; }catch(e){ return null; } }
+function verifYaHecha(f, tipo){
+  if(!f) return true; // ya no existe (se cambió o se borró)
+  if(tipo==='reverif') return f.estado!=='pendiente' || !!f.verif;
+  if(tipo==='reinst') return !(f.verif && f.verif.puertas==='reinstalada' && !f.verif.reEstado);
+  return !!(f.verif && f.verif.estado) || f.estado==='rechazado' || !!f.cambiadaPor;
+}
+function verifCandado(fn, tipo){
+  return async function(id, ...resto){
+    if(verifOcupadas.has(id) || verifTodasEnCurso){ toast('⏳ Ya se está verificando. Espera un momento.'); return; }
+    verifNotaCaptura = verifNotaVal(); verifOcupadas.add(id); if(current==='verif') verifPintar();
+    try{
+      const f = await verifFresco(id);
+      if(verifYaHecha(f, tipo)){ const l = verifLog(id); if(l && f) Object.assign(l, f); verifPanel = null; toast('✔ Esta instalación ya se verificó. No se movió nada.'); return; }
+      return await fn(id, ...resto);
+    } finally { verifOcupadas.delete(id); verifNotaCaptura = ''; if(current==='verif') verifTrasCambio(); }
+  };
+}
+// Todo lo que guarda una verificación pasa por el candado.
+verifNoInstalo = verifCandado(verifNoInstalo, 'normal');
+verifPedirModelo = verifCandado(verifPedirModelo, 'normal');
+verifParte = verifCandado(verifParte, 'normal');
+verifReverifOk = verifCandado(verifReverifOk, 'reverif');
+verifReverifNo = verifCandado(verifReverifNo, 'reverif');
+verifAccion = (orig => async function(id, acc){
+  if(acc==='ok') return verifCandado(i=>orig(i,acc), 'normal')(id);
+  if(acc==='reok' || acc==='reno') return verifCandado(i=>orig(i,acc), 'reinst')(id);
+  if(verifOcupadas.has(id)) return toast('⏳ Ya se está verificando. Espera un momento.');
+  return orig(id, acc);
+})(verifAccion);
+function verifOcupadaHtml(l){ return `<div class="card" style="padding:12px;border:2px solid #0e7490;opacity:.85"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:20px">⏳</span><div style="flex:1;min-width:0"><strong>${l.descripcion.split(' · ').slice(0,2).join(' · ')}</strong>${calleHtml(l)}<div class="hint" style="margin:2px 0 0;color:#0e7490;font-weight:700">Verificando… no la toques otra vez</div></div></div></div>`; }
 async function verifDeshacer(id){ try{ await db.collection('instalacionesLog').doc(id).update({verif:null}); const l=verifLog(id); if(l) delete l.verif; verifTrasCambio(); }catch(e){ alert('Error: '+e.message); } }
 async function verifAprobarSiPend(l){
   if(l.estado!=='pendiente') return;
@@ -7017,7 +7063,7 @@ async function verifAprobarSiPend(l){
   if(l.cambioDe){ try{ await db.collection('instalacionesLog').doc(l.cambioDe).update({cambiadaPor:l.id}); }catch(e){} }
 }
 async function verifPedirModelo(id){
-  const nota = ((document.getElementById('verif-nota')||{}).value||'').trim();
+  const nota = verifNotaVal();
   try{ await verifGuardar(id, {estado:'modelo', nota, resuelto:false, visto:false}); const l=verifLog(id); if(l) l.verif={estado:'modelo', nota}; verifPanel=null; toast('📨 Se le regresó al coordinador para que corrija el modelo.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
 }
 async function verifCambiarYo(id){
