@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v181';
+const APP_VERSION = 'v182';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6722,6 +6722,20 @@ async function verifGuardar(id, datos){
 }
 function verifMat(l){ const cs = (l.consumo||[]).filter(c=>Number(c.cantidad)>0).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return it ? `${it.nombre.replace(/^Melamina /,'')} ${fmtNum(c.cantidad)}` : ''; }).filter(Boolean);
   return cs.slice(0,3).join(' · ')+(cs.length>3?' …':''); }
+// Todo lo de la instalación (confirmado por el usuario, v182): extras, material completo y cuándo se capturó.
+function verifDetalleHtml(l){
+  const cs = (l.consumo||[]).filter(c=>Number(c.cantidad)>0).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return it?{it, q:Number(c.cantidad)}:null; }).filter(Boolean);
+  const hojas = cs.filter(x=>esHoja(x.it)), otros = cs.filter(x=>!esHoja(x.it));
+  const fila = x => `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)"><span>${x.it.nombre}</span><strong style="white-space:nowrap">${fmtNum(x.q)} ${x.it.unidad}</strong></div>`;
+  const cap = l.fecha ? new Date(l.fecha).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'}) : '';
+  return `${extrasLogHtml(l)}
+    <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12.5px;color:var(--sub);list-style:none">📦 ${verifMat(l)} <span style="color:var(--brand);font-weight:700;white-space:nowrap">· Ver todo ▾</span></summary>
+      <div style="margin-top:6px;padding:8px 10px;border-radius:10px;background:var(--bg);border:1px solid var(--line);font-size:13px">
+        ${hojas.length?`<div style="font-weight:800;margin-bottom:2px">🪵 Melamina / MDF</div>${hojas.map(fila).join('')}`:''}
+        ${otros.length?`<div style="font-weight:800;margin:${hojas.length?'8px':'0'} 0 2px">🔩 Herrajes y demás</div>${otros.map(fila).join('')}`:''}
+        ${cap?`<div class="hint" style="margin:8px 0 0">🕒 Capturada: ${cap}${(l.fechaDia && diaLocal(l.fecha)!==l.fechaDia)?` <strong style="color:#d97706">(otro día que la instalación)</strong>`:''}</div>`:''}
+      </div></details>`;
+}
 function verifQuien(l){ return (l.creadoPor||'').split('@')[0]; }
 const VERIF_TAG = {ok:['✅ Se instaló','#16a34a'], modelo:['✏️ Cambió el modelo','#3E5CDE'], parte:['🔸 Una parte','#d97706'], no:['❌ No se instaló','#dc2626']};
 function verifEstadoTxt(l){
@@ -6765,7 +6779,7 @@ function verifPintar(){
       <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:22px">${l.categoria==='Puerta'?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
         <strong style="font-size:15px">${l.descripcion}</strong>
         <div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''}${l.nota?' · '+l.nota:''}${l.estado==='pendiente'?' · <span style="color:#d97706">aún sin aprobar · ✅ la aprueba</span>':''}</div>
-        <div class="hint" style="margin:2px 0 0;font-size:12.5px">📦 ${verifMat(l)}</div></div></div>
+        ${verifDetalleHtml(l)}</div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
         ${btn(l.id,'ok','✅ Se instaló','#16a34a')}${btn(l.id,'modelo','✏️ Cambió el modelo','#3E5CDE')}
         ${btn(l.id,'parte','🔸 Una parte','#d97706')}${btn(l.id,'no','❌ No se instaló','#dc2626')}</div>
@@ -6773,7 +6787,7 @@ function verifPintar(){
   $('#main').innerHTML = `
     <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
       <div style="font-size:17px;font-weight:900">🔍 Verificar instalaciones</div>
-      <p class="hint" style="margin:2px 0 0">${verifDia?`Del ${nomDia(verifDia)}`:'No hay instalaciones'} · compáralas con el reporte del grupo de instalaciones.</p>
+      <p class="hint" style="margin:2px 0 0">${verifDia?`Instaladas el <strong>${nomDia(verifDia)}</strong>`:'No hay instalaciones'} · compáralas con el reporte del grupo de instalaciones de ese día.</p>
       ${rojo?`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:700">⚠️ Estas tienen ${verifDiasAtras(verifDia)} días sin revisar.</div>`:''}
       ${chips?`<div class="chips" style="margin-top:8px;flex-wrap:wrap">${chips}</div>`:''}
     </div>
