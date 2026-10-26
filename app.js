@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v182';
+const APP_VERSION = 'v183';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -690,6 +690,7 @@ function setView(v){
   if(v==='conteo') renderConteoDir();
   if(v==='mermaarm') renderMermaArm();
   if(v==='verif') renderVerif();
+  if(v==='rinst') renderRInst();
 }
 
 let invCat = null, invDetalle = false;
@@ -1364,6 +1365,7 @@ function renderHome(){
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
+    ${riHomeHtml()}
     ${avisosCardHtml()}
     ${cierresHoyHtml()}
     ${faltoCierre.length ? cierreFaltoHtml(faltoCierre) : recordatorioCierreHtml()}
@@ -8736,6 +8738,7 @@ function repGrupos(){
   G.push({ic:'📅', t:'Del día', c:'#d97706', items:[
     {t:'Cierre del día (PDF)', s:'inventario de hoy', k:'cierre inventario diario hojas enteras sin cortar pdf hoy', js:"repDiaSel=fechaHoyLocal();repAbrir('dia')"},
     {t:'Reporte de cualquier día', s:'elige fecha', k:'dia fecha ayer pasado inicio cierre pdf', js:"repDiaSel=repAyer();repDiaModo='completo';repAbrir('dia')"},
+    ...(ADM ? [] : [{t:'Reporte de instalaciones', s: C ? 'salida y cierre (calles)' : 'qué salió y qué no, por módulo', k:'reporte instalaciones calles salida cierre agenda whatsapp no salio reagendo', js: C ? "riDia=fechaHoyLocal();riCargadoDe='';irA('rinst')" : "repRiDia=fechaHoyLocal();repRiCache=null;repAbrir('rinstDir')"}]),
     ...(ADM ? [] : [{t:'Instalaciones del día (PDF)', s:'modelo, calle y estado', k:'instalaciones dia pdf calle reporte instalado closet puertas verificar', js:"repInstDia=fechaHoyLocal();repInstCache=null;repAbrir('instDia')"}]),
     ...(ADM ? [] : [{t: C ? 'Mis cierres del turno' : 'Cierres del turno', s: C ? 'lo que capturé' : (repEsDir() ? 'los 5 módulos' : modulo()), k:'cierre turno corte hojas cortadas pvc cintilla pegamento pijas coordinador', js:"repCierresDia=fechaHoyLocal();repCierreAbierto='';repCierresCache=null;repAbrir('cierres')"}])
   ]});
@@ -8827,6 +8830,7 @@ function renderRepVer(){
   if(s==='dia') return renderRepDia();
   if(s==='cierres') return renderRepCierres();
   if(s==='instDia') return renderRepInstDia();
+  if(s==='rinstDir') return renderRepRInst();
   if(s==='inst'){ $('#main').innerHTML = repVolverHtml('🔧 Instalaciones de la semana', '', true) + `<div class="card" id="rep-inst"><strong>🔧 Instalaciones de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`; setTimeout(repInstalacionesSemana, 0); return; }
   if(s==='gas'){ $('#main').innerHTML = repVolverHtml('⛽ Gasolina', '', true) + `<div class="card" id="rep-gas"><strong>⛽ Gasolina de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`; setTimeout(repGasolinaSemana, 0); return; }
   const T = {
@@ -8942,6 +8946,346 @@ async function generarInstDiaPDF(mods, dia, logs){
   });
   await S.fin(`Instalaciones_${mods.length===1?mods[0]:'5_modulos'}_${dia}.pdf`, 'Closets Vera · Instalaciones del día');
 }
+// ===== 📋 Reporte de instalaciones (confirmado por el usuario, v183) =====
+// SOLO ES UN REPORTE: no toca el inventario ni las instalaciones de la app. El coordinador escribe la
+// agenda del día (calle y número obligatorios), en la mañana marca qué sale y qué no (con motivo) y
+// manda el "reporte de salida"; en la tarde marca qué pasó con cada dirección (en ruta / instalada /
+// no se hizo), agrega las que le mandaron sueltas y manda el "reporte de cierre". Los dos se mandan
+// como PDF al grupo de WhatsApp. Un documento por módulo y día en la colección 'reportesInst'.
+const RI_MOTIVOS = [['cancelo','❌','Canceló'],['secomunica','📞','Él se comunica'],['reagendo','📅','Reagendó'],['nocontesto','📵','No contestó'],['otro','✏️','Otro motivo']];
+const RI_HORA_SALIDA = 10;
+let riDia = '', riDoc = null, riCargadoDe = '', riPanel = null, riNuevo = null, riTexto = '', riMasAbierto = false, riTodos = null;
+function riId(mod, dia){ return mod+'_'+dia; }
+function riVacio(mod, dia){ return {modulo:mod, dia, direcciones:[], movimientos:[], enviadoSalida:'', enviadoCierre:''}; }
+function riEsc(t){ return String(t||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function riCalleNum(d){ return (d.calle||'')+(d.numero?' '+d.numero:''); }
+function riMotTxt(cod, txt, fecha){
+  const m = RI_MOTIVOS.find(x=>x[0]===cod); if(!m) return '';
+  if(cod==='reagendo') return m[2]+(fecha?' para el '+new Date(fecha+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'short'}):'');
+  if(cod==='otro') return 'Otro: '+(txt||'');
+  return m[2];
+}
+function riMotIc(cod){ const m = RI_MOTIVOS.find(x=>x[0]===cod); return m ? m[1] : ''; }
+// Separa "Choya 424 Hda las Yucas" en calle / número / colonia. Si hay dos números seguidos
+// ("Eje 1 110 Jardines") el número es el segundo. Si no encuentra número, queda para completarlo.
+function riParse(linea){
+  let s = String(linea||'').replace(/\t/g,' ').replace(/\s+/g,' ').trim();
+  s = s.replace(/^(\d{1,2}[.)]|[-•*])\s+/, '').trim();
+  if(!s) return null;
+  const tk = s.split(' '), esNum = t => /^(#?\d+[A-Za-z]?(-\d+)?|s\/n),?$/i.test(t);
+  let i = -1;
+  for(let k=1; k<tk.length; k++){ if(esNum(tk[k]) && !(k+1<tk.length && esNum(tk[k+1]))){ i = k; break; } }
+  if(i<0) return {calle:s, numero:'', colonia:''};
+  return {calle:tk.slice(0,i).join(' ').replace(/[,#]+$/,'').replace(/\s+(no\.?|núm\.?|num\.?)$/i,'').trim(), numero:tk[i].replace(/[#,]/g,'').toUpperCase(), colonia:tk.slice(i+1).join(' ').replace(/^[,\s-]+/,'').trim()};
+}
+async function riCargar(dia){
+  const mod = modulo();
+  const snap = await db.collection('reportesInst').get();
+  const todos = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===mod);
+  let doc = todos.find(x=>x.id===riId(mod, dia));
+  doc = doc ? JSON.parse(JSON.stringify(doc)) : riVacio(mod, dia);
+  delete doc.id;
+  // Las reagendadas para este día aparecen solas en la agenda (una sola vez).
+  const ya = new Set(doc.direcciones.map(d=>d.reagDe).filter(Boolean));
+  const nuevas = [];
+  todos.filter(x=>x.dia<dia).forEach(x=>(x.direcciones||[]).forEach(d=>{
+    const fecha = d.salida==='nosale' && d.mot==='reagendo' ? d.motFecha : (d.cierre==='nohizo' && d.motC==='reagendo' ? d.motCFecha : '');
+    if(fecha===dia && !ya.has(d.id)) nuevas.push({id:cryptoId(), calle:d.calle, numero:d.numero, colonia:d.colonia||'', cliente:d.cliente||'', nota:'', origen:'reagendada', reagDe:d.id, reagDeDia:x.dia, creado:new Date().toISOString()});
+  }));
+  if(nuevas.length && dia>=fechaHoyLocal()){
+    doc.direcciones.push(...nuevas);
+    doc.movimientos.push({f:new Date().toISOString(), calle:nuevas.map(riCalleNum).join(' · '), t:'📅 Reagendada'+(nuevas.length>1?'s':'')+' para hoy (vienen de otro día)'});
+    await riGuardar(doc);
+  }
+  riDoc = doc; riCargadoDe = mod+'|'+dia;
+}
+async function riGuardar(doc){
+  doc = doc || riDoc; if(!doc) return;
+  doc.actualizado = new Date().toISOString(); doc.porUltimo = getCurrentUserEmail?getCurrentUserEmail():'';
+  await db.collection('reportesInst').doc(riId(doc.modulo, doc.dia)).set(doc);
+}
+function riMov(calle, t){ riDoc.movimientos.push({f:new Date().toISOString(), calle, t}); }
+function riDir(id){ return (riDoc.direcciones||[]).find(d=>d.id===id); }
+async function renderRInst(){
+  current = 'rinst';
+  const hoy = fechaHoyLocal(); if(!riDia || riDia>hoy) riDia = hoy;
+  if(riCargadoDe !== modulo()+'|'+riDia || !riDoc){
+    $('#main').innerHTML = '<div class="card">Cargando el reporte…</div>';
+    try{ await riCargar(riDia); }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${e.message}</div>`; return; }
+    if(current!=='rinst') return;
+  }
+  riPintar();
+}
+function riPintar(){
+  if(current!=='rinst' || !riDoc) return;
+  const D = riDoc, ds = D.direcciones, hoy = fechaHoyLocal(), esHoy = riDia===hoy, ro = esSoloLectura();
+  const hora = iso => iso ? new Date(iso).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
+  const fechaTxt = new Date(riDia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'});
+  const B = (t, c, on, js, extra) => `<button onclick="${js}" style="flex:1;cursor:pointer;border-radius:10px;padding:9px 4px;font:inherit;font-size:13px;font-weight:800;${on?`background:${c};color:#fff;border:2px solid ${c}`:`background:transparent;color:${c};border:2px solid ${c}`};${extra||''}" ${ro?'disabled':''}>${t}</button>`;
+  const motPanel = (d, tipo) => { const cod = tipo==='sal' ? d.mot : d.motC, txt = tipo==='sal' ? d.motTxt : d.motCTxt, fe = tipo==='sal' ? d.motFecha : d.motCFecha;
+    const sel = riPanel && riPanel.sel!==undefined ? riPanel.sel : cod;
+    return `<div style="margin-top:10px;padding:12px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)">
+      <strong>${tipo==='sal'?'🚫 ¿Por qué no sale?':'⚠️ ¿Por qué no se hizo?'}</strong>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${RI_MOTIVOS.map(m=>`<button onclick="riPanel.sel='${m[0]}';riPintar()" style="cursor:pointer;border-radius:16px;padding:8px 11px;font:inherit;font-size:13px;font-weight:700;${sel===m[0]?'background:#dc2626;color:#fff;border:1px solid #dc2626':'background:transparent;color:var(--ink);border:1px solid var(--line)'}">${m[1]} ${m[2]}</button>`).join('')}</div>
+      ${sel==='reagendo'?`<label class="hint" style="display:block;margin-top:10px;font-weight:800;color:var(--ink)">📅 ¿Para qué día? *</label><input type="date" id="ri-fecha" min="${hoy}" value="${fe||''}" style="margin-top:4px">`:''}
+      ${sel==='otro'?`<label class="hint" style="display:block;margin-top:10px;font-weight:800;color:var(--ink)">✏️ ¿Cuál fue el motivo? *</label><input id="ri-otro" maxlength="120" value="${riEsc(txt)}" placeholder="Escribe el motivo" style="margin-top:4px">`:''}
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1;margin:0;background:#dc2626" onclick="riGuardarMotivo('${d.id}','${tipo}')">Guardar</button><button class="btn" style="margin:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="riPanel=null;riPintar()">Cancelar</button></div></div>`; };
+  const editPanel = d => `<div style="margin-top:10px;padding:12px;border-radius:12px;border:2px solid #3E5CDE">
+      <div class="grid2"><div><label class="hint">Calle *</label><input id="ri-e-calle" value="${riEsc(d.calle)}" style="margin-top:4px"></div><div><label class="hint">Número *</label><input id="ri-e-num" value="${riEsc(d.numero)}" inputmode="text" style="margin-top:4px"></div>
+      <div><label class="hint">Colonia</label><input id="ri-e-col" value="${riEsc(d.colonia)}" style="margin-top:4px"></div><div><label class="hint">Cliente</label><input id="ri-e-cli" value="${riEsc(d.cliente)}" style="margin-top:4px"></div></div>
+      <label class="hint" style="display:block;margin-top:8px">Nota</label><input id="ri-e-nota" value="${riEsc(d.nota)}" style="margin-top:4px">
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1;margin:0" onclick="riGuardarEdit('${d.id}')">Guardar</button><button class="btn" style="margin:0;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="riBorrarDir('${d.id}')">🗑️ Quitar</button><button class="btn" style="margin:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="riPanel=null;riPintar()">Cancelar</button></div></div>`;
+  const tagOrigen = d => d.origen==='tarde' ? '<span style="margin-left:6px;font-size:10.5px;font-weight:800;padding:2px 6px;border-radius:6px;background:#7c3aed;color:#fff">LLEGÓ EN LA TARDE</span>' : d.origen==='reagendada' ? `<span style="margin-left:6px;font-size:10.5px;font-weight:800;padding:2px 6px;border-radius:6px;background:#0e7490;color:#fff">REAGENDADA${d.reagDeDia?' DEL '+fCorta(d.reagDeDia).toUpperCase():''}</span>` : '';
+  const cab = d => `<div style="display:flex;gap:8px;align-items:flex-start"><div style="flex:1;min-width:0"><strong style="font-size:15px">📍 ${riEsc(d.calle)} ${d.numero?riEsc(d.numero):'<span style="color:#d97706">¿número?</span>'}</strong>${tagOrigen(d)}
+      ${(d.colonia||d.cliente||d.nota)?`<div class="hint" style="margin:2px 0 0">${[d.colonia, d.cliente, d.nota].filter(Boolean).map(riEsc).join(' · ')}</div>`:''}</div>
+      ${ro?'':`<button onclick="riPanel={id:'${d.id}',tipo:'edit'};riPintar()" style="border:0;background:transparent;font-size:17px;cursor:pointer;padding:2px 4px" title="Corregir">✏️</button>`}</div>`;
+  const tarjetaSal = d => `<div class="card" style="padding:11px;border-left:5px solid ${d.salida==='sale'?'#16a34a':d.salida==='nosale'?'#dc2626':(d.numero?'#3E5CDE':'#d97706')}">${cab(d)}
+      <div style="display:flex;gap:8px;margin-top:8px">${B('🚚 Sale','#16a34a',d.salida==='sale',`riSalida('${d.id}','sale')`)}${B('🚫 No sale','#dc2626',d.salida==='nosale',`riPanel={id:'${d.id}',tipo:'sal'};riPintar()`)}</div>
+      ${d.salida==='nosale'&&d.mot?`<div style="margin-top:6px;font-size:13px;color:#ef4444;font-weight:800">${riMotIc(d.mot)} ${riEsc(riMotTxt(d.mot, d.motTxt, d.motFecha))}</div>`:''}
+      ${riPanel && riPanel.id===d.id ? (riPanel.tipo==='sal' ? motPanel(d,'sal') : riPanel.tipo==='edit' ? editPanel(d) : '') : ''}</div>`;
+  const tarjetaCie = d => `<div class="card" style="padding:11px;border-left:5px solid ${d.cierre==='ok'?'#16a34a':d.cierre==='nohizo'?'#dc2626':d.cierre==='ruta'?'#2563eb':'var(--line)'}">${cab(d)}
+      <div style="display:flex;gap:6px;margin-top:8px">${B('🚚 En ruta','#2563eb',d.cierre==='ruta',`riCierre('${d.id}','ruta')`)}${B('✅ Instalada','#16a34a',d.cierre==='ok',`riCierre('${d.id}','ok')`)}${B('⚠️ No se hizo','#dc2626',d.cierre==='nohizo',`riPanel={id:'${d.id}',tipo:'cie'};riPintar()`)}</div>
+      ${d.cierre==='nohizo'&&d.motC?`<div style="margin-top:6px;font-size:13px;color:#ef4444;font-weight:800">${riMotIc(d.motC)} ${riEsc(riMotTxt(d.motC, d.motCTxt, d.motCFecha))}</div>`:''}
+      ${riPanel && riPanel.id===d.id ? (riPanel.tipo==='cie' ? motPanel(d,'cie') : riPanel.tipo==='edit' ? editPanel(d) : '') : ''}</div>`;
+  const sinMarcar = ds.filter(d=>!d.salida), salen = ds.filter(d=>d.salida==='sale'), noSalen = ds.filter(d=>d.salida==='nosale');
+  const agendaBox = `<div class="card" style="padding:12px;border:2px solid #3E5CDE">
+      <strong>✍️ ${ds.length?'Agregar más direcciones':'Escribe la agenda de hoy'}</strong>
+      <p class="hint" style="margin:2px 0 0">Una dirección por renglón: <strong>calle y número</strong> (la colonia si quieres). La app separa la calle del número.</p>
+      <textarea id="ri-texto" rows="${ds.length?3:6}" placeholder="Jesús González 200&#10;Príncipe de Francia 1922&#10;Choya 424 Hda las Yucas" style="margin-top:8px;width:100%;font-size:15px;line-height:1.6" oninput="riTexto=this.value">${riEsc(riTexto)}</textarea>
+      <p class="hint" style="margin:4px 0 0">🎤 También puedes dictar con el micrófono del teclado. Si te mandaron la lista en texto, pégala aquí.</p>
+      <button class="btn" style="width:100%;margin-top:8px;background:#3E5CDE" onclick="riAgregarTexto()">Agregar direcciones</button></div>`;
+  const nuevoBox = riNuevo ? `<div class="card" style="padding:12px;border:2px solid #7c3aed"><strong>➕ Me mandaron otra instalación</strong>
+      <div class="grid2" style="margin-top:8px"><div><label class="hint">Calle *</label><input id="ri-n-calle" style="margin-top:4px"></div><div><label class="hint">Número *</label><input id="ri-n-num" style="margin-top:4px"></div>
+      <div><label class="hint">Colonia</label><input id="ri-n-col" style="margin-top:4px"></div><div><label class="hint">Cliente</label><input id="ri-n-cli" style="margin-top:4px"></div></div>
+      <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1;margin:0;background:#7c3aed" onclick="riAgregarTarde()">Agregar</button><button class="btn" style="margin:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="riNuevo=null;riPintar()">Cancelar</button></div></div>` : '';
+  const antes = riPanel && riPanel.tipo==='antes' ? (()=>{ const enRuta = salen.filter(d=>d.cierre==='ruta'), sinCie = salen.filter(d=>!d.cierre);
+    return `<div class="card" style="padding:14px;border:2px solid #ffd34d;background:linear-gradient(0deg,rgba(255,211,77,.10),rgba(255,211,77,.10)),var(--card)"><div style="font-size:16px;font-weight:900">✋ Antes de mandar el reporte de cierre</div>
+      <p style="margin:8px 0 0;font-size:15px">¿Te mandaron más instalaciones en la tarde que no están en la agenda?</p><p class="hint" style="margin:4px 0 0">Hoy llevas ${ds.length} dirección(es)${ds.some(d=>d.origen==='tarde')?` · ${ds.filter(d=>d.origen==='tarde').length} llegaron en la tarde`:''}.</p>
+      ${sinCie.length?`<p style="margin:8px 0 0;color:#d97706;font-weight:800">⚠️ Sin marcar: ${sinCie.map(riCalleNum).map(riEsc).join(', ')}</p>`:''}
+      ${enRuta.length?`<p style="margin:6px 0 0;color:#2563eb;font-weight:800">🚚 Siguen en ruta: ${enRuta.map(riCalleNum).map(riEsc).join(', ')}. ¿Las actualizas?</p>`:''}
+      <button class="btn" style="width:100%;margin-top:10px;background:#7c3aed" onclick="riPanel=null;riNuevo={};riPintar();setTimeout(()=>{const e=document.getElementById('ri-n-calle'); if(e){ e.scrollIntoView({block:'center'}); e.focus(); }},50)">+ Sí, agregar otra</button>
+      <button class="btn" style="width:100%;margin-top:8px;background:#16a34a" onclick="riMandar('cierre',true)">No, ya están todas · mandar</button>
+      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="riPanel=null;riPintar()">Cancelar</button></div>`; })() : '';
+  const chip = (on, txt, js) => `<button class="chip ${on?'on':''}" onclick="${js}">${txt}</button>`;
+  $('#main').innerHTML = `
+    <div class="card" style="padding:12px;border:2px solid #d97706">
+      <div style="font-size:18px;font-weight:900">📋 Reporte de instalaciones · ${modulo()}</div>
+      <div class="chips" style="margin-top:8px">${chip(esHoy,'Hoy',"riDia=fechaHoyLocal();renderRInst()")}${chip(riDia===repAyer(),'Ayer',"riDia=repAyer();renderRInst()")}<input type="date" value="${riDia}" max="${hoy}" style="width:auto;min-height:0;padding:6px 8px" onchange="if(this.value){riDia=this.value;riPanel=null;renderRInst();}"></div>
+      <p class="hint" style="margin:6px 0 0"><strong>${fechaTxt}</strong> · ${ds.length} dirección(es)</p>
+      <div class="movlist" style="margin-top:8px"><div class="movitem" style="padding:8px 10px"><span>🌅 Reporte de salida</span><strong style="color:${D.enviadoSalida?'#16a34a':'#d97706'}">${D.enviadoSalida?'enviado '+hora(D.enviadoSalida):(esHoy?'antes de las '+RI_HORA_SALIDA+':00':'no se mandó')}</strong></div>
+      <div class="movitem" style="padding:8px 10px"><span>🌇 Reporte de cierre</span><strong style="color:${D.enviadoCierre?'#16a34a':'var(--sub)'}">${D.enviadoCierre?'enviado '+hora(D.enviadoCierre):'en la tarde'}</strong></div></div>
+      <div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(124,58,237,.12);border:1px solid #7c3aed;font-size:13px">ℹ️ <strong>Solo es un reporte.</strong> No toca el inventario ni las instalaciones de la app.</div></div>
+    ${ro?'':(!ds.length || riMasAbierto ? agendaBox : `<button class="btn" style="width:100%;background:transparent;color:#3E5CDE;border:1px dashed #3E5CDE;box-shadow:none" onclick="riMasAbierto=true;riPintar()">✍️ Agregar más direcciones a la agenda</button>`)}
+    ${ds.length?`<div class="home-sec-t" style="margin:14px 4px 4px">🌅 Reporte de salida · ${salen.length} salen · ${noSalen.length} no salen${sinMarcar.length?` · ${sinMarcar.length} sin marcar`:''}</div>
+      ${ds.map(tarjetaSal).join('')}
+      ${sinMarcar.length>1 && !ro ? `<button class="btn" style="width:100%;background:rgba(22,163,74,.12);color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="riTodasSalen()">⚡ Todas las demás salen (${sinMarcar.length})</button>` : ''}
+      <button class="btn" style="width:100%;min-height:52px;margin-top:8px;background:linear-gradient(135deg,#d97706,#b45309)" onclick="riMandar('salida')">📤 Mandar reporte de salida</button>`:''}
+    ${salen.length?`<div class="home-sec-t" style="margin:18px 4px 4px">🌇 Reporte de cierre · ¿qué pasó con cada una?</div>
+      ${salen.map(tarjetaCie).join('')}
+      ${nuevoBox || (ro?'':`<button class="btn" style="width:100%;background:transparent;color:#7c3aed;border:1px dashed #7c3aed;box-shadow:none" onclick="riNuevo={};riPintar()">+ Me mandaron otra instalación</button>`)}
+      ${antes || `<button class="btn" style="width:100%;min-height:52px;margin-top:8px;background:linear-gradient(135deg,#0d7468,#0a5c53)" onclick="riPanel={tipo:'antes'};riPintar();window.scrollTo(0,document.body.scrollHeight)">📤 Mandar reporte de cierre</button>`}`:''}
+    ${D.movimientos.length?`<details class="card" style="padding:12px"><summary style="cursor:pointer;font-weight:800">🕒 Movimientos del día (${D.movimientos.length})</summary>${D.movimientos.slice().reverse().map(m=>`<div class="movitem" style="padding:6px 8px;margin-top:6px;align-items:flex-start"><span class="hint" style="margin:0;min-width:62px">${hora(m.f)}</span><span style="flex:1;font-size:13px"><strong>${riEsc(m.calle)}</strong><br>${riEsc(m.t)}</span></div>`).join('')}</details>`:''}`;
+}
+async function riAgregarTexto(){
+  const t = (document.getElementById('ri-texto')||{}).value || riTexto;
+  const xs = t.split(/\n+/).map(riParse).filter(Boolean);
+  if(!xs.length) return alert('Escribe al menos una dirección (calle y número).');
+  const ahora = new Date().toISOString();
+  xs.forEach(x=>riDoc.direcciones.push({id:cryptoId(), calle:x.calle, numero:x.numero, colonia:x.colonia, cliente:'', nota:'', origen:'agenda', creado:ahora}));
+  riMov('(agenda)', `✍️ Se agregaron ${xs.length} dirección(es) a la agenda`);
+  riTexto = ''; riMasAbierto = false;
+  await riGuardar(); riPintar();
+  const faltan = xs.filter(x=>!x.numero);
+  toast(`✅ Se agregaron ${xs.length}.`+(faltan.length?`<br><small>${faltan.length} sin número: tócalas (✏️) para ponerlo.</small>`:''));
+}
+async function riSalida(id, v){
+  const d = riDir(id); if(!d) return;
+  if(!d.numero) return alert('📍 A esta dirección le falta el número. Tócala (✏️) para ponerlo.');
+  d.salida = v; delete d.mot; delete d.motTxt; delete d.motFecha;
+  riMov(riCalleNum(d), '🚚 Sale'); riPanel = null; await riGuardar(); riPintar();
+}
+async function riTodasSalen(){
+  const xs = riDoc.direcciones.filter(d=>!d.salida);
+  const sinNum = xs.filter(d=>!d.numero); if(sinNum.length) return alert('Primero ponles número a: '+sinNum.map(d=>d.calle).join(', '));
+  xs.forEach(d=>{ d.salida = 'sale'; });
+  riMov(xs.map(riCalleNum).join(' · '), `🚚 Salen (${xs.length})`); await riGuardar(); riPintar();
+}
+async function riGuardarMotivo(id, tipo){
+  const d = riDir(id); if(!d) return;
+  const sel = riPanel && riPanel.sel || (tipo==='sal' ? d.mot : d.motC);
+  if(!sel) return alert('Elige el motivo.');
+  let fecha = '', txt = '';
+  if(sel==='reagendo'){ fecha = (document.getElementById('ri-fecha')||{}).value||''; if(!fecha) return alert('📅 Escribe para qué día se reagendó.'); }
+  if(sel==='otro'){ txt = ((document.getElementById('ri-otro')||{}).value||'').trim(); if(!txt) return alert('✏️ Escribe cuál fue el motivo.'); }
+  if(tipo==='sal'){ if(!d.numero) return alert('📍 A esta dirección le falta el número. Tócala (✏️) para ponerlo.'); d.salida = 'nosale'; d.mot = sel; d.motTxt = txt; d.motFecha = fecha; delete d.cierre; delete d.motC; delete d.motCTxt; delete d.motCFecha; riMov(riCalleNum(d), '🚫 No sale · '+riMotTxt(sel, txt, fecha)); }
+  else { d.cierre = 'nohizo'; d.motC = sel; d.motCTxt = txt; d.motCFecha = fecha; riMov(riCalleNum(d), '⚠️ No se hizo · '+riMotTxt(sel, txt, fecha)); }
+  riPanel = null; await riGuardar(); riPintar();
+}
+async function riCierre(id, v){
+  const d = riDir(id); if(!d) return;
+  d.cierre = v; delete d.motC; delete d.motCTxt; delete d.motCFecha;
+  riMov(riCalleNum(d), v==='ok' ? '✅ Instalada' : '🚚 En ruta'); riPanel = null; await riGuardar(); riPintar();
+}
+async function riGuardarEdit(id){
+  const d = riDir(id); if(!d) return;
+  const g = k => ((document.getElementById(k)||{}).value||'').trim();
+  const calle = g('ri-e-calle'), numero = g('ri-e-num');
+  if(!calle || !numero) return alert('📍 La calle y el número son obligatorios.');
+  Object.assign(d, {calle, numero, colonia:g('ri-e-col'), cliente:g('ri-e-cli'), nota:g('ri-e-nota')});
+  riMov(riCalleNum(d), '✏️ Se corrigió la dirección'); riPanel = null; await riGuardar(); riPintar();
+}
+async function riBorrarDir(id){
+  const d = riDir(id); if(!d) return;
+  if(!confirm(`🗑️ ¿Quitar ${riCalleNum(d)} del reporte?\n\nSolo se quita del reporte (no toca nada más).`)) return;
+  riDoc.direcciones = riDoc.direcciones.filter(x=>x.id!==id);
+  riMov(riCalleNum(d), '🗑️ Se quitó del reporte'); riPanel = null; await riGuardar(); riPintar();
+}
+async function riAgregarTarde(){
+  const g = k => ((document.getElementById(k)||{}).value||'').trim();
+  const calle = g('ri-n-calle'), numero = g('ri-n-num');
+  if(!calle || !numero) return alert('📍 La calle y el número son obligatorios.');
+  const d = {id:cryptoId(), calle, numero, colonia:g('ri-n-col'), cliente:g('ri-n-cli'), nota:'', origen:'tarde', salida:'sale', creado:new Date().toISOString()};
+  riDoc.direcciones.push(d);
+  riMov(riCalleNum(d), '➕ Llegó en la tarde · 🚚 sale'); riNuevo = null; await riGuardar(); riPintar();
+}
+async function riMandar(tipo, confirmo){
+  const ds = riDoc.direcciones;
+  if(!ds.length) return alert('Primero escribe la agenda.');
+  if(tipo==='salida'){
+    const sin = ds.filter(d=>!d.salida);
+    if(sin.length) return alert('Marca primero si salen o no:\n\n'+sin.map(d=>'• '+riCalleNum(d)).join('\n'));
+    riDoc.enviadoSalida = new Date().toISOString(); riMov('(reporte)', '📤 Se mandó el reporte de salida');
+  } else {
+    riDoc.enviadoCierre = new Date().toISOString(); if(confirmo) riDoc.confirmoTodas = true;
+    riMov('(reporte)', '📤 Se mandó el reporte de cierre'+(confirmo?' · confirmó que no le mandaron más':''));
+  }
+  riPanel = null;
+  await riGuardar(); riPintar();
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('Se guardó, pero no se pudo cargar el generador de PDF. Revisa tu internet y vuelve a tocar el botón.');
+  try{ await riPdf(tipo, [riDoc]); }catch(e){ alert('No se pudo generar el PDF: '+e.message); }
+}
+// PDF: salida (qué sale y qué no) o cierre (qué pasó + movimientos). Con varios docs, una sección por módulo.
+async function riPdf(tipo, docs){
+  const sal = tipo==='salida', COL = sal ? [217,119,6] : [13,116,104], VER=[22,128,74], ROJ=[185,28,28], AZU=[37,99,235], MOR=[124,58,237];
+  const d0 = docs[0], fLarga = new Date(d0.dia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
+  const hora = iso => iso ? new Date(iso).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
+  const env = sal ? d0.enviadoSalida : d0.enviadoCierre;
+  const titulo = (sal?'Reporte de salida':'Reporte de cierre')+' · '+(docs.length===1?d0.modulo:'5 módulos');
+  const S = herrPdfBase(titulo, `${fLarga}${docs.length===1&&env?'  ·  enviado '+hora(env):''}`, COL);
+  const todas = docs.flatMap(x=>x.direcciones||[]);
+  const ori = d => d.origen==='tarde' ? ' (llegó en la tarde)' : d.origen==='reagendada' ? ' (reagendada)' : '';
+  const dirTxt = d => ({t:riCalleNum(d)+ori(d), b:true});
+  if(sal) S.kpis([[todas.length,'direcciones del día',[13,116,104]],[todas.filter(d=>d.salida==='sale').length,'salen hoy',VER],[todas.filter(d=>d.salida==='nosale').length,'no salen',ROJ]]);
+  else { const noHoy = todas.filter(d=>d.salida==='nosale' || d.cierre==='nohizo');
+    S.kpis([[todas.length,'direcciones',[13,116,104]],[todas.filter(d=>d.salida==='sale'&&d.cierre==='ok').length,'instaladas',VER],[todas.filter(d=>d.salida==='sale'&&d.cierre==='ruta').length,'en ruta',AZU],[noHoy.length,'no se instalaron hoy',ROJ]]); }
+  docs.forEach((D, i)=>{
+    const ds = D.direcciones||[];
+    if(docs.length>1){ S.seccion(D.modulo, `${ds.length} dirección(es) · salida ${D.enviadoSalida?hora(D.enviadoSalida):'sin mandar'} · cierre ${D.enviadoCierre?hora(D.enviadoCierre):'sin mandar'}`, COL, i>0 && S.y>60); }
+    if(!ds.length){ S.vacio('Sin direcciones en la agenda.'); return; }
+    if(sal){
+      const si = ds.filter(d=>d.salida==='sale'), no = ds.filter(d=>d.salida==='nosale'), sin = ds.filter(d=>!d.salida);
+      S.banda('Salen hoy', String(si.length), VER);
+      if(si.length) S.tabla([{t:'#',w:8},{t:'Calle y número',w:70},{t:'Colonia',w:52},{t:'Cliente',w:52}], si.map((d,k)=>[String(k+1), dirTxt(d), d.colonia||'', d.cliente||'']), VER); else S.vacio('Ninguna.');
+      S.banda('No salen', String(no.length), ROJ);
+      if(no.length) S.tabla([{t:'#',w:8},{t:'Calle y número',w:66},{t:'Motivo',w:56},{t:'Cliente / nota',w:52}], no.map((d,k)=>[String(k+1), dirTxt(d), {t:riMotTxt(d.mot, d.motTxt, d.motFecha), col:ROJ, b:true}, [d.cliente, d.nota].filter(Boolean).join(' · ')]), ROJ); else S.vacio('Ninguna.');
+      if(sin.length){ S.banda('Sin marcar', String(sin.length), [180,83,9]); S.tabla([{t:'#',w:8},{t:'Calle y número',w:174}], sin.map((d,k)=>[String(k+1), dirTxt(d)]), [180,83,9]); }
+    } else {
+      const vivas = ds.filter(d=>d.salida==='sale' && d.cierre!=='nohizo'), noHoy = ds.filter(d=>d.salida==='nosale' || d.cierre==='nohizo');
+      S.banda('Salieron · instaladas o en ruta', String(vivas.length), [13,116,104]);
+      if(vivas.length) S.tabla([{t:'#',w:8},{t:'Calle y número',w:72},{t:'Cliente',w:40},{t:'¿Qué pasó?',w:30},{t:'Hora',w:32}], vivas.map((d,k)=>{ const mv = (D.movimientos||[]).filter(m=>m.calle===riCalleNum(d) && /Instalada|En ruta/.test(m.t)).pop();
+        return [String(k+1), dirTxt(d), d.cliente||'', d.cierre==='ok'?{t:'Instalada',col:VER,b:true}:d.cierre==='ruta'?{t:'En ruta',col:AZU,b:true}:{t:'Sin marcar',col:[180,83,9],b:true}, mv?hora(mv.f):'']; }), [13,116,104]); else S.vacio('Ninguna.');
+      S.banda('No se instalaron hoy', String(noHoy.length), ROJ);
+      if(noHoy.length) S.tabla([{t:'#',w:8},{t:'Calle y número',w:64},{t:'¿Cuándo?',w:40},{t:'Motivo',w:70}], noHoy.map((d,k)=>[String(k+1), dirTxt(d), d.salida==='nosale'?'No salió (mañana)':'Salió pero no se hizo', {t:d.salida==='nosale'?riMotTxt(d.mot,d.motTxt,d.motFecha):riMotTxt(d.motC,d.motCTxt,d.motCFecha), col:ROJ, b:true}]), ROJ); else S.vacio('Ninguna.');
+      const mv = D.movimientos||[];
+      if(mv.length){ S.banda('Movimientos del día', String(mv.length), AZU); S.tabla([{t:'Hora',w:20},{t:'Calle y número',w:62},{t:'Movimiento',w:100}], mv.map(m=>[hora(m.f), m.calle, m.t.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,'').trim()]), AZU); }
+      if(D.confirmoTodas) S.vacio('El coordinador confirmó que no le mandaron más instalaciones.');
+    }
+  });
+  S.vacio('Este reporte no mueve inventario ni instalaciones de la app.');
+  await S.fin(`Reporte_${sal?'salida':'cierre'}_${docs.length===1?d0.modulo:'5_modulos'}_${d0.dia}.pdf`, 'Closets Vera · Reporte de instalaciones');
+}
+// Tarjeta en el Inicio del coordinador.
+let _riHome = null, _riHomeT = 0;
+async function riHomeCargar(){
+  if(Date.now()-_riHomeT < 5000) return; _riHomeT = Date.now();
+  try{ const d = await db.collection('reportesInst').doc(riId(modulo(), fechaHoyLocal())).get(); const x = d && d.data && d.data();
+    const antes = JSON.stringify(_riHome); _riHome = {mod:modulo(), dia:fechaHoyLocal(), doc:x||null};
+    if(JSON.stringify(_riHome)!==antes && current==='home' && !esAdmin()) renderHome(); }catch(e){}
+}
+function riHomeHtml(){
+  if(esAdmin() || esSoloLectura() || !esCoordinador()) return '';
+  if(!_riHome || _riHome.mod!==modulo() || _riHome.dia!==fechaHoyLocal()){ riHomeCargar(); }
+  else setTimeout(riHomeCargar, 60);
+  const x = _riHome && _riHome.doc, h = new Date().getHours();
+  const hora = iso => new Date(iso).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'});
+  const ds = x ? (x.direcciones||[]) : [];
+  const tarde = !x || !x.enviadoSalida ? (h >= RI_HORA_SALIDA) : false;
+  const sal = x && x.enviadoSalida ? `<strong style="color:#16a34a">enviado ${hora(x.enviadoSalida)}</strong>` : `<strong style="color:${tarde?'#dc2626':'#d97706'}">${tarde?'⚠️ ya pasaron las '+RI_HORA_SALIDA:'antes de las '+RI_HORA_SALIDA+':00'}</strong>`;
+  const cie = x && x.enviadoCierre ? `<strong style="color:#16a34a">enviado ${hora(x.enviadoCierre)}</strong>` : '<span class="hint" style="margin:0">en la tarde</span>';
+  return `<div class="card" style="padding:12px;border:2px solid #d97706"><div style="font-size:16px;font-weight:900">📋 Reporte de instalaciones</div>
+    <div class="movlist" style="margin-top:6px"><div class="movitem" style="padding:7px 10px"><span>🌅 Reporte de salida</span>${sal}</div><div class="movitem" style="padding:7px 10px"><span>🌇 Reporte de cierre</span>${cie}</div></div>
+    ${ds.length?`<p class="hint" style="margin:6px 0 0">${ds.length} dirección(es) en la agenda</p>`:''}
+    <button class="btn" style="width:100%;margin-top:8px;background:#d97706" onclick="riDia=fechaHoyLocal();riCargadoDe='';irA('rinst')">Abrir</button>
+    <p class="hint" style="margin:6px 0 0">ℹ️ Solo es un reporte: no toca el inventario ni las instalaciones.</p></div>`;
+}
+// Dirección: los reportes de cada módulo (en Reportes) y aviso si a las 10 no se mandó el de salida.
+let repRiDia = '', repRiCache = null;
+function renderRepRInst(){
+  const hoy = fechaHoyLocal(); if(!repRiDia || repRiDia>hoy) repRiDia = hoy;
+  if(!repRiCache || repRiCache.dia!==repRiDia){
+    $('#main').innerHTML = repVolverHtml('📋 Reportes de instalaciones', '') + '<div class="card">Cargando…</div>';
+    db.collection('reportesInst').get().then(s=>{ repRiCache = {dia:repRiDia, docs:s.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.dia===repRiDia)}; if(current==='repver' && repSec==='rinstDir') renderRepRInst(); })
+      .catch(e=>{ $('#main').innerHTML = repVolverHtml('📋 Reportes de instalaciones','') + `<div class="card">No se pudo cargar: ${e.message}</div>`; });
+    return;
+  }
+  const chip = (on, txt, js) => `<button class="chip ${on?'on':''}" onclick="${js}">${txt}</button>`;
+  const mod = modulo(), D = repRiCache.docs.find(x=>x.modulo===mod), ds = D ? D.direcciones||[] : [];
+  const hora = iso => iso ? new Date(iso).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
+  const fila = (t, v, c) => `<div class="movitem" style="padding:8px 10px"><span>${t}</span><strong style="${c?'color:'+c:''}">${v}</strong></div>`;
+  const conDocs = repRiCache.docs.filter(x=>(x.direcciones||[]).length);
+  $('#main').innerHTML = repVolverHtml('📋 Reportes de instalaciones', 'Lo que reporta cada coordinador: qué salió, qué no y por qué. Solo es un reporte: no mueve inventario.') + `
+    <div class="card">
+      <div style="font-weight:800">¿De qué módulo?</div>${repModHtml()}
+      <div style="font-weight:800;margin-top:12px">¿Qué día?</div>
+      <div class="chips" style="margin-top:6px">${chip(repRiDia===hoy,'Hoy',"repRiDia=fechaHoyLocal();renderRepRInst()")}${chip(repRiDia===repAyer(),'Ayer',"repRiDia=repAyer();renderRepRInst()")}<input type="date" value="${repRiDia}" max="${hoy}" style="width:auto;min-height:0;padding:6px 8px" onchange="if(this.value){repRiDia=this.value;renderRepRInst();}"></div>
+      ${D && ds.length ? `<div class="movlist" style="margin-top:12px">${fila('🌅 Salida', D.enviadoSalida?'enviado '+hora(D.enviadoSalida):'sin mandar', D.enviadoSalida?'#16a34a':'#d97706')}${fila('🌇 Cierre', D.enviadoCierre?'enviado '+hora(D.enviadoCierre):'sin mandar', D.enviadoCierre?'#16a34a':'var(--sub)')}
+        ${fila('Direcciones', ds.length)}${fila('✅ Instaladas', ds.filter(d=>d.salida==='sale'&&d.cierre==='ok').length)}${fila('🚚 En ruta', ds.filter(d=>d.salida==='sale'&&d.cierre==='ruta').length)}${fila('🚫 No se instalaron hoy', ds.filter(d=>d.salida==='nosale'||d.cierre==='nohizo').length)}</div>
+        <div style="display:flex;gap:8px;margin-top:12px"><button class="btn" style="flex:1;margin:0;background:#d97706" onclick="repRiPdf('salida',false)">📄 PDF de salida</button><button class="btn" style="flex:1;margin:0;background:#0d7468" onclick="repRiPdf('cierre',false)">📄 PDF de cierre</button></div>`
+        : `<p class="hint" style="margin:12px 0 0">${mod} no tiene reporte de instalaciones ese día.</p>`}
+      ${conDocs.length>1 ? `<button class="btn" style="width:100%;margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="repRiPdf('cierre',true)">📄 Cierre de todos los módulos en un PDF (${conDocs.map(x=>x.modulo).join(', ')})</button>` : ''}
+      ${esAdmin() ? `<button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="riDia=repRiDia;riCargadoDe='';entrarModulo('${mod}','rinst')">✏️ Abrir el reporte de ${mod}</button>` : ''}
+    </div>`;
+}
+async function repRiPdf(tipo, todos){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  const docs = todos ? MODULOS.map(m=>repRiCache.docs.find(x=>x.modulo===m.nombre)).filter(x=>x && (x.direcciones||[]).length) : repRiCache.docs.filter(x=>x.modulo===modulo());
+  if(!docs.length) return alert('No hay reporte ese día.');
+  try{ await riPdf(tipo, docs); }catch(e){ alert('No se pudo generar el PDF: '+e.message); }
+}
+let _dirRI = null;
+function riCalcDir(docs){
+  const hoy = fechaHoyLocal(), h = new Date().getHours();
+  if(h < RI_HORA_SALIDA) return [];
+  const hace7 = (()=>{ const d=new Date(hoy+'T12:00:00'); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); })();
+  const usan = new Set(docs.filter(x=>x.dia>=hace7 && (x.direcciones||[]).length).map(x=>x.modulo));
+  return [...usan].filter(m=>!docs.some(x=>x.modulo===m && x.dia===hoy && x.enviadoSalida));
+}
+function riPendRow(fila){
+  if(!_dirRI || !_dirRI.length) return null;
+  return fila('📋', `Reporte de salida sin mandar: ${_dirRI.length}`, _dirRI.join(', ')+' · ya pasaron las '+RI_HORA_SALIDA+':00', '#d97706', 'Ver', "repRiDia=fechaHoyLocal();repRiCache=null;repAbrir('rinstDir')");
+}
+// Configuración: borrar SOLO los reportes de instalaciones (para quitar las pruebas).
+async function riBorrarTodo(mods){
+  if(!esAdmin()) return;
+  const snap = await db.collection('reportesInst').get();
+  const xs = snap.docs.filter(d=>mods.includes((d.data()||{}).modulo));
+  if(!xs.length) return alert('No hay reportes de instalaciones que borrar en '+mods.join(', ')+'.');
+  if(!confirm(`🗑️ Borrar ${xs.length} reporte(s) de instalaciones de ${mods.length===1?mods[0]:'los 5 módulos'}?\n\nSolo se borran los reportes de instalaciones (agenda, salida y cierre). No se toca el inventario, las instalaciones ni nada más.`)) return;
+  if(!(await pedirPinAdmin('borrar los reportes de instalaciones'))) return;
+  try{ for(const d of xs) await db.collection('reportesInst').doc(d.id).delete(); riDoc = null; riCargadoDe = ''; _riHome = null; repRiCache = null;
+    alert(`✅ Listo: se borraron ${xs.length} reporte(s) de instalaciones.`); }catch(e){ alert('Error al borrar: '+e.message); }
+}
+
 // --- Cierres del turno (Dirección: los 5 módulos; coordinador: el suyo) ---
 async function repCierresCargar(dia){
   const [sm, sc] = await Promise.all([db.collection('movimientos').get(), db.collection('cierres').get().catch(()=>({docs:[]}))]);
@@ -9095,6 +9439,14 @@ function renderConf(){
         <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="borrarDatosModulo(MODULOS.map(m=>m.nombre))">Borrar todo de los 5 módulos</button>
       </div>
     </div>
+    <div class="card" style="border:2px solid #d97706">
+      <strong style="color:#d97706">📋 Borrar reportes de instalaciones</strong>
+      <p class="hint" style="margin:4px 0 10px">Para quitar las pruebas. Borra <strong>solo</strong> los reportes de instalaciones (agenda, salida y cierre). No toca el inventario, las instalaciones ni nada más. Pide el PIN.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn small" style="background:#d97706" onclick="riBorrarTodo([modulo()])">Borrar los de ${modulo()}</button>
+        <button class="btn small" style="background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none" onclick="riBorrarTodo(MODULOS.map(m=>m.nombre))">Borrar los de los 5 módulos</button>
+      </div>
+    </div>
     ${grp('💾','Respaldo','#16a34a', fila('Descargar respaldo','todo en un archivo','exportarRespaldo()'))}
     ${grp('🧪','Pruebas','#7c3aed', fila('Simulador de auditoría','no guarda nada',"setAudTipo('simulacion');irA('aud')"))}`;
 }
@@ -9120,7 +9472,7 @@ function audIrConteo(){ irA('conteo'); }
 // pendientes y alertas, la Auditoría y lo de Dirección. Para ver un inventario, auditar o capturar
 // "como coordinador" entra a un módulo; arriba sale "📍 Módulo · ‹ Volver a Dirección".
 let dirModo = true;
-const VISTAS_MODULO = ['inv','mov','mermaarm','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
+const VISTAS_MODULO = ['rinst','inv','mov','mermaarm','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
 function enDirModo(){ return esAdmin() && dirModo; }
 async function entrarModulo(n, v){
   dirModo = false;
@@ -9200,15 +9552,16 @@ async function cargarPendDir(forzar){
   if(_dirCargando || (!forzar && Date.now()-_dirCargadoT < 3000)) return;
   _dirCargando = true;
   try{
-    const [snapMov, snapLog, snapDeu] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]}))]);
+    const [snapMov, snapLog, snapDeu, snapRI] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]})), db.collection('reportesInst').get().catch(()=>({docs:[]}))]);
     const porMod = {}, lotesVistos = new Set();
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ const k = m.loteId||Math.random(); if(lotesVistos.has(k)) return; lotesVistos.add(k); porMod[m.modulo] = (porMod[m.modulo]||0) + 1; });
     snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
     const deudas = snapDeu.docs.map(d=>d.data()).filter(x=>x.estado!=='saldada');
-    const antes = JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif]);
+    const antes = JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif, _dirRI]);
     _dirAprPorMod = porMod; _dirDeudas = deudas; _dirCargadoT = Date.now();
     _dirVerif = verifCalcDir(snapLog.docs.map(d=>({id:d.id,...d.data()})), snapMov.docs.map(d=>d.data()));
-    if(JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif])!==antes && current==='home' && enDirModo()) renderHomeDir();
+    _dirRI = riCalcDir(snapRI.docs.map(d=>({id:d.id,...d.data()})));
+    if(JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif, _dirRI])!==antes && current==='home' && enDirModo()) renderHomeDir();
   }catch(e){}
   _dirCargando = false;
 }
@@ -9220,6 +9573,7 @@ function pendDirHtml(){
   if(nApr) rows.push(fila('✅', `${nApr} captura${nApr===1?'':'s'} por aprobar`, apr.map(k=>k+' '+_dirAprPorMod[k]).join(' · '), '#16a34a', 'Aprobar', "irA('apr')"));
   const rV = verifPendRow(fila); if(rV) rows.push(rV);
   const rA = verifPendRowAtr(fila); if(rA) rows.push(rA);
+  const rR = riPendRow(fila); if(rR) rows.push(rR);
   const H = herrCache;
   if(H){
     const nP = herrPendientes(H).length, nRec = herrPorRecibir(H).length, avD = herrAvisosDir(H), fR = ferRecibidosSinVer(H), nRecEnv = herrEnviosRecibidos(H).length;
@@ -11229,6 +11583,7 @@ function renderMas(){
   const t = (ic, tit, sub, js, color) => `<button class="tile" style="--tc:${color}" onclick="${js}"><span class="tile-ic">${ic}</span><span class="tile-t">${tit}</span><span class="tile-s">${sub}</span></button>`;
   $('#main').innerHTML = `<div class="card"><strong>☰ Más opciones</strong><p class="hint">Lo que se usa de vez en cuando.</p></div>
     <div class="tiles">
+      ${t('📋','Reporte de instalaciones','Salida y cierre: qué sale y qué no',"riDia=fechaHoyLocal();riCargadoDe='';irA('rinst')",'#d97706')}
       ${t('⏳','Mis pendientes','Ver o corregir lo que espera aprobación',"irA('pend')",'#b3742c')}
       ${t('🛡️','Garantías','Material que se da en garantía',"irA('gar')",'#b3742c')}
       ${t('🔄','Traspasos','Enviar material a otro módulo',"irA('trasp')",'#7a4fb5')}
@@ -11725,7 +12080,7 @@ async function eliminarUsuarioUI(userId, email){
 // ===== Borrar datos de prueba (confirmado por el usuario) =====
 // Deja los módulos elegidos en blanco, como recién instalados. Se borra con la misma marca de
 // "borrado" que usa la sincronización, así también desaparece en la nube y en los demás celulares.
-const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto','pedidos','fotos','sobrantes'];
+const COLECCIONES_MODULO = ['movimientos','inicial','inicialHist','resets','auditorias','deudasAuditoria','garantiasLog','instalacionesLog','instalacionesPuertas','conteoAbierto','pedidos','fotos','sobrantes','reportesInst'];
 async function borrarDatosModulo(mods){
   if(!esAdmin()) return alert('Solo Dirección puede borrar datos.');
   const nombre = mods.length>1 ? 'LOS 5 MÓDULOS' : mods[0];
@@ -11764,7 +12119,7 @@ async function borrarDatosModulo(mods){
 
 async function exportarRespaldo(){
   // Todo lo que guarda la app (las fotos no, porque pesan mucho: se quedan en Supabase).
-  const COLLECTIONS = ['inicial','inicialHist','movimientos','resets','auditorias','deudasAuditoria','conteoAbierto','instalacionesLog','instalacionesPuertas','garantiasLog','prestamos','pedidos','sobrantes','cierres','gasolina','herramientas','herrMovs','herrInstaladores','config','versiones'];
+  const COLLECTIONS = ['inicial','inicialHist','movimientos','resets','auditorias','deudasAuditoria','conteoAbierto','instalacionesLog','instalacionesPuertas','garantiasLog','prestamos','pedidos','sobrantes','cierres','gasolina','herramientas','herrMovs','herrInstaladores','config','versiones','reportesInst'];
   const data = {};
   for(const c of COLLECTIONS){
     const snap = await db.collection(c).get();
