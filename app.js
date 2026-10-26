@@ -1384,7 +1384,7 @@ async function contarAprobacionesPendientes(){
   try{
     const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
     const lotes = new Set(snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').map(m=>m.loteId||Math.random()));
-    const inst = snapLog.docs.map(d=>d.data()).filter(l=>l.estado==='pendiente').length;
+    const inst = snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).length;
     const n = lotes.size + inst;
     const el = document.getElementById('home-apr');
     if(el && current==='home' && n) el.innerHTML = `<div class="card" style="padding:12px"><div class="pend"><div>✅ Hay <strong>${n}</strong> captura(s) esperando tu aprobación (todos los módulos).</div><button class="btn small" onclick="irA('apr')">Revisar</button></div></div>`;
@@ -6667,6 +6667,11 @@ function verifRevisables(logs, regresadas){
   return (logs||[]).filter(l=>{ const d = diaValorInst(l);
     return d < hoy && d >= desde && (l.estado!=='rechazado' || l.verif) && !l.cambiadaPor && !(l.cambioDe && l.estado==='pendiente') && !(regresadas && regresadas.has(l.id) && !l.verif); });
 }
+// Las instalaciones pendientes se aprueban en Verificar (✅ Se instaló), no en Aprobaciones, para no
+// revisarlas dos veces (confirmado por el usuario). En Aprobaciones solo quedan los cambios de modelo
+// y las que ya salieron de la ventana de verificación (más de 14 días).
+function instSeVerifica(l){ return l.estado==='pendiente' && !l.cambioDe && (l.fechaDia||diaLocal(l.fecha)) >= verifDesde(); }
+function instEnAprobaciones(l){ return l.estado==='pendiente' && !instSeVerifica(l); }
 function verifSinRevisar(logs, regresadas){ return verifRevisables(logs, regresadas).filter(verifPorRevisar); }
 // Puertas que el coordinador marcó como reinstaladas: Dirección las vuelve a verificar ese día.
 function verifReinstPend(l){ const v = l.verif; return !!(v && v.puertas==='reinstalada' && v.fechaReinst && !v.reEstado); }
@@ -9083,7 +9088,7 @@ async function cargarPendDir(forzar){
     const [snapMov, snapLog, snapDeu] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]}))]);
     const porMod = {}, lotesVistos = new Set();
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ const k = m.loteId||Math.random(); if(lotesVistos.has(k)) return; lotesVistos.add(k); porMod[m.modulo] = (porMod[m.modulo]||0) + 1; });
-    snapLog.docs.map(d=>d.data()).filter(l=>l.estado==='pendiente').forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
+    snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
     const deudas = snapDeu.docs.map(d=>d.data()).filter(x=>x.estado!=='saldada');
     const antes = JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif]);
     _dirAprPorMod = porMod; _dirDeudas = deudas; _dirCargadoT = Date.now();
@@ -9259,7 +9264,9 @@ async function renderAprobacionesBase(){
     garLogs = snapGar.docs.map(d=>({id:d.id,...d.data()}));
   }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${e.message}</div>`; return; }
 
-  const logsPendientes = todosLogs.filter(l=>l.estado==='pendiente').sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const logsPendientes = todosLogs.filter(instEnAprobaciones).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const nVerif = todosLogs.filter(instSeVerifica).length;
+  const avisoVerif = nVerif ? `<div class="card" style="padding:12px;border:2px solid #0e7490"><div class="row" style="justify-content:space-between;gap:10px;align-items:center"><div style="flex:1;min-width:0"><strong>🔍 ${nVerif} instalaci${nVerif===1?'ón':'ones'} sin aprobar</strong><p class="hint" style="margin:2px 0 0">Ya están descontadas. Se aprueban en <strong>Verificar instalaciones</strong> con el reporte del grupo (✅ Se instaló), no aquí.</p></div><button class="btn small" style="background:#0e7490;white-space:nowrap" onclick="verifDia='';verifPanel=null;irA('verif')">Verificar</button></div></div>` : '';
   // Movimientos pendientes que NO son de una instalación (esos ya se muestran agrupados arriba
   // por su instalacionesLog) — se agrupan por loteId (una sola captura de Entradas/Salidas).
   const movsSueltosPendientes = todosMovs.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo);
@@ -9269,7 +9276,7 @@ async function renderAprobacionesBase(){
 
   const cortesHoy = cortesHoyHtml(todosMovs, null);
   if(logsPendientes.length===0 && loteIds.length===0){
-    $('#main').innerHTML = '<div class="card">No hay nada pendiente de aprobación. 🎉</div>' + cortesHoy;
+    $('#main').innerHTML = '<div class="card">No hay nada pendiente de aprobación. 🎉</div>' + avisoVerif + cortesHoy;
     return;
   }
 
@@ -9277,7 +9284,7 @@ async function renderAprobacionesBase(){
   let html = `<div class="card"><strong>Aprobaciones</strong><p class="hint">Lo que capturan los coordinadores queda aquí hasta que lo apruebes o rechaces. Los traspasos entre módulos no requieren aprobación (se aplican de inmediato).</p>
     ${totalPend>1?`<button class="btn" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="aprobarTodo()">✅ Aprobar todo (${totalPend})</button><p class="hint" style="margin:6px 0 0">Revisa la lista de abajo antes de aprobar todo junto.</p>`:''}</div>`;
 
-  html += cortesHoy;
+  html += avisoVerif + cortesHoy;
   const clasesLote = {}; loteIds.forEach(k=>{ clasesLote[k] = claseAprobLote(lotes[k], garLogs); });
   html += aprobLeyendaHtml([...loteIds.map(k=>clasesLote[k].k), ...logsPendientes.map(l=>l.cambio?'cambio':'inst')]);
   if(loteIds.length>0){
@@ -9375,7 +9382,7 @@ async function rechazarLote(loteId){
 async function aprobarTodo(){
   try{
     const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
-    const logs = snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.estado==='pendiente');
+    const logs = snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(instEnAprobaciones);
     const lotes = [...new Set(snapMov.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).map(m=>m.loteId||m.id))];
     const porMod = {}; logs.forEach(l=>porMod[l.modulo]=(porMod[l.modulo]||0)+1);
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').forEach(m=>{ porMod[m.modulo]=porMod[m.modulo]||0; });
