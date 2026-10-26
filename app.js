@@ -38,6 +38,10 @@ function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // Lo que capture un coordinador queda "pendiente" hasta que Dirección lo apruebe; lo de
 // Dirección (o traspasos, que siempre son inmediatos) se guarda ya "aprobado".
 function estadoNuevoMovimiento(){ return esAdmin() ? 'aprobado' : 'pendiente'; }
+// v181 (confirmado por el usuario): las INSTALACIONES se descuentan desde que el coordinador las
+// captura (aunque estén pendientes); si Dirección las rechaza, el material regresa solo. Todo lo
+// demás (entradas, salidas, regresos, diferencias de cambio de modelo…) cuenta hasta que se aprueba.
+function cuentaEnInventario(m){ if(m.estado==='rechazado') return false; if(m.estado!=='pendiente') return true; return m.tipo==='instalacion' && !m.cambioModelo; }
 let instSub = 'mueble', instRegreso = false, instRegresoLibre = false;
 let instCambio = null; // cambio de modelo de una instalación ya registrada {logId, desc, fechaDia, categoria, estado, consumo}
 let instPreview = null; // {piezas, consumo:[{itemId,cantidad}], bloqueado, motivosBloqueo:[]}
@@ -218,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v180';
+const APP_VERSION = 'v181';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -538,7 +542,7 @@ function calcFormula(itemId){
   const b = lineaBase(resetFecha, doc);
   // Solo cuenta lo "aprobado" (o sin estado = movimientos viejos, de antes de que existiera
   // esta función) hacia el Final oficial. Lo "pendiente" o "rechazado" no descuenta/suma nada.
-  const lista = movs.filter(m=>m.itemId===itemId && (!b.desde || m.fecha>b.desde) && m.estado!=='pendiente' && m.estado!=='rechazado');
+  const lista = movs.filter(m=>m.itemId===itemId && (!b.desde || m.fecha>b.desde) && cuentaEnInventario(m));
   return calcularFormula(itemId, b.inicial, b.inicialCortado, lista);
 }
 
@@ -684,6 +688,8 @@ function setView(v){
   if(v==='repver'){ document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v==='rep')); renderRepVer(); }
   if(v==='conf') renderConf();
   if(v==='conteo') renderConteoDir();
+  if(v==='mermaarm') renderMermaArm();
+  if(v==='verif') renderVerif();
 }
 
 let invCat = null, invDetalle = false;
@@ -1357,6 +1363,7 @@ function renderHome(){
   $('#main').innerHTML = `
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
+    ${verifCoordHtml()}
     ${avisosCardHtml()}
     ${cierresHoyHtml()}
     ${faltoCierre.length ? cierreFaltoHtml(faltoCierre) : recordatorioCierreHtml()}
@@ -1377,7 +1384,7 @@ async function contarAprobacionesPendientes(){
   try{
     const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
     const lotes = new Set(snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').map(m=>m.loteId||Math.random()));
-    const inst = snapLog.docs.map(d=>d.data()).filter(l=>l.estado==='pendiente').length;
+    const inst = snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).length;
     const n = lotes.size + inst;
     const el = document.getElementById('home-apr');
     if(el && current==='home' && n) el.innerHTML = `<div class="card" style="padding:12px"><div class="pend"><div>✅ Hay <strong>${n}</strong> captura(s) esperando tu aprobación (todos los módulos).</div><button class="btn small" onclick="irA('apr')">Revisar</button></div></div>`;
@@ -1406,7 +1413,9 @@ function etiquetaTipoMov(m){
   if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
   if(m.motivo==='deSobrante') return 'Sobrante transformado';
   if(m.motivo==='regresoMerma') return 'Merma (regresó sin instalar)';
+  if(m.motivo==='mermaArmado') return 'Merma de mueble armado';
   if(m.motivo==='regresoInstalacion') return 'Regresó de instalación';
+  if(m.motivo==='regresoParcial') return 'Regresó una parte de una instalación';
   if(m.motivo==='cambioModelo') return 'Cambio de modelo (regresa)';
   if(m.motivo==='regresoPiezasInst') return 'Regresó de instalación (ya descontado)';
   if(m.motivo==='regresoSobrante') return 'A sobrantes (regresó de instalación)';
@@ -1798,7 +1807,7 @@ async function conDatos(){
   const [mv, ini, rs] = await Promise.all(['movimientos','inicial','resets'].map(c=>db.collection(c).get()));
   const resetF = {}; rs.docs.forEach(d=>{ resetF[d.id]=d.data().fecha; });
   const iniMap = {}; ini.docs.forEach(d=>{ iniMap[d.id]=d.data(); });
-  const movsT = mv.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado!=='pendiente' && m.estado!=='rechazado');
+  const movsT = mv.docs.map(d=>({id:d.id,...d.data()})).filter(cuentaEnInventario);
   conDatosCache = {resetF, iniMap, movsT};
   return conDatosCache;
 }
@@ -3367,7 +3376,7 @@ function renderMov(){
     ${ayuda?`<p class="hint">${ayuda}</p>`:''}
     ${movCat==='Herrajes'||movBuscar?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint" style="font-weight:800">¿Qué se dañó?</label>
-      <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes, armados…','#e0791a']].map(([k,ic,t,sub,c])=>`<button onclick="movLado='${k}';renderMov()" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
+      <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes…','#e0791a'],['armado','📦','Mueble armado','Cajonera, cajón, espejo…','#7c3aed']].map(([k,ic,t,sub,c])=>`<button onclick="${k==='armado'?`maf=null;irA('mermaarm')`:`movLado='${k}';renderMov()`}" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
       ${movLado==='cortado'?`<button class="btn" style="margin-top:10px;width:100%;min-height:50px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="pzSetModo('merma');irA('pzenc')">✂️ Contar las piezas dañadas (entrepaños, zóclos, paredes…)</button><p class="hint" style="margin:6px 0 0">La app convierte las piezas a hojas. O escribe abajo las hojas directo si ya las sabes.</p>`:''}</div>` : ''}
     <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
     <div class="movlist" id="mv-lista"></div>
@@ -4112,6 +4121,20 @@ function textoContadorAudit(){
 // Convierte piezas sueltas + armados a su equivalente en artículos del catálogo
 // (hojas de melamina/MDF y herrajes): {itemId: cantidad}. Todo se junta por color antes de
 // convertir, para que paredes y entrepaños se combinen igual que en el despiece (3+3 por hoja).
+// Material de un conjunto de piezas (hojas por color + herrajes + correderas), como en la auditoría.
+function consumoDePool(pool){
+  const porColor = {}, out = {};
+  pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
+  Object.keys(porColor).forEach(c=>{ piezasAConsumo(porColor[c], c).forEach(r=>{ out[r.itemId]=(out[r.itemId]||0)+r.cantidad; }); });
+  balanceCorrederas(pool).forEach(b=>{
+    if(b.pares>0){ const it=itemByName(b.item); if(it) out[it.id]=(out[it.id]||0)+b.pares; }
+    const t = CORR_TIPOS.find(x=>x.juego===b.item);
+    if(t && b.hembrasSinPareja>0){ const it=itemByName(t.hembra); if(it) out[it.id]=(out[it.id]||0)+b.hembrasSinPareja; }
+    if(t && b.machosSinPareja>0){ const it=itemByName(t.macho); if(it) out[it.id]=(out[it.id]||0)+b.machosSinPareja; }
+  });
+  Object.keys(out).forEach(k=>{ out[k] = fmtNum(out[k]); if(!(out[k]>0)) delete out[k]; });
+  return out;
+}
 function piezasAuditAHojas(){
   const pool = [];
   Object.keys(auditPiezas).forEach(grupo=>{
@@ -6381,13 +6404,14 @@ async function renderInstHistorial(){
   const aviso = avisoReg;
   if(esAdmin()) await cargarValoresInst();
   const regresadas = regresadasDe(movs);
-  const semanaDe = {}; instLog.forEach(x=>{ const k=sabadoDe(x.fechaDia||diaLocal(x.fecha)); (semanaDe[k]=semanaDe[k]||[]).push(x); });
+  const semanaDe = {}; instLog.forEach(x=>{ const k=sabadoDe(diaValorInst(x)); (semanaDe[k]=semanaDe[k]||[]).push(x); });
   const cabSemana = dia => { const sab = sabadoDe(dia); const xs = semanaDe[sab]||[]; const vale = xs.filter(x=>instCuenta(x, regresadas));
     return `<div class="card" style="border-left:6px solid #e3b341;padding:12px 14px"><strong>📅 Semana ${fCorta(sab)} – ${fCorta(finSemana(sab))}</strong>
       <div class="hint" style="margin:4px 0 0">🔧 <strong>${vale.length}</strong> instalación(es)${xs.length-vale.length?` · ${xs.length-vale.length} no cuentan (regresaron, se cambiaron o se rechazaron)`:''}${esAdmin()?` · ⭐ Valor: <strong>${fmtNum(xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0))}</strong>`:''}</div></div>`; };
   let ultimaSemana = null;
   const tagValor = x => { if(!esAdmin()) return ''; const v = valorInstalacion(x, regresadas);
-    if(!instCuenta(x, regresadas)) return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>';
+    if(!instCuenta(x, regresadas)) return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>'+(verifNoCuenta(x)?' <span class="tag" style="color:#0e7490;border-color:#0e7490">🚪 cuenta cuando se reinstalen</span>':'');
+    if(x.verif && x.verif.puertas==='reinstalada' && x.verif.fechaReinst) return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)} · cuenta el ${fCorta(x.verif.fechaReinst)} (se reinstalaron)</span>`;
     const det = valorDetalleTxt(x);
     return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)}${det?' <span style="font-weight:500">('+det+')</span>':''}</span>`; };
   $('#inst-body').innerHTML = aviso + dias.map(dia=>{ const sab=sabadoDe(dia); const cab = sab!==ultimaSemana ? cabSemana(dia) : ''; ultimaSemana = sab; return cab + `
@@ -6398,7 +6422,7 @@ async function renderInstHistorial(){
       ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${extrasLogHtml(x)} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
     </div>`; }).join('');
-  if(regVolver && regInstSel){ regVolver = false; mostrarRegresoInst(); }
+  if(regVolver && regInstSel){ regVolver = false; regParcial ? mostrarRegresoParcial() : mostrarRegresoInst(); }
 }
 
 // ===== Regreso de un modelo completo (confirmado por el usuario) =====
@@ -6434,7 +6458,7 @@ function diffConsumo(orig, nuevo){
   Object.keys(m).forEach(id=>{ if(!CATALOGO.find(i=>i.id===id)) return; const v=Math.round(m[id]*1e6)/1e6; if(v<0) regresa.push({itemId:id, cantidad:-v}); else if(v>0) descuenta.push({itemId:id, cantidad:v}); else iguales++; });
   return {regresa, descuenta, iguales};
 }
-function consumoAValidar(consumo){ return (instCambio && instCambio.estado!=='pendiente') ? diffConsumo(instCambio.consumo, consumo).descuenta : consumo; }
+function consumoAValidar(consumo){ return instCambio ? diffConsumo(instCambio.consumo, consumo).descuenta : consumo; }
 function cambioDeInstalacion(logId){ return (instLog||[]).find(l=>l.cambioDe===logId && l.estado==='pendiente'); }
 function puedeCambiarModelo(x){
   if(esSoloLectura() || x.estado==='rechazado' || x.cambiadaPor || (x.cambioDe && x.estado==='pendiente') || regresoDeInstalacion(x.id) || cambioDeInstalacion(x.id)) return false;
@@ -6447,7 +6471,7 @@ function iniciarCambioModelo(id){
   instSub = x.categoria==='Puerta' ? 'puertas' : 'mueble'; instRegreso=false; instRegresoLibre=false; instPreview=null; puertaPreview=null; iAdicionales=[];
   renderInst(); window.scrollTo(0,0);
 }
-function cancelarCambioModelo(){ instCambio=null; instPreview=null; puertaPreview=null; instSub='historial'; renderInst(); window.scrollTo(0,0); }
+function cancelarCambioModelo(){ if(verifCancelarFlujo()) return; instCambio=null; instPreview=null; puertaPreview=null; instSub='historial'; renderInst(); window.scrollTo(0,0); }
 function avisoCambioHtml(){
   const c = instCambio;
   return `<div class="card" style="border:2px solid #3E5CDE;background:rgba(62,92,222,.12)"><div style="font-size:16px;font-weight:800">✏️ Cambiando el modelo de una instalación</div>
@@ -6459,7 +6483,7 @@ function cambioPreviewHtml(consumo, accion){
   const c = instCambio; const li = arr => arr.length ? arr.map(x=>{ const it=CATALOGO.find(i=>i.id===x.itemId); return `<li>${fmtNum(x.cantidad)} ${it.unidad} ${it.nombre}</li>`; }).join('') : '<li>Nada</li>';
   let cuerpo;
   if(c.estado==='pendiente'){
-    cuerpo = `<p class="hint" style="margin:8px 0 0">La instalación original todavía no está aprobada: <strong>se reemplaza por esta</strong> y Dirección aprueba el modelo nuevo. Nada se mueve del inventario hasta que se apruebe.</p>`;
+    cuerpo = `<p class="hint" style="margin:8px 0 0">La instalación original todavía no está aprobada: <strong>se reemplaza por esta</strong> (el inventario cambia al modelo nuevo de una vez) y Dirección la aprueba.</p>`;
   } else {
     const d = diffConsumo(c.consumo, consumo);
     cuerpo = `<div style="margin-top:12px;font-weight:800;color:#1f9d55">↩️ Regresa al inventario</div><ul style="margin:4px 0 0 18px;padding:0">${li(d.regresa.map(x=>({...x})))}</ul>
@@ -6485,10 +6509,10 @@ async function guardarCambioModelo(n){
   const mov = (it, tipo, cantidad, extra) => db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo, cantidad:Number(cantidad), nota:`${n.desc} · ${nota}`, fecha, estado, loteId:newId, creadoPor, ...(extra||{})});
   try{
     if(L.estado==='pendiente'){
-      for(const x of n.consumo){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
+      for(const x of diffConsumo(L.consumo, n.consumo).descuenta){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
       const viejos = movs.filter(m=>m.loteId===L.id);
       for(const x of n.consumo) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad);
-      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion});
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion, ...verifParaNuevo(L)});
       for(const m of viejos) await db.collection('movimientos').doc(m.id).delete();
       await db.collection('instalacionesLog').doc(L.id).delete();
       movs = movs.filter(m=>!viejos.includes(m));
@@ -6498,11 +6522,12 @@ async function guardarCambioModelo(n){
       for(const x of d.regresa) await mov(CATALOGO.find(i=>i.id===x.itemId), 'devolucion', x.cantidad, {motivo:'cambioModelo', instalacionId:L.id, cambioModelo:true});
       for(const x of d.descuenta) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad, {cambioModelo:true});
       await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor,
-        cambioDe:L.id, cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta}});
+        cambioDe:L.id, cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta}, ...verifParaNuevo(L)});
       if(estado==='aprobado') await db.collection('instalacionesLog').doc(L.id).update({cambiadaPor:newId});
     }
     toast(estado==='pendiente' ? '✅ Cambio de modelo guardado.<br><small>Dirección lo tiene que aprobar.</small>' : '✅ Modelo cambiado.');
     instCambio=null; instPreview=null; puertaPreview=null; iAdicionales=[]; instLog=null; instSub='historial';
+    if(await verifTerminarFlujo()) return;
     await cargarInstLog(); renderInst(); window.scrollTo(0,0);
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -6573,7 +6598,7 @@ function mostrarRegresoInst(){
   const hojas = cons.filter(c=>esHojaId(c.itemId)), otros = cons.filter(c=>!esHojaId(c.itemId));
   const nM = Object.keys(regMerma).filter(k=>regMerma[k]>0).length, nS = cons.filter(c=>regSob[c.itemId] && Number(c.cantidad)-(Number(regMerma[c.itemId])||0)>0.0005).length;
   body.innerHTML = `<div class="card" style="border:2px solid #1f9d55">
-    <div style="font-size:16px;font-weight:800">↩️ Regresó completo sin instalar</div>
+    <div style="font-size:16px;font-weight:800">${verifTituloRegreso(x)}</div>
     <p class="hint" style="margin:6px 0 0"><strong>${x.descripcion}</strong> (${fCorta(x.fechaDia)}). Esta instalación ya no va a contar.</p>
     <p class="hint" style="margin:6px 0 0">Todo vuelve al inventario <strong>menos lo que marques como merma</strong> (mojado, roto, dañado). En la casilla de la derecha va cuánto se va a merma.</p>
     <p class="hint" style="margin:4px 0 0">🧩 <strong>A sobrantes</strong>: la melamina/MDF queda apartada para cortarla en otras piezas; en Sobrantes se anota en qué se transformó.</p>
@@ -6587,7 +6612,7 @@ function mostrarRegresoInst(){
     ${otros.length?`<div style="margin-top:12px;font-weight:700">🔩 Herrajes</div><div class="movlist" style="margin-top:6px">${otros.map(fila).join('')}</div>`:''}
     <input id="reg-motivo" placeholder="¿Por qué regresó? (opcional)" value="${String(regMotivo).replace(/"/g,'&quot;')}" oninput="regMotivo=this.value" style="margin-top:12px">
     <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoInst()">${nM||nS?`↩️ Regresar${nM?` · ${nM} con merma`:''}${nS?` · ${nS} a sobrantes`:''}`:'↩️ Regresar todo al inventario'}</button>
-    <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="regInstSel=null;regMerma={};regSob={};renderInstHistorial()">Cancelar</button>
+    <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="verifCancelarFlujo()||(regInstSel=null,regMerma={},regSob={},renderInstHistorial())">Cancelar</button>
   </div>`;
   window.scrollTo(0,0);
 }
@@ -6618,9 +6643,439 @@ async function confirmarRegresoInst(){
     }
     regInstSel = null; regMerma = {}; regSob = {}; regMotivo = '';
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : (sobs.length?'✅ Regresó; la melamina quedó apartada en 🧩 Sobrantes.':(merm.length?'✅ Regresó; lo dañado quedó como merma.':'✅ Regresó al inventario.')));
+    if(await verifTerminarFlujo()) return;
     renderInstHistorial();
   }catch(e){ alert('Error: '+e.message); }
 }
+// ===== Verificar instalaciones (confirmado por el usuario, v181) =====
+// Al día siguiente Dirección compara las instalaciones capturadas con el reporte del grupo de
+// instalaciones: ✅ Se instaló · ✏️ Cambió el modelo · 🔸 Una parte · ❌ No se instaló.
+//  - Lo que no se instaló (clóset o puertas): el material queda apartado (ya estaba descontado desde
+//    la captura) y el coordinador decide: 🔁 se vuelve a instalar (Dirección lo marca cuando sale en
+//    el reporte; no se descuenta otra vez) · ↩️ regresa al inventario · 🧩 sobrantes · 🗑️ merma.
+//  - Cambió el modelo: se le pide al coordinador con una nota (o Dirección lo cambia), solo se mueve
+//    la diferencia y Dirección aprueba.
+// Al coordinador le sale un aviso con cuántas instalaciones no se aprobaron y por qué.
+const VERIF_DESDE = '2026-10-23', VERIF_DIAS_ROJO = 2;
+let verifLogs = null, verifRegresadas = new Set(), verifDia = '', verifPanel = null, verifFlujo = null;
+let _dirVerif = null, _verifCoord = null, _verifCoordT = 0;
+function verifDiasAtras(dia){ return Math.round((new Date(fechaHoyLocal()+'T12:00:00') - new Date(dia+'T12:00:00'))/86400000); }
+function verifDesde(){ const d = new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-14); const s = d.toISOString().slice(0,10); return s > VERIF_DESDE ? s : VERIF_DESDE; }
+// Instalaciones que se pueden revisar (de ayer para atrás, de los últimos 14 días).
+function verifRevisables(logs, regresadas){
+  const hoy = fechaHoyLocal(), desde = verifDesde();
+  return (logs||[]).filter(l=>{ const d = diaValorInst(l);
+    return d < hoy && d >= desde && (l.estado!=='rechazado' || l.verif) && !l.cambiadaPor && !(l.cambioDe && l.estado==='pendiente') && !(regresadas && regresadas.has(l.id) && !l.verif); });
+}
+// Las instalaciones pendientes se aprueban en Verificar (✅ Se instaló), no en Aprobaciones, para no
+// revisarlas dos veces (confirmado por el usuario). En Aprobaciones solo quedan los cambios de modelo
+// y las que ya salieron de la ventana de verificación (más de 14 días).
+function instSeVerifica(l){ return l.estado==='pendiente' && !l.cambioDe && (l.fechaDia||diaLocal(l.fecha)) >= verifDesde(); }
+function instEnAprobaciones(l){ return l.estado==='pendiente' && !instSeVerifica(l); }
+function verifSinRevisar(logs, regresadas){ return verifRevisables(logs, regresadas).filter(verifPorRevisar); }
+// Puertas que el coordinador marcó como reinstaladas: Dirección las vuelve a verificar ese día.
+function verifReinstPend(l){ const v = l.verif; return !!(v && v.puertas==='reinstalada' && v.fechaReinst && !v.reEstado); }
+function verifPorRevisar(l){ return !l.verif || verifReinstPend(l); }
+function verifCalcDir(logs, movsAll){
+  const reg = regresadasDe(movsAll||[]); const xs = verifSinRevisar(logs, reg);
+  const porMod = {}; xs.forEach(l=>{ porMod[l.modulo]=(porMod[l.modulo]||0)+1; });
+  const masViejo = xs.reduce((m,l)=>Math.max(m, verifDiasAtras(diaValorInst(l))), 0);
+  const atr = verifEsperando(logs).filter(e=>e.atrasada).map(e=>({modulo:e.l.modulo, que:e.que}));
+  return {n:xs.length, porMod, masViejo, atr};
+}
+// Lo que espera al coordinador (puertas sin decidir, cambio de modelo, puertas por reinstalar).
+// Se avisa a Dirección si pasan más de 3 días sin decidir, o más de 7 por reinstalar.
+const VERIF_DIAS_DECIDIR = 3, VERIF_DIAS_REINST = 7;
+function verifEsperando(logs){
+  const dias = iso => iso ? verifDiasAtras(diaLocal(iso)) : 0;
+  const out = [];
+  (logs||[]).forEach(l=>{ const v = l.verif; if(!v) return;
+    if(v.estado==='no' && v.puertas==='pendiente'){ const d = dias(v.fecha); out.push({l, que:(l.categoria==='Puerta'?'puertas':'clóset')+' sin decidir', dias:d, atrasada:d>VERIF_DIAS_DECIDIR}); }
+    else if(v.puertas==='reinstalar'){ const d = dias(v.fechaDecision||v.fecha); out.push({l, que:'por volver a instalar', dias:d, atrasada:d>VERIF_DIAS_REINST}); }
+    else if(v.estado==='modelo' && !v.resuelto){ const d = dias(v.fecha); out.push({l, que:'cambio de modelo', dias:d, atrasada:d>VERIF_DIAS_DECIDIR}); } });
+  return out.sort((a,b)=>b.dias-a.dias);
+}
+function verifPendRowAtr(fila){
+  const V = _dirVerif; if(!V || !(V.atr||[]).length) return null;
+  const por = {}; V.atr.forEach(a=>{ const k = a.modulo+': '+a.que; por[k]=(por[k]||0)+1; });
+  return fila('⏳', `Sin resolver: ${V.atr.length}`, Object.keys(por).map(k=>por[k]>1?k.replace(': ',': '+por[k]+' '):k).join(' · '), '#b45309', 'Ver', "verifDia='';verifPanel=null;irA('verif')");
+}
+function verifPendRow(fila){
+  const V = _dirVerif; if(!V || !V.n) return null;
+  const rojo = V.masViejo > VERIF_DIAS_ROJO;
+  return fila('🔍', `Verificar instalaciones: ${V.n}`, (rojo?`⚠️ Hay de hace ${V.masViejo} días sin revisar · `:'')+Object.keys(V.porMod).map(k=>k+' '+V.porMod[k]).join(' · ')+' · con el reporte del grupo', rojo?'#dc2626':'#0e7490', 'Verificar', "verifDia='';verifPanel=null;irA('verif')");
+}
+async function verifCargar(){
+  const [snapLog, snapMov] = await Promise.all([db.collection('instalacionesLog').get(), db.collection('movimientos').get()]);
+  verifLogs = snapLog.docs.map(d=>({id:d.id,...d.data()}));
+  const ms = snapMov.docs.map(d=>({id:d.id,...d.data()}));
+  verifRegresadas = regresadasDe(ms);
+  _dirVerif = verifCalcDir(verifLogs, ms);
+}
+async function verifGuardar(id, datos){
+  const d = await db.collection('instalacionesLog').doc(id).get(); const l = d && d.data && d.data(); if(!l) return false;
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'';
+  const v = Object.assign({}, l.verif||{}, datos);
+  if(datos.estado) Object.assign(v, {por:quien, fecha:new Date().toISOString()});
+  await db.collection('instalacionesLog').doc(id).update({verif:v});
+  return true;
+}
+function verifMat(l){ const cs = (l.consumo||[]).filter(c=>Number(c.cantidad)>0).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return it ? `${it.nombre.replace(/^Melamina /,'')} ${fmtNum(c.cantidad)}` : ''; }).filter(Boolean);
+  return cs.slice(0,3).join(' · ')+(cs.length>3?' …':''); }
+function verifQuien(l){ return (l.creadoPor||'').split('@')[0]; }
+const VERIF_TAG = {ok:['✅ Se instaló','#16a34a'], modelo:['✏️ Cambió el modelo','#3E5CDE'], parte:['🔸 Una parte','#d97706'], no:['❌ No se instaló','#dc2626']};
+function verifEstadoTxt(l){
+  const v = l.verif||{}; const t = VERIF_TAG[v.estado]; if(!t) return '';
+  let extra = '';
+  if(v.estado==='no') extra = {regreso:' · ↩️ regresó al inventario', pendiente:' · esperando al coordinador', reinstalar:' · 🔁 se vuelven a instalar', reinstalada: v.reEstado==='ok' ? ' · ✅ reinstalación verificada' : ' · 🔁 reinstaladas, por verificar', sobrantes:' · 🧩 a sobrantes', merma:' · 🗑️ a merma'}[v.puertas]||'';
+  if(v.estado==='modelo') extra = v.resuelto ? ' · ya se corrigió' : ' · esperando al coordinador';
+  return `<span class="tag" style="color:${t[1]};border-color:${t[1]}">${t[0]}${extra}</span>`;
+}
+async function renderVerif(){
+  current = 'verif';
+  $('#main').innerHTML = `<div class="card hint">Cargando instalaciones…</div>`;
+  try{ await verifCargar(); }catch(e){ $('#main').innerHTML = `<div class="card">No se pudieron cargar las instalaciones: ${e.message}</div>`; return; }
+  verifPintar();
+}
+function verifPintar(){
+  if(current!=='verif') return;
+  const todas = verifRevisables(verifLogs, verifRegresadas);
+  const sinRev = todas.filter(verifPorRevisar);
+  const diasPend = [...new Set(sinRev.map(l=>diaValorInst(l)))].sort();
+  const diasTodos = [...new Set(todas.map(l=>diaValorInst(l)))].sort();
+  if(!verifDia || !diasTodos.includes(verifDia)) verifDia = diasPend[0] || diasTodos[diasTodos.length-1] || '';
+  const nomDia = d => new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'short'});
+  const chips = diasTodos.slice(-8).map(d=>{ const n = sinRev.filter(l=>(diaValorInst(l))===d).length, rojo = n && verifDiasAtras(d)>VERIF_DIAS_ROJO;
+    return `<button class="chip ${d===verifDia?'on':''}" style="${rojo&&d!==verifDia?'border-color:#dc2626;color:#dc2626':''}" onclick="verifDia='${d}';verifPanel=null;verifPintar()">${nomDia(d)}${n?` · ${n}`:' ✓'}</button>`; }).join('');
+  const delDia = todas.filter(l=>(diaValorInst(l))===verifDia);
+  const pend = delDia.filter(verifPorRevisar), hechas = delDia.filter(l=>!verifPorRevisar(l));
+  const rojo = pend.length && verifDiasAtras(verifDia)>VERIF_DIAS_ROJO;
+  const porMod = {}; pend.forEach(l=>{ (porMod[l.modulo]=porMod[l.modulo]||[]).push(l); });
+  const btn = (id, acc, t, c) => `<button class="btn small" style="min-height:44px;padding:6px 8px;${verifPanel&&verifPanel.id===id&&verifPanel.acc===acc?`background:${c}`:`background:transparent;color:${c};border:1.5px solid ${c};box-shadow:none`}" onclick="verifAccion('${id}','${acc}')">${t}</button>`;
+  const tarjeta = l => { const M = MODULOS.find(m=>m.nombre===l.modulo)||{color:'#666'};
+    if(verifReinstPend(l)) return `<div class="card" style="padding:12px;border-left:6px solid ${M.color};border-top:2px solid #0e7490;border-right:2px solid #0e7490;border-bottom:2px solid #0e7490">
+      <span class="tag" style="color:#0e7490;border-color:#0e7490">🔁 Reinstalación${(l.verif.intentos||0)>0?' · intento '+(l.verif.intentos+1):''}</span>
+      <div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px"><span style="font-size:22px">🚪</span><div style="flex:1;min-width:0">
+        <strong style="font-size:15px">${l.descripcion}</strong>
+        <div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''} · el ${fCorta(l.fechaDia)} no se instalaron; el coordinador dice que ya se instalaron</div>
+        <div class="hint" style="margin:2px 0 0;font-size:12.5px">Ya estaban descontadas: no se mueve material.</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
+        ${btn(l.id,'reok','✅ Sí se instalaron','#16a34a')}${btn(l.id,'reno','❌ No se instalaron','#dc2626')}</div></div>`;
+    return `<div class="card" style="padding:12px;border-left:6px solid ${M.color}">
+      <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:22px">${l.categoria==='Puerta'?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
+        <strong style="font-size:15px">${l.descripcion}</strong>
+        <div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''}${l.nota?' · '+l.nota:''}${l.estado==='pendiente'?' · <span style="color:#d97706">aún sin aprobar · ✅ la aprueba</span>':''}</div>
+        <div class="hint" style="margin:2px 0 0;font-size:12.5px">📦 ${verifMat(l)}</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
+        ${btn(l.id,'ok','✅ Se instaló','#16a34a')}${btn(l.id,'modelo','✏️ Cambió el modelo','#3E5CDE')}
+        ${btn(l.id,'parte','🔸 Una parte','#d97706')}${btn(l.id,'no','❌ No se instaló','#dc2626')}</div>
+      ${verifPanel && verifPanel.id===l.id ? verifPanelHtml(l) : ''}</div>`; };
+  $('#main').innerHTML = `
+    <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
+      <div style="font-size:17px;font-weight:900">🔍 Verificar instalaciones</div>
+      <p class="hint" style="margin:2px 0 0">${verifDia?`Del ${nomDia(verifDia)}`:'No hay instalaciones'} · compáralas con el reporte del grupo de instalaciones.</p>
+      ${rojo?`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:700">⚠️ Estas tienen ${verifDiasAtras(verifDia)} días sin revisar.</div>`:''}
+      ${chips?`<div class="chips" style="margin-top:8px;flex-wrap:wrap">${chips}</div>`:''}
+    </div>
+    ${verifReinstHtml()}
+    ${verifEsperandoHtml()}
+    ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste todas las de este día.</strong></div>` : ''}
+    ${Object.keys(porMod).map(mod=>`<div class="home-sec-t" style="margin:12px 4px 4px">${mod} · ${porMod[mod].length}</div>${porMod[mod].map(tarjeta).join('')}`).join('')}
+    ${pend.length>1 || (pend.length===1 && hechas.length) ? `<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás sí se instalaron (${pend.length})</button>` : ''}
+    ${hechas.length?`<div class="card" style="padding:12px"><strong>Ya revisadas · ${hechas.length}</strong>${hechas.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span><span class="hint" style="display:block;margin:2px 0 0">${l.modulo}${(l.verif||{}).nota?' · “'+l.verif.nota+'”':''}</span><span style="display:block;margin-top:4px">${verifEstadoTxt(l)}</span></span>${(l.verif||{}).estado==='ok'?`<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDeshacer('${l.id}')">Deshacer</button>`:''}</div>`).join('')}</div>`:''}`;
+}
+function verifReinstHtml(){
+  const xs = (verifLogs||[]).filter(l=>l.verif && l.verif.puertas==='reinstalar').map(l=>({l, dias:verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha))})).sort((a,b)=>b.dias-a.dias);
+  if(!xs.length) return '';
+  const ayer = (()=>{ const d=new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
+  return `<div class="card" style="padding:12px;border:2px solid #0e7490"><strong style="font-size:15px">🔁 Por volver a instalar · ${xs.length}</strong>
+    <p class="hint" style="margin:2px 0 0">Ya están descontadas. Cuando salga en el reporte del grupo, pon la fecha y toca "Ya se instaló". No se mueve material.</p>
+    ${xs.map(e=>{ const l=e.l, atr=e.dias>VERIF_DIAS_REINST; const min=(l.verif.fechaDecision?diaLocal(l.verif.fechaDecision):l.fechaDia);
+      return `<div style="padding:10px;border-radius:12px;border:1px solid ${atr?'#dc2626':'var(--line)'};margin-top:8px">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span><span class="hint" style="display:block;margin:2px 0 0">${l.modulo} · no se instaló el ${fCorta(l.fechaDia)}${l.verif.nota?' · “'+l.verif.nota+'”':''}</span></span><strong style="white-space:nowrap;color:${atr?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>
+      <div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap"><input type="date" id="reinst-f-${l.id}" value="${ayer<min?min:ayer}" min="${min}" max="${fechaHoyLocal()}" style="flex:1;min-width:140px"><button class="btn small" style="min-height:42px;background:#16a34a;white-space:nowrap" onclick="verifDirReinstalada('${l.id}')">✅ Ya se instaló</button></div>
+      <button class="btn small" style="margin-top:6px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDirRedecidir('${l.id}')">↩️ Ya no se van a instalar: que el coordinador decida otra vez</button></div>`; }).join('')}</div>`;
+}
+async function verifDirReinstalada(id){
+  const l = verifLog(id); if(!l) return;
+  const f = (document.getElementById('reinst-f-'+id)||{}).value || fechaHoyLocal();
+  try{ const v = Object.assign({}, l.verif, {puertas:'reinstalada', fechaReinst:f, reEstado:'ok', reFecha:new Date().toISOString()});
+    await verifGuardar(id, v); l.verif = v; toast('✅ Instalada el '+fCorta(f)+'. Cuenta en esa semana.'); verifTrasCambio();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function verifDirRedecidir(id){
+  const l = verifLog(id); if(!l) return;
+  if(!confirm('↩️ Ya no se va a reinstalar.\n\nEl material sigue apartado (no se mueve) y le sale otra vez al coordinador para que decida: regresa al inventario, sobrantes, merma o reinstalar.')) return;
+  try{ const v = Object.assign({}, l.verif, {estado:'no', puertas:'pendiente', visto:false, intentos:(l.verif.intentos||0)+1});
+    await verifGuardar(id, v); l.verif = v; toast('📨 Regresan al coordinador.'); verifTrasCambio();
+  }catch(e){ alert('Error: '+e.message); }
+}
+function verifEsperandoHtml(){
+  const xs = verifEsperando(verifLogs).filter(e=>e.l.verif.puertas!=='reinstalar'); if(!xs.length) return '';
+  const nA = xs.filter(e=>e.atrasada).length;
+  return `<div class="card" style="padding:12px;border:2px solid ${nA?'#dc2626':'#b45309'}"><strong style="font-size:15px">⏳ Esperando al coordinador · ${xs.length}</strong>
+    <p class="hint" style="margin:2px 0 0">Se marca en rojo si pasan más de ${VERIF_DIAS_DECIDIR} días sin que decida.</p>
+    ${xs.map(e=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;${e.atrasada?'border-color:#dc2626;':''}"><span style="min-width:0;flex:1"><span class="invname">${e.l.categoria==='Puerta'?'🚪':'🗄️'} ${e.l.descripcion.split(' · ').slice(0,3).join(' · ')}</span><span class="hint" style="display:block;margin:2px 0 0">${e.l.modulo} · ${e.que}${(e.l.verif||{}).nota?' · “'+e.l.verif.nota+'”':''}</span></span><strong style="white-space:nowrap;color:${e.atrasada?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>`).join('')}</div>`;
+}
+function verifNotaVal(){ return ((document.getElementById('verif-nota')||{}).value||'').trim(); }
+function verifPanelHtml(l){
+  const acc = verifPanel.acc, M = l.modulo;
+  const nota = ph => `<input id="verif-nota" placeholder="${ph}" style="margin-top:8px">`;
+  const notaNo = nota('Motivo para el coordinador (opcional): ej. no está en el reporte del grupo');
+  const caja = (c, html) => `<div style="margin-top:10px;padding:12px;border-radius:12px;border:2px solid ${c};background:linear-gradient(0deg,${c}14,${c}14),var(--card)">${html}</div>`;
+  const lista = `<ul style="margin:6px 0 0 18px;padding:0">${(l.consumo||[]).filter(c=>Number(c.cantidad)>0).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return it?`<li>${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}</li>`:''; }).join('')}</ul>`;
+  if(acc==='modelo') return caja('#3E5CDE', `<strong>✏️ ${l.descripcion.split(' · ')[0]}: cambió el modelo</strong>
+    <p class="hint" style="margin:4px 0 0">Se le pide al coordinador de ${M} que capture el modelo que de verdad se instaló. Solo se mueve la diferencia de material y tú lo apruebas.</p>
+    <input id="verif-nota" placeholder="Nota: ej. se instaló Doble en vez de Central" style="margin-top:8px">
+    <button class="btn" style="width:100%;min-height:50px;margin-top:8px;background:#3E5CDE" onclick="verifPedirModelo('${l.id}')">📨 Pedir el cambio al coordinador</button>
+    <button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:#3E5CDE;border:1px solid var(--line);box-shadow:none" onclick="verifCambiarYo('${l.id}')">O si ya sabes el modelo, cámbialo tú</button>`);
+  if(acc==='parte') return caja('#d97706', `<strong>🔸 Solo se instaló una parte</strong>
+    <p class="hint" style="margin:4px 0 0">Elige qué regresó: eso vuelve al inventario de ${M} (o a merma o sobrantes). Lo que sí se instaló se queda descontado.</p>
+    ${l.estado==='pendiente'?`<p class="hint" style="margin:4px 0 0">Esta instalación aún no estaba aprobada: se aprueba lo que sí se instaló.</p>`:''}
+    ${nota('Nota para el coordinador (opcional): ej. faltó la cajonera')}
+    <button class="btn" style="width:100%;min-height:50px;margin-top:8px;background:#d97706" onclick="verifParte('${l.id}')">🔸 Elegir lo que regresó</button>`);
+  if(acc==='no'){ const pl = l.categoria==='Puerta';
+    return caja('#dc2626', `<strong>❌ ${l.descripcion.split(' · ').slice(0,2).join(' · ')}: no se instal${pl?'aron':'ó'}</strong>
+      <p class="hint" style="margin:4px 0 0">El material queda <strong>apartado</strong> (ya está descontado) en ${M} y el coordinador decide:</p>${lista}
+      <div class="hint" style="margin:6px 0 0">🔁 <strong>Se vuelve a instalar</strong> (no se descuenta otra vez; tú la marcas cuando salga en el reporte) · ↩️ <strong>Regresa al inventario</strong> · 🧩 <strong>A sobrantes</strong> · 🗑️ <strong>A merma</strong></div>
+      <p class="hint" style="margin:4px 0 0">Lo que regrese, vaya a sobrantes o a merma te llega para aprobar.</p>
+      ${notaNo}
+      <button class="btn" style="width:100%;min-height:50px;margin-top:10px;background:#dc2626" onclick="verifNoInstalo('${l.id}')">📨 Avisar al coordinador</button>`);
+  }
+  return '';
+}
+function verifLog(id){ return (verifLogs||[]).find(l=>l.id===id); }
+async function verifAccion(id, acc){
+  if(acc==='reok' || acc==='reno'){ const l = verifLog(id); if(!l) return;
+    if(acc==='reno' && !confirm('❌ ¿Las puertas otra vez no se instalaron?\n\nSiguen apartadas (no se mueve material) y regresan al coordinador para que decida: reinstalar, sobrantes o merma.')) return;
+    try{ if(acc==='reok'){ await verifGuardar(id, {reEstado:'ok', reFecha:new Date().toISOString()}); l.verif = Object.assign({}, l.verif, {reEstado:'ok'}); }
+      else { const v = Object.assign({}, l.verif, {estado:'no', puertas:'pendiente', visto:false, fechaReinst:null, reEstado:null, intentos:(l.verif.intentos||0)+1});
+        await verifGuardar(id, v); l.verif = v; toast('📨 Regresan al coordinador.'); }
+      verifPanel=null; verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
+    return; }
+  if(acc==='ok'){ try{ const l=verifLog(id); if(l) await verifAprobarSiPend(l); await verifGuardar(id, {estado:'ok'}); if(l) l.verif={estado:'ok'}; verifPanel=null; if(l && l.aprobadaAqui) toast('✅ Verificada y aprobada.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); } return; }
+  verifPanel = (verifPanel && verifPanel.id===id && verifPanel.acc===acc) ? null : {id, acc};
+  verifPintar();
+}
+function verifTrasCambio(){ if(verifLogs) _dirVerif = verifCalcDir(verifLogs, []); cargarPendDir(true); verifPintar(); }
+async function verifTodasOk(){
+  const xs = verifRevisables(verifLogs, verifRegresadas).filter(l=>verifPorRevisar(l) && diaValorInst(l)===verifDia);
+  if(!xs.length) return;
+  const nP = xs.filter(l=>l.estado==='pendiente').length;
+  if(!confirm(`✅ Marcar como instaladas las ${xs.length} que faltan de este día?\n\n${xs.map(l=>'• '+l.modulo+': '+l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.estado==='pendiente'?' (se aprueba)':'')).join('\n')}${nP?`\n\n${nP} aún no estaba(n) aprobada(s): también se aprueban.`:''}`)) return;
+  try{ for(const l of xs){ if(verifReinstPend(l)){ await verifGuardar(l.id, {reEstado:'ok', reFecha:new Date().toISOString()}); l.verif = Object.assign({}, l.verif, {reEstado:'ok'}); continue; }
+      await verifAprobarSiPend(l); await verifGuardar(l.id, {estado:'ok'}); l.verif={estado:'ok'}; } verifPanel=null; toast('✅ Listo, '+xs.length+' verificada(s).'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
+}
+async function verifDeshacer(id){ try{ await db.collection('instalacionesLog').doc(id).update({verif:null}); const l=verifLog(id); if(l) delete l.verif; verifTrasCambio(); }catch(e){ alert('Error: '+e.message); } }
+async function verifAprobarSiPend(l){
+  if(l.estado!=='pendiente') return;
+  await db.collection('instalacionesLog').doc(l.id).update({estado:'aprobado'}); await cambiarEstadoLote(l.id,'aprobado'); l.estado='aprobado'; l.aprobadaAqui=true;
+  if(l.cambioDe){ try{ await db.collection('instalacionesLog').doc(l.cambioDe).update({cambiadaPor:l.id}); }catch(e){} }
+}
+async function verifPedirModelo(id){
+  const nota = ((document.getElementById('verif-nota')||{}).value||'').trim();
+  if(!nota && !confirm('¿Pedir el cambio sin nota? Al coordinador le ayuda saber qué modelo se instaló.')) return;
+  try{ await verifGuardar(id, {estado:'modelo', nota, resuelto:false, visto:false}); const l=verifLog(id); if(l) l.verif={estado:'modelo', nota}; verifPanel=null; toast('📨 Se le pidió el cambio al coordinador.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
+}
+async function verifCambiarYo(id){
+  const l = verifLog(id); if(!l) return;
+  const nota = ((document.getElementById('verif-nota')||{}).value||'').trim();
+  verifFlujo = {id, tipo:'modelo', nota, volver:'dir'};
+  await entrarModulo(l.modulo, 'inst'); await cargarInstLog(); iniciarCambioModelo(id);
+}
+async function verifParte(id){
+  const l = verifLog(id); if(!l) return;
+  try{ await verifAprobarSiPend(l); }catch(e){ return alert('Error: '+e.message); }
+  const nota = verifNotaVal();
+  verifFlujo = {id, tipo:'parte', volver:'dir', nota};
+  regParcial = true; regVuelve = {}; regMerma = {}; regSob = {}; regMotivo = 'Solo se instaló una parte (Dirección)'+(nota?' · '+nota:'');
+  instSub='historial'; instRegreso=false; regInstSel=id; regVolver=true;
+  await entrarModulo(l.modulo, 'inst');
+}
+async function verifNoInstalo(id){
+  const l = verifLog(id); if(!l) return;
+  const nota = verifNotaVal();
+  try{ await verifAprobarSiPend(l); await verifGuardar(id, {estado:'no', puertas:'pendiente', visto:false, nota}); l.verif={estado:'no', puertas:'pendiente', nota};
+    verifPanel=null; toast('📨 Avisado. El material queda apartado hasta que el coordinador decida.'); verifTrasCambio();
+  }catch(e){ alert('Error: '+e.message); }
+}
+// Al terminar un flujo que empezó en Verificar (regreso, parte, cambio de modelo, puertas a sobrantes).
+async function verifTerminarFlujo(newId){
+  const f = verifFlujo; verifFlujo = null; if(!f) return false;
+  try{
+    if(f.tipo==='no') await verifGuardar(f.id, {estado:'no', visto:false, nota:f.nota||''});
+    else if(f.tipo==='parte') await verifGuardar(f.id, {estado:'parte', visto:false, nota:f.nota||''});
+    else if(f.tipo==='modelo') await verifGuardar(f.id, {estado:'modelo', nota:f.nota||'', resuelto:true, visto:false});
+    else if(f.tipo==='modeloCoord') await verifGuardar(f.id, {resuelto:true});
+    else if(f.tipo==='sob') await verifGuardar(f.id, {puertas:'sobrantes', visto:true});
+    else if(f.tipo==='reg') await verifGuardar(f.id, {puertas:'regreso', visto:true});
+    else if(f.tipo==='merma') await verifGuardar(f.id, {puertas:'merma', visto:true});
+  }catch(e){}
+  regParcial = false;
+  if(f.volver==='dir'){ volverDireccion(); verifPanel=null; irA('verif'); }
+  else { _verifCoordT = 0; setView('home'); }
+  window.scrollTo(0,0);
+  return true;
+}
+function verifTituloRegreso(x){
+  const t = verifFlujo && verifFlujo.tipo, q = x.categoria==='Puerta' ? '🚪 Puertas que no se instalaron' : '🗄️ Clóset que no se instaló';
+  return {no:'❌ No se instaló: regresa al inventario', reg:q+' → ↩️ regresa al inventario', sob:q+' → 🧩 Sobrantes', merma:q+' → 🗑️ Merma'}[t] || '↩️ Regresó completo sin instalar';
+}
+function verifCancelarFlujo(){
+  const f = verifFlujo; if(!f) return false;
+  verifFlujo = null; regParcial = false; regInstSel = null; regMerma = {}; regSob = {}; instCambio = null; instPreview = null; puertaPreview = null;
+  if(f.volver==='dir'){ volverDireccion(); irA('verif'); } else setView('home');
+  window.scrollTo(0,0); return true;
+}
+// Verificación que hereda la instalación nueva cuando se cambia el modelo de una ya revisada.
+function verifParaNuevo(L){ return (L.verif || verifFlujo) ? {verif:{estado:'ok', auto:'cambio', fecha:new Date().toISOString()}} : {}; }
+// Las puertas que esperan la decisión del coordinador no cuentan como instalación todavía.
+function verifNoCuenta(l){ return !!(l.verif && l.verif.estado==='no' && (l.verif.puertas==='pendiente' || l.verif.puertas==='reinstalar')); }
+// ⭐ Las puertas que se volvieron a instalar cuentan en la semana en que de verdad se instalaron.
+function diaValorInst(x){ const v = x.verif; return (v && v.puertas==='reinstalada' && v.fechaReinst) ? v.fechaReinst : (x.fechaDia||diaLocal(x.fecha)); }
+
+// ----- Regreso de una parte (🔸) -----
+// Cada material dice cuánto regresó; eso vuelve al inventario (o a merma / sobrantes). La instalación sigue contando.
+let regParcial = false, regVuelve = {};
+function mostrarRegresoParcial(){
+  const x = (instLog||[]).find(l=>l.id===regInstSel); if(!x) return;
+  const cons = regCons(); const body = document.getElementById('inst-body'); if(!body) return;
+  const fila = c => { const it=CATALOGO.find(i=>i.id===c.itemId), h=esHoja(it), q=Number(c.cantidad), v=Number(regVuelve[c.itemId])||0, mm=!!regMerma[c.itemId], sb=!!regSob[c.itemId];
+    return `<div class="movitem" style="padding:10px 12px;align-items:flex-start;${v>0?'border-color:#d97706;':''}"><span style="min-width:0;flex:1"><span class="invname">${it.nombre}</span>
+        <span class="hint" style="display:block;margin:2px 0 0">Llevaba ${fmtNum(q)} ${it.unidad}${v>0?` · <strong style="color:${mm?'var(--bad)':sb?'#0e8a8a':'#1f9d55'}">regresan ${fmtNum(v)} ${mm?'a merma':sb?'a sobrantes':'al inventario'}</strong>`:''}</span>
+        <span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+          <button class="btn small" style="padding:4px 10px;min-height:0;${v>=q-1e-9?'background:#d97706':'background:transparent;color:#d97706;border:1px solid var(--line);box-shadow:none'}" onclick="regVuelve['${c.itemId}']=${q};mostrarRegresoParcial()">Regresó todo</button>
+          ${v>0?`<button class="btn small" style="padding:4px 10px;min-height:0;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="delete regVuelve['${c.itemId}'];delete regMerma['${c.itemId}'];delete regSob['${c.itemId}'];mostrarRegresoParcial()">No regresó</button>
+          <button class="btn small" style="padding:4px 10px;min-height:0;${mm?'background:var(--bad)':'background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none'}" onclick="if(regMerma['${c.itemId}']) delete regMerma['${c.itemId}']; else { regMerma['${c.itemId}']=1; delete regSob['${c.itemId}']; } mostrarRegresoParcial()">🗑️ Dañado → merma</button>
+          ${h?`<button class="btn small" style="padding:4px 10px;min-height:0;${sb?'background:#0e8a8a':'background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none'}" onclick="if(regSob['${c.itemId}']) delete regSob['${c.itemId}']; else { regSob['${c.itemId}']=true; delete regMerma['${c.itemId}']; } mostrarRegresoParcial()">🧩 A sobrantes</button>`:''}`:''}
+        </span></span>
+      <input type="number" min="0" max="${q}" step="${h?'0.01':'1'}" inputmode="decimal" placeholder="0" value="${v?fmtNum(v):''}" style="width:72px;min-width:72px;text-align:center" title="Cuánto regresó" oninput="const v=Number(this.value)||0; if(v>${q}) this.value=${q}; if(v>0) regVuelve['${c.itemId}']=Math.min(v,${q}); else delete regVuelve['${c.itemId}'];" onchange="mostrarRegresoParcial()"></div>`; };
+  const hojas = cons.filter(c=>esHojaId(c.itemId)), otros = cons.filter(c=>!esHojaId(c.itemId));
+  const n = cons.filter(c=>Number(regVuelve[c.itemId])>0).length;
+  body.innerHTML = `<div class="card" style="border:2px solid #d97706">
+    <div style="font-size:16px;font-weight:800">🔸 Solo se instaló una parte</div>
+    <p class="hint" style="margin:6px 0 0"><strong>${x.descripcion}</strong> (${fCorta(x.fechaDia)}). La instalación sí cuenta.</p>
+    <p class="hint" style="margin:6px 0 0">En la casilla de la derecha va <strong>cuánto regresó</strong> de cada material. Lo que no regresó se queda descontado (sí se instaló).</p>
+    ${hojas.length?`<div style="margin-top:12px;font-weight:700">🪵 Melamina / MDF</div><div class="movlist" style="margin-top:6px">${hojas.map(fila).join('')}</div>`:''}
+    ${otros.length?`<div style="margin-top:12px;font-weight:700">🔩 Herrajes</div><div class="movlist" style="margin-top:6px">${otros.map(fila).join('')}</div>`:''}
+    <input id="reg-motivo" placeholder="¿Qué pasó? (opcional)" value="${String(regMotivo).replace(/"/g,'&quot;')}" oninput="regMotivo=this.value" style="margin-top:12px">
+    <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#d97706,#b45309)" onclick="confirmarRegresoParcial()">${n?`↩️ Guardar lo que regresó (${n})`:'Marca primero lo que regresó'}</button>
+    <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="verifCancelarFlujo()||(regParcial=false,regInstSel=null,renderInstHistorial())">Cancelar</button>
+  </div>`;
+  window.scrollTo(0,0);
+}
+async function confirmarRegresoParcial(){
+  const logId = regInstSel; const x = (instLog||[]).find(l=>l.id===logId); if(!x) return;
+  const cons = regCons().filter(c=>Number(regVuelve[c.itemId])>0);
+  if(!cons.length) return alert('Marca cuánto regresó de cada material.');
+  const motivo = ((document.getElementById('reg-motivo')||{}).value||regMotivo||'').trim();
+  const q = c => Math.min(Number(regVuelve[c.itemId]), Number(c.cantidad));
+  if(!confirm('🔸 Regresó una parte de: '+x.descripcion+'\n\n'+cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `• ${it.nombre}: ${fmtNum(q(c))} ${regMerma[c.itemId]?'a MERMA':regSob[c.itemId]?'a SOBRANTES':'al inventario'}`; }).join('\n')+'\n\n¿Guardar?')) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId(), fechaM = new Date(Date.parse(fecha)+1).toISOString();
+    const nota = 'Regresó una parte · '+x.descripcion+(motivo?' · '+motivo:'');
+    const sobs = [];
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId), cant = q(c);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoParcial', instalacionId:logId, cantidad:cant, nota, fecha, estado, loteId, creadoPor});
+      if(regMerma[c.itemId]) await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', ...(esHoja(it)?{lado:'cortado'}:{}), motivo:'regresoMerma', instalacionId:logId, cantidad:cant, nota:'Dañado (no sirve) · '+nota, fecha:fechaM, estado, loteId, creadoPor});
+      else if(regSob[c.itemId] && esHoja(it)){ sobs.push({itemId:it.id, cantidad:fmtNum(cant)});
+        await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'regresoSobrante', instalacionId:logId, cantidad:cant, nota:'A sobrantes · '+nota, fecha:fechaM, estado, loteId, sobranteId:loteId, creadoPor}); }
+    }
+    if(sobs.length){ const restante = {}; sobs.forEach(m=>{ restante[m.itemId]=m.cantidad; });
+      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, nota:(motivo||'')+' (regresó una parte de una instalación)', lineas:[x.descripcion+' · regresó una parte'], lineasData:[], material:sobs, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId}); }
+    regInstSel = null; regVuelve = {}; regMerma = {}; regSob = {}; regMotivo = ''; regParcial = false;
+    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : '✅ Lo que regresó ya está en el inventario.');
+    if(await verifTerminarFlujo()) return;
+    renderInstHistorial();
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+// ----- Coordinador: aviso de instalaciones que no se aprobaron y puertas por reinstalar -----
+async function verifCoordCargar(){
+  if(Date.now()-_verifCoordT < 4000 && _verifCoord && _verifCoord.mod===modulo()) return;
+  _verifCoordT = Date.now();
+  try{ const snap = await db.collection('instalacionesLog').get(); const mod = modulo();
+    const logs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===mod && l.verif && l.verif.estado && l.verif.estado!=='ok');
+    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs};
+    if(JSON.stringify(_verifCoord)!==antes && current==='home' && !esAdmin()) renderHome();
+  }catch(e){}
+}
+function verifCoordHtml(){
+  if(esAdmin() || esSoloLectura()) return '';
+  if(!_verifCoord || _verifCoord.mod!==modulo()){ verifCoordCargar(); return ''; }
+  setTimeout(verifCoordCargar, 50);
+  const logs = _verifCoord.logs;
+  const accion = l => (l.verif.estado==='modelo' && !l.verif.resuelto) || (l.verif.estado==='no' && l.verif.puertas==='pendiente');
+  const aviso = logs.filter(l=>accion(l) || !l.verif.visto);
+  const reinst = logs.filter(l=>l.verif.puertas==='reinstalar');
+  let html = '';
+  if(aviso.length){
+    const linea = l => { const v = l.verif, d = `<strong>${l.descripcion.split(' · ').slice(0,2).join(' · ')}</strong> <span class="hint" style="margin:0">(${fCorta(l.fechaDia)})</span>`;
+      let ic, txt, bt = '';
+      if(v.estado==='no' && v.puertas==='pendiente'){ const pl = l.categoria==='Puerta'; ic = pl?'🚪':'🗄️';
+        txt = (v.intentos?`Dirección marcó <strong>otra vez</strong> que no se instal${pl?'aron':'ó'}. `:`No se instal${pl?'aron':'ó'}. `)+`El material quedó apartado (ya descontado): ¿qué pasa con ${pl?'ellas':'él'}?`;
+        bt = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px"><button class="btn small" style="min-height:42px;background:#0e7490;grid-column:1/-1" onclick="verifPuertasReinstalar('${l.id}')">🔁 Se vuelve${pl?'n':''} a instalar</button><button class="btn small" style="min-height:42px;padding:4px;background:#16a34a" onclick="verifRegresa('${l.id}')">↩️ Regresa</button><button class="btn small" style="min-height:42px;padding:4px;background:#0e8a8a" onclick="verifPuertasSob('${l.id}')">🧩 Sobrantes</button><button class="btn small" style="min-height:42px;padding:4px;background:#dc2626" onclick="verifPuertasMerma('${l.id}')">🗑️ Merma</button></div>`; }
+      else if(v.estado==='no'){ ic='❌'; txt = l.estado==='rechazado' ? 'No se instaló: se rechazó y el material regresó al inventario.' : 'No se instaló.'; }
+      else if(v.estado==='parte'){ ic='🔸'; txt='Solo se instaló una parte: lo que regresó ya está en el inventario.'; }
+      else if(v.estado==='modelo'){ ic='✏️'; txt = v.resuelto ? 'Se instaló otro modelo: Dirección ya lo corrigió.' : 'Dirección pide corregir el modelo'+(v.nota?`: “${v.nota}”`:'.');
+        if(!v.resuelto) bt = `<button class="btn small" style="width:100%;min-height:42px;margin-top:8px;background:#3E5CDE" onclick="verifCapturarModelo('${l.id}')">✏️ Capturar el modelo real</button>`; }
+      const notaD = v.nota && v.estado!=='modelo' ? `<div style="margin-top:4px;font-size:13.5px">📝 Dirección: “${v.nota}”</div>` : '';
+      return `<div style="padding:10px;border-radius:12px;border:1px solid var(--line);margin-top:8px;background:var(--card)"><div style="display:flex;gap:8px"><span style="font-size:18px">${ic}</span><div style="flex:1;min-width:0">${d}<div class="hint" style="margin:2px 0 0">${txt}</div>${notaD}</div></div>${bt}</div>`; };
+    const nInfo = aviso.filter(l=>!accion(l)).length;
+    html += `<div class="card" style="padding:12px;border:2px solid #dc2626;background:linear-gradient(0deg,rgba(220,38,38,.10),rgba(220,38,38,.10)),var(--card)">
+      <div style="font-size:16px;font-weight:900">⚠️ ${aviso.length} instalaci${aviso.length===1?'ón no se aprobó':'ones no se aprobaron'}</div>
+      <p class="hint" style="margin:2px 0 0">Dirección las revisó con el reporte del grupo de instalaciones.</p>
+      ${aviso.map(linea).join('')}
+      ${nInfo?`<button class="btn small" style="width:100%;margin-top:10px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="verifEnterado()">👍 Enterado</button>`:''}</div>`;
+  }
+  if(reinst.length) html += `<div class="card" style="padding:12px;border:2px solid #0e7490">
+      <div style="font-size:16px;font-weight:900">🔁 Por volver a instalar (${reinst.length})</div>
+      <p class="hint" style="margin:2px 0 0">Ya están descontadas: <strong>NO las captures otra vez</strong> como instalación. Cuando se instale y salga en el reporte del grupo, Dirección la marca como instalada.</p>
+      ${reinst.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span><span class="hint" style="display:block;margin:2px 0 0">Del ${fCorta(l.fechaDia)}${(()=>{ const d = verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha)); return d>VERIF_DIAS_REINST?` · <strong style="color:#dc2626">esperando ${d} días</strong>`:''; })()}</span></span></div>`).join('')}</div>`;
+  return html;
+}
+async function verifCoordAccion(id, datos, msg){
+  try{ await verifGuardar(id, datos); _verifCoordT = 0; _verifCoord = null; if(msg) toast(msg); renderHome(); }catch(e){ alert('Error: '+e.message); }
+}
+function verifPuertasReinstalar(id){ verifCoordAccion(id, {puertas:'reinstalar', visto:true, fechaDecision:new Date().toISOString()}, '🔁 Queda en "Por volver a instalar". No la captures otra vez.'); }
+async function verifRegresa(id){
+  await cargarInstLog(); const l = (instLog||[]).find(x=>x.id===id); if(!l) return;
+  verifFlujo = {id, tipo:'reg', volver:'home'};
+  regParcial = false; regMerma = {}; regSob = {}; regMotivo = 'No se instaló (Dirección)';
+  instSub='historial'; instRegreso=false; regInstSel=id; regVolver=true;
+  setView('inst');
+}
+async function verifEnterado(){
+  const xs = (_verifCoord?_verifCoord.logs:[]).filter(l=>!l.verif.visto && !((l.verif.estado==='modelo' && !l.verif.resuelto) || l.verif.puertas==='pendiente'));
+  try{ for(const l of xs) await verifGuardar(l.id, {visto:true}); _verifCoordT = 0; _verifCoord = null; renderHome(); }catch(e){ alert('Error: '+e.message); }
+}
+async function verifPuertasSob(id){
+  await cargarInstLog(); const l = (instLog||[]).find(x=>x.id===id); if(!l) return;
+  verifFlujo = {id, tipo:'sob', volver:'home'};
+  regParcial = false; regMerma = {}; regSob = {}; (l.consumo||[]).forEach(c=>{ if(esHojaId(c.itemId)) regSob[c.itemId]=true; }); regMotivo = 'No se instaló (Dirección)';
+  instSub='historial'; instRegreso=false; regInstSel=id; regVolver=true;
+  setView('inst');
+}
+async function verifPuertasMerma(id){
+  await cargarInstLog(); const l = (instLog||[]).find(x=>x.id===id); if(!l) return;
+  verifFlujo = {id, tipo:'merma', volver:'home'};
+  regParcial = false; regMerma = {}; regSob = {}; (l.consumo||[]).forEach(c=>{ if(Number(c.cantidad)>0) regMerma[c.itemId]=Number(c.cantidad); }); regMotivo = 'No se instaló (Dirección) · dañado';
+  instSub='historial'; instRegreso=false; regInstSel=id; regVolver=true;
+  setView('inst');
+}
+async function verifCapturarModelo(id){
+  verifFlujo = {id, tipo:'modeloCoord', volver:'home'};
+  setView('inst'); await cargarInstLog(); iniciarCambioModelo(id);
+}
+// Aviso si el coordinador captura otra vez algo que Dirección marcó como no instalado o por reinstalar.
+async function verifAvisoRecaptura(categoria, modeloKey){
+  try{ await cargarInstLog(); }catch(e){ return true; }
+  const xs = (instLog||[]).filter(l=>l.verif && l.categoria===categoria && (l.verif.puertas==='reinstalar' || l.verif.puertas==='pendiente'));
+  if(!xs.length) return true;
+  const lista = xs.slice(0,4).map(l=>'• '+l.descripcion.split(' · ').slice(0,3).join(' · ')+' ('+fCorta(l.fechaDia)+')').join('\n');
+  return confirm(`⚠️ Dirección marcó como NO instalado y su material sigue apartado (YA está descontado):\n\n${lista}\n\nSi es ${categoria==='Puerta'?'una de esas puertas':'uno de esos'}, NO lo captures otra vez: en Inicio elige "🔁 Se vuelve a instalar" y Dirección lo marca como instalado cuando salga en el reporte del grupo.\n\n¿Es una instalación nueva y distinta?`);
+}
+
 // Regreso de un modelo completo elegido a mano (sin instalación registrada): mismo cálculo que una
 // instalación, pero todo se SUMA al inventario (confirmado por el usuario).
 async function confirmarRegresoLibre(){
@@ -7394,6 +7849,7 @@ async function confirmarInst(){
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = ($('#i-nota').value||'').trim();
   if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[], consumo:instPreview.consumo});
+  if(!(await verifAvisoRecaptura('Mueble', instPreview.modeloKey||null))) return; // v181
   const fechaDia = $('#i-fecha').value || new Date().toISOString().slice(0,10);
   const mod = modulo();
   const desc = `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`;
@@ -7903,6 +8359,7 @@ async function registrarPuerta(tipo, alto, ancho){
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
   const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${puertaPreview.medidasTxt||(ancho+'×'+alto+' cm (ancho×alto)')}`;
   if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo});
+  if(!(await verifAvisoRecaptura('Puerta'))) return; // v181
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
     for(const c of puertaPreview.consumo){
@@ -7956,7 +8413,7 @@ async function calcFormulaForModulo(mod, itemId){
       const m = doc.data();
       if(m.modulo!==mod || m.itemId!==itemId) return;
       if(b.desde && m.fecha<=b.desde) return;
-      if(m.estado==='pendiente' || m.estado==='rechazado') return;
+      if(!cuentaEnInventario(m)) return;
       lista.push(m);
     });
   }catch(e){}
@@ -8548,7 +9005,7 @@ function audIrConteo(){ irA('conteo'); }
 // pendientes y alertas, la Auditoría y lo de Dirección. Para ver un inventario, auditar o capturar
 // "como coordinador" entra a un módulo; arriba sale "📍 Módulo · ‹ Volver a Dirección".
 let dirModo = true;
-const VISTAS_MODULO = ['inv','mov','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
+const VISTAS_MODULO = ['inv','mov','mermaarm','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
 function enDirModo(){ return esAdmin() && dirModo; }
 async function entrarModulo(n, v){
   dirModo = false;
@@ -8631,11 +9088,12 @@ async function cargarPendDir(forzar){
     const [snapMov, snapLog, snapDeu] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]}))]);
     const porMod = {}, lotesVistos = new Set();
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ const k = m.loteId||Math.random(); if(lotesVistos.has(k)) return; lotesVistos.add(k); porMod[m.modulo] = (porMod[m.modulo]||0) + 1; });
-    snapLog.docs.map(d=>d.data()).filter(l=>l.estado==='pendiente').forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
+    snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
     const deudas = snapDeu.docs.map(d=>d.data()).filter(x=>x.estado!=='saldada');
-    const antes = JSON.stringify([_dirAprPorMod, _dirDeudas]);
+    const antes = JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif]);
     _dirAprPorMod = porMod; _dirDeudas = deudas; _dirCargadoT = Date.now();
-    if(JSON.stringify([_dirAprPorMod, _dirDeudas])!==antes && current==='home' && enDirModo()) renderHomeDir();
+    _dirVerif = verifCalcDir(snapLog.docs.map(d=>({id:d.id,...d.data()})), snapMov.docs.map(d=>d.data()));
+    if(JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif])!==antes && current==='home' && enDirModo()) renderHomeDir();
   }catch(e){}
   _dirCargando = false;
 }
@@ -8645,6 +9103,8 @@ function pendDirHtml(){
   const apr = _dirAprPorMod ? Object.keys(_dirAprPorMod).filter(k=>_dirAprPorMod[k]) : [];
   const nApr = apr.reduce((s,k)=>s+_dirAprPorMod[k],0);
   if(nApr) rows.push(fila('✅', `${nApr} captura${nApr===1?'':'s'} por aprobar`, apr.map(k=>k+' '+_dirAprPorMod[k]).join(' · '), '#16a34a', 'Aprobar', "irA('apr')"));
+  const rV = verifPendRow(fila); if(rV) rows.push(rV);
+  const rA = verifPendRowAtr(fila); if(rA) rows.push(rA);
   const H = herrCache;
   if(H){
     const nP = herrPendientes(H).length, nRec = herrPorRecibir(H).length, avD = herrAvisosDir(H), fR = ferRecibidosSinVer(H), nRecEnv = herrEnviosRecibidos(H).length;
@@ -8804,7 +9264,9 @@ async function renderAprobacionesBase(){
     garLogs = snapGar.docs.map(d=>({id:d.id,...d.data()}));
   }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${e.message}</div>`; return; }
 
-  const logsPendientes = todosLogs.filter(l=>l.estado==='pendiente').sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const logsPendientes = todosLogs.filter(instEnAprobaciones).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const nVerif = todosLogs.filter(instSeVerifica).length;
+  const avisoVerif = nVerif ? `<div class="card" style="padding:12px;border:2px solid #0e7490"><div class="row" style="justify-content:space-between;gap:10px;align-items:center"><div style="flex:1;min-width:0"><strong>🔍 ${nVerif} instalaci${nVerif===1?'ón':'ones'} sin aprobar</strong><p class="hint" style="margin:2px 0 0">Ya están descontadas. Se aprueban en <strong>Verificar instalaciones</strong> con el reporte del grupo (✅ Se instaló), no aquí.</p></div><button class="btn small" style="background:#0e7490;white-space:nowrap" onclick="verifDia='';verifPanel=null;irA('verif')">Verificar</button></div></div>` : '';
   // Movimientos pendientes que NO son de una instalación (esos ya se muestran agrupados arriba
   // por su instalacionesLog) — se agrupan por loteId (una sola captura de Entradas/Salidas).
   const movsSueltosPendientes = todosMovs.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo);
@@ -8814,7 +9276,7 @@ async function renderAprobacionesBase(){
 
   const cortesHoy = cortesHoyHtml(todosMovs, null);
   if(logsPendientes.length===0 && loteIds.length===0){
-    $('#main').innerHTML = '<div class="card">No hay nada pendiente de aprobación. 🎉</div>' + cortesHoy;
+    $('#main').innerHTML = '<div class="card">No hay nada pendiente de aprobación. 🎉</div>' + avisoVerif + cortesHoy;
     return;
   }
 
@@ -8822,7 +9284,7 @@ async function renderAprobacionesBase(){
   let html = `<div class="card"><strong>Aprobaciones</strong><p class="hint">Lo que capturan los coordinadores queda aquí hasta que lo apruebes o rechaces. Los traspasos entre módulos no requieren aprobación (se aplican de inmediato).</p>
     ${totalPend>1?`<button class="btn" style="width:100%;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="aprobarTodo()">✅ Aprobar todo (${totalPend})</button><p class="hint" style="margin:6px 0 0">Revisa la lista de abajo antes de aprobar todo junto.</p>`:''}</div>`;
 
-  html += cortesHoy;
+  html += avisoVerif + cortesHoy;
   const clasesLote = {}; loteIds.forEach(k=>{ clasesLote[k] = claseAprobLote(lotes[k], garLogs); });
   html += aprobLeyendaHtml([...loteIds.map(k=>clasesLote[k].k), ...logsPendientes.map(l=>l.cambio?'cambio':'inst')]);
   if(loteIds.length>0){
@@ -8920,11 +9382,11 @@ async function rechazarLote(loteId){
 async function aprobarTodo(){
   try{
     const [snapMov, snapLog] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get()]);
-    const logs = snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.estado==='pendiente');
+    const logs = snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(instEnAprobaciones);
     const lotes = [...new Set(snapMov.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).map(m=>m.loteId||m.id))];
     const porMod = {}; logs.forEach(l=>porMod[l.modulo]=(porMod[l.modulo]||0)+1);
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion').forEach(m=>{ porMod[m.modulo]=porMod[m.modulo]||0; });
-    if(!confirm(`¿Aprobar TODO lo pendiente?\n\n• ${lotes.length} captura(s) de entradas, salidas, garantías, pedidos…\n• ${logs.length} instalación(es)\n\nMódulos: ${Object.keys(porMod).join(', ')}\n\nTodo se sumará o descontará del inventario.`)) return;
+    if(!confirm(`¿Aprobar TODO lo pendiente?\n\n• ${lotes.length} captura(s) de entradas, salidas, garantías, pedidos…\n• ${logs.length} instalación(es)\n\nMódulos: ${Object.keys(porMod).join(', ')}\n\nLas instalaciones ya están descontadas; lo demás se sumará o descontará del inventario.`)) return;
     for(const l of logs){ await db.collection('instalacionesLog').doc(l.id).update({estado:'aprobado'}); await cambiarEstadoLote(l.id,'aprobado'); if(l.cambioDe) await db.collection('instalacionesLog').doc(l.cambioDe).update({cambiadaPor:l.id}); }
     for(const k of lotes) await cambiarEstadoLote(k,'aprobado');
     toast(`✅ Se aprobaron ${lotes.length+logs.length} captura(s).`);
@@ -8940,7 +9402,7 @@ async function aprobarInstalacion(logId){
   }catch(e){ alert('Error: '+e.message); }
 }
 async function rechazarInstalacion(logId){
-  if(!confirm('¿Rechazar esta instalación? El material NO se descontará del inventario.')) return;
+  if(!confirm('¿Rechazar esta instalación? El material que se descontó regresa al inventario.')) return;
   try{
     await db.collection('instalacionesLog').doc(logId).update({estado:'rechazado'});
     await cambiarEstadoLote(logId,'rechazado');
@@ -9138,7 +9600,7 @@ function usoRaroCierre(itemId, uso, esp){
 // Material de instalaciones y garantías recientes (ya descontado) por artículo.
 function materialApartado(dias){
   const desde = new Date(Date.now()-(dias||3)*86400000).toISOString(), mod = modulo();
-  return movs.filter(m=>m.modulo===mod && (m.tipo==='instalacion'||m.tipo==='garantia') && !m.anulado && m.estado!=='pendiente' && m.estado!=='rechazado' && (m.fecha||'')>=desde);
+  return movs.filter(m=>m.modulo===mod && (m.tipo==='instalacion'||m.tipo==='garantia') && !m.anulado && cuentaEnInventario(m) && (m.fecha||'')>=desde);
 }
 function apartadoDe(itemId){ return materialApartado(3).filter(m=>m.itemId===itemId).reduce((s,m)=>s+(Number(m.cantidad)||0),0); }
 const apartadoBadge = itemId => { const q = apartadoDe(itemId); return q>0 ? `<span title="De instalaciones de los últimos 3 días" style="display:inline-block;font-size:11px;font-weight:800;padding:2px 7px;border-radius:8px;margin-top:3px;background:rgba(124,58,237,.2);color:#c4b5fd;border:1px solid #7c3aed">📦 ${fmtNum(q)} apartado${q===1?'':'s'}</span>` : ''; };
@@ -9389,7 +9851,7 @@ async function inventarioTodos(){
   const iniMap = {}; ini.docs.forEach(d=>{ iniMap[d.id]=d.data(); });
   const mins = {}; cfg.docs.forEach(d=>{ if(d.id.startsWith('minimos_')) mins[d.id.slice(8)] = d.data().valores||{}; });
   const porModItem = {};
-  mv.docs.forEach(d=>{ const m=d.data(); if(m.estado==='pendiente'||m.estado==='rechazado') return; const k=m.modulo+'__'+m.itemId; (porModItem[k]=porModItem[k]||[]).push(m); });
+  mv.docs.forEach(d=>{ const m=d.data(); if(!cuentaEnInventario(m)) return; const k=m.modulo+'__'+m.itemId; (porModItem[k]=porModItem[k]||[]).push(m); });
   const res = {};
   MODULOS.forEach(({nombre})=>{ res[nombre] = {};
     CATALOGO.forEach(it=>{ const b = lineaBase(resetF[nombre], iniMap[inicialKey(nombre,it.id)]||null);
@@ -10126,6 +10588,101 @@ async function guardarReconteo(corregir){
   }catch(e){ alert('Error: '+e.message); }
 }
 
+// ===== Merma de un MUEBLE ARMADO (confirmado por el usuario, v181) =====
+// Cajonera, cajón, cuadro, cajonera de espejo, puerta de espejo o de zapatera. Usa el mismo despiece
+// que la auditoría. Se pregunta si los herrajes (y el espejo) también se dañaron: si no, no se descuentan.
+let maf = null, mafNota = '';
+function mafNuevo(){ return {tipo:'cajonera', variante:'3', color:MEL_COLORES[0], colorFrente:'', colorCuadro:MEL_COLORES[0], cantidad:'1', ext:false, puertitas:false, herrDanados:true, espejoRoto:true, bisDanadas:true, jalDanada:true, sinFondo:false}; }
+function mafArmado(){
+  const f = maf, n = Number(f.cantidad)||0;
+  const a = {tipo:f.tipo, variante:f.variante, color:f.color, cantidad:n};
+  if(f.tipo==='cajon') a.colorCuadro = f.colorCuadro;
+  if((f.tipo==='cajonera'||f.tipo==='cajonera_espejo') && f.colorFrente && f.colorFrente!==f.color) a.colorFrente = f.colorFrente;
+  if(f.tipo==='cajonera' && armadoTienePuertitas(f.variante)) a.puertitas = !!f.puertitas;
+  if((f.tipo==='cajonera'||f.tipo==='cajonera_espejo') && f.sinFondo) a.sinFondo = true;
+  if(f.tipo==='puerta_espejo' || f.tipo==='puerta_zapatera'){
+    if(!f.bisDanadas) a.sinBisagras = true; if(!f.jalDanada) a.sinJaladera = true;
+    if(f.tipo==='puerta_espejo' && !f.espejoRoto) a.sinEspejo = true;
+  } else if(!f.herrDanados) a.sinHerrajes = true;
+  if(armadoUsaCorredera(f) && f.herrDanados) a.ext = !!f.ext;
+  return a;
+}
+function mafSiNo(pregunta, campo, siT, siS, noT, noS, cSi, cNo){
+  const v = !!maf[campo];
+  const b = (on, t, sub, c, val) => `<button onclick="maf.${campo}=${val};renderMermaArm()" style="flex:1;cursor:pointer;text-align:left;border-radius:12px;padding:10px;border:2px solid ${on?c:'var(--line)'};background:${on?c+'26':'transparent'};color:var(--ink);font:inherit"><strong style="font-size:14px">${t}</strong><span class="hint" style="display:block;margin:2px 0 0;font-size:12px">${sub}</span></button>`;
+  return `<div style="margin-top:12px"><strong style="font-size:14px">${pregunta}</strong><div style="display:flex;gap:8px;margin-top:6px">${b(v, siT, siS, cSi||'#dc2626', 'true')}${b(!v, noT, noS, cNo||'#16a34a', 'false')}</div></div>`;
+}
+function renderMermaArm(){
+  current = 'mermaarm';
+  if(!maf) maf = mafNuevo();
+  const f = maf, esCaj = f.tipo==='cajonera';
+  const variantes = esCaj ? ARMADO_CAJONERAS : (ARMADO_SIN_VARIANTE(f.tipo) ? {normal:'Normal'} : {normal:'Normal', max:'Max'});
+  if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
+  const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
+  const labelColor = (esCaj||f.tipo==='cajonera_espejo') ? 'Color de la cajonera' : ((f.tipo==='cajon'||f.tipo==='puerta_espejo') ? (f.tipo==='puerta_espejo'?'Color de los marcos':'Color del frente') : (f.tipo==='puerta_zapatera' ? 'Color de la puerta' : 'Color del cuadro'));
+  const tipos = {cajonera:'Cajonera', cajon:'Cajón completo', cuadro_fondo:'Cuadro de cajón con fondo', cuadro_sin:'Cuadro de cajón sin fondo', cajonera_espejo:'Cajonera de espejo', puerta_espejo:'Puerta de espejo', puerta_zapatera:'Puerta de zapatera'};
+  const esPuerta = f.tipo==='puerta_espejo' || f.tipo==='puerta_zapatera';
+  const llevaHerr = ['cajonera','cajon'].includes(f.tipo);
+  const a = mafArmado(), cons = Number(a.cantidad)>0 ? consumoDePool(piezasDeArmado(a)) : {};
+  const filas = Object.keys(cons).map(id=>{ const it = CATALOGO.find(i=>i.id===id)||{nombre:id, unidad:''}; return `<div class="movitem"><span>${it.nombre}${esHoja(it)?' <span class="hint" style="margin:0">(cortado)</span>':''}</span><strong style="white-space:nowrap">${fmtNum(cons[id])} ${it.unidad||''}</strong></div>`; }).join('');
+  const sinDescontar = [];
+  if(llevaHerr && !f.herrDanados) sinDescontar.push('herrajes');
+  if(f.tipo==='puerta_espejo' && !f.espejoRoto) sinDescontar.push('espejo');
+  if(esPuerta && !f.bisDanadas) sinDescontar.push('bisagras');
+  if(esPuerta && !f.jalDanada) sinDescontar.push('jaladera');
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #7c3aed">
+      <div class="row" style="justify-content:space-between"><div style="font-size:17px;font-weight:800">📦 Merma de mueble armado · ${modulo()}</div><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="maf=null;irA('mov',{tipo:'merma'})">Salir</button></div>
+      <p class="hint" style="margin:4px 0 0">Un mueble armado que se dañó. La app calcula el material con el mismo despiece de la auditoría.</p>
+      <label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Qué mueble?</label>
+      <div class="chips" style="margin-top:6px">${Object.keys(tipos).map(k=>`<button class="chip ${k===f.tipo?'on':''}" onclick="maf.tipo='${k}';renderMermaArm()">${tipos[k]}</button>`).join('')}</div>
+      <div class="grid2" style="margin-top:10px">
+        ${ARMADO_SIN_VARIANTE(f.tipo)?'':`<div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="maf.variante=this.value;renderMermaArm()">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>`}
+        <div><label class="hint">¿Cuántos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="maf.cantidad=this.value" onchange="renderMermaArm()"></div>
+        <div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="maf.color=this.value;renderMermaArm()">${colorOpts(f.color)}</select></div>
+        ${(esCaj||f.tipo==='cajonera_espejo')?`<div><label class="hint">Color de ${f.tipo==='cajonera_espejo'?'los zóclos':'frentes y zóclos'}</label><select style="margin-top:4px" onchange="maf.colorFrente=this.value;renderMermaArm()">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
+        ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="maf.colorCuadro=this.value;renderMermaArm()">${colorOpts(f.colorCuadro)}</select></div>`:''}
+      </div>
+      ${esCaj && armadoTienePuertitas(f.variante) ? mafSiNo('¿Lleva puertitas?', 'puertitas', 'Sí', 'con sus puertitas', 'No', 'solo la cajonera', '#2563eb', '#2563eb') : ''}
+      ${llevaHerr ? mafSiNo('¿Los herrajes también se dañaron?', 'herrDanados', 'Sí, también se tiran', `correderas, jaladeras${esCaj?', bisagras':''} van a merma`, 'No, se quitan y se guardan', 'solo la melamina va a merma') : ''}
+      ${f.tipo==='puerta_espejo' ? mafSiNo('¿El espejo también se rompió?', 'espejoRoto', 'Sí', 'el espejo va a merma', 'No', 'el espejo se guarda') : ''}
+      ${esPuerta ? mafSiNo('¿Las bisagras también se dañaron?', 'bisDanadas', 'Sí', 'van a merma', 'No', 'se guardan') : ''}
+      ${esPuerta ? mafSiNo('¿La jaladera también se dañó?', 'jalDanada', 'Sí', 'va a merma', 'No', 'se guarda') : ''}
+      ${armadoUsaCorredera(f) && llevaHerr && f.herrDanados ? `<label class="row" style="margin-top:12px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="maf.ext=this.checked;renderMermaArm()"> Lleva corredera de extensión</label>` : ''}
+      ${(esCaj||f.tipo==='cajonera_espejo') ? `<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinFondo?'checked':''} onchange="maf.sinFondo=this.checked;renderMermaArm()"> Sin fondo (no tenía el fondo de MDF)</label>` : ''}
+    </div>
+    <div class="card" style="border:2px solid #e0791a;background:linear-gradient(0deg,rgba(224,121,26,.10),rgba(224,121,26,.10)),var(--card)">
+      <strong>⚠️ Esto se va a merma</strong>
+      <div class="movlist" style="margin-top:6px">${filas || '<p class="hint" style="margin:4px 0">Escribe cuántos.</p>'}</div>
+      ${sinDescontar.length ? `<p class="hint" style="margin:8px 0 0">✅ No se descuenta: ${sinDescontar.join(', ')} (se guardan).</p>` : ''}
+    </div>
+    <div class="card">
+      ${fotoPickerHtml('merma','Foto de lo dañado (opcional)')}
+      <input placeholder="Nota (opcional)" style="margin-top:10px" value="${String(mafNota).replace(/"/g,'&quot;')}" oninput="mafNota=this.value">
+      <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarMermaArm()">Revisar y guardar</button>
+    </div>`;
+}
+async function guardarMermaArm(){
+  if(!confirmarModuloDir()) return;
+  const a = mafArmado(); if(!(Number(a.cantidad)>0)) return alert('Escribe cuántos se dañaron.');
+  const consM = consumoDePool(piezasDeArmado(a)), cons = Object.keys(consM).map(id=>({itemId:id, cantidad:consM[id]}));
+  if(!cons.length) return alert('No hay material que descontar.');
+  const falta = cons.filter(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return esHoja(it) && c.cantidad > calcFormula(c.itemId).cortado + 1e-9; });
+  if(falta.length && !confirm(`⚠️ Según la app no hay suficiente material cortado/armado:\n\n${falta.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `• ${it.nombre}: hay ${fmtNum(calcFormula(c.itemId).cortado)} y el mueble equivale a ${fmtNum(c.cantidad)}`; }).join('\n')}\n\nRevisa el color. Si de verdad se dañó, guárdalo y Dirección lo revisa al aprobar.\n\n¿Guardar de todos modos?`)) return;
+  const desc = describirArmado(a);
+  if(!confirm(`⚠️ Merma de mueble armado en ${modulo()}:\n\n${a.cantidad} × ${desc}\n\nSe descuenta:\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `− ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (de cortado)':''}`; }).join('\n')}\n\n¿Guardar?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
+    const nota = 'Merma de mueble armado · '+a.cantidad+' × '+desc+(mafNota.trim()?' · '+mafNota.trim():'');
+    const fotos = (fotosTmp.merma||[]).length;
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', ...(esHoja(it)?{lado:'cortado'}:{}), motivo:'mermaArmado', cantidad:c.cantidad, nota, armado:a, fecha, estado, loteId, creadoPor, ...(fotos?{fotos, fotosRef:loteId}:{})});
+    }
+    if(fotos) await guardarFotos('merma', 'merma', loteId, modulo());
+    maf = null; mafNota = '';
+    toast(estado==='pendiente' ? '✅ Merma guardada.<br><small>Dirección la aprueba y se descuenta.</small>' : '⚠️ Merma registrada.');
+    irA('mov',{tipo:'merma'}); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
 async function guardarMermaPiezas(cons, detalle){
   for(const c of cons){ const f=calcFormula(c.itemId); const it=CATALOGO.find(i=>i.id===c.itemId);
     if(c.cantidad > f.cortado + 1e-9) return alert(`No alcanza: de ${it.nombre} hay ${fmtNum(f.cortado)} hojas ya cortadas y las piezas equivalen a ${fmtNum(c.cantidad)}.\n\nRevisa las piezas. No se guardó nada.`); }
@@ -10183,7 +10740,7 @@ function valorExtra(){ const v = valoresInst && valoresInst._extra; return (v!==
 // Cuenta como instalación: no rechazada, no regresó completa, no se cambió por otro modelo (aprobado),
 // y si es un cambio de modelo, ya está aprobado (mientras tanto sigue contando la original).
 function instCuenta(log, regresadas){
-  return log.estado!=='rechazado' && !(regresadas && regresadas.has(log.id)) && !log.cambiadaPor && !(log.cambioDe && log.estado==='pendiente');
+  return log.estado!=='rechazado' && !(regresadas && regresadas.has(log.id)) && !log.cambiadaPor && !(log.cambioDe && log.estado==='pendiente') && !verifNoCuenta(log);
 }
 // Texto de los extras de una instalación (confirmado por el usuario: que se vea qué extra sumó).
 function describirExtra(a){
@@ -10253,7 +10810,7 @@ async function repInstalacionesSemana(){
   const regresadas = regresadasDe(movs);
   const hoy = fechaHoyLocal(), sab = sabadoDe(hoy);
   const sabP = (()=>{ const d=new Date(sab+'T12:00:00'); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); })();
-  const sem = (desde, hasta) => { const xs = instLog.filter(x=>{ const f=x.fechaDia||diaLocal(x.fecha); return f>=desde && f<=hasta && x.estado!=='rechazado'; });
+  const sem = (desde, hasta) => { const xs = instLog.filter(x=>{ const f=diaValorInst(x); return f>=desde && f<=hasta && x.estado!=='rechazado'; });
     const vale = xs.filter(x=>instCuenta(x, regresadas)); return {n:vale.length, reg:xs.length-vale.length, valor:xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0)}; };
   const a = sem(sab, hoy), b = sem(sabP, finSemana(sabP));
   const fila = (t, r, rango) => `<div class="movitem" style="padding:8px 10px"><span>${t}<span class="hint" style="display:block;margin:0">${rango}</span></span><strong>${fmtNum(r.valor)}</strong></div>`;
@@ -10451,7 +11008,7 @@ function datosModuloResumen(R, mod, rg){
   const pendLotes = new Set(R.movs.filter(m=>m.modulo===mod && m.estado==='pendiente').map(m=>m.loteId||m.id)).size;
   const auds = R.auds.filter(a=>a.modulo===mod && !a.complemento).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
   const regresadas = regresadasDe(R.movs);
-  const instR = R.inst.filter(x=>x.modulo===mod && x.estado!=='rechazado' && enRango(x.fechaDia||diaLocal(x.fecha)));
+  const instR = R.inst.filter(x=>x.modulo===mod && x.estado!=='rechazado' && enRango(diaValorInst(x)));
   return {
     inst: instR.filter(x=>instCuenta(x, regresadas)).length,
     instReg: instR.filter(x=>regresadas.has(x.id)).length,
@@ -10660,7 +11217,7 @@ function calcularAvisos(){
     Object.keys(lotes).forEach(k=>{ const ms=lotes[k]; const ok=ms[0].estado==='aprobado';
       out.push({id:'lote_'+k+'_'+ms[0].estado, fecha:ms[0].revisadoEn, ic: ok?'✅':'❌',
         titulo: `Dirección ${ok?'aprobó':'rechazó'}: ${describirLote(ms)}`,
-        texto: `${ms.length} artículo(s) · anotado el ${new Date(ms[0].fecha).toLocaleDateString('es-MX')}${ok?'':' · no se sumó ni se descontó'}`}); });
+        texto: `${ms.length} artículo(s) · anotado el ${new Date(ms[0].fecha).toLocaleDateString('es-MX')}${ok?'':(ms.some(m=>m.tipo==='instalacion')?' · el material regresó al inventario':' · no se sumó ni se descontó')}`}); });
     pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p) && p.fecha>visto).forEach(p=>out.push({id:'ped_'+p.id, fecha:p.fecha, ic:'🚚',
       titulo:'Viene material en camino', texto:`${p.items.length} artículo(s)${p.proveedor?' · '+p.proveedor:''}${p.fechaEstimada?' · llega aprox. '+fechaCorta(p.fechaEstimada):''}`}));
   } else {
@@ -11221,7 +11778,7 @@ async function generarReporteDiarioPDF(modo, fechaDia){
       const docI = inicialMap[itemId]!==undefined ? {cantidad:inicialMap[itemId], cortado:inicialCortadoMap[itemId], fecha:inicialFechaMap[itemId]} : null;
       const bl = lineaBase(resetFecha, docI);
       if(bl.desde && bl.desde >= cutISO) return {final:bl.inicial, completas:bl.inicial-bl.inicialCortado, cortado:bl.inicialCortado};
-      const lista = movs.filter(m=>m.itemId===itemId && (!bl.desde || m.fecha>bl.desde) && (incluye ? m.fecha <= cutISO : m.fecha < cutISO) && m.estado!=='pendiente' && m.estado!=='rechazado');
+      const lista = movs.filter(m=>m.itemId===itemId && (!bl.desde || m.fecha>bl.desde) && (incluye ? m.fecha <= cutISO : m.fecha < cutISO) && cuentaEnInventario(m));
       return calcularFormula(itemId, bl.inicial, bl.inicialCortado, lista);
     };
     const inicioDia = itemId => alCorte(itemId, iniDiaISO, false);
