@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v183';
+const APP_VERSION = 'v184';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6743,11 +6743,11 @@ function verifDetalleHtml(l){
 // Dirección la ubique en el grupo de instalaciones.
 function escCalle(t){ return String(t||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function calleHtml(l, grande){ return l && l.calle ? `<div style="margin:3px 0 0;font-size:${grande?'15px':'13px'};font-weight:800;color:var(--ink)">📍 ${escCalle(l.calle)}</div>` : ''; }
-function calleCampoHtml(pre){ return `<div style="margin-top:10px"><label class="hint" style="font-weight:800;color:var(--ink)">📍 Calle de la instalación <span style="color:var(--bad)">*</span></label><input id="${pre}-calle" placeholder="Ej. Hidalgo" maxlength="80" autocomplete="off" style="margin-top:4px" oninput="this.style.borderColor=''"><p class="hint" style="margin:4px 0 0">Obligatoria: con ella Dirección encuentra la instalación en el grupo.</p></div>`; }
+function calleCampoHtml(pre){ return `<div style="margin-top:10px"><label class="hint" style="font-weight:800;color:var(--ink)">📍 Calle y número de la instalación <span style="color:var(--bad)">*</span></label><input id="${pre}-calle" placeholder="Ej. Hidalgo 245" maxlength="80" autocomplete="off" style="margin-top:4px" oninput="this.style.borderColor=''"><p class="hint" style="margin:4px 0 0">Obligatoria: con ella Dirección encuentra la instalación en el grupo.</p></div>`; }
 function exigirCalle(pre){
   const el = document.getElementById(pre+'-calle'), c = el ? el.value.trim() : '';
   if(c) return c;
-  alert('📍 Escribe la calle de la instalación.\n\nEs obligatoria: Dirección la usa para encontrarla en el grupo de instalaciones.');
+  alert('📍 Escribe la calle y el número de la instalación.\n\nEs obligatoria: Dirección la usa para encontrarla en el grupo de instalaciones.');
   if(el){ el.scrollIntoView({block:'center'}); el.style.borderColor='var(--bad)'; el.focus(); }
   return null;
 }
