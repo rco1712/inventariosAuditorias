@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v181';
+const APP_VERSION = 'v182';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6368,7 +6368,8 @@ function renderInst(){
   if(instSub==='mueble') renderInstMueble();
   else if(instSub==='puertas') renderInstPuertas();
   else renderInstHistorial();
-  if(instCambio){ const f=document.getElementById(instSub==='puertas'?'p-fecha':'i-fecha'); if(f){ f.value=instCambio.fechaDia; f.disabled=true; } }
+  if(instCambio){ const pre = instSub==='puertas'?'p':'i'; const f=document.getElementById(pre+'-fecha'); if(f){ f.value=instCambio.fechaDia; f.disabled=true; }
+    const c=document.getElementById(pre+'-calle'); if(c){ c.value=instCambio.calle||''; c.disabled=!!instCambio.calle; } }
 }
 
 async function cargarInstLog(){
@@ -6419,7 +6420,7 @@ async function renderInstHistorial(){
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
       <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${extrasLogHtml(x)} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${calleHtml(x)}${extrasLogHtml(x)} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
       </table></div>
     </div>`; }).join('');
   if(regVolver && regInstSel){ regVolver = false; regParcial ? mostrarRegresoParcial() : mostrarRegresoInst(); }
@@ -6467,7 +6468,7 @@ function puedeCambiarModelo(x){
 }
 function iniciarCambioModelo(id){
   const x = (instLog||[]).find(l=>l.id===id); if(!x) return;
-  instCambio = {logId:x.id, desc:x.descripcion, fechaDia:x.fechaDia, categoria:x.categoria, estado:x.estado, consumo:(x.consumo||[]).map(c=>({...c}))};
+  instCambio = {logId:x.id, desc:x.descripcion, fechaDia:x.fechaDia, calle:x.calle||'', categoria:x.categoria, estado:x.estado, consumo:(x.consumo||[]).map(c=>({...c}))};
   instSub = x.categoria==='Puerta' ? 'puertas' : 'mueble'; instRegreso=false; instRegresoLibre=false; instPreview=null; puertaPreview=null; iAdicionales=[];
   renderInst(); window.scrollTo(0,0);
 }
@@ -6512,7 +6513,7 @@ async function guardarCambioModelo(n){
       for(const x of diffConsumo(L.consumo, n.consumo).descuenta){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
       const viejos = movs.filter(m=>m.loteId===L.id);
       for(const x of n.consumo) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad);
-      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion, ...verifParaNuevo(L)});
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion, calle:L.calle||'', ...verifParaNuevo(L)});
       for(const m of viejos) await db.collection('movimientos').doc(m.id).delete();
       await db.collection('instalacionesLog').doc(L.id).delete();
       movs = movs.filter(m=>!viejos.includes(m));
@@ -6522,7 +6523,7 @@ async function guardarCambioModelo(n){
       for(const x of d.regresa) await mov(CATALOGO.find(i=>i.id===x.itemId), 'devolucion', x.cantidad, {motivo:'cambioModelo', instalacionId:L.id, cambioModelo:true});
       for(const x of d.descuenta) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad, {cambioModelo:true});
       await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor,
-        cambioDe:L.id, cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta}, ...verifParaNuevo(L)});
+        cambioDe:L.id, calle:L.calle||'', cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta}, ...verifParaNuevo(L)});
       if(estado==='aprobado') await db.collection('instalacionesLog').doc(L.id).update({cambiadaPor:newId});
     }
     toast(estado==='pendiente' ? '✅ Cambio de modelo guardado.<br><small>Dirección lo tiene que aprobar.</small>' : '✅ Modelo cambiado.');
@@ -6657,7 +6658,7 @@ async function confirmarRegresoInst(){
 //    la diferencia y Dirección aprueba.
 // Al coordinador le sale un aviso con cuántas instalaciones no se aprobaron y por qué.
 const VERIF_DESDE = '2026-10-23', VERIF_DIAS_ROJO = 2;
-let verifLogs = null, verifRegresadas = new Set(), verifDia = '', verifPanel = null, verifFlujo = null;
+let verifLogs = null, verifRegresadas = new Set(), verifDia = '', verifMod = '', verifPanel = null, verifFlujo = null;
 let _dirVerif = null, _verifCoord = null, _verifCoordT = 0;
 function verifDiasAtras(dia){ return Math.round((new Date(fechaHoyLocal()+'T12:00:00') - new Date(dia+'T12:00:00'))/86400000); }
 function verifDesde(){ const d = new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-14); const s = d.toISOString().slice(0,10); return s > VERIF_DESDE ? s : VERIF_DESDE; }
@@ -6698,12 +6699,12 @@ function verifEsperando(logs){
 function verifPendRowAtr(fila){
   const V = _dirVerif; if(!V || !(V.atr||[]).length) return null;
   const por = {}; V.atr.forEach(a=>{ const k = a.modulo+': '+a.que; por[k]=(por[k]||0)+1; });
-  return fila('⏳', `Sin resolver: ${V.atr.length}`, Object.keys(por).map(k=>por[k]>1?k.replace(': ',': '+por[k]+' '):k).join(' · '), '#b45309', 'Ver', "verifDia='';verifPanel=null;irA('verif')");
+  return fila('⏳', `Sin resolver: ${V.atr.length}`, Object.keys(por).map(k=>por[k]>1?k.replace(': ',': '+por[k]+' '):k).join(' · '), '#b45309', 'Ver', "verifDia='';verifMod='';verifPanel=null;irA('verif')");
 }
 function verifPendRow(fila){
   const V = _dirVerif; if(!V || !V.n) return null;
   const rojo = V.masViejo > VERIF_DIAS_ROJO;
-  return fila('🔍', `Verificar instalaciones: ${V.n}`, (rojo?`⚠️ Hay de hace ${V.masViejo} días sin revisar · `:'')+Object.keys(V.porMod).map(k=>k+' '+V.porMod[k]).join(' · ')+' · con el reporte del grupo', rojo?'#dc2626':'#0e7490', 'Verificar', "verifDia='';verifPanel=null;irA('verif')");
+  return fila('🔍', `Verificar instalaciones: ${V.n}`, (rojo?`⚠️ Hay de hace ${V.masViejo} días sin revisar · `:'')+Object.keys(V.porMod).map(k=>k+' '+V.porMod[k]).join(' · ')+' · con el reporte del grupo', rojo?'#dc2626':'#0e7490', 'Verificar', "verifDia='';verifMod='';verifPanel=null;irA('verif')");
 }
 async function verifCargar(){
   const [snapLog, snapMov] = await Promise.all([db.collection('instalacionesLog').get(), db.collection('movimientos').get()]);
@@ -6722,6 +6723,32 @@ async function verifGuardar(id, datos){
 }
 function verifMat(l){ const cs = (l.consumo||[]).filter(c=>Number(c.cantidad)>0).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return it ? `${it.nombre.replace(/^Melamina /,'')} ${fmtNum(c.cantidad)}` : ''; }).filter(Boolean);
   return cs.slice(0,3).join(' · ')+(cs.length>3?' …':''); }
+// Todo lo de la instalación (confirmado por el usuario, v182): extras, material completo y cuándo se capturó.
+function verifDetalleHtml(l){
+  const cs = (l.consumo||[]).filter(c=>Number(c.cantidad)>0).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return it?{it, q:Number(c.cantidad)}:null; }).filter(Boolean);
+  const hojas = cs.filter(x=>esHoja(x.it)), otros = cs.filter(x=>!esHoja(x.it));
+  const fila = x => `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)"><span>${x.it.nombre}</span><strong style="white-space:nowrap">${fmtNum(x.q)} ${x.it.unidad}</strong></div>`;
+  const cap = l.fecha ? new Date(l.fecha).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'}) : '';
+  return `${extrasLogHtml(l)}
+    <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12.5px;color:var(--sub);list-style:none">📦 ${verifMat(l)} <span style="color:var(--brand);font-weight:700;white-space:nowrap">· Ver todo ▾</span></summary>
+      <div style="margin-top:6px;padding:8px 10px;border-radius:10px;background:var(--bg);border:1px solid var(--line);font-size:13px">
+        ${hojas.length?`<div style="font-weight:800;margin-bottom:2px">🪵 Melamina / MDF</div>${hojas.map(fila).join('')}`:''}
+        ${otros.length?`<div style="font-weight:800;margin:${hojas.length?'8px':'0'} 0 2px">🔩 Herrajes y demás</div>${otros.map(fila).join('')}`:''}
+        ${cap?`<div class="hint" style="margin:8px 0 0">🕒 Capturada: ${cap}${(l.fechaDia && diaLocal(l.fecha)!==l.fechaDia)?` <strong style="color:#d97706">(otro día que la instalación)</strong>`:''}</div>`:''}
+      </div></details>`;
+}
+// v182 (confirmado por el usuario): la CALLE de la instalación es obligatoria al capturar, para que
+// Dirección la ubique en el grupo de instalaciones.
+function escCalle(t){ return String(t||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function calleHtml(l, grande){ return l && l.calle ? `<div style="margin:3px 0 0;font-size:${grande?'15px':'13px'};font-weight:800;color:var(--ink)">📍 ${escCalle(l.calle)}</div>` : ''; }
+function calleCampoHtml(pre){ return `<div style="margin-top:10px"><label class="hint" style="font-weight:800;color:var(--ink)">📍 Calle de la instalación <span style="color:var(--bad)">*</span></label><input id="${pre}-calle" placeholder="Ej. Hidalgo" maxlength="80" autocomplete="off" style="margin-top:4px" oninput="this.style.borderColor=''"><p class="hint" style="margin:4px 0 0">Obligatoria: con ella Dirección encuentra la instalación en el grupo.</p></div>`; }
+function exigirCalle(pre){
+  const el = document.getElementById(pre+'-calle'), c = el ? el.value.trim() : '';
+  if(c) return c;
+  alert('📍 Escribe la calle de la instalación.\n\nEs obligatoria: Dirección la usa para encontrarla en el grupo de instalaciones.');
+  if(el){ el.scrollIntoView({block:'center'}); el.style.borderColor='var(--bad)'; el.focus(); }
+  return null;
+}
 function verifQuien(l){ return (l.creadoPor||'').split('@')[0]; }
 const VERIF_TAG = {ok:['✅ Se instaló','#16a34a'], modelo:['✏️ Cambió el modelo','#3E5CDE'], parte:['🔸 Una parte','#d97706'], no:['❌ No se instaló','#dc2626']};
 function verifEstadoTxt(l){
@@ -6739,7 +6766,16 @@ async function renderVerif(){
 }
 function verifPintar(){
   if(current!=='verif') return;
-  const todas = verifRevisables(verifLogs, verifRegresadas);
+  // Un módulo a la vez (confirmado por el usuario, v182): cada módulo se compara con su reporte del grupo.
+  const todasAll = verifRevisables(verifLogs, verifRegresadas), sinRevAll = todasAll.filter(verifPorRevisar);
+  const otrosMod = n => verifEsperando(verifLogs).some(e=>e.l.modulo===n);
+  const modsCon = MODULOS.map(m=>m.nombre).filter(n=>todasAll.some(l=>l.modulo===n) || otrosMod(n));
+  const primeroPend = MODULOS.map(m=>m.nombre).find(n=>sinRevAll.some(l=>l.modulo===n));
+  if(!verifMod || !modsCon.includes(verifMod)) verifMod = primeroPend || modsCon[0] || '';
+  const modChips = MODULOS.filter(m=>modsCon.includes(m.nombre)).map(m=>{ const xs = sinRevAll.filter(l=>l.modulo===m.nombre), on = m.nombre===verifMod, rojoM = xs.some(l=>verifDiasAtras(diaValorInst(l))>VERIF_DIAS_ROJO);
+    return `<button onclick="verifMod='${m.nombre}';verifDia='';verifPanel=null;verifPintar();window.scrollTo(0,0)" style="border-radius:12px;padding:8px 12px;border:2px solid ${rojoM&&!on?'#dc2626':m.color};background:${on?m.color:'transparent'};color:${on?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${m.nombre}${xs.length?` · ${xs.length}`:' ✓'}</button>`; }).join('');
+  const sigMod = MODULOS.map(m=>m.nombre).find(n=>n!==verifMod && sinRevAll.some(l=>l.modulo===n));
+  const todas = todasAll.filter(l=>l.modulo===verifMod);
   const sinRev = todas.filter(verifPorRevisar);
   const diasPend = [...new Set(sinRev.map(l=>diaValorInst(l)))].sort();
   const diasTodos = [...new Set(todas.map(l=>diaValorInst(l)))].sort();
@@ -6750,22 +6786,21 @@ function verifPintar(){
   const delDia = todas.filter(l=>(diaValorInst(l))===verifDia);
   const pend = delDia.filter(verifPorRevisar), hechas = delDia.filter(l=>!verifPorRevisar(l));
   const rojo = pend.length && verifDiasAtras(verifDia)>VERIF_DIAS_ROJO;
-  const porMod = {}; pend.forEach(l=>{ (porMod[l.modulo]=porMod[l.modulo]||[]).push(l); });
   const btn = (id, acc, t, c) => `<button class="btn small" style="min-height:44px;padding:6px 8px;${verifPanel&&verifPanel.id===id&&verifPanel.acc===acc?`background:${c}`:`background:transparent;color:${c};border:1.5px solid ${c};box-shadow:none`}" onclick="verifAccion('${id}','${acc}')">${t}</button>`;
   const tarjeta = l => { const M = MODULOS.find(m=>m.nombre===l.modulo)||{color:'#666'};
     if(verifReinstPend(l)) return `<div class="card" style="padding:12px;border-left:6px solid ${M.color};border-top:2px solid #0e7490;border-right:2px solid #0e7490;border-bottom:2px solid #0e7490">
       <span class="tag" style="color:#0e7490;border-color:#0e7490">🔁 Reinstalación${(l.verif.intentos||0)>0?' · intento '+(l.verif.intentos+1):''}</span>
       <div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px"><span style="font-size:22px">🚪</span><div style="flex:1;min-width:0">
-        <strong style="font-size:15px">${l.descripcion}</strong>
+        <strong style="font-size:15px">${l.descripcion}</strong>${calleHtml(l,true)}
         <div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''} · el ${fCorta(l.fechaDia)} no se instalaron; el coordinador dice que ya se instalaron</div>
         <div class="hint" style="margin:2px 0 0;font-size:12.5px">Ya estaban descontadas: no se mueve material.</div></div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
         ${btn(l.id,'reok','✅ Sí se instalaron','#16a34a')}${btn(l.id,'reno','❌ No se instalaron','#dc2626')}</div></div>`;
     return `<div class="card" style="padding:12px;border-left:6px solid ${M.color}">
       <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:22px">${l.categoria==='Puerta'?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
-        <strong style="font-size:15px">${l.descripcion}</strong>
+        <strong style="font-size:15px">${l.descripcion}</strong>${calleHtml(l,true)}
         <div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''}${l.nota?' · '+l.nota:''}${l.estado==='pendiente'?' · <span style="color:#d97706">aún sin aprobar · ✅ la aprueba</span>':''}</div>
-        <div class="hint" style="margin:2px 0 0;font-size:12.5px">📦 ${verifMat(l)}</div></div></div>
+        ${verifDetalleHtml(l)}</div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
         ${btn(l.id,'ok','✅ Se instaló','#16a34a')}${btn(l.id,'modelo','✏️ Cambió el modelo','#3E5CDE')}
         ${btn(l.id,'parte','🔸 Una parte','#d97706')}${btn(l.id,'no','❌ No se instaló','#dc2626')}</div>
@@ -6773,26 +6808,27 @@ function verifPintar(){
   $('#main').innerHTML = `
     <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
       <div style="font-size:17px;font-weight:900">🔍 Verificar instalaciones</div>
-      <p class="hint" style="margin:2px 0 0">${verifDia?`Del ${nomDia(verifDia)}`:'No hay instalaciones'} · compáralas con el reporte del grupo de instalaciones.</p>
+      ${modChips?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${modChips}</div>`:''}
+      <p class="hint" style="margin:10px 0 0">${verifDia?`<strong>${verifMod}</strong> · instaladas el <strong>${nomDia(verifDia)}</strong>`:'No hay instalaciones'} · compáralas con el reporte del grupo de instalaciones de ese día.</p>
       ${rojo?`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:700">⚠️ Estas tienen ${verifDiasAtras(verifDia)} días sin revisar.</div>`:''}
       ${chips?`<div class="chips" style="margin-top:8px;flex-wrap:wrap">${chips}</div>`:''}
     </div>
-    ${verifReinstHtml()}
-    ${verifEsperandoHtml()}
-    ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste todas las de este día.</strong></div>` : ''}
-    ${Object.keys(porMod).map(mod=>`<div class="home-sec-t" style="margin:12px 4px 4px">${mod} · ${porMod[mod].length}</div>${porMod[mod].map(tarjeta).join('')}`).join('')}
-    ${pend.length>1 || (pend.length===1 && hechas.length) ? `<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás sí se instalaron (${pend.length})</button>` : ''}
-    ${hechas.length?`<div class="card" style="padding:12px"><strong>Ya revisadas · ${hechas.length}</strong>${hechas.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span><span class="hint" style="display:block;margin:2px 0 0">${l.modulo}${(l.verif||{}).nota?' · “'+l.verif.nota+'”':''}</span><span style="display:block;margin-top:4px">${verifEstadoTxt(l)}</span></span>${(l.verif||{}).estado==='ok'?`<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDeshacer('${l.id}')">Deshacer</button>`:''}</div>`).join('')}</div>`:''}`;
+    ${verifReinstHtml(verifMod)}
+    ${verifEsperandoHtml(verifMod)}
+    ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste las de ${verifMod} de este día.</strong>${sinRev.length?`<p class="hint" style="margin:4px 0 0">Faltan ${sinRev.length} de otro(s) día(s): elígelos arriba.</p>`:''}${sigMod?`<button class="btn" style="width:100%;margin-top:10px;background:${(MODULOS.find(m=>m.nombre===sigMod)||{}).color||'var(--brand)'}" onclick="verifMod='${sigMod}';verifDia='';verifPanel=null;verifPintar();window.scrollTo(0,0)">Siguiente: ${sigMod} (${sinRevAll.filter(l=>l.modulo===sigMod).length}) ›</button>`:''}</div>` : ''}
+    ${pend.map(tarjeta).join('')}
+    ${pend.length>1 || (pend.length===1 && hechas.length) ? `<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás de ${verifMod} sí se instalaron (${pend.length})</button>` : ''}
+    ${hechas.length?`<div class="card" style="padding:12px"><strong>Ya revisadas · ${hechas.length}</strong>${hechas.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">${l.modulo}${(l.verif||{}).nota?' · “'+l.verif.nota+'”':''}</span><span style="display:block;margin-top:4px">${verifEstadoTxt(l)}</span></span>${(l.verif||{}).estado==='ok'?`<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDeshacer('${l.id}')">Deshacer</button>`:''}</div>`).join('')}</div>`:''}`;
 }
-function verifReinstHtml(){
-  const xs = (verifLogs||[]).filter(l=>l.verif && l.verif.puertas==='reinstalar').map(l=>({l, dias:verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha))})).sort((a,b)=>b.dias-a.dias);
+function verifReinstHtml(mod){
+  const xs = (verifLogs||[]).filter(l=>l.verif && l.verif.puertas==='reinstalar' && (!mod || l.modulo===mod)).map(l=>({l, dias:verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha))})).sort((a,b)=>b.dias-a.dias);
   if(!xs.length) return '';
   const ayer = (()=>{ const d=new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
   return `<div class="card" style="padding:12px;border:2px solid #0e7490"><strong style="font-size:15px">🔁 Por volver a instalar · ${xs.length}</strong>
     <p class="hint" style="margin:2px 0 0">Ya están descontadas. Cuando salga en el reporte del grupo, pon la fecha y toca "Ya se instaló". No se mueve material.</p>
     ${xs.map(e=>{ const l=e.l, atr=e.dias>VERIF_DIAS_REINST; const min=(l.verif.fechaDecision?diaLocal(l.verif.fechaDecision):l.fechaDia);
       return `<div style="padding:10px;border-radius:12px;border:1px solid ${atr?'#dc2626':'var(--line)'};margin-top:8px">
-      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span><span class="hint" style="display:block;margin:2px 0 0">${l.modulo} · no se instaló el ${fCorta(l.fechaDia)}${l.verif.nota?' · “'+l.verif.nota+'”':''}</span></span><strong style="white-space:nowrap;color:${atr?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">${l.modulo} · no se instaló el ${fCorta(l.fechaDia)}${l.verif.nota?' · “'+l.verif.nota+'”':''}</span></span><strong style="white-space:nowrap;color:${atr?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap"><input type="date" id="reinst-f-${l.id}" value="${ayer<min?min:ayer}" min="${min}" max="${fechaHoyLocal()}" style="flex:1;min-width:140px"><button class="btn small" style="min-height:42px;background:#16a34a;white-space:nowrap" onclick="verifDirReinstalada('${l.id}')">✅ Ya se instaló</button></div>
       <button class="btn small" style="margin-top:6px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDirRedecidir('${l.id}')">↩️ Ya no se van a instalar: que el coordinador decida otra vez</button></div>`; }).join('')}</div>`;
 }
@@ -6810,12 +6846,12 @@ async function verifDirRedecidir(id){
     await verifGuardar(id, v); l.verif = v; toast('📨 Regresan al coordinador.'); verifTrasCambio();
   }catch(e){ alert('Error: '+e.message); }
 }
-function verifEsperandoHtml(){
-  const xs = verifEsperando(verifLogs).filter(e=>e.l.verif.puertas!=='reinstalar'); if(!xs.length) return '';
+function verifEsperandoHtml(mod){
+  const xs = verifEsperando(verifLogs).filter(e=>e.l.verif.puertas!=='reinstalar' && (!mod || e.l.modulo===mod)); if(!xs.length) return '';
   const nA = xs.filter(e=>e.atrasada).length;
   return `<div class="card" style="padding:12px;border:2px solid ${nA?'#dc2626':'#b45309'}"><strong style="font-size:15px">⏳ Esperando al coordinador · ${xs.length}</strong>
     <p class="hint" style="margin:2px 0 0">Se marca en rojo si pasan más de ${VERIF_DIAS_DECIDIR} días sin que decida.</p>
-    ${xs.map(e=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;${e.atrasada?'border-color:#dc2626;':''}"><span style="min-width:0;flex:1"><span class="invname">${e.l.categoria==='Puerta'?'🚪':'🗄️'} ${e.l.descripcion.split(' · ').slice(0,3).join(' · ')}</span><span class="hint" style="display:block;margin:2px 0 0">${e.l.modulo} · ${e.que}${(e.l.verif||{}).nota?' · “'+e.l.verif.nota+'”':''}</span></span><strong style="white-space:nowrap;color:${e.atrasada?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>`).join('')}</div>`;
+    ${xs.map(e=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;${e.atrasada?'border-color:#dc2626;':''}"><span style="min-width:0;flex:1"><span class="invname">${e.l.categoria==='Puerta'?'🚪':'🗄️'} ${e.l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(e.l)}<span class="hint" style="display:block;margin:2px 0 0">${e.l.modulo} · ${e.que}${(e.l.verif||{}).nota?' · “'+e.l.verif.nota+'”':''}</span></span><strong style="white-space:nowrap;color:${e.atrasada?'#dc2626':'var(--sub)'}">${e.dias===0?'hoy':e.dias===1?'1 día':e.dias+' días'}</strong></div>`).join('')}</div>`;
 }
 function verifNotaVal(){ return ((document.getElementById('verif-nota')||{}).value||'').trim(); }
 function verifPanelHtml(l){
@@ -6859,10 +6895,10 @@ async function verifAccion(id, acc){
 }
 function verifTrasCambio(){ if(verifLogs) _dirVerif = verifCalcDir(verifLogs, []); cargarPendDir(true); verifPintar(); }
 async function verifTodasOk(){
-  const xs = verifRevisables(verifLogs, verifRegresadas).filter(l=>verifPorRevisar(l) && diaValorInst(l)===verifDia);
+  const xs = verifRevisables(verifLogs, verifRegresadas).filter(l=>verifPorRevisar(l) && diaValorInst(l)===verifDia && l.modulo===verifMod);
   if(!xs.length) return;
   const nP = xs.filter(l=>l.estado==='pendiente').length;
-  if(!confirm(`✅ Marcar como instaladas las ${xs.length} que faltan de este día?\n\n${xs.map(l=>'• '+l.modulo+': '+l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.estado==='pendiente'?' (se aprueba)':'')).join('\n')}${nP?`\n\n${nP} aún no estaba(n) aprobada(s): también se aprueban.`:''}`)) return;
+  if(!confirm(`✅ ${verifMod}: ¿marcar como instaladas las ${xs.length} que faltan de este día?\n\n${xs.map(l=>'• '+l.modulo+': '+l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.estado==='pendiente'?' (se aprueba)':'')).join('\n')}${nP?`\n\n${nP} aún no estaba(n) aprobada(s): también se aprueban.`:''}`)) return;
   try{ for(const l of xs){ if(verifReinstPend(l)){ await verifGuardar(l.id, {reEstado:'ok', reFecha:new Date().toISOString()}); l.verif = Object.assign({}, l.verif, {reEstado:'ok'}); continue; }
       await verifAprobarSiPend(l); await verifGuardar(l.id, {estado:'ok'}); l.verif={estado:'ok'}; } verifPanel=null; toast('✅ Listo, '+xs.length+' verificada(s).'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
 }
@@ -7010,7 +7046,7 @@ function verifCoordHtml(){
   const reinst = logs.filter(l=>l.verif.puertas==='reinstalar');
   let html = '';
   if(aviso.length){
-    const linea = l => { const v = l.verif, d = `<strong>${l.descripcion.split(' · ').slice(0,2).join(' · ')}</strong> <span class="hint" style="margin:0">(${fCorta(l.fechaDia)})</span>`;
+    const linea = l => { const v = l.verif, d = `<strong>${l.descripcion.split(' · ').slice(0,2).join(' · ')}</strong> <span class="hint" style="margin:0">(${fCorta(l.fechaDia)})</span>${calleHtml(l)}`;
       let ic, txt, bt = '';
       if(v.estado==='no' && v.puertas==='pendiente'){ const pl = l.categoria==='Puerta'; ic = pl?'🚪':'🗄️';
         txt = (v.intentos?`Dirección marcó <strong>otra vez</strong> que no se instal${pl?'aron':'ó'}. `:`No se instal${pl?'aron':'ó'}. `)+`El material quedó apartado (ya descontado): ¿qué pasa con ${pl?'ellas':'él'}?`;
@@ -7031,7 +7067,7 @@ function verifCoordHtml(){
   if(reinst.length) html += `<div class="card" style="padding:12px;border:2px solid #0e7490">
       <div style="font-size:16px;font-weight:900">🔁 Por volver a instalar (${reinst.length})</div>
       <p class="hint" style="margin:2px 0 0">Ya están descontadas: <strong>NO las captures otra vez</strong> como instalación. Cuando se instale y salga en el reporte del grupo, Dirección la marca como instalada.</p>
-      ${reinst.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span><span class="hint" style="display:block;margin:2px 0 0">Del ${fCorta(l.fechaDia)}${(()=>{ const d = verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha)); return d>VERIF_DIAS_REINST?` · <strong style="color:#dc2626">esperando ${d} días</strong>`:''; })()}</span></span></div>`).join('')}</div>`;
+      ${reinst.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">Del ${fCorta(l.fechaDia)}${(()=>{ const d = verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha)); return d>VERIF_DIAS_REINST?` · <strong style="color:#dc2626">esperando ${d} días</strong>`:''; })()}</span></span></div>`).join('')}</div>`;
   return html;
 }
 async function verifCoordAccion(id, datos, msg){
@@ -7134,6 +7170,7 @@ function renderInstMueble(){
       <div><label class="hint">Fecha</label><input id="i-fecha" type="date" value="${hoyStr}" style="margin-top:4px"></div>
       <div><label class="hint">${reg?'¿De dónde viene? (opcional)':'Cliente (opcional)'}</label><input id="i-nota" placeholder="${reg?'Cliente o motivo del regreso':'Nombre o referencia'}" style="margin-top:4px"></div>
     </div>
+    ${reg?'':calleCampoHtml('i')}
     <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="previewInst()">Revisar material</button>
   </div>
   <div id="i-result"></div>`;
@@ -7849,6 +7886,7 @@ async function confirmarInst(){
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = ($('#i-nota').value||'').trim();
   if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[], consumo:instPreview.consumo});
+  const calle = exigirCalle('i'); if(!calle) return; // v182
   if(!(await verifAvisoRecaptura('Mueble', instPreview.modeloKey||null))) return; // v181
   const fechaDia = $('#i-fecha').value || new Date().toISOString().slice(0,10);
   const mod = modulo();
@@ -7864,11 +7902,11 @@ async function confirmarInst(){
     const logId = cryptoId();
     for(const c of instPreview.consumo){
       const item = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc} · 📍 ${calle}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
     }
     // Registro consolidado para el historial por día del módulo
     await db.collection('instalacionesLog').doc(logId).set({
-      modulo:mod, categoria:'Mueble', descripcion:desc, nota, fechaDia, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[],
+      modulo:mod, categoria:'Mueble', descripcion:desc, nota, calle, fechaDia, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[],
       consumo:instPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
     toast(estado==='pendiente'
@@ -7935,6 +7973,7 @@ function renderInstPuertas(){
     <div class="grid2" style="margin-top:10px">
       <div><label class="hint">Fecha</label><input id="p-fecha" type="date" value="${new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)}" style="margin-top:4px"></div>
       <div><label class="hint">${reg?'¿De dónde viene? (opcional)':'Cliente (opcional)'}</label><input id="p-nota" placeholder="${reg?'Cliente o motivo del regreso':'Nombre o referencia'}" style="margin-top:4px"></div>
+      ${reg?'':`<div style="grid-column:1/-1">${calleCampoHtml('p')}</div>`}
     </div>
     <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="calcPuerta()">Revisar material</button>
   </div>
@@ -8359,6 +8398,7 @@ async function registrarPuerta(tipo, alto, ancho){
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
   const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${puertaPreview.medidasTxt||(ancho+'×'+alto+' cm (ancho×alto)')}`;
   if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo});
+  const calle = exigirCalle('p'); if(!calle) return; // v182
   if(!(await verifAvisoRecaptura('Puerta'))) return; // v181
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
@@ -8371,11 +8411,11 @@ async function registrarPuerta(tipo, alto, ancho){
     const logId = cryptoId();
     for(const c of puertaPreview.consumo){
       const item = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc} · 📍 ${calle}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
     }
-    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,altoMax:puertaPreview.altoMax||alto,medidas:puertaPreview.medidasTxt||'',nota,fechaDia,fecha:new Date().toISOString(),estado});
+    await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,altoMax:puertaPreview.altoMax||alto,medidas:puertaPreview.medidasTxt||'',nota,calle,fechaDia,fecha:new Date().toISOString(),estado});
     await db.collection('instalacionesLog').doc(logId).set({
-      modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, fechaDia, modeloKey:'Puerta '+tipo,
+      modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, calle, fechaDia, modeloKey:'Puerta '+tipo,
       consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
     });
     const so = puertaPreview.sobOferta; let conSob = false;
@@ -8696,6 +8736,7 @@ function repGrupos(){
   G.push({ic:'📅', t:'Del día', c:'#d97706', items:[
     {t:'Cierre del día (PDF)', s:'inventario de hoy', k:'cierre inventario diario hojas enteras sin cortar pdf hoy', js:"repDiaSel=fechaHoyLocal();repAbrir('dia')"},
     {t:'Reporte de cualquier día', s:'elige fecha', k:'dia fecha ayer pasado inicio cierre pdf', js:"repDiaSel=repAyer();repDiaModo='completo';repAbrir('dia')"},
+    ...(ADM ? [] : [{t:'Instalaciones del día (PDF)', s:'modelo, calle y estado', k:'instalaciones dia pdf calle reporte instalado closet puertas verificar', js:"repInstDia=fechaHoyLocal();repInstCache=null;repAbrir('instDia')"}]),
     ...(ADM ? [] : [{t: C ? 'Mis cierres del turno' : 'Cierres del turno', s: C ? 'lo que capturé' : (repEsDir() ? 'los 5 módulos' : modulo()), k:'cierre turno corte hojas cortadas pvc cintilla pegamento pijas coordinador', js:"repCierresDia=fechaHoyLocal();repCierreAbierto='';repCierresCache=null;repAbrir('cierres')"}])
   ]});
   G.push({ic:'📦', t:'Material', c:'#2563eb', items:[
@@ -8707,6 +8748,7 @@ function repGrupos(){
     {t:'Inventario con movimiento', s:'comprobación', k:'formula comprobacion inicial final teorico reporte modulo', js:"repAbrir('formula')"}
   ]});
   G.push({ic:'🏠', t:'Instalaciones y garantías', c:'#0d7468', items:[
+    {t:'Instalaciones del día (PDF)', s:'modelo, calle y estado', k:'instalaciones dia pdf calle', js:"repInstDia=fechaHoyLocal();repInstCache=null;repAbrir('instDia')"},
     {t:'Instalaciones de la semana', s:modulo(), k:'instalaciones semana closet puertas', js:"repAbrir('inst')"},
     {t:'Consumo por instalaciones', s:'acumulado', k:'consumo instalaciones acumulado', js:"repAbrir('consInst')"},
     {t:'Material en garantía', s:'acumulado', k:'garantia garantias acumulado', js:"repAbrir('garAcum')"}
@@ -8784,6 +8826,7 @@ function renderRepVer(){
   const s = repSec;
   if(s==='dia') return renderRepDia();
   if(s==='cierres') return renderRepCierres();
+  if(s==='instDia') return renderRepInstDia();
   if(s==='inst'){ $('#main').innerHTML = repVolverHtml('🔧 Instalaciones de la semana', '', true) + `<div class="card" id="rep-inst"><strong>🔧 Instalaciones de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`; setTimeout(repInstalacionesSemana, 0); return; }
   if(s==='gas'){ $('#main').innerHTML = repVolverHtml('⛽ Gasolina', '', true) + `<div class="card" id="rep-gas"><strong>⛽ Gasolina de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`; setTimeout(repGasolinaSemana, 0); return; }
   const T = {
@@ -8826,6 +8869,78 @@ async function repDiaPDF(){
   if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet e intenta de nuevo.');
   try{ await generarReporteDiarioPDF(repDiaModo, repDiaSel); }
   catch(e){ alert('No se pudo generar el reporte: '+e.message); }
+}
+// --- Instalaciones del día (PDF) (confirmado por el usuario, v182): por módulo, con la calle ---
+let repInstDia = '', repInstCache = null;
+async function repInstCargar(){
+  const snap = await db.collection('instalacionesLog').get();
+  return snap.docs.map(d=>({id:d.id,...d.data()})).filter(l=>!l.cambiadaPor);
+}
+function instDiaDe(logs, mod, dia){ return logs.filter(l=>l.modulo===mod && (l.fechaDia||diaLocal(l.fecha))===dia).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')); }
+function instEstadoTxt(l){
+  const v = l.verif||{};
+  if(l.estado==='rechazado' && !v.estado) return {t:'Rechazada', c:[185,28,28]};
+  if(v.estado==='ok') return {t:'Verificada', c:[22,128,74]};
+  if(v.estado==='no') return {t:'No se instaló'+({reinstalar:' (por reinstalar)', reinstalada:' (ya se reinstaló)', regreso:' (regresó)', sobrantes:' (a sobrantes)', merma:' (a merma)', pendiente:''}[v.puertas]||''), c:[185,28,28]};
+  if(v.estado==='parte') return {t:'Una parte', c:[180,83,9]};
+  if(v.estado==='modelo') return {t:v.resuelto?'Cambio de modelo':'Cambio de modelo (pendiente)', c:[62,92,222]};
+  return {t:'Por verificar', c:[100,116,139]};
+}
+function renderRepInstDia(){
+  const hoy = fechaHoyLocal(), ayer = repAyer();
+  if(!repInstDia || repInstDia>hoy) repInstDia = hoy;
+  if(!repInstCache){
+    $('#main').innerHTML = repVolverHtml('🔧 Instalaciones del día (PDF)', '') + '<div class="card">Cargando…</div>';
+    repInstCargar().then(r=>{ repInstCache = r; if(current==='repver' && repSec==='instDia') renderRepInstDia(); })
+      .catch(e=>{ $('#main').innerHTML = repVolverHtml('🔧 Instalaciones del día (PDF)','') + `<div class="card">No se pudo cargar: ${e.message}</div>`; });
+    return;
+  }
+  const paso = (n, t) => `<div style="margin-top:14px;font-weight:800"><span class="paso" style="display:inline-flex;margin-right:6px">${n}</span>${t}</div>`;
+  const chip = (on, txt, js) => `<button class="chip ${on?'on':''}" onclick="${js}">${txt}</button>`;
+  const mod = modulo(), xs = instDiaDe(repInstCache, mod, repInstDia);
+  const fechaTxt = new Date(repInstDia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'});
+  const total5 = repEsDir() ? MODULOS.map(m=>({m:m.nombre, n:instDiaDe(repInstCache, m.nombre, repInstDia).length})) : [];
+  $('#main').innerHTML = repVolverHtml('🔧 Instalaciones del día (PDF)', 'Lo que se instaló ese día: modelo, calle, cliente, quién la capturó y cómo va la verificación.') + `
+    <div class="card">
+      ${paso(1, repEsDir() ? '¿De qué módulo?' : 'Módulo')}${repModHtml()}
+      ${paso(2, '¿Qué día se instaló?')}
+      <div class="chips" style="margin-top:8px">${chip(repInstDia===hoy,'Hoy',"repInstDia=fechaHoyLocal();renderRepInstDia()")}${chip(repInstDia===ayer,'Ayer',"repInstDia=repAyer();renderRepInstDia()")}</div>
+      <div class="row" style="gap:8px;margin-top:8px;flex-wrap:nowrap;align-items:center"><span class="hint" style="margin:0;white-space:nowrap">📆 Otra fecha:</span><input type="date" value="${repInstDia}" max="${hoy}" style="flex:1;min-width:0" onchange="if(this.value){repInstDia=this.value;renderRepInstDia();}"></div>
+      <p class="hint" style="margin:6px 0 0">Elegiste: <strong>${fechaTxt}</strong></p>
+      ${paso(3, `${mod}: ${xs.length} instalaci${xs.length===1?'ón':'ones'}`)}
+      <div class="movlist" style="margin-top:6px">${xs.length ? xs.map(l=>{ const e = instEstadoTxt(l); return `<div class="movitem" style="padding:8px 10px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">${[l.nota, verifQuien(l)].filter(Boolean).join(' · ')}</span></span><span class="tag" style="white-space:nowrap;color:rgb(${e.c});border-color:rgb(${e.c})">${e.t}</span></div>`; }).join('') : '<p class="hint" style="margin:4px 0">No hay instalaciones capturadas con esa fecha.</p>'}</div>
+      <button class="btn" style="width:100%;margin-top:14px;min-height:52px;font-size:16px;background:linear-gradient(135deg,#0d7468,#0a5c53)" ${xs.length?'':'disabled'} onclick="repInstPDF(false)">📄 Descargar PDF de ${mod}</button>
+      ${repEsDir() ? `<button class="btn" style="width:100%;margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" ${total5.some(x=>x.n)?'':'disabled'} onclick="repInstPDF(true)">📄 Los 5 módulos en un PDF (${total5.map(x=>x.m+' '+x.n).join(' · ')})</button>` : ''}
+    </div>`;
+}
+async function repInstPDF(todos){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet e intenta de nuevo.');
+  try{ await generarInstDiaPDF(todos ? MODULOS.map(m=>m.nombre) : [modulo()], repInstDia, repInstCache || await repInstCargar()); }
+  catch(e){ alert('No se pudo generar el reporte: '+e.message); }
+}
+async function generarInstDiaPDF(mods, dia, logs){
+  const VERDE = [13,116,104], fLarga = new Date(dia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long', year:'numeric'});
+  const ahora = new Date().toLocaleString('es-MX',{day:'numeric', month:'short', hour:'numeric', minute:'2-digit'});
+  const S = herrPdfBase('Closets Vera · Instalaciones del día · '+(mods.length===1?mods[0]:'5 módulos'), `${fLarga}  ·  generado ${ahora}`, VERDE);
+  const todas = mods.flatMap(m=>instDiaDe(logs, m, dia));
+  const cuenta = f => todas.filter(f).length;
+  S.kpis([[todas.length,'instalaciones',VERDE],[cuenta(l=>l.categoria!=='Puerta'),'clósets',[71,85,105]],[cuenta(l=>l.categoria==='Puerta'),'puertas',[71,85,105]],[cuenta(l=>(l.verif||{}).estado==='ok'),'verificadas',[22,128,74]],[cuenta(l=>!l.verif && l.estado!=='rechazado'),'por verificar',[100,116,139]],[cuenta(l=>['no','parte','modelo'].includes((l.verif||{}).estado)),'con observación',[185,28,28]]]);
+  const hora = l => { if(!l.fecha) return ''; const h = new Date(l.fecha).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}); return diaLocal(l.fecha)!==dia ? {t:fCorta(diaLocal(l.fecha))+' '+h, col:[180,83,9], b:true} : h; };
+  mods.forEach((mod, mi)=>{
+    const xs = instDiaDe(logs, mod, dia);
+    if(mods.length>1){ if(!xs.length) return; S.seccion(mod, xs.length+' instalación(es)', VERDE, mi>0 && S.y>60); }
+    if(!xs.length){ S.vacio('No hay instalaciones capturadas con esta fecha.'); return; }
+    S.tabla([{t:'#',w:7},{t:'Capturada',w:17},{t:'Tipo',w:14},{t:'Modelo y color',w:50},{t:'Calle',w:34},{t:'Cliente',w:22},{t:'Capturó',w:16},{t:'Estado',w:22}],
+      xs.map((l,i)=>{ const e = instEstadoTxt(l), ex = (l.extrasDetalle||[]).length ? ' + '+l.extrasDetalle.join(', ') : '';
+        return [String(i+1), hora(l), l.categoria==='Puerta'?'Puertas':'Clóset', {t:l.descripcion+ex, b:true}, {t:l.calle||'(sin calle)', b:!!l.calle, col:l.calle?null:[150,150,150]}, l.nota||'', verifQuien(l), {t:e.t, col:e.c, b:true}]; }), VERDE);
+    const notas = xs.filter(l=>(l.verif||{}).nota);
+    if(notas.length){ S.banda('Observaciones de Dirección', notas.length+'', [185,28,28]); S.tabla([{t:'#',w:7},{t:'Instalación',w:70},{t:'Observación',w:105}], notas.map(l=>[String(xs.indexOf(l)+1), l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), l.verif.nota]), [185,28,28]); }
+    const tot = {}; xs.filter(l=>l.estado!=='rechazado').forEach(l=>(l.consumo||[]).forEach(c=>{ if(Number(c.cantidad)>0) tot[c.itemId]=(tot[c.itemId]||0)+Number(c.cantidad); }));
+    const ids = Object.keys(tot).filter(id=>CATALOGO.find(i=>i.id===id)).sort((a,b)=>{ const A=CATALOGO.find(i=>i.id===a), B=CATALOGO.find(i=>i.id===b); return (esHoja(B)?1:0)-(esHoja(A)?1:0) || A.nombre.localeCompare(B.nombre); });
+    if(ids.length){ S.banda('Material de estas instalaciones'+(mods.length>1?' · '+mod:''), ids.length+' artículo(s)', VERDE);
+      S.tabla([{t:'Artículo',w:120},{t:'Cantidad',w:62}], ids.map(id=>{ const it = CATALOGO.find(i=>i.id===id); return [it.nombre, {t:fmtNum(tot[id])+' '+it.unidad, b:true}]; }), VERDE); }
+  });
+  await S.fin(`Instalaciones_${mods.length===1?mods[0]:'5_modulos'}_${dia}.pdf`, 'Closets Vera · Instalaciones del día');
 }
 // --- Cierres del turno (Dirección: los 5 módulos; coordinador: el suyo) ---
 async function repCierresCargar(dia){
@@ -9266,7 +9381,7 @@ async function renderAprobacionesBase(){
 
   const logsPendientes = todosLogs.filter(instEnAprobaciones).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
   const nVerif = todosLogs.filter(instSeVerifica).length;
-  const avisoVerif = nVerif ? `<div class="card" style="padding:12px;border:2px solid #0e7490"><div class="row" style="justify-content:space-between;gap:10px;align-items:center"><div style="flex:1;min-width:0"><strong>🔍 ${nVerif} instalaci${nVerif===1?'ón':'ones'} sin aprobar</strong><p class="hint" style="margin:2px 0 0">Ya están descontadas. Se aprueban en <strong>Verificar instalaciones</strong> con el reporte del grupo (✅ Se instaló), no aquí.</p></div><button class="btn small" style="background:#0e7490;white-space:nowrap" onclick="verifDia='';verifPanel=null;irA('verif')">Verificar</button></div></div>` : '';
+  const avisoVerif = nVerif ? `<div class="card" style="padding:12px;border:2px solid #0e7490"><div class="row" style="justify-content:space-between;gap:10px;align-items:center"><div style="flex:1;min-width:0"><strong>🔍 ${nVerif} instalaci${nVerif===1?'ón':'ones'} sin aprobar</strong><p class="hint" style="margin:2px 0 0">Ya están descontadas. Se aprueban en <strong>Verificar instalaciones</strong> con el reporte del grupo (✅ Se instaló), no aquí.</p></div><button class="btn small" style="background:#0e7490;white-space:nowrap" onclick="verifDia='';verifMod='';verifPanel=null;irA('verif')">Verificar</button></div></div>` : '';
   // Movimientos pendientes que NO son de una instalación (esos ya se muestran agrupados arriba
   // por su instalacionesLog) — se agrupan por loteId (una sola captura de Entradas/Salidas).
   const movsSueltosPendientes = todosMovs.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo);
@@ -9319,7 +9434,7 @@ async function renderAprobacionesBase(){
         <div class="row" style="justify-content:space-between">
           <div><strong>${l.modulo}</strong><div class="tag">${l.fechaDia}</div>${l.creadoPor?`<div class="tag">${l.creadoPor}</div>`:''}</div>
         </div>
-        <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>${extrasLogHtml(l)}
+        <p class="hint" style="margin:6px 0">${l.descripcion}${l.nota?(' · '+l.nota):''}</p>${calleHtml(l)}${extrasLogHtml(l)}
         ${l.cambio ? detalleCambioAprob(l) : `<div class="wrap-x"><table><tr><th>Artículo</th><th>Cant.</th></tr>
         ${(l.consumo||[]).map(c=>`<tr><td>${CATALOGO.find(i=>i.id===c.itemId)?.nombre||c.itemId}</td><td>${fmtNum(c.cantidad)}</td></tr>`).join('')}
         </table></div>`}
