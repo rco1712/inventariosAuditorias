@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v184';
+const APP_VERSION = 'v185';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8849,7 +8849,6 @@ function renderRepDia(){
   const hoy = fechaHoyLocal(), ayer = repAyer();
   if(!repDiaSel || repDiaSel>hoy) repDiaSel = hoy;
   const esHoy = repDiaSel===hoy;
-  if(!esHoy && repDiaModo==='sincortar') repDiaModo = 'completo';
   const paso = (n, t) => `<div style="margin-top:14px;font-weight:800"><span class="paso" style="display:inline-flex;margin-right:6px">${n}</span>${t}</div>`;
   const chip = (on, txt, js) => `<button class="chip ${on?'on':''}" onclick="${js}">${txt}</button>`;
   const opt = (k, t, d, dis) => { const on = repDiaModo===k && !dis;
@@ -8863,8 +8862,8 @@ function renderRepDia(){
       <div class="row" style="gap:8px;margin-top:8px;flex-wrap:nowrap;align-items:center"><span class="hint" style="margin:0;white-space:nowrap">📆 Otra fecha:</span><input type="date" value="${repDiaSel}" max="${hoy}" style="flex:1;min-width:0" onchange="repDiaSel=this.value||fechaHoyLocal();renderRepDia()"></div>
       <p class="hint" style="margin:6px 0 0">Elegiste: <strong>${fechaTxt}</strong></p>
       ${paso(3, '¿Qué quieres ver?')}
-      ${opt('completo', esHoy ? 'Inventario completo' : 'Reporte del día', esHoy ? 'Todo el inventario, con las hojas sin cortar al final y las entradas y salidas.' : 'Con qué inició y con qué cerró cada artículo, más sus entradas y salidas.')}
-      ${opt('sincortar', 'Solo hojas sin cortar', esHoy ? 'Una hoja con la melamina y MDF enteros.' : 'Solo se puede sacar de hoy.', !esHoy)}
+      ${opt('completo', esHoy ? 'Inventario completo' : 'Reporte del día', esHoy ? 'Todo el inventario, con las hojas sin cortar al final y las entradas y salidas.' : 'Con qué inició y con qué cerró cada artículo, sus entradas y salidas, y las hojas enteras al cerrar.')}
+      ${opt('sincortar', 'Solo hojas sin cortar', esHoy ? 'Una hoja con la melamina y MDF enteros.' : 'Las hojas enteras que quedaron al cerrar ese día.')}
       ${opt('movs', 'Entradas y salidas del día', 'Proveedores, traspasos, salidas y cómo quedan las deudas.')}
       <button class="btn" style="width:100%;margin-top:14px;min-height:52px;font-size:16px;background:linear-gradient(135deg,#d97706,#b45309)" onclick="repDiaPDF()">📄 Descargar PDF</button>
     </div>`;
@@ -12374,9 +12373,19 @@ async function generarReporteDiarioPDF(modo, fechaDia){
   } // fin de acumulado y correderas (solo hoy)
   } // fin de la parte de tablas
   // Hoja final (confirmado por el usuario): SOLO hojas enteras de Melamina y MDF (3 y 5 mm).
-  if((!esPasado || soloSinCortar) && !soloMovs){
+  // v185 (confirmado por el usuario): también en el reporte de un día pasado, con lo que quedó al cerrar ese día.
+  const completasAlCerrar = itemId => {
+    if(!esPasado) return calcFormula(itemId).completas;
+    const cutISO = new Date(diaSel+'T23:59:59.999').toISOString();
+    const docI = inicialMap[itemId]!==undefined ? {cantidad:inicialMap[itemId], cortado:inicialCortadoMap[itemId], fecha:inicialFechaMap[itemId]} : null;
+    const bl = lineaBase(resetMap[mod], docI);
+    if(bl.desde && bl.desde >= cutISO) return bl.inicial - bl.inicialCortado;
+    const lista = movs.filter(m=>m.itemId===itemId && (!bl.desde || m.fecha>bl.desde) && m.fecha <= cutISO && cuentaEnInventario(m));
+    return calcularFormula(itemId, bl.inicial, bl.inicialCortado, lista).completas || 0;
+  };
+  if(!soloMovs){
     if(!soloSinCortar) doc.addPage();
-    encabezado('Hojas enteras', `Lo que hay sin cortar  ·  Módulo ${mod}  ·  ${fechaStr}, ${horaStr}`);
+    encabezado('Hojas enteras', esPasado ? `Lo que quedó sin cortar al cerrar el ${diaStr}  ·  Módulo ${mod}` : `Lo que hay sin cortar  ·  Módulo ${mod}  ·  ${fechaStr}, ${horaStr}`);
     // Diseño sencillo como las demás tablas, con resaltes (confirmado por el usuario).
     const hdr = () => {
       doc.setFillColor(...color); doc.rect(marginL, y, tableW(), 6, 'F');
@@ -12385,7 +12394,7 @@ async function generarReporteDiarioPDF(modo, fechaDia){
       doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); y += 6;
     };
     const tablaEnteras = (cat, titulo) => {
-      const datos = CATALOGO.filter(i=>i.cat===cat).map(it=>({it, n:calcFormula(it.id).completas}));
+      const datos = CATALOGO.filter(i=>i.cat===cat).map(it=>({it, n:completasAlCerrar(it.id)}));
       if(!datos.length) return;
       color = PDF_CAT_COLOR[cat];
       const tot = datos.reduce((s2,x)=>s2+x.n,0);
