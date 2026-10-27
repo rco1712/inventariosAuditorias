@@ -4810,7 +4810,8 @@ async function movCorrAnularLote(loteId){
   if(!confirm(`🗑️ Anular TODA esta captura (${lote.length} artículos):\n\n${lote.map(m=>`• ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} ${m.itemNombre}`).join('\n')}\n\nMotivo: ${nota}\n\n¿Anular todo?`)) return;
   const quien = (getCurrentUserEmail?getCurrentUserEmail():''), ahora = new Date().toISOString();
   try{ for(const m of lote){ const upd = {estado:'rechazado', anulado:true, correccion:{fecha:ahora, por:quien, anulado:true, motivo:nota, antes:{itemId:m.itemId, itemNombre:m.itemNombre, cantidad:m.cantidad}}, nota:(m.nota?m.nota+' · ':'')+`🗑️ Anulado por Dirección: ${nota}`};
-      await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); } }
+      await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); }
+    await verifReabrirSiSeRechaza(lote.filter(m=>VERIF_MOT_REG.includes(m.motivo)).map(m=>m.instalacionId)); }
   catch(e){ return alert('Error: '+e.message); }
   movCorrCerrar(); entrCache = null; salCache = null; toast(`🗑️ ${lote.length} movimientos anulados`); movCorrRefrescar();
 }
@@ -4849,7 +4850,7 @@ async function movCorrGuardar(anular){
     if(!confirm(`✏️ Corregir esta ${tipoTxt}:\n\nAntes: ${fmtNum(m.cantidad)} ${item2unidad(m.itemId)} de ${m.itemNombre}\nAhora: ${fmtNum(q)} ${it.unidad} de ${it.nombre}\n\nMotivo: ${nota}\n\n¿Guardar?`)) return;
     upd = {itemId, itemNombre:it.nombre, cantidad:q, correccion:{fecha:ahora, por:quien, motivo:nota, antes}, nota:(m.nota?m.nota+' · ':'')+`✏️ Corregido por Dirección (antes: ${fmtNum(antes.cantidad)} ${antes.itemNombre}): ${nota}`};
   }
-  try{ await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); }catch(e){ return alert('Error: '+e.message); }
+  try{ await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); if(anular && VERIF_MOT_REG.includes(m.motivo)) await verifReabrirSiSeRechaza([m.instalacionId]); }catch(e){ return alert('Error: '+e.message); }
   movCorrCerrar(); entrCache = null; salCache = null; toast(anular?'🗑️ Movimiento anulado':'✏️ Movimiento corregido'); movCorrRefrescar();
 }
 async function borrarCorte(id){
@@ -10032,9 +10033,24 @@ async function aprobarLote(loteId){
   try{ await cambiarEstadoLote(loteId,'aprobado'); renderAprobaciones(); }
   catch(e){ alert('Error: '+e.message); }
 }
+// v191 (auditoría del flujo): si Dirección rechaza o anula el regreso / sobrantes / merma de una
+// instalación que marcó "No se instaló", el material sigue apartado: la instalación vuelve a quedar
+// "sin definir" para que el coordinador decida otra vez (antes se quedaba sin aparecer en ningún lado).
+const VERIF_MOT_REG = ['regresoInstalacion','regresoMerma','regresoSobrante'];
+async function verifReabrirSiSeRechaza(instIds){
+  const ids = [...new Set((instIds||[]).filter(Boolean))]; if(!ids.length) return;
+  try{ const ms = (await db.collection('movimientos').get()).docs.map(d=>d.data());
+    for(const id of ids){
+      if(ms.some(m=>m.instalacionId===id && VERIF_MOT_REG.includes(m.motivo) && m.estado!=='rechazado')) continue;
+      const d = await db.collection('instalacionesLog').doc(id).get(); const l = d && d.data && d.data(); const v = l && l.verif;
+      if(!v || v.estado!=='no' || !['regreso','sobrantes','merma'].includes(v.puertas)) continue;
+      await db.collection('instalacionesLog').doc(id).update({verif:Object.assign({}, v, {puertas:'pendiente', visto:false, nota:'Dirección rechazó a dónde iba el material: decide otra vez', intentos:(v.intentos||0)+1})});
+    } }catch(e){}
+}
 async function rechazarLote(loteId){
   if(!confirm('¿Rechazar este lote? El material NO se descontará/agregará al inventario.')) return;
-  try{ await cambiarEstadoLote(loteId,'rechazado'); renderAprobaciones(); }
+  try{ const ids = (await db.collection('movimientos').get()).docs.map(d=>d.data()).filter(m=>(m.loteId===loteId) && VERIF_MOT_REG.includes(m.motivo)).map(m=>m.instalacionId);
+    await cambiarEstadoLote(loteId,'rechazado'); await verifReabrirSiSeRechaza(ids); renderAprobaciones(); }
   catch(e){ alert('Error: '+e.message); }
 }
 async function aprobarTodo(){
