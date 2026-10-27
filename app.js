@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v191';
+const APP_VERSION = 'v192';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -12693,7 +12693,7 @@ async function renderApart(){
 function apPintar(){
   if(current!=='apart') return;
   const E = verifEsperando(verifLogs);
-  if(!apMod || !E.some(e=>e.l.modulo===apMod)) apMod = (MODULOS.find(m=>E.some(e=>e.l.modulo===m.nombre))||{}).nombre || '';
+  if(!apMod) apMod = (MODULOS.find(m=>E.some(e=>e.l.modulo===m.nombre))||{}).nombre || '';
   const chips = MODULOS.map(m=>{ const xs = E.filter(e=>e.l.modulo===m.nombre), on = m.nombre===apMod, rojo = xs.some(e=>e.atrasada);
     return `<button onclick="apMod='${m.nombre}';apPintar()" style="border-radius:12px;padding:8px 12px;border:2px solid ${rojo&&!on?'#dc2626':m.color};background:${on?m.color:'transparent'};color:${on?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${m.nombre}${xs.length?` · ${xs.length}`:' ✓'}</button>`; }).join('');
   const xs = E.filter(e=>e.l.modulo===apMod);
@@ -12716,7 +12716,7 @@ function apPintar(){
       <p class="hint" style="margin:2px 0 0">Instalaciones que marcaste <strong>❌ No se instaló</strong> y que el coordinador todavía no resuelve. Su material <strong>sigue descontado</strong>: no ha vuelto al inventario. En rojo, las que llevan más de ${VERIF_DIAS_DECIDIR} días (o ${VERIF_DIAS_REINST} si se van a reinstalar).</p>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${chips}</div>
     </div>
-    ${!E.length ? '<div class="card" style="text-align:center">✅ No hay material apartado. Todo lo rechazado ya está definido.</div>' : `
+    ${!E.length ? '<div class="card" style="text-align:center">✅ No hay material apartado. Todo lo rechazado ya está definido.</div>' : !xs.length ? `<div class="card" style="text-align:center">✅ ${apMod} no tiene material apartado: todo lo que rechazaste ya está definido.</div>` : `
     <div class="card" style="padding:12px">
       <strong style="font-size:15px">${apMod} · ${xs.length} sin definir</strong>
       ${totTxt?`<div class="hint" style="margin:4px 0 0">Total apartado en ${apMod} (no está en el inventario):</div><ul style="margin:4px 0 0 18px;padding:0;font-size:13px">${totTxt}</ul>`:''}
@@ -12773,7 +12773,7 @@ async function renderDup(){
 function dupPintar(){
   if(current!=='dup' || !dupCache) return;
   const G = dupCache.grupos;
-  if(!dupMod || !G.some(g=>g.modulo===dupMod)) dupMod = (MODULOS.find(m=>G.some(g=>g.modulo===m.nombre))||{}).nombre || '';
+  if(!dupMod) dupMod = (MODULOS.find(m=>G.some(g=>g.modulo===m.nombre))||{}).nombre || '';
   const hora = iso => iso ? new Date(iso).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit', second:'2-digit'}) : '';
   const quien = x => String(x.creadoPor||((x.movs||[])[0]||{}).creadoPor||'').split('@')[0];
   const lista = arr => arr.map(m=>{ const it = CATALOGO.find(i=>i.id===m.itemId); return `${fmtNum(m.cantidad)} ${it?it.unidad:''} ${it?it.nombre:(m.itemNombre||m.itemId)}`; }).join(' · ');
@@ -12794,7 +12794,7 @@ function dupPintar(){
       <div style="font-size:18px;font-weight:900">🔍 Revisar duplicados</div>
       <p class="hint" style="margin:2px 0 0">Capturas iguales guardadas con menos de 3 minutos de diferencia (doble toque), en los 5 módulos. Revisa cada caso: si sobra, tócale <strong>Quitar esta copia</strong> y deja de contar en el inventario.</p>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${mods.map(m=>`<button onclick="dupMod='${m.n}';dupPintar()" style="border-radius:12px;padding:8px 12px;border:2px solid ${m.c};background:${m.n===dupMod?m.c:'transparent'};color:${m.n===dupMod?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${m.n}${m.k?' · '+m.k:' ✓'}</button>`).join('')}</div></div>
-    ${!G.length ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ No se encontraron duplicados en ningún módulo.</strong></div>` : ''}
+    ${!G.length ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ No se encontraron duplicados en ningún módulo.</strong></div>` : !xs.length ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ ${dupMod} no tiene duplicados.</strong></div>` : ''}
     ${xs.map(g=>`<div class="card" style="padding:12px;border-left:6px solid #dc2626">
       <strong style="font-size:15px">${titulo(g)}</strong>
       ${g.items.map((x,i)=>copia(g,x,i)).join('')}${ayuda(g)}
