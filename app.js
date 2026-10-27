@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v195';
+const APP_VERSION = 'v196';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8973,6 +8973,7 @@ function repGrupos(){
     herr.push({t:'Almacén general · herramienta', s:'PDF', k:'almacen general herramienta pdf', js:'generarAlmacenPDF()'});
     herr.push({t:'Almacén general · ferretería', s:'PDF', k:'ferreteria almacen herrajes stickers pvc cintilla pdf', js:'generarFerPDF()'});
   }
+  if(A) herr.push({t:'Maquinaria', s:'PDF', k:'maquinaria maquinas enchapadora escuadradora aspiradora compresor mantenimiento reparacion pdf', js:'generarMaqPDF(null)'});
   if(!ADM && (A || SL || C)) herr.push({t:'Vehículos', s:'PDF', k:'vehiculos carros placas seguro mantenimiento pdf', js: repEsDir() ? `generarVehPDF(${mods})` : `generarVehPDF(['${modulo()}'])`});
   if(herr.length) G.push({ic:'🧰', t:'Herramienta, vehículos y gasolina', c:'#c2410c', items:herr});
   return G;
@@ -12739,7 +12740,7 @@ async function renderMaq(){
       <div style="font-size:18px;font-weight:900">🏭 Maquinaria</div>
       <p class="hint" style="margin:2px 0 0">Enchapadoras, escuadradoras, aspiradoras y compresores de cada módulo, con sus mantenimientos y reparaciones. Solo Dirección.</p>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${chips}</div>
-      <button class="btn" style="width:100%;margin-top:10px;background:#7c3aed" onclick="maqNueva()">➕ Agregar máquina</button>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:nowrap"><button class="btn" style="flex:1;background:#7c3aed" onclick="maqNueva()">➕ Agregar máquina</button><button class="btn" style="background:#b91c1c;white-space:nowrap" onclick="generarMaqPDF(${maqMod?`['${maqMod}']`:'null'})">📄 PDF${maqMod?'':' de todo'}</button></div>
     </div>
     ${xs.length ? `<p class="hint" style="margin:4px 4px 0">${xs.length} máquina(s) · gastado en total: <strong>${maqPesos(tot)}</strong></p>`+xs.map(card).join('') : `<div class="card" style="text-align:center">${maqMod?`${maqEsc(maqModNombre(maqMod))} todavía no tiene máquinas registradas.`:'Todavía no hay máquinas registradas.'}</div>`}`;
 }
@@ -12814,7 +12815,7 @@ function maqFichaPintar(){
         <button class="btn" style="flex:1;background:#16a34a" onclick="maqServNuevo('mant')">🔧 Registrar mantenimiento</button>
         <button class="btn" style="flex:1;background:#d97706" onclick="maqServNuevo('rep')">🛠️ Registrar reparación</button>
       </div>
-      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="maqEditar('${x.id}')">✏️ Editar datos / cambiar estado</button>
+      <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="maqEditar('${x.id}')">✏️ Editar datos / cambiar estado</button><button class="btn small" style="background:transparent;color:#b91c1c;border:1px solid #b91c1c;box-shadow:none" onclick="generarMaqPDF(null,'${x.id}')">📄 PDF de esta máquina</button></div>
     </div>
     <div id="maq-serv"></div>
     <div class="card"><strong>📋 Historial (${servs.length})</strong>${servs.length?servs.map(serv).join(''):'<p class="hint">Sin mantenimientos ni reparaciones todavía.</p>'}</div>`;
@@ -12857,6 +12858,43 @@ async function maqServBorrar(mid, sid){
   if(!(await pedirPinAdmin('borrar este registro'))) return;
   const servicios = x.servicios.filter(s=>s.id!==sid);
   try{ await db.collection('maquinas').doc(x.id).update({servicios}); x.servicios = servicios; maqFichaPintar(); }catch(e){ alert('Error: '+e.message); }
+}
+
+// v196 (pedido por el usuario): reporte en PDF de la maquinaria (todos los módulos, uno, o una máquina).
+async function generarMaqPDF(mods, soloId){
+  if(!esAdmin()) return;
+  try{ await maqCargar(); }catch(e){ return alert('No se pudo cargar: '+e.message); }
+  mods = (mods && mods.length ? mods : maqMods());
+  const una = soloId ? maqCache.find(x=>x.id===soloId) : null; if(soloId && !una) return;
+  const hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  const MOR=[124,58,237], VER=[22,128,74], AMB=[217,119,6], ROJ=[220,38,38], GRI=[107,114,128];
+  const sub = una ? `${una.tipo} ${una.marca}${una.modelo?' '+una.modelo:''} · ${maqModNombre(una.modulo)} · ${hoy}` : `${mods.length>1?'Todos los módulos':maqModNombre(mods[0])} · ${hoy}`;
+  const S = herrPdfBase('Maquinaria', sub, MOR);
+  const todas = una ? [una] : maqCache.filter(x=>mods.includes(x.modulo));
+  const pesos = n => '$'+(Number(n)||0).toLocaleString('es-MX',{maximumFractionDigits:2});
+  const fCor = d => d ? new Date(d+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'}) : '—';
+  const estCel = x => { const k = x.estado||'funciona'; return {t:MAQ_ESTADOS[k][0].replace(/^\S+\s/,''), col:k==='funciona'?VER:k==='reparacion'?AMB:ROJ, b:true}; };
+  const totMant = todas.reduce((s,x)=>s+(x.servicios||[]).filter(v=>v.tipo!=='rep').reduce((a,v)=>a+maqServTotal(v),0),0), totRep = todas.reduce((s,x)=>s+(x.servicios||[]).filter(v=>v.tipo==='rep').reduce((a,v)=>a+maqServTotal(v),0),0);
+  S.kpis(una ? [[(una.servicios||[]).length,'servicios',MOR],[pesos(totMant),'en mantenimientos',VER],[pesos(totRep),'en reparaciones',AMB],[pesos(totMant+totRep),'gastado en total',MOR]]
+    : [[todas.length,'máquinas',MOR],[todas.filter(x=>x.estado==='reparacion').length,'en reparación',AMB],[todas.filter(x=>x.estado==='baja').length,'fuera de servicio',ROJ],[pesos(totMant+totRep),'gastado en total',VER]]);
+  const historial = x => { const servs = (x.servicios||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+    S.banda(`${x.tipo} · ${x.marca}${x.modelo?' '+x.modelo:''}${x.serie?' · serie '+x.serie:''}`, `${servs.length} servicio(s) · ${pesos(maqTotal(x))}`, MOR);
+    if(!servs.length){ S.vacio('Sin mantenimientos ni reparaciones registrados.'); return; }
+    S.tabla([{t:'Fecha',w:22},{t:'Tipo',w:24},{t:'Quién lo hizo',w:34},{t:'Cobró',w:18},{t:'Piezas compradas',w:62},{t:'Total',w:22}],
+      servs.map(v=>[fCor(v.fecha), {t:v.tipo==='rep'?'Reparación':'Mantenimiento', col:v.tipo==='rep'?AMB:VER, b:true}, v.quien||'—', pesos(v.costo),
+        [(v.piezas||[]).map(p=>`${p.n} ${pesos(p.costo)}`).join(', '), v.nota?`Nota: ${v.nota}`:''].filter(Boolean).join('\n')||'—', {t:pesos(maqServTotal(v)), b:true}]), MOR); };
+  if(una){ historial(una); }
+  else mods.forEach((md, mi)=>{
+    const xs = todas.filter(x=>x.modulo===md).sort((a,b)=>(a.tipo||'').localeCompare(b.tipo||''));
+    if(!xs.length && mods.length>1) return;
+    S.seccion(maqModNombre(md), `${xs.length} máquina${xs.length===1?'':'s'} · gastado ${pesos(xs.reduce((s,x)=>s+maqTotal(x),0))}`, MOR, false);
+    if(!xs.length){ S.vacio('Sin máquinas registradas.'); return; }
+    S.tabla([{t:'Máquina',w:30},{t:'Marca',w:24},{t:'Modelo / serie',w:32},{t:'Estado',w:28},{t:'Último servicio',w:44},{t:'Gastado',w:24}],
+      xs.map(x=>{ const u = maqUltimo(x); return [x.tipo, x.marca||'—', [x.modelo, x.serie?'serie '+x.serie:''].filter(Boolean).join(' · ')||'—', estCel(x), u?`${fCor(u.fecha)} · ${u.tipo==='rep'?'reparación':'mantenimiento'}\n${u.quien||''}`:{t:'Sin servicios', col:GRI}, {t:pesos(maqTotal(x)), b:true}]; }), MOR);
+    xs.forEach(historial);
+  });
+  if(!una && !todas.length) S.vacio('No hay máquinas registradas.');
+  await S.fin(una ? `Maquinaria_${(una.tipo+'_'+una.marca).replace(/\s+/g,'_')}.pdf` : `Maquinaria_${mods.length>1?'todos':maqModNombre(mods[0]).replace(/\W+/g,'_')}.pdf`, 'Closets Vera · Maquinaria');
 }
 // ===== v194 (pedido por el usuario): avisos al coordinador para no olvidar capturar instalaciones =====
 // Solo avisan; no mueven nada. Comparan lo capturado con su Reporte de instalaciones (cuando lo usa).
