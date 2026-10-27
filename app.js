@@ -12711,12 +12711,13 @@ function dupPintar(){
   const estadoTxt = x => { const e = x.estado || ((x.movs||[]).some(m=>m.estado==='pendiente') ? 'pendiente' : 'aprobado'); return e==='pendiente' ? '<span class="tag" style="color:#d97706;border-color:#d97706">pendiente</span>' : '<span class="tag pos">aprobado</span>'; };
   const titulo = g => g.tipo==='inst' ? `🔧 Instalación repetida · ${g.items[0].descripcion}` : g.tipo==='tras' ? `🔄 Traspaso repetido · ${g.items[0].origen} → ${g.items[0].destino}` : g.tipo==='reg' ? `↩️ La misma instalación se regresó ${g.items.length} veces${g.log?' · '+g.log.descripcion:''}` : `📦 Captura repetida · ${(TIPO_LABEL[g.items[0].movs[0].tipo]||g.items[0].movs[0].tipo)}${g.items[0].movs[0].motivo?' ('+etiquetaTipoMov(g.items[0].movs[0])+')':''}`;
   const copia = (g, x, i) => { const f = g.tipo==='lote'||g.tipo==='reg' ? x.fecha : x.fecha;
-    const det = g.tipo==='inst' ? lista(x.consumo||[]) + (x.calle?` · 📍 ${escCalle(x.calle)}`:'') : g.tipo==='tras' ? `${fmtNum(x.cantidad)} ${x.unidad||''} ${x.itemNombre}` : lista(x.movs);
+    const det = g.tipo==='inst' ? `<div style="font-weight:700;margin-bottom:2px">📅 Instalada el ${x.fechaDia?fCorta(x.fechaDia):'—'} · ${x.calle?'📍 '+escCalle(x.calle):'<span style="color:#d97706">📍 sin calle</span>'}</div>${x.nota?`<div class="hint" style="margin:0 0 2px">📝 ${escCalle(x.nota)}</div>`:''}${x.verif&&VERIF_TAG[x.verif.estado]?`<div style="margin:2px 0 4px">${verifEstadoTxt(x)}</div>`:''}` + lista(x.consumo||[]) : g.tipo==='tras' ? `${fmtNum(x.cantidad)} ${x.unidad||''} ${x.itemNombre}` : lista(x.movs);
     return `<div style="padding:10px;border-radius:12px;border:1px solid ${i?'#dc2626':'var(--line)'};margin-top:8px">
       <div class="row" style="justify-content:space-between;gap:8px"><strong>${i?'Copia '+(i+1):'Primera'}</strong>${g.tipo==='tras'?'':estadoTxt(x)}</div>
       <div class="hint" style="margin:2px 0 0">🕒 ${hora(f)}${quien(x)?' · '+quien(x):''}</div>
       <div style="font-size:13px;margin-top:4px">${det}</div>
       ${i?`<button class="btn small" style="margin-top:8px;background:#dc2626" onclick="dupQuitar('${g.clave}',${i})">🗑️ Quitar esta copia</button>`:''}</div>`; };
+  const ayuda = g => g.tipo==='inst' ? `<p class="hint" style="margin:8px 0 0">💡 ¿Fueron dos muebles iguales en la misma casa? Pregúntale a ${quien(g.items[0])||'el coordinador'} o compáralo con el reporte del grupo de ese día. Si fue uno solo, quita la copia; si fueron dos, toca <strong>No es duplicado</strong>.</p>` : '';
   const mods = MODULOS.map(m=>({n:m.nombre, c:m.color, k:G.filter(g=>g.modulo===m.nombre).length}));
   const xs = G.filter(g=>g.modulo===dupMod);
   $('#main').innerHTML = `
@@ -12727,7 +12728,7 @@ function dupPintar(){
     ${!G.length ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ No se encontraron duplicados en ningún módulo.</strong></div>` : ''}
     ${xs.map(g=>`<div class="card" style="padding:12px;border-left:6px solid #dc2626">
       <strong style="font-size:15px">${titulo(g)}</strong>
-      ${g.items.map((x,i)=>copia(g,x,i)).join('')}
+      ${g.items.map((x,i)=>copia(g,x,i)).join('')}${ayuda(g)}
       <button class="btn small" style="margin-top:10px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="dupIgnorar('${g.clave}')">✔ No es duplicado (son dos distintas)</button></div>`).join('')}
     <p class="hint" style="text-align:center;margin:10px 0">Lo que quites queda en el historial como "anulado por duplicado" (no se borra). Pide el PIN de Dirección.</p>`;
 }
