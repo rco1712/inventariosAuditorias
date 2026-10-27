@@ -29,7 +29,9 @@ const COLLECTIONS_V10 = [...COLLECTIONS_V9, 'vehiculos', 'vehMovs'];
 // v11: avance de auditoría guardado en internet, para seguir en otro aparato (confirmado por el usuario).
 const COLLECTIONS_V11 = [...COLLECTIONS_V10, 'borradores'];
 // v12: reporte de instalaciones del coordinador (agenda, salida y cierre). Solo es un reporte (confirmado por el usuario).
-const COLLECTIONS = [...COLLECTIONS_V11, 'reportesInst'];
+const COLLECTIONS_V12 = [...COLLECTIONS_V11, 'reportesInst'];
+// v13: maquinaria por módulo con mantenimientos y reparaciones (solo Dirección, confirmado por el usuario).
+const COLLECTIONS = [...COLLECTIONS_V12, 'maquinas'];
 const NO_DESCARGAR = new Set(['fotos']);
 
 const ddb = new Dexie('auditoriamodulos');
@@ -45,7 +47,8 @@ ddb.version(8).stores(storesDe(COLLECTIONS_V8));
 ddb.version(9).stores(storesDe(COLLECTIONS_V9));
 ddb.version(10).stores(storesDe(COLLECTIONS_V10));
 ddb.version(11).stores(storesDe(COLLECTIONS_V11));
-ddb.version(12).stores(storesDe(COLLECTIONS));
+ddb.version(12).stores(storesDe(COLLECTIONS_V12));
+ddb.version(13).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 

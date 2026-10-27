@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v194';
+const APP_VERSION = 'v195';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -694,6 +694,7 @@ function setView(v){
   if(v==='rinst') renderRInst();
   if(v==='dup') renderDup();
   if(v==='apart') renderApart();
+  if(v==='maq') renderMaq();
 }
 
 let invCat = null, invDetalle = false;
@@ -959,6 +960,7 @@ function irA(v, opts){
 }
 // Iconos de línea para Inicio (diseño serio, confirmado por el usuario).
 const HOME_IC = {
+  maquina:'<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   llave:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
   almacen:'<path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/>',
   entrada:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
@@ -9815,6 +9817,7 @@ function renderHomeDir(){
     tile('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#4b5563'),
     tile('camion','Vehículos','Los 5 módulos',"vehMod='__todos';vehAbierto='';vehForm=null;irA('veh')",'#0369a1', nVeh||''),
     tile('llave','Herramienta','Por módulo',"irA('herr')",'#c2410c'),
+    tile('maquina','Maquinaria','Mantenimiento y reparaciones',"maqCache=null;maqAbierta='';maqForm=null;maqServ=null;irA('maq')",'#7c3aed'),
     tile('almacen','Almacén general', nRec ? nRec+' por recibir' : 'Entregas, regresos y ferretería',"irA('alm')",'#9a3412', nRec||''),
     tile('lista','Pedidos','Material que va a llegar',"irA('ped')",'#2348b5'),
     tile('tendencia','Resumen semanal','Cómo va cada módulo',"irA('resumen')",'#0d7468'),
@@ -12693,6 +12696,168 @@ window.exportarRespaldo = exportarRespaldo;
   init();
 })();
 
+// ===== 🏭 Maquinaria por módulo (pedido por el usuario, v195) — solo Dirección =====
+// Cada máquina guarda su historial de mantenimientos y reparaciones: cuándo, quién lo hizo, cuánto
+// cobró y qué piezas se compraron (con su costo). No toca el inventario de material.
+const MAQ_TIPOS = [['Enchapadora','🎞️'],['Escuadradora','🪚'],['Aspiradora','🌀'],['Compresor','💨']];
+const MAQ_MARCAS_BASE = [{n:'Felder', bg:'#0f766e', fg:'#fff'}, {n:'Trimaq', bg:'#1d4ed8', fg:'#fff'}];
+const MAQ_ESTADOS = {funciona:['✅ Funciona','#16a34a'], reparacion:['🛠️ En reparación','#d97706'], baja:['⛔ Fuera de servicio','#dc2626']};
+let maqCache = null, maqMod = '', maqAbierta = '', maqForm = null, maqServ = null;
+const maqEsc = t => String(t==null?'':t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const maqPesos = n => '$'+(Number(n)||0).toLocaleString('es-MX',{minimumFractionDigits:0, maximumFractionDigits:2});
+const maqModNombre = m => m===ALM ? 'Taller / Almacén general' : m;
+const maqMods = () => [...MODULOS.map(m=>m.nombre), ALM];
+function maqIcono(tipo){ const t = MAQ_TIPOS.find(x=>x[0]===tipo); return t ? t[1] : '⚙️'; }
+function maqMarcas(){ const base = MAQ_MARCAS_BASE.map(m=>m.n), extra = [...new Set((maqCache||[]).map(x=>x.marca).filter(m=>m && !base.some(b=>b.toLowerCase()===String(m).toLowerCase())))].sort(); return [...base, ...extra]; }
+function maqMarcaBadge(n){ const m = MAQ_MARCAS_BASE.find(x=>x.n.toLowerCase()===String(n||'').toLowerCase());
+  return `<span style="display:inline-block;padding:2px 9px;border-radius:7px;font-weight:900;letter-spacing:.3px;font-size:13px;background:${m?m.bg:'#475569'};color:${m?m.fg:'#fff'}">${maqEsc(n||'Sin marca')}</span>`; }
+function maqTotal(x){ return (x.servicios||[]).reduce((s,v)=>s+(Number(v.costo)||0)+(v.piezas||[]).reduce((a,p)=>a+(Number(p.costo)||0),0),0); }
+function maqServTotal(v){ return (Number(v.costo)||0)+(v.piezas||[]).reduce((a,p)=>a+(Number(p.costo)||0),0); }
+function maqUltimo(x, tipo){ return (x.servicios||[]).filter(v=>!tipo||v.tipo===tipo).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''))[0]; }
+async function maqCargar(){ const s = await db.collection('maquinas').get(); maqCache = s.docs.map(d=>({id:d.id,...d.data()})).filter(x=>!x.borrada); return maqCache; }
+async function renderMaq(){
+  current = 'maq';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  if(!maqCache){ $('#main').innerHTML = '<div class="card">Cargando maquinaria…</div>'; try{ await maqCargar(); }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${e.message}</div>`; return; } }
+  if(current!=='maq') return;
+  if(maqForm) return maqFormPintar();
+  if(maqAbierta) return maqFichaPintar();
+  const xs = maqCache.filter(x=>!maqMod || x.modulo===maqMod).sort((a,b)=>(a.modulo||'').localeCompare(b.modulo||'')||(a.tipo||'').localeCompare(b.tipo||''));
+  const chip = (k, txt, c, n) => `<button onclick="maqMod='${k}';renderMaq()" style="border-radius:12px;padding:8px 12px;border:2px solid ${c};background:${maqMod===k?c:'transparent'};color:${maqMod===k?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${txt}${n?` · ${n}`:''}</button>`;
+  const chips = chip('', 'Todos', '#7c3aed', maqCache.length) + maqMods().map(m=>{ const mm = MODULOS.find(x=>x.nombre===m); return chip(m, m===ALM?'Taller':m, mm?mm.color:'#9a3412', maqCache.filter(x=>x.modulo===m).length); }).join('');
+  const card = x => { const u = maqUltimo(x), e = MAQ_ESTADOS[x.estado||'funciona'], dias = u ? Math.round((new Date(fechaHoyLocal()+'T12:00:00')-new Date(u.fecha+'T12:00:00'))/864e5) : null;
+    return `<div class="card" onclick="maqAbierta='${x.id}';renderMaq();window.scrollTo(0,0)" style="cursor:pointer;border-left:6px solid #7c3aed;padding:12px 14px">
+      <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><div style="min-width:0"><div style="font-size:17px;font-weight:900">${maqIcono(x.tipo)} ${maqEsc(x.tipo)}</div>
+        <div style="margin-top:4px">${maqMarcaBadge(x.marca)} ${x.modelo?`<span class="hint" style="margin:0">${maqEsc(x.modelo)}</span>`:''}</div></div>
+        <span class="tag" style="color:${e[1]};border-color:${e[1]};white-space:nowrap">${e[0]}</span></div>
+      ${!maqMod?`<div class="hint" style="margin:6px 0 0">📍 ${maqEsc(maqModNombre(x.modulo))}</div>`:''}
+      <div class="hint" style="margin:6px 0 0">${u ? `${u.tipo==='rep'?'🛠️ Última reparación':'🔧 Último mantenimiento'}: <strong>${fCorta(u.fecha)}</strong> (${dias===0?'hoy':dias===1?'hace 1 día':'hace '+dias+' días'}) · ${maqEsc(u.quien||'')}` : '🔧 Sin mantenimientos registrados'}</div>
+      <div style="margin-top:4px;font-weight:800">💰 Gastado: ${maqPesos(maqTotal(x))} <span class="hint" style="margin:0;font-weight:500">· ${(x.servicios||[]).length} servicio(s)</span></div></div>`; };
+  const tot = xs.reduce((s,x)=>s+maqTotal(x),0);
+  $('#main').innerHTML = `
+    <div class="card" style="padding:12px;border:2px solid #7c3aed">
+      <div style="font-size:18px;font-weight:900">🏭 Maquinaria</div>
+      <p class="hint" style="margin:2px 0 0">Enchapadoras, escuadradoras, aspiradoras y compresores de cada módulo, con sus mantenimientos y reparaciones. Solo Dirección.</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${chips}</div>
+      <button class="btn" style="width:100%;margin-top:10px;background:#7c3aed" onclick="maqNueva()">➕ Agregar máquina</button>
+    </div>
+    ${xs.length ? `<p class="hint" style="margin:4px 4px 0">${xs.length} máquina(s) · gastado en total: <strong>${maqPesos(tot)}</strong></p>`+xs.map(card).join('') : `<div class="card" style="text-align:center">${maqMod?`${maqEsc(maqModNombre(maqMod))} todavía no tiene máquinas registradas.`:'Todavía no hay máquinas registradas.'}</div>`}`;
+}
+function maqNueva(){ maqForm = {id:'', modulo:maqMod||'', tipo:'', otroTipo:false, marca:'', otraMarca:false, modelo:'', serie:'', estado:'funciona', nota:''}; maqAbierta=''; renderMaq(); window.scrollTo(0,0); }
+function maqEditar(id){ const x = maqCache.find(m=>m.id===id); if(!x) return; const tipoConocido = MAQ_TIPOS.some(t=>t[0]===x.tipo);
+  maqForm = {id, modulo:x.modulo, tipo:x.tipo, otroTipo:!tipoConocido, marca:x.marca||'', otraMarca:!maqMarcas().includes(x.marca), modelo:x.modelo||'', serie:x.serie||'', estado:x.estado||'funciona', nota:x.nota||''}; renderMaq(); window.scrollTo(0,0); }
+function maqFormPintar(){
+  const f = maqForm, set = (k, v) => `maqForm.${k}=${v};maqFormPintar()`;
+  const chipOn = (on, txt, js, st) => `<button class="chip ${on?'on':''}" style="${on&&st?st:''}" onclick="${js}">${txt}</button>`;
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #7c3aed">
+    <div style="font-size:17px;font-weight:900">${f.id?'✏️ Editar máquina':'➕ Agregar máquina'}</div>
+    <label class="hint" style="display:block;margin-top:10px">¿En qué módulo está? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${maqMods().map(m=>chipOn(f.modulo===m, m===ALM?'Taller / Almacén':m, set('modulo',`'${m}'`))).join('')}</div>
+    <label class="hint" style="display:block;margin-top:10px">¿Qué máquina es? <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${MAQ_TIPOS.map(([t,ic])=>chipOn(!f.otroTipo&&f.tipo===t, ic+' '+t, `maqForm.otroTipo=false;${set('tipo',`'${t}'`)}`)).join('')}${chipOn(f.otroTipo,'✏️ Otra',`maqForm.otroTipo=true;${set('tipo',"''")}`)}</div>
+    ${f.otroTipo?`<input placeholder="¿Qué máquina? (ej. Sierra cinta)" value="${maqEsc(f.tipo)}" oninput="maqForm.tipo=this.value" style="margin-top:8px">`:''}
+    <label class="hint" style="display:block;margin-top:10px">Marca <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${maqMarcas().map(m=>{ const b = MAQ_MARCAS_BASE.find(x=>x.n===m); return chipOn(!f.otraMarca&&f.marca===m, m, `maqForm.otraMarca=false;${set('marca',`'${maqEsc(m)}'`)}`, `background:${b?b.bg:'#475569'};border-color:${b?b.bg:'#475569'};color:#fff`); }).join('')}${chipOn(f.otraMarca,'✏️ Otra marca',`maqForm.otraMarca=true;${set('marca',"''")}`)}</div>
+    ${f.otraMarca?`<input placeholder="¿Qué marca?" value="${maqEsc(f.marca)}" oninput="maqForm.marca=this.value" style="margin-top:8px"><p class="hint" style="margin:4px 0 0">La marca nueva queda en la lista para las siguientes máquinas.</p>`:''}
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Modelo (opcional)</label><input value="${maqEsc(f.modelo)}" placeholder="Ej. G 220" oninput="maqForm.modelo=this.value" style="margin-top:4px"></div>
+      <div><label class="hint">Número de serie (opcional)</label><input value="${maqEsc(f.serie)}" oninput="maqForm.serie=this.value" style="margin-top:4px"></div>
+    </div>
+    <label class="hint" style="display:block;margin-top:10px">¿Cómo está?</label>
+    <div class="chips" style="margin-top:6px">${Object.keys(MAQ_ESTADOS).map(k=>chipOn(f.estado===k, MAQ_ESTADOS[k][0], set('estado',`'${k}'`))).join('')}</div>
+    <input placeholder="Nota (opcional)" value="${maqEsc(f.nota)}" oninput="maqForm.nota=this.value" style="margin-top:10px">
+    <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:#7c3aed" onclick="maqGuardar()">💾 Guardar</button>
+    <button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="maqForm=null;renderMaq()">Cancelar</button>
+    ${f.id?`<button class="btn small" style="margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="maqBorrar('${f.id}')">🗑️ Quitar esta máquina</button>`:''}
+  </div>`;
+}
+async function maqGuardar(){
+  const f = maqForm; if(!f) return;
+  const tipo = String(f.tipo||'').trim(), marca = String(f.marca||'').trim();
+  if(!f.modulo) return alert('Elige en qué módulo está.'); if(!tipo) return alert('Elige qué máquina es.'); if(!marca) return alert('Elige la marca.');
+  const marcaFinal = maqMarcas().find(m=>m.toLowerCase()===marca.toLowerCase()) || marca;
+  const datos = {modulo:f.modulo, tipo, marca:marcaFinal, modelo:String(f.modelo||'').trim(), serie:String(f.serie||'').trim(), estado:f.estado||'funciona', nota:String(f.nota||'').trim()};
+  try{
+    if(f.id){ await db.collection('maquinas').doc(f.id).update(datos); Object.assign(maqCache.find(x=>x.id===f.id)||{}, datos); maqAbierta = f.id; }
+    else { const id = cryptoId(); const doc = Object.assign(datos, {servicios:[], alta:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); await db.collection('maquinas').doc(id).set(doc); maqCache.push({id, ...doc}); maqAbierta = id; }
+    maqForm = null; toast('💾 Máquina guardada'); renderMaq(); window.scrollTo(0,0);
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function maqBorrar(id){
+  const x = maqCache.find(m=>m.id===id); if(!x) return;
+  if(!confirm(`🗑️ Quitar ${x.tipo} ${x.marca} de ${maqModNombre(x.modulo)}?\n\nSe quita de la lista junto con su historial.`)) return;
+  if(!(await pedirPinAdmin('quitar esta máquina'))) return;
+  try{ await db.collection('maquinas').doc(id).update({borrada:true, borradaEn:new Date().toISOString()}); maqCache = maqCache.filter(m=>m.id!==id); maqForm=null; maqAbierta=''; renderMaq(); }catch(e){ alert('Error: '+e.message); }
+}
+function maqFichaPintar(){
+  const x = maqCache.find(m=>m.id===maqAbierta); if(!x){ maqAbierta=''; return renderMaq(); }
+  const e = MAQ_ESTADOS[x.estado||'funciona'], servs = (x.servicios||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const um = maqUltimo(x,'mant'), ur = maqUltimo(x,'rep');
+  const serv = v => `<div style="padding:10px 12px;border-radius:12px;border:1px solid ${v.tipo==='rep'?'#d97706':'#16a34a'};margin-top:8px">
+      <div class="row" style="justify-content:space-between;gap:8px"><strong>${v.tipo==='rep'?'🛠️ Reparación':'🔧 Mantenimiento'} · ${fCorta(v.fecha)}</strong><strong>${maqPesos(maqServTotal(v))}</strong></div>
+      <div class="hint" style="margin:2px 0 0">👤 ${maqEsc(v.quien||'—')} · cobró ${maqPesos(v.costo)}</div>
+      ${(v.piezas||[]).length?`<div style="margin-top:4px;font-size:13px">🔩 Piezas: ${(v.piezas||[]).map(p=>`${maqEsc(p.n)} <strong>${maqPesos(p.costo)}</strong>`).join(' · ')}</div>`:''}
+      ${v.nota?`<div class="hint" style="margin:4px 0 0">📝 ${maqEsc(v.nota)}</div>`:''}
+      <button class="btn small" style="margin-top:6px;padding:3px 10px;min-height:0;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="maqServBorrar('${x.id}','${v.id}')">🗑️ Borrar</button></div>`;
+  $('#main').innerHTML = `
+    <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="maqAbierta='';maqServ=null;renderMaq()">‹ Toda la maquinaria</button>
+    <div class="card" style="margin-top:8px;border:2px solid #7c3aed">
+      <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><div><div style="font-size:19px;font-weight:900">${maqIcono(x.tipo)} ${maqEsc(x.tipo)}</div>
+        <div style="margin-top:4px">${maqMarcaBadge(x.marca)} ${x.modelo?`<strong>${maqEsc(x.modelo)}</strong>`:''}</div></div>
+        <span class="tag" style="color:${e[1]};border-color:${e[1]}">${e[0]}</span></div>
+      <div class="hint" style="margin:8px 0 0">📍 ${maqEsc(maqModNombre(x.modulo))}${x.serie?` · Serie ${maqEsc(x.serie)}`:''}${x.nota?` · ${maqEsc(x.nota)}`:''}</div>
+      <div class="grid2" style="margin-top:10px">
+        <div class="subcard" style="padding:8px 10px"><div class="hint" style="margin:0">🔧 Último mantenimiento</div><strong>${um?fCorta(um.fecha):'—'}</strong></div>
+        <div class="subcard" style="padding:8px 10px"><div class="hint" style="margin:0">💰 Gastado en total</div><strong>${maqPesos(maqTotal(x))}</strong></div>
+      </div>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn" style="flex:1;background:#16a34a" onclick="maqServNuevo('mant')">🔧 Registrar mantenimiento</button>
+        <button class="btn" style="flex:1;background:#d97706" onclick="maqServNuevo('rep')">🛠️ Registrar reparación</button>
+      </div>
+      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="maqEditar('${x.id}')">✏️ Editar datos / cambiar estado</button>
+    </div>
+    <div id="maq-serv"></div>
+    <div class="card"><strong>📋 Historial (${servs.length})</strong>${servs.length?servs.map(serv).join(''):'<p class="hint">Sin mantenimientos ni reparaciones todavía.</p>'}</div>`;
+  if(maqServ) maqServPintar();
+}
+function maqServNuevo(tipo){ maqServ = {tipo, fecha:fechaHoyLocal(), quien:'', costo:'', piezas:tipo==='rep'?[{n:'',costo:''}]:[], nota:''}; maqFichaPintar(); setTimeout(()=>{ const el=document.getElementById('maq-serv'); if(el) el.scrollIntoView({behavior:'smooth'}); },50); }
+function maqServPintar(){
+  const el = document.getElementById('maq-serv'); if(!el || !maqServ) return; const s = maqServ, rep = s.tipo==='rep', c = rep?'#d97706':'#16a34a';
+  const quienes = [...new Set((maqCache||[]).flatMap(m=>(m.servicios||[]).map(v=>v.quien)).filter(Boolean))];
+  const tot = (Number(s.costo)||0) + s.piezas.reduce((a,p)=>a+(Number(p.costo)||0),0);
+  el.innerHTML = `<div class="card" style="border:2px solid ${c}">
+    <div style="font-size:16px;font-weight:900">${rep?'🛠️ Registrar reparación':'🔧 Registrar mantenimiento'}</div>
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">¿Cuándo se hizo?</label><input type="date" value="${s.fecha}" oninput="maqServ.fecha=this.value" style="margin-top:4px"></div>
+      <div><label class="hint">¿Cuánto cobraron? (mano de obra)</label><input type="number" min="0" inputmode="decimal" placeholder="$" value="${s.costo}" oninput="maqServ.costo=this.value;maqServTot()" style="margin-top:4px"></div>
+    </div>
+    <label class="hint" style="display:block;margin-top:10px">¿Quién lo hizo? <span style="color:var(--bad)">*</span></label>
+    <input list="maq-quienes" placeholder="Ej. Técnico Juan Pérez / Servicio Felder" value="${maqEsc(s.quien)}" oninput="maqServ.quien=this.value" style="margin-top:4px"><datalist id="maq-quienes">${quienes.map(q=>`<option value="${maqEsc(q)}">`).join('')}</datalist>
+    <label class="hint" style="display:block;margin-top:10px">🔩 Piezas que se compraron ${rep?'':'(si se cambió algo)'}</label>
+    ${s.piezas.map((p,i)=>`<div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap"><input placeholder="Pieza (ej. banda, resistencia)" value="${maqEsc(p.n)}" oninput="maqServ.piezas[${i}].n=this.value" style="flex:1;min-width:0"><input type="number" min="0" inputmode="decimal" placeholder="$" value="${p.costo}" oninput="maqServ.piezas[${i}].costo=this.value;maqServTot()" style="width:90px;min-width:90px"><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;padding:4px 10px" onclick="maqServ.piezas.splice(${i},1);maqServPintar()">✕</button></div>`).join('')}
+    <button class="btn small" style="margin-top:6px;background:transparent;color:${c};border:1px solid ${c};box-shadow:none" onclick="maqServ.piezas.push({n:'',costo:''});maqServPintar()">➕ Agregar pieza</button>
+    <input placeholder="Nota (opcional): qué se le hizo" value="${maqEsc(s.nota)}" oninput="maqServ.nota=this.value" style="margin-top:10px">
+    <div id="maq-tot" style="margin-top:10px;font-size:16px;font-weight:900">Total: ${maqPesos(tot)}</div>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:${c}" onclick="maqServGuardar()">💾 Guardar ${rep?'reparación':'mantenimiento'}</button>
+    <button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="maqServ=null;maqFichaPintar()">Cancelar</button></div>`;
+}
+function maqServTot(){ const el = document.getElementById('maq-tot'); if(el && maqServ) el.textContent = 'Total: '+maqPesos((Number(maqServ.costo)||0)+maqServ.piezas.reduce((a,p)=>a+(Number(p.costo)||0),0)); }
+async function maqServGuardar(){
+  const s = maqServ, x = maqCache.find(m=>m.id===maqAbierta); if(!s || !x) return;
+  if(!s.fecha) return alert('Escribe la fecha.'); if(!String(s.quien).trim()) return alert('Escribe quién lo hizo.');
+  const piezas = s.piezas.filter(p=>String(p.n).trim() || Number(p.costo)>0).map(p=>({n:String(p.n).trim()||'Pieza', costo:Number(p.costo)||0}));
+  if(s.tipo==='rep' && !piezas.length && !(Number(s.costo)>0) && !confirm('No escribiste piezas ni costo. ¿Guardar así?')) return;
+  const v = {id:cryptoId(), tipo:s.tipo, fecha:s.fecha, quien:String(s.quien).trim(), costo:Number(s.costo)||0, piezas, nota:String(s.nota||'').trim(), por:getCurrentUserEmail?getCurrentUserEmail():'', creado:new Date().toISOString()};
+  const servicios = [...(x.servicios||[]), v];
+  try{ await db.collection('maquinas').doc(x.id).update({servicios}); x.servicios = servicios; maqServ = null; toast('💾 Guardado'); maqFichaPintar(); window.scrollTo(0,0); }catch(e){ alert('Error: '+e.message); }
+}
+async function maqServBorrar(mid, sid){
+  const x = maqCache.find(m=>m.id===mid); if(!x) return; const v = (x.servicios||[]).find(s=>s.id===sid); if(!v) return;
+  if(!confirm(`🗑️ Borrar ${v.tipo==='rep'?'la reparación':'el mantenimiento'} del ${fCorta(v.fecha)} (${maqPesos(maqServTotal(v))})?`)) return;
+  if(!(await pedirPinAdmin('borrar este registro'))) return;
+  const servicios = x.servicios.filter(s=>s.id!==sid);
+  try{ await db.collection('maquinas').doc(x.id).update({servicios}); x.servicios = servicios; maqFichaPintar(); }catch(e){ alert('Error: '+e.message); }
+}
 // ===== v194 (pedido por el usuario): avisos al coordinador para no olvidar capturar instalaciones =====
 // Solo avisan; no mueven nada. Comparan lo capturado con su Reporte de instalaciones (cuando lo usa).
 function diaAnteriorLaboral(dia){ const d = new Date(dia+'T12:00:00'); do{ d.setDate(d.getDate()-1); }while(d.getDay()===0); return d.toISOString().slice(0,10); }
@@ -12933,7 +13098,7 @@ function unaSolaVez(nombre, fn){
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
  'verifRegresa','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
- 'dupQuitar','dupIgnorar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
+ 'dupQuitar','dupIgnorar','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
 // v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
 ['renderInstMueble','renderInstPuertas'].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = function(...a){ const r = f.apply(this, a); try{ instDiaPintar(n==='renderInstMueble'?'i':'p'); }catch(e){} return r; }; }catch(e){} });
