@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v190';
+const APP_VERSION = 'v191';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -693,6 +693,7 @@ function setView(v){
   if(v==='verif') renderVerif();
   if(v==='rinst') renderRInst();
   if(v==='dup') renderDup();
+  if(v==='apart') renderApart();
 }
 
 let invCat = null, invDetalle = false;
@@ -6730,8 +6731,9 @@ function verifCalcDir(logs, movsAll){
   const reg = regresadasDe(movsAll||[]); const xs = verifSinRevisar(logs, reg);
   const porMod = {}; xs.forEach(l=>{ porMod[l.modulo]=(porMod[l.modulo]||0)+1; });
   const masViejo = xs.reduce((m,l)=>Math.max(m, verifDiasAtras(diaValorInst(l))), 0);
-  const atr = verifEsperando(logs).filter(e=>e.atrasada).map(e=>({modulo:e.l.modulo, que:e.que}));
-  return {n:xs.length, porMod, masViejo, atr};
+  const espAll = verifEsperando(logs); const atr = espAll.filter(e=>e.atrasada).map(e=>({modulo:e.l.modulo, que:e.que}));
+  const esp = {}; espAll.forEach(e=>{ esp[e.l.modulo]=(esp[e.l.modulo]||0)+1; });
+  return {n:xs.length, porMod, masViejo, atr, esp, nEsp:espAll.length};
 }
 // Lo que espera al coordinador (puertas sin decidir, cambio de modelo, puertas por reinstalar).
 // Se avisa a Dirección si pasan más de 3 días sin decidir, o más de 7 por reinstalar.
@@ -6746,7 +6748,11 @@ function verifEsperando(logs){
   return out.sort((a,b)=>b.dias-a.dias);
 }
 function verifPendRowAtr(fila){
-  const V = _dirVerif; if(!V || !(V.atr||[]).length) return null;
+  const V = _dirVerif; if(!V) return null;
+  // v191 (pedido por el usuario): siempre se ve lo rechazado que el coordinador aún no define.
+  if(V.nEsp){ const nA = (V.atr||[]).length;
+    return fila('📦', `Material apartado sin definir: ${V.nEsp}`, (nA?`⚠️ ${nA} con varios días · `:'')+Object.keys(V.esp).map(k=>k+' '+V.esp[k]).join(' · ')+' · aún no entra al inventario', nA?'#dc2626':'#b45309', 'Ver', "apMod='';irA('apart')"); }
+  if(!(V.atr||[]).length) return null;
   const por = {}; V.atr.forEach(a=>{ const k = a.modulo+': '+a.que; por[k]=(por[k]||0)+1; });
   return fila('⏳', `Sin resolver: ${V.atr.length}`, Object.keys(por).map(k=>por[k]>1?k.replace(': ',': '+por[k]+' '):k).join(' · '), '#b45309', 'Ver', "verifDia='';verifMod='';verifPanel=null;irA('verif')");
 }
@@ -8945,6 +8951,7 @@ function repGrupos(){
   if(A || (SL && !ADM)) G.push({ic:'📋', t:'Auditoría', c:'#9333ea', items:[
     {t:'Última auditoría vs. teórico', s:modulo(), k:'auditoria ultima teorico fisico diferencias', js:"repAbrir('ultAud')"},
     {t:'Faltantes (deuda)', s:'sin saldar', k:'faltantes deuda auditoria', js:"irA('hist',{tab:'deuda'})"},
+    ...(A ? [{t:'Material apartado sin definir', s:'rechazadas', k:'rechazadas apartado no se instalo coordinador pendiente definir material', js:"apMod='';irA('apart')"}] : []),
     ...(A ? [{t:'Revisar duplicados', s:'los 5 módulos', k:'duplicados doble toque repetido duplicado revisar', js:"dupMod='';irA('dup')"}] : [])
   ]});
   const herr = [];
@@ -9625,7 +9632,7 @@ function renderConf(){
         <button class="btn small" style="background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none" onclick="riBorrarTodo(MODULOS.map(m=>m.nombre))">Borrar los de los 5 módulos</button>
       </div>
     </div>
-    ${grp('🔍','Revisar','#7c3aed', fila('Revisar duplicados','capturas guardadas dos veces · los 5 módulos',"dupMod='';irA('dup')"))}
+    ${grp('🔍','Revisar','#7c3aed', fila('Revisar duplicados','capturas guardadas dos veces · los 5 módulos',"dupMod='';irA('dup')")+fila('Material apartado sin definir','instalaciones rechazadas que el coordinador no ha decidido',"apMod='';irA('apart')"))}
     ${grp('💾','Respaldo','#16a34a', fila('Descargar respaldo','todo en un archivo','exportarRespaldo()'))}
     ${grp('🧪','Pruebas','#7c3aed', fila('Simulador de auditoría','no guarda nada',"setAudTipo('simulacion');irA('aud')"))}`;
 }
@@ -12655,6 +12662,52 @@ window.exportarRespaldo = exportarRespaldo;
   init();
 })();
 
+// ===== 📦 Material apartado sin definir (pedido por el usuario, v191) =====
+// Instalaciones que Dirección marcó "No se instaló" (o "No coincide") y que el coordinador todavía no
+// resuelve: su material sigue apartado (descontado) y NO ha vuelto al inventario. Solo muestra; no mueve nada.
+let apMod = '';
+async function renderApart(){
+  current = 'apart';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  $('#main').innerHTML = '<div class="card">Buscando material apartado…</div>';
+  try{ const snap = await db.collection('instalacionesLog').get(); verifLogs = snap.docs.map(d=>({id:d.id,...d.data()})); }
+  catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${e.message}</div>`; return; }
+  apPintar();
+}
+function apPintar(){
+  if(current!=='apart') return;
+  const E = verifEsperando(verifLogs);
+  if(!apMod || !E.some(e=>e.l.modulo===apMod)) apMod = (MODULOS.find(m=>E.some(e=>e.l.modulo===m.nombre))||{}).nombre || '';
+  const chips = MODULOS.map(m=>{ const xs = E.filter(e=>e.l.modulo===m.nombre), on = m.nombre===apMod, rojo = xs.some(e=>e.atrasada);
+    return `<button onclick="apMod='${m.nombre}';apPintar()" style="border-radius:12px;padding:8px 12px;border:2px solid ${rojo&&!on?'#dc2626':m.color};background:${on?m.color:'transparent'};color:${on?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${m.nombre}${xs.length?` · ${xs.length}`:' ✓'}</button>`; }).join('');
+  const xs = E.filter(e=>e.l.modulo===apMod);
+  const tot = {}; xs.filter(e=>e.l.verif.estado==='no').forEach(e=>(e.l.consumo||[]).forEach(c=>{ if(Number(c.cantidad)>0) tot[c.itemId]=(tot[c.itemId]||0)+Number(c.cantidad); }));
+  const totTxt = Object.keys(tot).map(id=>{ const it=CATALOGO.find(i=>i.id===id); return it?`<li>${fmtNum(tot[id])} ${it.unidad} ${it.nombre}</li>`:''; }).join('');
+  const queTxt = e => { const v = e.l.verif; if(v.estado==='modelo') return '❓ No coincide · el coordinador no ha corregido el modelo';
+    if(v.puertas==='reinstalar') return '🔁 El coordinador dijo que se vuelve a instalar · tú la marcas cuando salga en el reporte';
+    return '⏳ El coordinador no ha decidido a dónde va el material'; };
+  const item = e => { const l = e.l, v = l.verif, dias = e.dias===0?'hoy':e.dias===1?'hace 1 día':`hace ${e.dias} días`;
+    const mat = (l.consumo||[]).filter(c=>Number(c.cantidad)>0).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return it?`${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}`:''; }).filter(Boolean).join(' · ');
+    return `<div style="padding:10px;border-radius:12px;border:${e.atrasada?'2px solid #dc2626':'1px solid var(--line)'};margin-top:8px">
+      <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><strong style="min-width:0">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</strong><strong style="white-space:nowrap;color:${e.atrasada?'#dc2626':'var(--sub)'}">${dias}</strong></div>
+      ${calleHtml(l)}<div class="hint" style="margin:2px 0 0">📅 Instalación del ${l.fechaDia?fCorta(l.fechaDia):'—'}${v.fecha?` · la rechazaste el ${fCorta(diaLocal(v.fecha))}`:''}${v.nota?` · “${escCalle(v.nota)}”`:''}</div>
+      <div style="margin-top:6px;font-weight:700;color:${e.atrasada?'#dc2626':'#b45309'}">${queTxt(e)}</div>
+      ${v.estado==='no'?`<div style="font-size:13px;margin-top:4px">📦 Apartado: ${mat||'—'}</div>`:''}
+      ${v.estado==='no'&&v.puertas==='pendiente'?`<button class="btn small" style="margin-top:8px;background:transparent;color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="Promise.resolve(verifYaRegresado('${l.id}')).then(()=>apPintar())">✔ Ya se regresó por otro lado</button>`:''}</div>`; };
+  $('#main').innerHTML = `
+    <div class="card" style="padding:12px;border:2px solid #b45309">
+      <div style="font-size:18px;font-weight:900">📦 Material apartado sin definir</div>
+      <p class="hint" style="margin:2px 0 0">Instalaciones que marcaste <strong>❌ No se instaló</strong> y que el coordinador todavía no resuelve. Su material <strong>sigue descontado</strong>: no ha vuelto al inventario. En rojo, las que llevan más de ${VERIF_DIAS_DECIDIR} días (o ${VERIF_DIAS_REINST} si se van a reinstalar).</p>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">${chips}</div>
+    </div>
+    ${!E.length ? '<div class="card" style="text-align:center">✅ No hay material apartado. Todo lo rechazado ya está definido.</div>' : `
+    <div class="card" style="padding:12px">
+      <strong style="font-size:15px">${apMod} · ${xs.length} sin definir</strong>
+      ${totTxt?`<div class="hint" style="margin:4px 0 0">Total apartado en ${apMod} (no está en el inventario):</div><ul style="margin:4px 0 0 18px;padding:0;font-size:13px">${totTxt}</ul>`:''}
+      ${xs.map(item).join('')}
+      <p class="hint" style="margin:10px 0 0">Avísale al coordinador de ${apMod}: le sale en su Inicio para decidir (reinstalar, regresa al inventario, sobrantes o merma).</p>
+    </div>`}`;
+}
 // ===== 🔍 Revisar duplicados (confirmado por el usuario, v188) =====
 // Busca en los 5 módulos capturas que se guardaron dos veces (doble toque): instalaciones iguales,
 // lotes de movimientos iguales (entradas, salidas, mermas, regresos, cierres…), dos regresos de la
