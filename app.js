@@ -10420,7 +10420,8 @@ function renderCierreConsumibles(){
 }
 async function guardarCierre(){
   try{ const a = await coordAvisosInst(fechaHoyLocal());
-    if(!a.capt && !confirm('⚠️ No has capturado ninguna instalación de hoy.\n\nSi hubo instalaciones, captúralas ANTES del cierre: si faltan, tu inventario puede no cuadrar.\n\n¿Seguro que hoy no hubo instalaciones y quieres guardar el cierre?')) return;
+    if(a.hayReporte && a.faltan.length && !confirm('⚠️ Te falta capturar '+a.faltan.length+' instalación(es) de tu reporte de hoy:\n\n'+a.faltan.map(t=>'• '+t).join('\n')+'\n\nCaptura todas las que salieron, se hayan instalado o no. ¿Guardar el cierre de todos modos?')) return;
+    if(!a.hayReporte && !a.capt && !confirm('⚠️ No has capturado ninguna instalación de hoy.\n\nSi hubo instalaciones, captúralas ANTES del cierre: si faltan, tu inventario puede no cuadrar.\n\n¿Seguro que hoy no hubo instalaciones y quieres guardar el cierre?')) return;
   }catch(e){}
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = (document.getElementById('cierre-nota').value||'').trim();
@@ -12702,9 +12703,23 @@ async function coordAvisosInst(dia){
   const capt = logs.filter(l=>(l.fechaDia||diaLocal(l.fecha))===dia && !l.cambioDe).length;
   const rep = sr.docs.map(d=>({id:d.id,...d.data()})).find(x=>x.id===riId(mod, dia));
   const dirs = rep ? (rep.direcciones||[]) : [];
-  const repOk = dirs.filter(d=>d.cierre==='ok').length, repSalen = dirs.filter(d=>d.salida==='sale' && d.cierre!=='nohizo').length;
+  // Confirmado por el usuario: se captura TODO lo que sale a instalar (se instale o no); solo lo que
+  // "No sale" no se captura. El reporte solo se lee para avisar: no mueve nada.
+  const salen = dirs.filter(d=>d.salida==='sale');
+  const capDia = logs.filter(l=>(l.fechaDia||diaLocal(l.fecha))===dia && !l.cambioDe);
+  const faltan = salen.filter(d=>!capDia.some(l=>calleEmpata(l.calle, d))).map(d=>[d.calle, d.numero].filter(Boolean).join(' '));
+  const repOk = salen.length, repSalen = salen.length;
   const pendDecidir = logs.filter(l=>l.verif && ((l.verif.estado==='no' && l.verif.puertas==='pendiente') || (l.verif.estado==='modelo' && !l.verif.resuelto))).length;
-  return {capt, repOk, repSalen, hayReporte:!!dirs.length, pendDecidir};
+  return {capt, repOk, repSalen, hayReporte:!!dirs.length, faltan, pendDecidir};
+}
+// "Av. Hidalgo #245" y "hidalgo 245" son la misma dirección: se comparan sin acentos, signos ni "av/calle/col".
+function calleNorm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9ñ ]/g,' ').replace(/\b(av|ave|avenida|calle|c|col|colonia|no|num|numero|blvd|boulevard|priv|privada|fracc)\b/g,' ').replace(/\s+/g,' ').trim(); }
+function calleEmpata(capturada, d){
+  const c = ' '+calleNorm(capturada)+' ', nom = calleNorm(d.calle), num = calleNorm(d.numero);
+  if(!nom) return false;
+  const nomOk = c.includes(' '+nom+' ') || c.includes(nom) || (nom.split(' ').filter(w=>w.length>2 && !/^\d+$/.test(w)).every(w=>c.includes(w)));
+  const numOk = !num || c.includes(' '+num+' ');
+  return nomOk && numOk;
 }
 let _instDia = {preguntar:false, elegido:false};
 function instDiaElegir(pre, dia){ const f = document.getElementById(pre+'-fecha'); if(f) f.value = dia; _instDia.elegido = true; instDiaPintar(pre); }
@@ -12717,13 +12732,13 @@ async function instDiaPintar(pre){
   const el = document.getElementById(pre+'-diaaviso'); if(!el || esAdmin() || instRegresoLibre || instCambio) return;
   const hoy = fechaHoyLocal(), ayer = diaAnteriorLaboral(hoy);
   let a; try{ a = await coordAvisosInst(ayer); }catch(e){ return; }
-  const falta = !a.capt || (a.hayReporte && a.repOk > a.capt);
+  const falta = a.hayReporte ? a.faltan.length>0 : !a.capt;
   _instDia.preguntar = falta; if(!falta){ el.innerHTML = ''; return; }
   const f = (document.getElementById(pre+'-fecha')||{}).value || hoy;
   const chip = (dia, txt) => { const on = _instDia.elegido && f===dia; return `<button class="btn small" style="${on?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="instDiaElegir('${pre}','${dia}')">${on?'✔ ':''}${txt}</button>`; };
   const otro = _instDia.elegido && f!==hoy && f!==ayer;
   el.innerHTML = `<div style="margin-top:12px;padding:12px;border-radius:12px;border:2px solid #d97706;background:rgba(217,119,6,.10)">
-    <strong>📅 ${!a.capt ? `Ayer (${fCorta(ayer)}) no capturaste instalaciones.` : `De ayer (${fCorta(ayer)}) llevas ${a.capt} capturada${a.capt===1?'':'s'} y en tu reporte marcaste ${a.repOk} instalada${a.repOk===1?'':'s'}.`}</strong>
+    <strong>📅 ${a.hayReporte ? `De ayer (${fCorta(ayer)}) te falta capturar: ${a.faltan.map(escCalle).join(', ')}` : `Ayer (${fCorta(ayer)}) no capturaste instalaciones.`}</strong>
     <div style="margin-top:4px">¿De qué día es <strong>esta</strong> instalación?</div>
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${chip(hoy,'Hoy · '+fCorta(hoy))}${chip(ayer,'Ayer · '+fCorta(ayer))}<button class="btn small" style="${otro?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="_instDia.elegido=true;const f=document.getElementById('${pre}-fecha');f.focus();try{f.showPicker()}catch(e){};instDiaPintar('${pre}')">${otro?'✔ '+fCorta(f):'Otro día'}</button></div>
     <p class="hint" style="margin:6px 0 0">Así Dirección la compara con el reporte del grupo del día correcto.</p></div>`;
@@ -12733,12 +12748,13 @@ async function coordAvisosPintarCierre(){
   let a; try{ a = await coordAvisosInst(fechaHoyLocal()); }catch(e){ return; }
   const caja = (c, html) => `<div class="card" style="padding:12px;border:2px solid ${c};background:linear-gradient(0deg,${c}14,${c}14),var(--card)">${html}</div>`;
   const out = [];
-  if(!a.capt) out.push(caja('#dc2626', `<strong>⚠️ No has capturado instalaciones de hoy</strong>
+  if(a.hayReporte){ if(a.faltan.length) out.push(caja('#dc2626', `<strong>⚠️ Te falta capturar ${a.faltan.length} instalaci${a.faltan.length===1?'ón':'ones'} de tu reporte de hoy</strong>
+    <ul style="margin:6px 0 0 18px;padding:0;font-weight:700">${a.faltan.map(t=>`<li>📍 ${escCalle(t)}</li>`).join('')}</ul>
+    <p class="hint" style="margin:6px 0 0">Captura <strong>todas las que salieron</strong>, se hayan instalado o no (las que no se instalaron las revisa Dirección). Solo las que pusiste <strong>No sale</strong> no se capturan. Si faltan, tu inventario puede no cuadrar.</p>
+    <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="instSub='';irA('inst')">🔧 Capturar instalaciones</button>`)); }
+  else if(!a.capt) out.push(caja('#dc2626', `<strong>⚠️ No has capturado instalaciones de hoy</strong>
     <p class="hint" style="margin:4px 0 0">Si hubo instalaciones, <strong>captúralas antes del cierre</strong>: si faltan, tu inventario puede no cuadrar.</p>
     <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="instSub='';irA('inst')">🔧 Capturar instalaciones</button>`));
-  else if(a.hayReporte && a.repOk > a.capt) out.push(caja('#d97706', `<strong>⚠️ Llevas ${a.capt} instalación${a.capt===1?'':'es'} capturada${a.capt===1?'':'s'} y en tu reporte de hoy marcaste ${a.repOk} instalada${a.repOk===1?'':'s'}</strong>
-    <p class="hint" style="margin:4px 0 0">Captura las que faltan antes del cierre para que tu inventario cuadre.</p>
-    <button class="btn" style="width:100%;margin-top:8px;background:#d97706" onclick="instSub='';irA('inst')">🔧 Capturar instalaciones</button>`));
   if(a.pendDecidir) out.push(caja('#b45309', `<strong>📦 Tienes ${a.pendDecidir} instalación${a.pendDecidir===1?'':'es'} rechazada${a.pendDecidir===1?'':'s'} sin decidir</strong>
     <p class="hint" style="margin:4px 0 0">Dirección marcó que no se instaló. Su material sigue apartado: decide si se vuelve a instalar, regresa al inventario, va a sobrantes o a merma.</p>
     <button class="btn" style="width:100%;margin-top:8px;background:#b45309" onclick="setView('home');window.scrollTo(0,0)">Decidir ahora</button>`));
