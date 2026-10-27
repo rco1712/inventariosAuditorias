@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v193';
+const APP_VERSION = 'v194';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -684,7 +684,7 @@ function setView(v){
   if(v==='valinst') renderValInst();
   if(v==='sob'){ if(garSub==='sobrante') salirSobrante(); renderSob(); }
   if(v==='inv') renderInv(); if(v==='mov') renderMov(); if(v==='aud') renderAud(); if(v==='hist') renderHist();
-  if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; instRegresoLibre=false; renderInst(); } else instCambio=null;
+  if(v==='cat') renderCat(); if(v==='desp') renderDesp(); if(v==='inst'){ instPreview=null; instRegresoLibre=false; _instDia.elegido=false; renderInst(); } else instCambio=null;
   if(v==='trasp') renderTrasp(); if(v==='rep') renderRep(); if(v==='usr') renderUsuarios(); if(v==='apr') renderAprobaciones();
   if(v==='repver'){ document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v==='rep')); renderRepVer(); }
   if(v==='conf') renderConf();
@@ -7362,6 +7362,7 @@ function renderInstMueble(){
       <div><label class="hint">${reg?'¿De dónde viene? (opcional)':'Cliente (opcional)'}</label><input id="i-nota" placeholder="${reg?'Cliente o motivo del regreso':'Nombre o referencia'}" style="margin-top:4px"></div>
     </div>
     ${reg?'':calleCampoHtml('i')}
+    ${reg?'':'<div id="i-diaaviso"></div>'}
     <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="previewInst()">Revisar material</button>
   </div>
   <div id="i-result"></div>`;
@@ -7431,6 +7432,7 @@ function syncTodoColor(prefix){
 }
 
 function previewInst(){
+  if(!instDiaOk('i')) return;
   const color = $('#i-color').value;
   const todoColor = $('#i-todocolor').checked;
   const correderaExt = document.getElementById('i-corredera-ext') ? document.getElementById('i-corredera-ext').checked : false;
@@ -8166,6 +8168,7 @@ function renderInstPuertas(){
       <div><label class="hint">${reg?'¿De dónde viene? (opcional)':'Cliente (opcional)'}</label><input id="p-nota" placeholder="${reg?'Cliente o motivo del regreso':'Nombre o referencia'}" style="margin-top:4px"></div>
       ${reg?'':`<div style="grid-column:1/-1">${calleCampoHtml('p')}</div>`}
     </div>
+    ${reg?'':'<div id="p-diaaviso"></div>'}
     <button class="btn" style="margin-top:14px;width:100%;min-height:54px;font-size:16px" onclick="calcPuerta()">Revisar material</button>
   </div>
   <div id="p-result"></div>`;
@@ -8465,6 +8468,7 @@ function calcularPuerta(tipo, alto, ancho, paredFalsaExtra, altoMax){
 function puertaSig(){ const v=id=>{ const e=document.getElementById(id); return e ? (e.type==='checkbox'?e.checked:e.value) : ''; };
   return JSON.stringify(['p-tipo','p-color','p-alto','p-ancho','p-ancho-dos','p-ancho2','p-alto-dos','p-alto2'].map(v)); }
 function calcPuerta(){
+  if(!instDiaOk('p')) return;
   const tipo = $('#p-tipo').value;
   const color = $('#p-color').value;
   const alto1 = Number($('#p-alto').value), ancho1 = Number($('#p-ancho').value);
@@ -10378,6 +10382,7 @@ function renderCierre(){
       ${cierreHechoHoy()?'<p class="hint" style="color:var(--ok)">✅ Ya capturaste un cierre hoy. Puedes agregar más si faltó algo.</p>':''}
       ${(()=>{ const ds = cierreHechoHoy() ? [] : diasSinCierre(); return ds.length ? `<p style="margin:10px 0 0;padding:9px 11px;border-radius:10px;background:rgba(37,99,235,.12);border:1px solid rgba(37,99,235,.5);font-size:14px">📆 Este cierre incluye <strong>${ds.length+1} días</strong> (${diasCortosTxt(ds.slice(-4))}${ds.length>4?'…':''} y hoy): no se hizo cierre antes. Cuenta lo que te queda como siempre.</p>` : ''; })()}
     </div>
+    <div id="cierre-avisos"></div>
     ${cierreRepetidasHtml()}
     ${cierreMovsHoyHtml()}
     <div class="card">
@@ -10399,6 +10404,7 @@ function renderCierre(){
       <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarCierre()">✅ Guardar cierre del turno</button>
     </div>`;
   renderCierreConsumibles();
+  coordAvisosPintarCierre();
 }
 // Solo los artículos que tienen material (o que ya se escribieron); los demás con "Ver todos" (v178).
 let cierreTodosCons = false;
@@ -10413,6 +10419,9 @@ function renderCierreConsumibles(){
   el.innerHTML = (cons.map(filaCierreConteo).join('') || `<p class="hint">${q ? 'No se encontró.' : 'La app no tiene '+nombreCat+' en '+modulo()+'.'}</p>`) + boton;
 }
 async function guardarCierre(){
+  try{ const a = await coordAvisosInst(fechaHoyLocal());
+    if(!a.capt && !confirm('⚠️ No has capturado ninguna instalación de hoy.\n\nSi hubo instalaciones, captúralas ANTES del cierre: si faltan, tu inventario puede no cuadrar.\n\n¿Seguro que hoy no hubo instalaciones y quieres guardar el cierre?')) return;
+  }catch(e){}
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = (document.getElementById('cierre-nota').value||'').trim();
   const hojasContadas = CATALOGO.filter(i=>esHoja(i) && !vacioCierre(cierreVals[i.id]));
@@ -12683,6 +12692,58 @@ window.exportarRespaldo = exportarRespaldo;
   init();
 })();
 
+// ===== v194 (pedido por el usuario): avisos al coordinador para no olvidar capturar instalaciones =====
+// Solo avisan; no mueven nada. Comparan lo capturado con su Reporte de instalaciones (cuando lo usa).
+function diaAnteriorLaboral(dia){ const d = new Date(dia+'T12:00:00'); do{ d.setDate(d.getDate()-1); }while(d.getDay()===0); return d.toISOString().slice(0,10); }
+async function coordAvisosInst(dia){
+  const mod = modulo();
+  const [sl, sr] = await Promise.all([db.collection('instalacionesLog').get(), db.collection('reportesInst').get().catch(()=>({docs:[]}))]);
+  const logs = sl.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===mod && l.estado!=='rechazado' && !l.duplicadoAnulado && !l.cambiadaPor);
+  const capt = logs.filter(l=>(l.fechaDia||diaLocal(l.fecha))===dia && !l.cambioDe).length;
+  const rep = sr.docs.map(d=>({id:d.id,...d.data()})).find(x=>x.id===riId(mod, dia));
+  const dirs = rep ? (rep.direcciones||[]) : [];
+  const repOk = dirs.filter(d=>d.cierre==='ok').length, repSalen = dirs.filter(d=>d.salida==='sale' && d.cierre!=='nohizo').length;
+  const pendDecidir = logs.filter(l=>l.verif && ((l.verif.estado==='no' && l.verif.puertas==='pendiente') || (l.verif.estado==='modelo' && !l.verif.resuelto))).length;
+  return {capt, repOk, repSalen, hayReporte:!!dirs.length, pendDecidir};
+}
+let _instDia = {preguntar:false, elegido:false};
+function instDiaElegir(pre, dia){ const f = document.getElementById(pre+'-fecha'); if(f) f.value = dia; _instDia.elegido = true; instDiaPintar(pre); }
+function instDiaOk(pre){
+  if(!_instDia.preguntar || _instDia.elegido || instRegresoLibre || instCambio) return true;
+  const el = document.getElementById(pre+'-diaaviso'); if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+  alert('📅 Antes de seguir, elige de qué día es esta instalación (hoy, ayer u otro día).'); return false;
+}
+async function instDiaPintar(pre){
+  const el = document.getElementById(pre+'-diaaviso'); if(!el || esAdmin() || instRegresoLibre || instCambio) return;
+  const hoy = fechaHoyLocal(), ayer = diaAnteriorLaboral(hoy);
+  let a; try{ a = await coordAvisosInst(ayer); }catch(e){ return; }
+  const falta = !a.capt || (a.hayReporte && a.repOk > a.capt);
+  _instDia.preguntar = falta; if(!falta){ el.innerHTML = ''; return; }
+  const f = (document.getElementById(pre+'-fecha')||{}).value || hoy;
+  const chip = (dia, txt) => { const on = _instDia.elegido && f===dia; return `<button class="btn small" style="${on?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="instDiaElegir('${pre}','${dia}')">${on?'✔ ':''}${txt}</button>`; };
+  const otro = _instDia.elegido && f!==hoy && f!==ayer;
+  el.innerHTML = `<div style="margin-top:12px;padding:12px;border-radius:12px;border:2px solid #d97706;background:rgba(217,119,6,.10)">
+    <strong>📅 ${!a.capt ? `Ayer (${fCorta(ayer)}) no capturaste instalaciones.` : `De ayer (${fCorta(ayer)}) llevas ${a.capt} capturada${a.capt===1?'':'s'} y en tu reporte marcaste ${a.repOk} instalada${a.repOk===1?'':'s'}.`}</strong>
+    <div style="margin-top:4px">¿De qué día es <strong>esta</strong> instalación?</div>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${chip(hoy,'Hoy · '+fCorta(hoy))}${chip(ayer,'Ayer · '+fCorta(ayer))}<button class="btn small" style="${otro?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="_instDia.elegido=true;const f=document.getElementById('${pre}-fecha');f.focus();try{f.showPicker()}catch(e){};instDiaPintar('${pre}')">${otro?'✔ '+fCorta(f):'Otro día'}</button></div>
+    <p class="hint" style="margin:6px 0 0">Así Dirección la compara con el reporte del grupo del día correcto.</p></div>`;
+}
+async function coordAvisosPintarCierre(){
+  const el = document.getElementById('cierre-avisos'); if(!el) return;
+  let a; try{ a = await coordAvisosInst(fechaHoyLocal()); }catch(e){ return; }
+  const caja = (c, html) => `<div class="card" style="padding:12px;border:2px solid ${c};background:linear-gradient(0deg,${c}14,${c}14),var(--card)">${html}</div>`;
+  const out = [];
+  if(!a.capt) out.push(caja('#dc2626', `<strong>⚠️ No has capturado instalaciones de hoy</strong>
+    <p class="hint" style="margin:4px 0 0">Si hubo instalaciones, <strong>captúralas antes del cierre</strong>: si faltan, tu inventario puede no cuadrar.</p>
+    <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="instSub='';irA('inst')">🔧 Capturar instalaciones</button>`));
+  else if(a.hayReporte && a.repOk > a.capt) out.push(caja('#d97706', `<strong>⚠️ Llevas ${a.capt} instalación${a.capt===1?'':'es'} capturada${a.capt===1?'':'s'} y en tu reporte de hoy marcaste ${a.repOk} instalada${a.repOk===1?'':'s'}</strong>
+    <p class="hint" style="margin:4px 0 0">Captura las que faltan antes del cierre para que tu inventario cuadre.</p>
+    <button class="btn" style="width:100%;margin-top:8px;background:#d97706" onclick="instSub='';irA('inst')">🔧 Capturar instalaciones</button>`));
+  if(a.pendDecidir) out.push(caja('#b45309', `<strong>📦 Tienes ${a.pendDecidir} instalación${a.pendDecidir===1?'':'es'} rechazada${a.pendDecidir===1?'':'s'} sin decidir</strong>
+    <p class="hint" style="margin:4px 0 0">Dirección marcó que no se instaló. Su material sigue apartado: decide si se vuelve a instalar, regresa al inventario, va a sobrantes o a merma.</p>
+    <button class="btn" style="width:100%;margin-top:8px;background:#b45309" onclick="setView('home');window.scrollTo(0,0)">Decidir ahora</button>`));
+  el.innerHTML = out.join('');
+}
 // ===== 📦 Material apartado sin definir (pedido por el usuario, v191) =====
 // Instalaciones que Dirección marcó "No se instaló" (o "No coincide") y que el coordinador todavía no
 // resuelve: su material sigue apartado (descontado) y NO ha vuelto al inventario. Solo muestra; no mueve nada.
@@ -12858,3 +12919,5 @@ function unaSolaVez(nombre, fn){
  'verifRegresa','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
  'dupQuitar','dupIgnorar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
+// v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
+['renderInstMueble','renderInstPuertas'].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = function(...a){ const r = f.apply(this, a); try{ instDiaPintar(n==='renderInstMueble'?'i':'p'); }catch(e){} return r; }; }catch(e){} });
