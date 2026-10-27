@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v189';
+const APP_VERSION = 'v190';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6400,10 +6400,12 @@ async function renderInstHistorial(){
   const btnCambio = x => puedeCambiarModelo(x) ? ` <button class="btn small" style="background:transparent;color:#3E5CDE;border:1px solid var(--line);box-shadow:none;white-space:nowrap;margin-top:4px" onclick="iniciarCambioModelo('${x.id}')">✏️ Cambiar modelo</button>` : '';
   const colReg = x => { if(x.cambiadaPor) return '<span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambiada · no cuenta</span>';
     const pc = cambioDeInstalacion(x.id); if(pc) return '<span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo esperando aprobación</span>';
-    return colRegBase(x) + btnCambio(x) + (esAdmin() ? ` <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap;margin-top:4px" onclick="borrarInstalacionError('${x.id}')">🗑️ Se capturó por error</button>` : ''); };
+    return colRegBase(x) + (x.verif&&x.verif.estado==='no'?'':btnCambio(x)) + (esAdmin() ? ` <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap;margin-top:4px" onclick="borrarInstalacionError('${x.id}')">🗑️ Se capturó por error</button>` : ''); };
   const colRegBase = x => { const r = regresoDeInstalacion(x.id);
     if(r) return `<span class="tag pos" style="border-color:var(--ok)">↩️ Regresó</span>${r.estado==='pendiente'?' '+badgeEstado('pendiente'):''}`;
     if(!puede || x.estado==='rechazado') return '';
+    // v190: si Dirección marcó que no se instaló, el material se decide en Verificar (no aquí), para no regresarlo dos veces.
+    if(x.verif && x.verif.estado==='no') return '';
     if(x.estado==='pendiente') return `<span class="hint" style="margin:0">${instSeVerifica(x)?'⏳ Esperando que Dirección verifique':'Aún sin aprobar'}</span>`;
     // v187 (confirmado por el usuario): el coordinador ya no regresa a mano una instalación que entra a
     // Verificar: si no se instaló, Dirección lo marca y entonces él decide a dónde va el material.
@@ -6418,7 +6420,7 @@ async function renderInstHistorial(){
       <div class="hint" style="margin:4px 0 0">🔧 <strong>${vale.length}</strong> instalación(es)${xs.length-vale.length?` · ${xs.length-vale.length} no cuentan (regresaron, se cambiaron o se rechazaron)`:''}${esAdmin()?` · ⭐ Valor: <strong>${fmtNum(xs.reduce((s,x)=>s+valorInstalacion(x,regresadas),0))}</strong>`:''}</div></div>`; };
   let ultimaSemana = null;
   const tagValor = x => { if(!esAdmin()) return ''; const v = valorInstalacion(x, regresadas);
-    if(!instCuenta(x, regresadas)) return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>'+(verifNoCuenta(x)?' <span class="tag" style="color:#0e7490;border-color:#0e7490">🚪 cuenta cuando se reinstalen</span>':'');
+    if(!instCuenta(x, regresadas)) return '<span class="tag" style="text-decoration:line-through">⭐ no cuenta</span>';
     if(x.verif && x.verif.puertas==='reinstalada' && x.verif.fechaReinst) return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)} · cuenta el ${fCorta(x.verif.fechaReinst)} (se reinstalaron)</span>`;
     const det = valorDetalleTxt(x);
     return `<span class="tag" style="color:#b38a1e;border-color:#b38a1e">⭐ ${fmtNum(v)}${det?' <span style="font-weight:500">('+det+')</span>':''}</span>`; };
@@ -6427,7 +6429,7 @@ async function renderInstHistorial(){
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
       <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${calleHtml(x)}${extrasLogHtml(x)} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${badgeEstado(x.estado)}</td></tr>`).join('')}
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${calleHtml(x)}${extrasLogHtml(x)}${x.verif&&VERIF_TAG[x.verif.estado]?`<div style="margin-top:4px">${verifEstadoTxt(x)}</div>`:''} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${estadoInstHist(x)}</td></tr>`).join('')}
       </table></div>
     </div>`; }).join('');
   if(regVolver && regInstSel){ regVolver = false; regParcial ? mostrarRegresoParcial() : mostrarRegresoInst(); }
@@ -6800,6 +6802,8 @@ function verifQuien(l){ return (l.creadoPor||'').split('@')[0]; }
 // v187 (confirmado por el usuario): Dirección ya no dice "cambió el modelo" (no lo sabe): marca
 // "❓ No coincide" y el coordinador, que sí sabe qué se instaló, corrige el modelo.
 const VERIF_TAG = {ok:['✅ Se instaló','#16a34a'], modelo:['❓ No coincide','#3E5CDE'], parte:['🔸 Una parte','#d97706'], no:['❌ No se instaló','#dc2626']};
+// v190: en el historial de instalaciones, la columna Estado muestra lo que Dirección verificó (no solo "Aprobado").
+function estadoInstHist(x){ if(x.estado==='rechazado' || !x.verif || !VERIF_TAG[x.verif.estado]) return badgeEstado(x.estado); return verifEstadoTxt(x); }
 function verifEstadoTxt(l){
   const v = l.verif||{}; const t = VERIF_TAG[v.estado]; if(!t) return '';
   let extra = '';
