@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v192';
+const APP_VERSION = 'v193';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6408,6 +6408,7 @@ async function renderInstHistorial(){
     if(!puede || x.estado==='rechazado') return '';
     // v190: si Dirección marcó que no se instaló, el material se decide en Verificar (no aquí), para no regresarlo dos veces.
     if(x.verif && x.verif.estado==='no') return '';
+    if(verifCerrada(x)) return '';
     if(x.estado==='pendiente') return `<span class="hint" style="margin:0">${instSeVerifica(x)?'⏳ Esperando que Dirección verifique':'Aún sin aprobar'}</span>`;
     // v187 (confirmado por el usuario): el coordinador ya no regresa a mano una instalación que entra a
     // Verificar: si no se instaló, Dirección lo marca y entonces él decide a dónde va el material.
@@ -6472,7 +6473,11 @@ function diffConsumo(orig, nuevo){
 }
 function consumoAValidar(consumo){ return instCambio ? diffConsumo(instCambio.consumo, consumo).descuenta : consumo; }
 function cambioDeInstalacion(logId){ return (instLog||[]).find(l=>l.cambioDe===logId && l.estado==='pendiente'); }
+// v193 (confirmado por el usuario): una instalación que Dirección ya confirmó (✅, una parte, o reinstalada y
+// verificada) queda cerrada: ya no se regresa ni se cambia de modelo desde el historial.
+function verifCerrada(x){ const v = x && x.verif; return !!(v && (v.estado==='ok' || v.estado==='parte' || (v.puertas==='reinstalada' && v.reEstado==='ok'))); }
 function puedeCambiarModelo(x){
+  if(verifCerrada(x)) return false;
   if(esSoloLectura() || x.estado==='rechazado' || x.cambiadaPor || (x.cambioDe && x.estado==='pendiente') || regresoDeInstalacion(x.id) || cambioDeInstalacion(x.id)) return false;
   // v187: lo que Dirección marcó como no instalado se resuelve desde el aviso de Inicio, no desde aquí.
   if(x.verif && x.verif.estado==='no' && ['pendiente','cambio','reinstalar','otrolado'].includes(x.verif.puertas)) return false;
