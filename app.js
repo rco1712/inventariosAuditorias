@@ -512,11 +512,12 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
   });
   // autoCortes = hojas tomadas provisionalmente que TODAVÍA no cubre ningún corte registrado.
   const autoCortes = Math.abs(deuda)<EPS ? 0 : deuda;
-  const final = inicial+entradas-salidas-instalaciones-garantias-mermas+ajustes;
+  const r6 = x => Math.round(x*1e6)/1e6; // evita restos como 20.999999999999996 (auditoría v188)
+  const final = r6(inicial+entradas-salidas-instalaciones-garantias-mermas+ajustes);
   const r = {inicial,entradas,salidas,instalaciones,garantias,mermas,ajustes,final};
   if(hoja){
     Object.assign(r, {esHoja:true, cortes, autoCortes, faltoCortado,
-      completas: Math.abs(completas)<EPS?0:completas, cortado: Math.abs(cortado)<EPS?0:cortado,
+      completas: Math.abs(completas)<EPS?0:r6(completas), cortado: Math.abs(cortado)<EPS?0:r6(cortado),
       inicialCortado: iniCort});
   } else {
     r.completas = final; r.cortado = 0;
@@ -8767,6 +8768,7 @@ async function confirmarTraspaso(){
 }
 
 async function renderTraspHistorial(){
+  if(!document.getElementById('trasp-body')) return;
   $('#trasp-body').innerHTML = `<div class="card hint">Cargando préstamos…</div>`;
   await cargarPrestamos();
   if(prestamos.length===0){ $('#trasp-body').innerHTML = `<div class="card">Aún no hay traspasos registrados.</div>`; return; }
@@ -12642,3 +12644,26 @@ window.exportarRespaldo = exportarRespaldo;
   }
   init();
 })();
+
+// ===== Anti doble toque (auditoría v188) =====
+// Si el usuario toca dos veces "Guardar" (o el celular va lento), la segunda llamada se ignora mientras
+// la primera sigue guardando. Así una instalación, traspaso, devolución, regreso, garantía, merma,
+// cierre, etc. no se registra dos veces. La llave es la función + sus datos (otra dirección u otra
+// instalación sí se puede guardar al mismo tiempo).
+const _enCurso = new Set();
+function unaSolaVez(nombre, fn){
+  return async function(...args){
+    const k = nombre+'|'+JSON.stringify(args);
+    if(_enCurso.has(k)){ try{ toast('⏳ Ya se está guardando. Espera un momento.'); }catch(e){} return; }
+    _enCurso.add(k);
+    try{ return await fn.apply(this, args); }
+    finally{ setTimeout(()=>_enCurso.delete(k), 1200); }
+  };
+}
+['confirmarInst','registrarPuerta','confirmarGar','confirmarRetornoGar','confirmarTraspaso','registrarDevolucion',
+ 'confirmarRegresoInst','confirmarRegresoParcial','confirmarRegresoLibre','confirmarRegresoPuerta','guardarCambioModelo',
+ 'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
+ 'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
+ 'verifRegresa','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
+ 'riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
+].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
