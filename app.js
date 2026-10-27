@@ -12708,6 +12708,9 @@ const maqEsc = t => String(t==null?'':t).replace(/[&<>"']/g, c=>({'&':'&amp;','<
 const maqPesos = n => '$'+(Number(n)||0).toLocaleString('es-MX',{minimumFractionDigits:0, maximumFractionDigits:2});
 const maqModNombre = m => m===ALM ? 'Taller / Almacén general' : m;
 const maqMods = () => [...MODULOS.map(m=>m.nombre), ALM];
+function maqModColor(m){ const mm = MODULOS.find(x=>x.nombre===m); return mm ? mm.color : '#9a3412'; }
+function maqModRgb(m){ const h = maqModColor(m); return [1,3,5].map(k=>parseInt(h.slice(k,k+2),16)); }
+function maqGastoMod(xs){ const r = {mant:0, rep:0}; xs.forEach(x=>(x.servicios||[]).forEach(v=>{ r[v.tipo==='rep'?'rep':'mant'] += maqServTotal(v); })); r.total = r.mant + r.rep; return r; }
 function maqIcono(tipo){ const t = MAQ_TIPOS.find(x=>x[0]===tipo); return t ? t[1] : '⚙️'; }
 function maqMarcas(){ const base = MAQ_MARCAS_BASE.map(m=>m.n), extra = [...new Set((maqCache||[]).map(x=>x.marca).filter(m=>m && !base.some(b=>b.toLowerCase()===String(m).toLowerCase())))].sort(); return [...base, ...extra]; }
 function maqMarcaBadge(n){ const m = MAQ_MARCAS_BASE.find(x=>x.n.toLowerCase()===String(n||'').toLowerCase());
@@ -12727,14 +12730,21 @@ async function renderMaq(){
   const chip = (k, txt, c, n) => `<button onclick="maqMod='${k}';renderMaq()" style="border-radius:12px;padding:8px 12px;border:2px solid ${c};background:${maqMod===k?c:'transparent'};color:${maqMod===k?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${txt}${n?` · ${n}`:''}</button>`;
   const chips = chip('', 'Todos', '#7c3aed', maqCache.length) + maqMods().map(m=>{ const mm = MODULOS.find(x=>x.nombre===m); return chip(m, m===ALM?'Taller':m, mm?mm.color:'#9a3412', maqCache.filter(x=>x.modulo===m).length); }).join('');
   const card = x => { const u = maqUltimo(x), e = MAQ_ESTADOS[x.estado||'funciona'], dias = u ? Math.round((new Date(fechaHoyLocal()+'T12:00:00')-new Date(u.fecha+'T12:00:00'))/864e5) : null;
-    return `<div class="card" onclick="maqAbierta='${x.id}';renderMaq();window.scrollTo(0,0)" style="cursor:pointer;border-left:6px solid #7c3aed;padding:12px 14px">
+    return `<div class="card" onclick="maqAbierta='${x.id}';renderMaq();window.scrollTo(0,0)" style="cursor:pointer;border-left:8px solid ${maqModColor(x.modulo)};padding:12px 14px">
       <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><div style="min-width:0"><div style="font-size:17px;font-weight:900">${maqIcono(x.tipo)} ${maqEsc(x.tipo)}</div>
         <div style="margin-top:4px">${maqMarcaBadge(x.marca)} ${x.modelo?`<span class="hint" style="margin:0">${maqEsc(x.modelo)}</span>`:''}</div></div>
         <span class="tag" style="color:${e[1]};border-color:${e[1]};white-space:nowrap">${e[0]}</span></div>
-      ${!maqMod?`<div class="hint" style="margin:6px 0 0">📍 ${maqEsc(maqModNombre(x.modulo))}</div>`:''}
+      ${!maqMod?`<div style="margin:6px 0 0"><span style="display:inline-block;padding:2px 9px;border-radius:7px;font-weight:800;font-size:13px;background:${maqModColor(x.modulo)};color:#fff">📍 ${maqEsc(maqModNombre(x.modulo))}</span></div>`:''}
       <div class="hint" style="margin:6px 0 0">${u ? `${u.tipo==='rep'?'🛠️ Última reparación':'🔧 Último mantenimiento'}: <strong>${fCorta(u.fecha)}</strong> (${dias===0?'hoy':dias===1?'hace 1 día':'hace '+dias+' días'}) · ${maqEsc(u.quien||'')}` : '🔧 Sin mantenimientos registrados'}</div>
       <div style="margin-top:4px;font-weight:800">💰 Gastado: ${maqPesos(maqTotal(x))} <span class="hint" style="margin:0;font-weight:500">· ${(x.servicios||[]).length} servicio(s)</span></div></div>`; };
   const tot = xs.reduce((s,x)=>s+maqTotal(x),0);
+  const gastos = !maqMod && maqCache.length ? `<div class="card" style="padding:12px"><strong>💰 Gastos por módulo</strong>
+    ${maqMods().filter(m=>maqCache.some(x=>x.modulo===m)).map(m=>{ const g = maqGastoMod(maqCache.filter(x=>x.modulo===m)), c = maqModColor(m);
+      return `<div onclick="maqMod='${m}';renderMaq()" style="cursor:pointer;display:flex;align-items:center;gap:10px;margin-top:8px;padding:9px 12px;border-radius:12px;border:2px solid ${c};background:${c}22">
+        <strong style="flex:1;color:${c};filter:brightness(1.35)">${maqEsc(m===ALM?'Taller':m)}</strong>
+        <span class="hint" style="margin:0;text-align:right;font-size:12.5px">🔧 ${maqPesos(g.mant)}<br>🛠️ ${maqPesos(g.rep)}</span>
+        <strong style="min-width:84px;text-align:right">${maqPesos(g.total)}</strong></div>`; }).join('')}
+    <div style="display:flex;justify-content:space-between;margin-top:10px;font-weight:900"><span>Total</span><span>${maqPesos(tot)}</span></div></div>` : '';
   $('#main').innerHTML = `
     <div class="card" style="padding:12px;border:2px solid #7c3aed">
       <div style="font-size:18px;font-weight:900">🏭 Maquinaria</div>
@@ -12742,6 +12752,7 @@ async function renderMaq(){
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${chips}</div>
       <div class="row" style="gap:8px;margin-top:10px;flex-wrap:nowrap"><button class="btn" style="flex:1;background:#7c3aed" onclick="maqNueva()">➕ Agregar máquina</button><button class="btn" style="background:#b91c1c;white-space:nowrap" onclick="generarMaqPDF(${maqMod?`['${maqMod}']`:'null'})">📄 PDF${maqMod?'':' de todo'}</button></div>
     </div>
+    ${gastos}
     ${xs.length ? `<p class="hint" style="margin:4px 4px 0">${xs.length} máquina(s) · gastado en total: <strong>${maqPesos(tot)}</strong></p>`+xs.map(card).join('') : `<div class="card" style="text-align:center">${maqMod?`${maqEsc(maqModNombre(maqMod))} todavía no tiene máquinas registradas.`:'Todavía no hay máquinas registradas.'}</div>`}`;
 }
 function maqNueva(){ maqForm = {id:'', modulo:maqMod||'', tipo:'', otroTipo:false, marca:'', otraMarca:false, modelo:'', serie:'', estado:'funciona', nota:''}; maqAbierta=''; renderMaq(); window.scrollTo(0,0); }
@@ -12877,20 +12888,28 @@ async function generarMaqPDF(mods, soloId){
   const totMant = todas.reduce((s,x)=>s+(x.servicios||[]).filter(v=>v.tipo!=='rep').reduce((a,v)=>a+maqServTotal(v),0),0), totRep = todas.reduce((s,x)=>s+(x.servicios||[]).filter(v=>v.tipo==='rep').reduce((a,v)=>a+maqServTotal(v),0),0);
   S.kpis(una ? [[(una.servicios||[]).length,'servicios',MOR],[pesos(totMant),'en mantenimientos',VER],[pesos(totRep),'en reparaciones',AMB],[pesos(totMant+totRep),'gastado en total',MOR]]
     : [[todas.length,'máquinas',MOR],[todas.filter(x=>x.estado==='reparacion').length,'en reparación',AMB],[todas.filter(x=>x.estado==='baja').length,'fuera de servicio',ROJ],[pesos(totMant+totRep),'gastado en total',VER]]);
+  if(!una){ const filas = mods.map(md=>({md, xs:todas.filter(x=>x.modulo===md)})).filter(f=>f.xs.length || mods.length===1);
+    const g = filas.map(f=>({...f, ...maqGastoMod(f.xs)}));
+    S.banda('Gastos por módulo', pesos(g.reduce((s,f)=>s+f.total,0)), MOR);
+    S.tabla([{t:'Módulo',w:46},{t:'Máquinas',w:22},{t:'Mantenimientos',w:38},{t:'Reparaciones',w:38},{t:'Total',w:38}],
+      [...g.map(f=>{ const c = maqModRgb(f.md); return [{t:maqModNombre(f.md), col:c, b:true}, String(f.xs.length), pesos(f.mant), pesos(f.rep), {t:pesos(f.total), col:c, b:true}]; }),
+       [{t:'Total', b:true}, String(todas.length), {t:pesos(g.reduce((s,f)=>s+f.mant,0)), b:true}, {t:pesos(g.reduce((s,f)=>s+f.rep,0)), b:true}, {t:pesos(g.reduce((s,f)=>s+f.total,0)), b:true}]], MOR); }
+  let CM = MOR;
   const historial = x => { const servs = (x.servicios||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
-    S.banda(`${x.tipo} · ${x.marca}${x.modelo?' '+x.modelo:''}${x.serie?' · serie '+x.serie:''}`, `${servs.length} servicio(s) · ${pesos(maqTotal(x))}`, MOR);
+    S.banda(`${x.tipo} · ${x.marca}${x.modelo?' '+x.modelo:''}${x.serie?' · serie '+x.serie:''}`, `${servs.length} servicio(s) · ${pesos(maqTotal(x))}`, CM);
     if(!servs.length){ S.vacio('Sin mantenimientos ni reparaciones registrados.'); return; }
     S.tabla([{t:'Fecha',w:22},{t:'Tipo',w:24},{t:'Quién lo hizo',w:34},{t:'Cobró',w:18},{t:'Piezas compradas',w:62},{t:'Total',w:22}],
       servs.map(v=>[fCor(v.fecha), {t:v.tipo==='rep'?'Reparación':'Mantenimiento', col:v.tipo==='rep'?AMB:VER, b:true}, v.quien||'—', pesos(v.costo),
-        [(v.piezas||[]).map(p=>`${p.n} ${pesos(p.costo)}`).join(', '), v.nota?`Nota: ${v.nota}`:''].filter(Boolean).join('\n')||'—', {t:pesos(maqServTotal(v)), b:true}]), MOR); };
-  if(una){ historial(una); }
+        [(v.piezas||[]).map(p=>`${p.n} ${pesos(p.costo)}`).join(', '), v.nota?`Nota: ${v.nota}`:''].filter(Boolean).join('\n')||'—', {t:pesos(maqServTotal(v)), b:true}]), CM); };
+  if(una){ CM = maqModRgb(una.modulo); historial(una); }
   else mods.forEach((md, mi)=>{
     const xs = todas.filter(x=>x.modulo===md).sort((a,b)=>(a.tipo||'').localeCompare(b.tipo||''));
     if(!xs.length && mods.length>1) return;
-    S.seccion(maqModNombre(md), `${xs.length} máquina${xs.length===1?'':'s'} · gastado ${pesos(xs.reduce((s,x)=>s+maqTotal(x),0))}`, MOR, false);
+    CM = maqModRgb(md); const gm = maqGastoMod(xs);
+    S.seccion(maqModNombre(md), `${xs.length} máquina${xs.length===1?'':'s'} · mantenimientos ${pesos(gm.mant)} · reparaciones ${pesos(gm.rep)} · total ${pesos(gm.total)}`, CM, false);
     if(!xs.length){ S.vacio('Sin máquinas registradas.'); return; }
     S.tabla([{t:'Máquina',w:30},{t:'Marca',w:24},{t:'Modelo / serie',w:32},{t:'Estado',w:28},{t:'Último servicio',w:44},{t:'Gastado',w:24}],
-      xs.map(x=>{ const u = maqUltimo(x); return [x.tipo, x.marca||'—', [x.modelo, x.serie?'serie '+x.serie:''].filter(Boolean).join(' · ')||'—', estCel(x), u?`${fCor(u.fecha)} · ${u.tipo==='rep'?'reparación':'mantenimiento'}\n${u.quien||''}`:{t:'Sin servicios', col:GRI}, {t:pesos(maqTotal(x)), b:true}]; }), MOR);
+      xs.map(x=>{ const u = maqUltimo(x); return [x.tipo, x.marca||'—', [x.modelo, x.serie?'serie '+x.serie:''].filter(Boolean).join(' · ')||'—', estCel(x), u?`${fCor(u.fecha)} · ${u.tipo==='rep'?'reparación':'mantenimiento'}\n${u.quien||''}`:{t:'Sin servicios', col:GRI}, {t:pesos(maqTotal(x)), b:true}]; }), CM);
     xs.forEach(historial);
   });
   if(!una && !todas.length) S.vacio('No hay máquinas registradas.');
