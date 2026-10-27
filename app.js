@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v187';
+const APP_VERSION = 'v188';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -12403,8 +12403,9 @@ async function generarReporteDiarioPDF(modo, fechaDia){
     const hoyL = diaSel;
     const iniDiaISO = new Date(hoyL+'T00:00:00').toISOString(), finDiaISO = new Date(hoyL+'T23:59:59.999').toISOString();
     const deHoy = movs.filter(m=>m.modulo===mod && m.fecha && diaLocal(m.fecha)===hoyL && m.tipo!=='nota');
-    const aprobHoy = deHoy.filter(m=>m.estado!=='pendiente' && m.estado!=='rechazado');
-    const pendHoy = deHoy.filter(m=>m.estado==='pendiente').length;
+    // v188: igual que el inventario: las instalaciones cuentan desde que se capturan (aunque falte verificarlas).
+    const aprobHoy = deHoy.filter(cuentaEnInventario);
+    const pendHoy = deHoy.filter(m=>m.estado==='pendiente' && !cuentaEnInventario(m)).length;
     const porItem = {};
     aprobHoy.forEach(m=>{ const t = porItem[m.itemId] = porItem[m.itemId] || {ent:0, sal:0, corte:0, inst:0, gar:0, merma:0, aj:0};
       const q = Number(m.cantidad)||0;
@@ -12467,7 +12468,7 @@ async function generarReporteDiarioPDF(modo, fechaDia){
     if(y > pageH-20){ doc.addPage(); y = 15; }
     doc.setFontSize(7.5); doc.setTextColor(90,96,112);
     doc.text(`Inició + Entró − Salió − Instal. − Garant. − Mermas ± Ajuste = ${esPasado?'Cerró':'Queda'}. El corte solo pasa hojas de completas a cortado.`, marginL, y);
-    doc.text(`En negritas y amarillo: lo que tuvo movimiento ${esPasado?'ese día':'hoy'}. Solo cuenta lo aprobado` + (pendHoy ? `; hay ${pendHoy} movimiento(s) de ${esPasado?'ese día':'hoy'} por aprobar.` : '.'), marginL, y+3.6);
+    doc.text(`En negritas y amarillo: lo que tuvo movimiento ${esPasado?'ese día':'hoy'}. Cuenta lo aprobado y las instalaciones capturadas` + (pendHoy ? `; hay ${pendHoy} movimiento(s) de ${esPasado?'ese día':'hoy'} por aprobar.` : '.'), marginL, y+3.6);
     doc.setTextColor(0,0,0);
     // Lo acumulado desde el conteo va en hoja aparte (solo en el reporte de hoy)
     if(!esPasado){
