@@ -692,6 +692,7 @@ function setView(v){
   if(v==='mermaarm') renderMermaArm();
   if(v==='verif') renderVerif();
   if(v==='rinst') renderRInst();
+  if(v==='dup') renderDup();
 }
 
 let invCat = null, invDetalle = false;
@@ -8649,7 +8650,7 @@ function grupoDeuda(itemId){ return esMelaminaId(itemId) ? 'Melamina' : itemId; 
 async function cargarPrestamos(){
   try{
     const snap = await db.collection('prestamos').get();
-    prestamos = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+    prestamos = snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.estado!=='anulado').sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
   }catch(e){ prestamos=[]; }
 }
 
@@ -8939,7 +8940,8 @@ function repGrupos(){
   ]});
   if(A || (SL && !ADM)) G.push({ic:'📋', t:'Auditoría', c:'#9333ea', items:[
     {t:'Última auditoría vs. teórico', s:modulo(), k:'auditoria ultima teorico fisico diferencias', js:"repAbrir('ultAud')"},
-    {t:'Faltantes (deuda)', s:'sin saldar', k:'faltantes deuda auditoria', js:"irA('hist',{tab:'deuda'})"}
+    {t:'Faltantes (deuda)', s:'sin saldar', k:'faltantes deuda auditoria', js:"irA('hist',{tab:'deuda'})"},
+    ...(A ? [{t:'Revisar duplicados', s:'los 5 módulos', k:'duplicados doble toque repetido duplicado revisar', js:"dupMod='';irA('dup')"}] : [])
   ]});
   const herr = [];
   if(!ADM) herr.push({t:'Gasolina', s:'presupuesto', k:'gasolina cargas presupuesto semana', js:"repAbrir('gas')"});
@@ -9619,6 +9621,7 @@ function renderConf(){
         <button class="btn small" style="background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none" onclick="riBorrarTodo(MODULOS.map(m=>m.nombre))">Borrar los de los 5 módulos</button>
       </div>
     </div>
+    ${grp('🔍','Revisar','#7c3aed', fila('Revisar duplicados','capturas guardadas dos veces · los 5 módulos',"dupMod='';irA('dup')"))}
     ${grp('💾','Respaldo','#16a34a', fila('Descargar respaldo','todo en un archivo','exportarRespaldo()'))}
     ${grp('🧪','Pruebas','#7c3aed', fila('Simulador de auditoría','no guarda nada',"setAudTipo('simulacion');irA('aud')"))}`;
 }
@@ -9729,11 +9732,12 @@ async function cargarPendDir(forzar){
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ const k = m.loteId||Math.random(); if(lotesVistos.has(k)) return; lotesVistos.add(k); porMod[m.modulo] = (porMod[m.modulo]||0) + 1; });
     snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
     const deudas = snapDeu.docs.map(d=>d.data()).filter(x=>x.estado!=='saldada');
-    const antes = JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif, _dirRI]);
+    const antes = JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif, _dirRI, dupCache?dupCache.grupos.length:0]);
     _dirAprPorMod = porMod; _dirDeudas = deudas; _dirCargadoT = Date.now();
     _dirVerif = verifCalcDir(snapLog.docs.map(d=>({id:d.id,...d.data()})), snapMov.docs.map(d=>d.data()));
     _dirRI = riCalcDir(snapRI.docs.map(d=>({id:d.id,...d.data()})));
-    if(JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif, _dirRI])!==antes && current==='home' && enDirModo()) renderHomeDir();
+    if(!_dupT || Date.now()-_dupT > 60000){ _dupT = Date.now(); try{ await dupCargar(); }catch(e){} }
+    if(JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif, _dirRI, dupCache?dupCache.grupos.length:0])!==antes && current==='home' && enDirModo()) renderHomeDir();
   }catch(e){}
   _dirCargando = false;
 }
@@ -9746,6 +9750,8 @@ function pendDirHtml(){
   const rV = verifPendRow(fila); if(rV) rows.push(rV);
   const rA = verifPendRowAtr(fila); if(rA) rows.push(rA);
   const rR = riPendRow(fila); if(rR) rows.push(rR);
+  if(dupCache && dupCache.grupos.length){ const por = {}; dupCache.grupos.forEach(g=>{ por[g.modulo]=(por[g.modulo]||0)+1; });
+    rows.push(fila('🔍', `Posibles duplicados: ${dupCache.grupos.length}`, Object.keys(por).map(k=>k+' '+por[k]).join(' · ')+' · capturas guardadas dos veces', '#7c3aed', 'Revisar', "dupMod='';irA('dup')")); }
   const H = herrCache;
   if(H){
     const nP = herrPendientes(H).length, nRec = herrPorRecibir(H).length, avD = herrAvisosDir(H), fR = ferRecibidosSinVer(H), nRecEnv = herrEnviosRecibidos(H).length;
@@ -12645,6 +12651,112 @@ window.exportarRespaldo = exportarRespaldo;
   init();
 })();
 
+// ===== 🔍 Revisar duplicados (confirmado por el usuario, v188) =====
+// Busca en los 5 módulos capturas que se guardaron dos veces (doble toque): instalaciones iguales,
+// lotes de movimientos iguales (entradas, salidas, mermas, regresos, cierres…), dos regresos de la
+// misma instalación y traspasos repetidos. Dirección revisa cada caso y decide: "Quitar este" (se
+// anula: deja de contar en el inventario, queda en el historial como anulado por duplicado) o
+// "No es duplicado" (no vuelve a salir).
+const DUP_SEG = 180; // capturas iguales con menos de 3 minutos de diferencia
+let dupCache = null, dupMod = '', _dupT = 0;
+function dupFirma(obj){ return JSON.stringify(obj); }
+function dupCerca(a, b){ return Math.abs(Date.parse(a||0) - Date.parse(b||0)) <= DUP_SEG*1000; }
+async function dupCargar(){
+  const [sm, sl, sp, sc] = await Promise.all(['movimientos','instalacionesLog','prestamos','config'].map(c=>db.collection(c).get()));
+  const movsT = sm.docs.map(d=>({id:d.id,...d.data()})), logs = sl.docs.map(d=>({id:d.id,...d.data()})), pres = sp.docs.map(d=>({id:d.id,...d.data()}));
+  const cfg = sc.docs.find(d=>d.id==='duplicadosRevisados'); const ignorados = new Set(cfg ? ((cfg.data()||{}).claves||[]) : []);
+  const grupos = [];
+  const agrupar = (xs, firma, fecha) => { const por = {}; xs.forEach(x=>{ const k = firma(x); (por[k]=por[k]||[]).push(x); });
+    const out = []; Object.values(por).forEach(arr=>{ if(arr.length<2) return; arr.sort((a,b)=>(fecha(a)||'').localeCompare(fecha(b)||''));
+      let g = [arr[0]]; for(let i=1;i<arr.length;i++){ if(dupCerca(fecha(arr[i]), fecha(g[g.length-1]))) g.push(arr[i]); else { if(g.length>1) out.push(g); g=[arr[i]]; } } if(g.length>1) out.push(g); }); return out; };
+  // 1) Instalaciones iguales
+  const vivos = logs.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado);
+  agrupar(vivos, l=>dupFirma([l.modulo, l.categoria, l.descripcion, l.calle||'', l.fechaDia, (l.consumo||[]).map(c=>c.itemId+':'+c.cantidad).sort()]), l=>l.fecha)
+    .forEach(g=>grupos.push({tipo:'inst', modulo:g[0].modulo, items:g, clave:'inst:'+g.map(x=>x.id).sort().join(',')}));
+  // 2) Lotes de movimientos iguales (no instalaciones: esas van arriba; no traspasos: van abajo)
+  const lotes = {}; movsT.filter(m=>m.estado!=='rechazado' && !m.duplicadoAnulado && m.tipo!=='instalacion' && !/^Traspaso |^Devolución de préstamo /.test(m.nota||'')).forEach(m=>{ const k = m.loteId||m.id; (lotes[k]=lotes[k]||[]).push(m); });
+  const loteArr = Object.keys(lotes).map(k=>({id:k, movs:lotes[k], fecha:lotes[k].map(m=>m.fecha).sort()[0], modulo:lotes[k][0].modulo}));
+  agrupar(loteArr, L=>dupFirma([L.modulo, L.movs.map(m=>[m.tipo, m.motivo||'', m.itemId, Number(m.cantidad), m.lado||'', m.instalacionId||'', m.destinoTipo||'', m.destinoModulo||'', m.proveedor||'', m.origenTipo||'', m.origenModulo||'', m.pedidoId||''].join('|')).sort()]), L=>L.fecha)
+    .forEach(g=>grupos.push({tipo:'lote', modulo:g[0].modulo, items:g, clave:'lote:'+g.map(x=>x.id).sort().join(',')}));
+  // 3) Dos regresos de la misma instalación (aunque sean de días distintos)
+  const regs = {}; loteArr.filter(L=>L.movs.some(m=>m.motivo==='regresoInstalacion' && m.instalacionId)).forEach(L=>{ const k = L.movs.find(m=>m.instalacionId).instalacionId; (regs[k]=regs[k]||[]).push(L); });
+  Object.keys(regs).forEach(k=>{ const g = regs[k].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')); if(g.length<2) return;
+    const clave = 'reg:'+g.map(x=>x.id).sort().join(','); if(grupos.some(x=>x.clave===clave.replace('reg:','lote:'))) return;
+    grupos.push({tipo:'reg', modulo:g[0].modulo, items:g, clave, log:logs.find(l=>l.id===k)}); });
+  // 4) Traspasos repetidos (préstamo + su salida y su entrada)
+  agrupar(pres.filter(x=>!x.duplicadoAnulado && x.estado!=='anulado'), x=>dupFirma([x.origen, x.destino, x.itemId, Number(x.cantidad)]), x=>x.fecha)
+    .forEach(g=>grupos.push({tipo:'tras', modulo:g[0].origen, items:g, clave:'tras:'+g.map(x=>x.id).sort().join(',')}));
+  dupCache = {grupos: grupos.filter(g=>!ignorados.has(g.clave)), ignorados, movsT, logs};
+  return dupCache;
+}
+function dupNum(mod){ return dupCache ? dupCache.grupos.filter(g=>!mod || g.modulo===mod).length : 0; }
+async function renderDup(){
+  current = 'dup';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  $('#main').innerHTML = '<div class="card">Buscando duplicados en los 5 módulos…</div>';
+  try{ await dupCargar(); }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo revisar: ${e.message}</div>`; return; }
+  dupPintar();
+}
+function dupPintar(){
+  if(current!=='dup' || !dupCache) return;
+  const G = dupCache.grupos;
+  if(!dupMod || !G.some(g=>g.modulo===dupMod)) dupMod = (MODULOS.find(m=>G.some(g=>g.modulo===m.nombre))||{}).nombre || '';
+  const hora = iso => iso ? new Date(iso).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit', second:'2-digit'}) : '';
+  const quien = x => String(x.creadoPor||((x.movs||[])[0]||{}).creadoPor||'').split('@')[0];
+  const lista = arr => arr.map(m=>{ const it = CATALOGO.find(i=>i.id===m.itemId); return `${fmtNum(m.cantidad)} ${it?it.unidad:''} ${it?it.nombre:(m.itemNombre||m.itemId)}`; }).join(' · ');
+  const estadoTxt = x => { const e = x.estado || ((x.movs||[]).some(m=>m.estado==='pendiente') ? 'pendiente' : 'aprobado'); return e==='pendiente' ? '<span class="tag" style="color:#d97706;border-color:#d97706">pendiente</span>' : '<span class="tag pos">aprobado</span>'; };
+  const titulo = g => g.tipo==='inst' ? `🔧 Instalación repetida · ${g.items[0].descripcion}` : g.tipo==='tras' ? `🔄 Traspaso repetido · ${g.items[0].origen} → ${g.items[0].destino}` : g.tipo==='reg' ? `↩️ La misma instalación se regresó ${g.items.length} veces${g.log?' · '+g.log.descripcion:''}` : `📦 Captura repetida · ${(TIPO_LABEL[g.items[0].movs[0].tipo]||g.items[0].movs[0].tipo)}${g.items[0].movs[0].motivo?' ('+etiquetaTipoMov(g.items[0].movs[0])+')':''}`;
+  const copia = (g, x, i) => { const f = g.tipo==='lote'||g.tipo==='reg' ? x.fecha : x.fecha;
+    const det = g.tipo==='inst' ? lista(x.consumo||[]) + (x.calle?` · 📍 ${escCalle(x.calle)}`:'') : g.tipo==='tras' ? `${fmtNum(x.cantidad)} ${x.unidad||''} ${x.itemNombre}` : lista(x.movs);
+    return `<div style="padding:10px;border-radius:12px;border:1px solid ${i?'#dc2626':'var(--line)'};margin-top:8px">
+      <div class="row" style="justify-content:space-between;gap:8px"><strong>${i?'Copia '+(i+1):'Primera'}</strong>${g.tipo==='tras'?'':estadoTxt(x)}</div>
+      <div class="hint" style="margin:2px 0 0">🕒 ${hora(f)}${quien(x)?' · '+quien(x):''}</div>
+      <div style="font-size:13px;margin-top:4px">${det}</div>
+      ${i?`<button class="btn small" style="margin-top:8px;background:#dc2626" onclick="dupQuitar('${g.clave}',${i})">🗑️ Quitar esta copia</button>`:''}</div>`; };
+  const mods = MODULOS.map(m=>({n:m.nombre, c:m.color, k:G.filter(g=>g.modulo===m.nombre).length}));
+  const xs = G.filter(g=>g.modulo===dupMod);
+  $('#main').innerHTML = `
+    <div class="card" style="padding:12px;border:2px solid #7c3aed">
+      <div style="font-size:18px;font-weight:900">🔍 Revisar duplicados</div>
+      <p class="hint" style="margin:2px 0 0">Capturas iguales guardadas con menos de 3 minutos de diferencia (doble toque), en los 5 módulos. Revisa cada caso: si sobra, tócale <strong>Quitar esta copia</strong> y deja de contar en el inventario.</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${mods.map(m=>`<button onclick="dupMod='${m.n}';dupPintar()" style="border-radius:12px;padding:8px 12px;border:2px solid ${m.c};background:${m.n===dupMod?m.c:'transparent'};color:${m.n===dupMod?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${m.n}${m.k?' · '+m.k:' ✓'}</button>`).join('')}</div></div>
+    ${!G.length ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ No se encontraron duplicados en ningún módulo.</strong></div>` : ''}
+    ${xs.map(g=>`<div class="card" style="padding:12px;border-left:6px solid #dc2626">
+      <strong style="font-size:15px">${titulo(g)}</strong>
+      ${g.items.map((x,i)=>copia(g,x,i)).join('')}
+      <button class="btn small" style="margin-top:10px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="dupIgnorar('${g.clave}')">✔ No es duplicado (son dos distintas)</button></div>`).join('')}
+    <p class="hint" style="text-align:center;margin:10px 0">Lo que quites queda en el historial como "anulado por duplicado" (no se borra). Pide el PIN de Dirección.</p>`;
+}
+async function dupQuitar(clave, idx){
+  const g = (dupCache.grupos||[]).find(x=>x.clave===clave); if(!g) return;
+  const x = g.items[idx]; if(!x) return;
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
+  const que = g.tipo==='inst' ? 'esta instalación repetida (su material vuelve al inventario)' : g.tipo==='tras' ? 'este traspaso repetido (su salida, su entrada y su préstamo)' : g.tipo==='reg' ? 'este regreso repetido (su material deja de sumarse)' : 'esta captura repetida (deja de contar en el inventario)';
+  if(!confirm(`🗑️ Quitar ${que}?\n\nLa primera se queda igual. Esta copia queda en el historial como "anulada por duplicado".`)) return;
+  if(!(await pedirPinAdmin('quitar un duplicado'))) return;
+  const anular = async id => db.collection('movimientos').doc(id).update({estado:'rechazado', duplicadoAnulado:true, revisadoEn:ahora, revisadoPor:quien});
+  try{
+    if(g.tipo==='inst'){
+      for(const m of dupCache.movsT.filter(m=>m.loteId===x.id && m.estado!=='rechazado')) await anular(m.id);
+      await db.collection('instalacionesLog').doc(x.id).update({estado:'rechazado', duplicadoAnulado:true, duplicadoDe:g.items[0].id, verif:{estado:'ok', auto:'duplicado', fecha:ahora, por:quien}});
+    } else if(g.tipo==='lote' || g.tipo==='reg'){
+      for(const m of x.movs) await anular(m.id);
+      try{ const s = await db.collection('sobrantes').doc(x.id).get(); if(s && s.data) await db.collection('sobrantes').doc(x.id).update({estado:'anulado', duplicadoAnulado:true}); }catch(e){}
+    } else if(g.tipo==='tras'){
+      const t0 = Date.parse(x.fecha||0);
+      const ms = dupCache.movsT.filter(m=>m.estado!=='rechazado' && m.itemId===x.itemId && Number(m.cantidad)===Number(x.cantidad) && /^Traspaso /.test(m.nota||'') && ((m.modulo===x.origen && m.tipo==='salida') || (m.modulo===x.destino && m.tipo==='entrada')) && Math.abs(Date.parse(m.fecha||0)-t0) < 5000);
+      for(const m of ms.slice(0,2)) await anular(m.id);
+      await db.collection('prestamos').doc(x.id).update({estado:'anulado', pendiente:0, duplicadoAnulado:true});
+    }
+    toast('🗑️ Listo, se quitó la copia.'); await dupCargar(); dupPintar(); cargarPendDir(true);
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function dupIgnorar(clave){
+  try{ const d = await db.collection('config').doc('duplicadosRevisados').get(); const claves = ((d && d.data && d.data()) || {}).claves || [];
+    await db.collection('config').doc('duplicadosRevisados').set({claves:[...new Set(claves.concat([clave]))]});
+    dupCache.grupos = dupCache.grupos.filter(g=>g.clave!==clave); toast('✔ Marcado: no es duplicado.'); dupPintar(); }catch(e){ alert('Error: '+e.message); }
+}
+
 // ===== Anti doble toque (auditoría v188) =====
 // Si el usuario toca dos veces "Guardar" (o el celular va lento), la segunda llamada se ignora mientras
 // la primera sigue guardando. Así una instalación, traspaso, devolución, regreso, garantía, merma,
@@ -12665,5 +12777,5 @@ function unaSolaVez(nombre, fn){
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
  'verifRegresa','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
- 'riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
+ 'dupQuitar','dupIgnorar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
