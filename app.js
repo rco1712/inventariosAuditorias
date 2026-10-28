@@ -13188,11 +13188,13 @@ function instDiaElegir(pre, dia){
   if(dia===hoy){ try{ localStorage.setItem('instDiaHoy_'+modulo(), hoy); }catch(e){} }
   instDiaPintar(pre); }
 function instDiaOk(pre){
+  return true; // v205 (pedido por el usuario): ya no se pregunta de qué día es; la fecha se queda en hoy y se puede cambiar a mano.
   if(!_instDia.preguntar || _instDia.elegido || instRegresoLibre || instCambio) return true;
   const el = document.getElementById(pre+'-diaaviso'); if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
   alert('📅 Antes de seguir, elige de qué día es esta instalación (hoy, ayer u otro día).'); return false;
 }
 async function instDiaPintar(pre){
+  return; // v205: aviso quitado (confundía a los coordinadores)
   const el = document.getElementById(pre+'-diaaviso'); if(!el || esAdmin() || instRegresoLibre || instCambio) return;
   const hoy = fechaHoyLocal(), ayer = diaAnteriorLaboral(hoy);
   let a; try{ a = await coordAvisosInst(ayer); }catch(e){ return; }
