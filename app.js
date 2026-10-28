@@ -8338,8 +8338,11 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
       // solo se descuenta lo que no se puede aprovechar. Un pedazo libre de 10 cm o más de ancho
       // (contando el corte de 5 mm) y de al menos 27 cm de largo se queda en el inventario como cortado;
       // las tiras de menos de 10 cm se van a merma (se descuentan).
-      const aprovechable = (hoja.libres||[]).filter(r=>Math.min(r.w,r.h)-0.5 >= 10 - 1e-9 && Math.max(r.w,r.h)-0.5 >= 27 - 1e-9).reduce((t,r)=>t+r.w*r.h,0);
-      costo += Math.max(0, 1 - aprovechable/(anchoHoja*altoHoja));
+      const peds = (hoja.libres||[]).filter(r=>Math.min(r.w,r.h)-0.5 >= 10 - 1e-9 && Math.max(r.w,r.h)-0.5 >= 27 - 1e-9);
+      const aprovechable = peds.reduce((t,r)=>t+r.w*r.h,0), sobra = aprovechable/(anchoHoja*altoHoja);
+      costo += Math.max(0, 1 - sobra);
+      if(sobra > 0) sobrantesHoja.push({hoja:hIdx+1, usado:Math.round((1-sobra)*1000)/1000, sobra:Math.round(sobra*1000)/1000, piezas:hoja.items.length,
+        pedazos: peds.map(r=>({w:Math.round((Math.min(r.w,r.h)-0.5)*10)/10, h:Math.round((Math.max(r.w,r.h)-(Math.max(r.w,r.h)>=altoHoja-0.01?0:0.5))*10)/10})).sort((a,b)=>b.w*b.h-a.w*a.h)});
     } else {
       let ch = 0;
       hoja.items.forEach(it=>{
@@ -8349,11 +8352,11 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
       costo += ch;
       const libre = (hoja.libres||[]).reduce((b,r)=> (!b || r.w*r.h > b.w*b.h) ? r : b, null);
       const usado = Math.min(1, Math.round(ch*1000)/1000);
-      if(usado < 1) sobrantesHoja.push({hoja:hIdx+1, usado, sobra:Math.round((1-usado)*1000)/1000, piezas:hoja.items.length, libre: libre?{w:Math.round(Math.min(libre.w,libre.h)*10)/10, h:Math.round(Math.max(libre.w,libre.h)*10)/10}:null});
+      if(usado < 1) sobrantesHoja.push({hoja:hIdx+1, usado, sobra:Math.round((1-usado)*1000)/1000, piezas:hoja.items.length, libre: libre?{w:Math.round(Math.min(libre.w,libre.h)*10)/10, h:Math.round(Math.max(libre.w,libre.h)*10)/10}:null, proporcional:true});
     }
   });
 
-  sobrantesHoja.forEach((x,i)=>{ x.hoja = hojas.length - sobrantesHoja.length + i + 1; }); // se cuentan al final: son las hojas que se abren de más
+  sobrantesHoja.sort((a,b)=>a.hoja-b.hoja);
   return {hojas: hojas.length, costo: Math.round(costo*1000)/1000, noCaben, sobrantesHoja};
 }
 
@@ -8551,7 +8554,7 @@ function calcPuerta(){
   // Sobrante de la última hoja (confirmado por el usuario): cuando las puertas pasan de 2 hojas y
   // de la siguiente solo se usa un poco, se ofrece mandar ese pedazo a Sobrantes para hacer piezas.
   const sobHojas = (!instRegresoLibre && !instCambio) ? (empaque.sobrantesHoja||[]).filter(x=>x.sobra>=0.05) : [];
-  const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:(sobHojas.length===1 ? Math.round((Math.ceil(Number(hojasMelamina)-1e-9)-Number(hojasMelamina))*1000)/1000 : Math.round(sobHojas.reduce((a,x)=>a+x.sobra,0)*1000)/1000), itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
+  const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:Math.round(Math.max(0, sobHojas.reduce((a,x)=>a+x.sobra,0) - (calc.zoclos||0)/piezasPorHojaIndividual(10, 52, 122, 244))*1000)/1000, itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
   const prevSob = puertaPreview && puertaPreview.sobOferta && puertaPreview.tipo===tipo && puertaPreview.alto===alto && puertaPreview.ancho===ancho && puertaPreview.color===color ? puertaPreview.aSob : false;
   puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: sobOferta ? prevSob : false, melNeta: melNetaPiezasPuerta(cortes, calc.zoclos)};
 
@@ -8585,10 +8588,11 @@ function pintarSobPuerta(){
   const el = document.getElementById('p-sob-card'); const pp = puertaPreview;
   if(!el || !pp || !pp.sobOferta) return;
   const o = pp.sobOferta, on = !!pp.aSob;
-  const det = o.hojas.map(x=>`<li>Hoja ${x.hoja} de ${o.totalHojas}: solo se usa <strong>${Math.round(x.usado*100)}%</strong> (${x.piezas} pieza${x.piezas===1?'':'s'}) → sobra <strong>${fmtNum(x.sobra)} hoja</strong>${x.libre?` · pedazo libre aprox. <strong>${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm</strong>`:''}</li>`).join('');
+  const det = o.hojas.map(x=>`<li>Hoja ${x.hoja} de ${o.totalHojas}: sobra <strong>${fmtNum(x.sobra)} hoja</strong>${x.pedazos&&x.pedazos.length?` · ${x.pedazos.map(z=>`pedazo de <strong>${fmtNum(z.w)}×${fmtNum(z.h)} cm</strong>`).join(' y ')}`:(x.libre?` · pedazo aprox. <strong>${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm</strong>`:'')}</li>`).join('');
   el.style.border = '2px solid #0e8a8a';
   el.innerHTML = `<div style="font-size:16px;font-weight:800">🧩 ¿Mandar el sobrante a Sobrantes?</div>
     <ul style="margin:8px 0 6px 18px;padding:0;line-height:1.6">${det}</ul>
+    <p class="hint" style="margin:0 0 6px">Total: <strong>${fmtNum(o.cantidad)} hoja</strong> en pedazos de 10 cm o más. Las tiras de menos de 10 cm ya se contaron como merma.</p>
     <p class="hint" style="margin:0 0 10px">Si lo mandas, ese pedazo sale del inventario y queda apartado en <strong>Sobrantes</strong> para convertirlo en piezas (entrepaños, zóclos, puertas…). Si no, se queda en el inventario como <strong>cortado</strong>.</p>
     <div class="row" style="gap:8px">
       <button class="btn" style="flex:1;min-height:50px;${on?'background:linear-gradient(135deg,#0e8a8a,#0b6f6f)':'background:transparent;color:inherit;border:1px solid var(--line);box-shadow:none'}" onclick="puertaPreview.aSob=true;pintarSobPuerta()">${on?'✅ ':''}Sí, a sobrantes (${fmtNum(o.cantidad)})</button>
@@ -8648,7 +8652,7 @@ async function registrarPuerta(tipo, alto, ancho){
     const so = puertaPreview.sobOferta; let conSob = false;
     if(so && puertaPreview.aSob && so.cantidad>0){
       const sid = logId+'s', it = CATALOGO.find(i=>i.id===so.itemId), fS = new Date(Date.now()+1).toISOString();
-      const lineas = so.hojas.map(x=>`Sobrante de hoja ${x.hoja} de ${so.totalHojas} del corte de puertas (${fmtNum(x.sobra)} hoja${x.libre?`, pedazo aprox. ${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm`:''})`);
+      const lineas = so.hojas.map(x=>`Sobrante de hoja ${x.hoja} de ${so.totalHojas} del corte de puertas (${fmtNum(x.sobra)} hoja${x.pedazos&&x.pedazos.length?', '+x.pedazos.map(z=>`pedazo de ${fmtNum(z.w)}×${fmtNum(z.h)} cm`).join(' y '):(x.libre?`, pedazo aprox. ${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm`:'')})`);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'sobranteCortePuertas', instalacionId:logId, cantidad:so.cantidad, nota:'Sobrante del corte · '+desc, fecha:fS, estado, loteId:sid, sobranteId:sid, creadoPor});
       await db.collection('sobrantes').doc(sid).set({modulo:modulo(), fecha:fS, nota:'Sobrante del corte de '+desc, lineas, lineasData:[], material:[{itemId:it.id, cantidad:so.cantidad}], restante:{[it.id]:so.cantidad}, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId, deCortePuertas:true});
       conSob = true;
