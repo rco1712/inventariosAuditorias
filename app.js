@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v202';
+const APP_VERSION = 'v203';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -503,6 +503,10 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
       // Garantías consumen igual que una instalación (del material cortado), pero se cuentan aparte.
       if(m.tipo==='garantia') garantias+=q; else instalaciones+=q;
       if(!hoja){ completas-=q; return; }
+      // v203 (confirmado por el usuario): las puertas salen siempre de hojas COMPLETAS (no de retazos):
+      // se abren las hojas físicas del corte y lo que no ocupan las puertas queda como cortado.
+      const hf = Number(m.hojasFisicas)||0;
+      if(hf>0 && hf >= q-EPS){ deuda += hf; completas -= hf; cortado += hf - q; return; }
       if(cortado >= q-EPS){ cortado-=q; return; }
       const falta = q - Math.max(0,cortado);
       const hojas = Math.ceil(falta - EPS);
@@ -8556,7 +8560,7 @@ function calcPuerta(){
   const sobHojas = (!instRegresoLibre && !instCambio) ? (empaque.sobrantesHoja||[]).filter(x=>x.sobra>=0.05) : [];
   const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:Math.round(Math.max(0, sobHojas.reduce((a,x)=>a+x.sobra,0) - (calc.zoclos||0)/piezasPorHojaIndividual(10, 52, 122, 244))*1000)/1000, itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
   const prevSob = puertaPreview && puertaPreview.sobOferta && puertaPreview.tipo===tipo && puertaPreview.alto===alto && puertaPreview.ancho===ancho && puertaPreview.color===color ? puertaPreview.aSob : false;
-  puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: !!sobOferta, melNeta: melNetaPiezasPuerta(cortes, calc.zoclos)};
+  puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: !!sobOferta, hojasFisicas: empaque.hojas, melItemId: (itemByName('Melamina '+color)||{}).id, melNeta: melNetaPiezasPuerta(cortes, calc.zoclos)};
 
   let html = `<div class="card"><h3>${tipo} · ${color}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
@@ -8644,7 +8648,7 @@ async function registrarPuerta(tipo, alto, ancho){
     const logId = cryptoId();
     for(const c of puertaPreview.consumo){
       const item = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc} · 📍 ${calle}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set(Object.assign({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc} · 📍 ${calle}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor}, (c.itemId===puertaPreview.melItemId && puertaPreview.hojasFisicas>0) ? {hojasFisicas:puertaPreview.hojasFisicas} : {}));
     }
     await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,altoMax:puertaPreview.altoMax||alto,medidas:puertaPreview.medidasTxt||'',nota,calle,fechaDia,fecha:new Date().toISOString(),estado});
     await db.collection('instalacionesLog').doc(logId).set({
