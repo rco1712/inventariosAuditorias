@@ -10146,14 +10146,35 @@ const HERRAJES_AUTOMATICOS = ['Bastidores','Bisagras','Espejos closet','Jaladera
 // los herrajes que la app descuenta sola con las instalaciones. Si dice No, escribe cuántos tiene:
 // solo es un dato para Dirección, NO mueve el inventario (Dirección decide si recuenta o audita).
 const HERR_CONFIRMAR = ['Tubos 1.5 m','Juegos de bridas','Juego de corredera','Correderas de extensión','Jaladeras','Jaladera plana','Bisagras','Push','Espejos closet','Rieles','Sistemas','Bastidores'];
-let herrConf = {};
+let herrConf = {}, herrHoyLogs = null;
 function herrConfItems(){ return HERR_CONFIRMAR.map(n=>itemByName(n)).filter(Boolean); }
+// Cuenta del día de un herraje (v199, pedido por el usuario): con cuánto empezó el día, qué lo movió hoy
+// y con cuánto debe terminar. Usa los mismos movimientos que el inventario esperado del cierre.
+function herrCuentaHoy(it){
+  const hoy = fechaHoyLocal(), esp = stockEsperadoCierre(it.id);
+  const ms = movs.filter(m=>m.itemId===it.id && m.estado!=='rechazado' && m.fecha && diaLocal(m.fecha)===hoy && (m.estado==='pendiente' || cuentaEnInventario(m)));
+  const signo = m => ['entrada','devolucion','ajuste'].includes(m.tipo) ? 1 : (['salida','merma','garantia','instalacion'].includes(m.tipo) ? -1 : 0);
+  const g = {};
+  ms.forEach(m=>{ const k = m.tipo==='instalacion' ? 'inst' : m.tipo==='devolucion' && m.motivo==='regresoInstalacion' ? 'reg' : m.tipo;
+    const e = g[k] = g[k] || {q:0, ids:new Set()}; e.q += signo(m)*(Number(m.cantidad)||0); if(m.loteId) e.ids.add(m.loteId); });
+  const delta = Object.values(g).reduce((t,e)=>t+e.q,0);
+  const u = it.unidad||'', n = x => fmtNum(Math.abs(x));
+  const partes = Object.keys(g).filter(k=>Math.abs(g[k].q)>1e-9).map(k=>{ const e = g[k], sg = e.q<0?'−':'+';
+    if(k==='inst'){ const logs = [...e.ids].map(id=>(herrHoyLogs||[]).find(l=>l.id===id)).filter(Boolean); const cats = {}; logs.forEach(l=>{ const c = l.categoria==='Puerta'?'puerta':'modelo'; cats[c]=(cats[c]||0)+1; });
+      const que = Object.keys(cats).map(c=>`${cats[c]} ${c}${cats[c]===1?'':'s'}`).join(' y ') || `${e.ids.size} instalación${e.ids.size===1?'':'es'}`;
+      const calles = logs.map(l=>l.calle).filter(Boolean); const cTxt = calles.length ? ` (${calles.slice(0,3).join(', ')}${calles.length>3?` y ${calles.length-3} más`:''})` : '';
+      return `${sg}${n(e.q)} por ${que}${cTxt}`; }
+    return `${sg}${n(e.q)} ${({reg:'regresaron de instalaciones', entrada:'llegaron', devolucion:'regresaron', salida:'salieron', merma:'merma', garantia:'por garantías', ajuste:'ajuste'})[k]||k}`; });
+  return {esp, tenia: fmtNum(esp - delta), partes, movio: partes.length>0, u};
+}
 function herrConfHtml(){
   const its = herrConfItems(); if(!its.length) return '';
-  const fila = it => { const esp = fmtNum(stockEsperadoCierre(it.id)), r = herrConf[it.id]||{}, u = it.unidad||'';
+  const fila = it => { const cu = herrCuentaHoy(it), esp = cu.esp, r = herrConf[it.id]||{}, u = it.unidad||'';
+    const cuenta = cu.movio ? `<span class="hint" style="margin:0">Tenías <strong style="color:var(--ink)">${cu.tenia}</strong> · ${cu.partes.join(' · ')}</span><br><span style="font-size:14px">Te deben quedar <strong>${esp} ${u}</strong>. ¿Los tienes?</span>`
+      : `<span class="hint" style="margin:0">No se movieron hoy · tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span>`;
     const b = (on, txt, c, js) => `<button class="btn small" style="min-width:64px;${on?`background:${c};border-color:${c}`:`background:transparent;color:${c};border:1px solid ${c};box-shadow:none`}" onclick="${js}">${txt}</button>`;
     return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:150px"><strong>${it.nombre}</strong><br><span class="hint" style="margin:0">El inventario dice que tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span></span>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:150px"><strong>${it.nombre}</strong><br>${cuenta}</span>
         <span style="display:flex;gap:6px">${b(r.ok===true,'✅ Sí','#16a34a',`herrConf['${it.id}']={ok:true};herrConfPintar()`)}${b(r.ok===false,'❌ No','#dc2626',`herrConf['${it.id}']={ok:false,tiene:''};herrConfPintar()`)}</span></div>
       ${r.ok===false?`<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><label class="hint" style="margin:0;flex:1">¿Cuántos tienes en realidad?</label><input type="number" min="0" inputmode="decimal" value="${r.tiene}" placeholder="0" style="max-width:110px" oninput="herrConf['${it.id}'].tiene=this.value"></div>`:''}</div>`; };
   const n = its.filter(it=>herrConf[it.id] && herrConf[it.id].ok!==undefined).length;
@@ -10201,7 +10222,8 @@ function recordatorioCierreHtml(){
 // descontar dos veces si ayer se hizo un cierre que Dirección no ha aprobado).
 function stockEsperadoCierre(itemId){
   let q = calcFormula(itemId).final;
-  movs.filter(m=>m.itemId===itemId && m.estado==='pendiente').forEach(m=>{
+  // Las instalaciones pendientes ya cuentan en el inventario (v187): no se restan otra vez.
+  movs.filter(m=>m.itemId===itemId && m.estado==='pendiente' && !cuentaEnInventario(m)).forEach(m=>{
     const c = Number(m.cantidad)||0;
     if(m.tipo==='entrada'||m.tipo==='devolucion') q += c;
     else if(m.tipo==='salida'||m.tipo==='merma'||m.tipo==='garantia'||m.tipo==='instalacion') q -= c;
@@ -10464,6 +10486,7 @@ function renderCierre(){
     </div>`;
   renderCierreConsumibles();
   coordAvisosPintarCierre();
+  if(!herrHoyLogs) db.collection('instalacionesLog').get().then(sn=>{ herrHoyLogs = sn.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===modulo()); herrConfPintar(); }).catch(()=>{ herrHoyLogs = []; });
 }
 // Solo los artículos que tienen material (o que ya se escribieron); los demás con "Ver todos" (v178).
 let cierreTodosCons = false;
@@ -10532,7 +10555,7 @@ async function guardarCierre(){
     try{ await db.collection('cierres').doc(cryptoId()).set({modulo:mod, fecha, dia:fechaHoyLocal(), creadoPor, nota,
       cortes:cortes.map(c=>({nombre:c.it.nombre, q:c.q})), hojasDeMas:hojasDeMas.map(x=>({nombre:x.it.nombre, q:x.deMas})),
       consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length, herrajes, herrNo:herrNo.length}); }catch(e){}
-    cierreVals = {}; cierreBuscar = ''; herrConf = {};
+    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null;
     toast('✅ Cierre del turno guardado.'+(hojasDeMas.length?'<br><small>Las hojas de más las revisa Dirección.</small>':''));
     setView('home');
   }catch(e){ alert('Error: '+e.message); }
