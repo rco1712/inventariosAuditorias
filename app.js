@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v198';
+const APP_VERSION = 'v199';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -695,6 +695,7 @@ function setView(v){
   if(v==='dup') renderDup();
   if(v==='apart') renderApart();
   if(v==='maq') renderMaq();
+  if(v==='herrcuad') renderHerrCuad();
 }
 
 let invCat = null, invDetalle = false;
@@ -9518,7 +9519,8 @@ function renderRepCierres(){
     const hora = ult ? new Date(ult).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
     const quien = hecho ? String((xs.find(m=>m.fecha===ult)||{}).creadoPor||'').split('@')[0] : '';
     const deMasH = xs.filter(m=>m.tipo==='ajuste' && m.motivo==='cierreCompletasDeMas'), consDeMas = [...new Set(c.flatMap(x=>x.consDeMas||[]))];
-    const alerta = deMasH.length || consDeMas.length;
+    const herrC = c.filter(x=>x.herrajes).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).pop(), herrMal = herrC ? herrC.herrajes.filter(h=>!h.ok) : [];
+    const alerta = deMasH.length || consDeMas.length || herrMal.length;
     const est = hecho ? `<strong style="color:${alerta?'#b3742c':'var(--ok)'};white-space:nowrap">${alerta?'⚠️':'✅'} ${hora}</strong>`
       : (domingo ? '<span class="hint" style="margin:0">Domingo</span>' : (dia===hoy && !esHoraDeCierre() ? '<span class="hint" style="margin:0">Aún no</span>' : '<strong style="color:var(--bad);white-space:nowrap">⏳ No cerró</strong>'));
     const abierto = repCierreAbierto===mod && hecho;
@@ -9536,6 +9538,7 @@ function renderRepCierres(){
         ${usos.length ? usos.map(m=>li(m.itemNombre+(m.correccion?' <span class="tag">corregido</span>':''), fmtNum(m.cantidad)+' '+unidad(m.itemId), esAdmin()?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;padding:4px 8px;min-height:0" onclick="repCorrMov('${mod}','${m.id}')">✏️</button>`:'')).join('') : '<p class="hint" style="margin:4px 0">No se anotó consumo de PVC, cintilla, pegamento, stickers ni herrajes.</p>'}
         ${deMasH.length?`<p style="margin:10px 0 0;color:#b3742c"><strong>⚠️ Hojas completas de más</strong> (las revisa Dirección): ${deMasH.map(m=>fmtNum(m.cantidad)+' '+m.itemNombre).join(', ')}</p>`:''}
         ${consDeMas.length?`<p style="margin:8px 0 0;color:#b3742c"><strong>⚠️ Tenía más de lo que dice la app:</strong> ${consDeMas.join(', ')} <span class="hint" style="margin:0">(¿faltó anotar una entrada?)</span></p>`:''}
+        ${herrC?`<div style="font-weight:800;color:#0d9488;margin-top:10px">🔩 Herrajes</div>${herrMal.length?herrMal.map(h=>li(`<span style="color:var(--bad)">❌ ${h.nombre}</span>`, `inventario ${h.esperado} · tiene ${h.tiene}`)).join('')+`<p class="hint" style="margin:4px 0 0">Los demás (${herrC.herrajes.length-herrMal.length}) sí cuadraron. No se movió el inventario.</p>`:`<p style="margin:4px 0;color:var(--ok);font-weight:700">✅ Confirmó que tiene todos (${herrC.herrajes.length}).</p>`}`:''}
         ${notas.length?`<p class="hint" style="margin:8px 0 0">📝 Nota: ${notas.join(' · ')}</p>`:''}
         <button class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#0d7468,#0f766e)" onclick="repCierrePDF('${mod}')">📄 Reporte del día de ${mod} (PDF)</button>
       </div>`;
@@ -9779,6 +9782,8 @@ function pendDirHtml(){
   const rV = verifPendRow(fila); if(rV) rows.push(rV);
   const rA = verifPendRowAtr(fila); if(rA) rows.push(rA);
   const rR = riPendRow(fila); if(rR) rows.push(rR);
+  { const hn = herrNoCuadran(); if(hn.length){ const por = {}; hn.forEach(c=>{ por[c.modulo]=(por[c.modulo]||0)+c.herrajes.filter(h=>!h.ok).length; });
+    rows.push(fila('🔩', `Herrajes que no cuadran: ${Object.values(por).reduce((a,b)=>a+b,0)}`, Object.keys(por).map(k=>k+' '+por[k]).join(' · ')+' · del cierre del turno', '#dc2626', 'Ver', "irA('herrcuad')")); } }
   if(dupCache && dupCache.grupos.length){ const por = {}; dupCache.grupos.forEach(g=>{ por[g.modulo]=(por[g.modulo]||0)+1; });
     rows.push(fila('🔍', `Posibles duplicados: ${dupCache.grupos.length}`, Object.keys(por).map(k=>k+' '+por[k]).join(' · ')+' · capturas guardadas dos veces', '#7c3aed', 'Revisar', "dupMod='';irA('dup')")); }
   const H = herrCache;
@@ -10114,6 +10119,27 @@ const CATS_CONSUMIBLES = ['Cintilla','PVC','Pegamento','Stickers'];
 const HERRAJES_AUTOMATICOS = ['Bastidores','Bisagras','Espejos closet','Jaladeras','Jaladera plana','Juego de corredera','Correderas de extensión',
   'Corredera hembra (sin pareja)','Corredera macho (sin pareja)','Corredera ext. hembra (sin pareja)','Corredera ext. macho (sin pareja)',
   'Rieles','Sistemas','Tubos 1.5 m','Juegos de bridas','Push'];
+// v199 (pedido por los dueños): en el cierre del turno el coordinador confirma, con Sí o No, si tiene
+// los herrajes que la app descuenta sola con las instalaciones. Si dice No, escribe cuántos tiene:
+// solo es un dato para Dirección, NO mueve el inventario (Dirección decide si recuenta o audita).
+const HERR_CONFIRMAR = ['Tubos 1.5 m','Juegos de bridas','Juego de corredera','Correderas de extensión','Jaladeras','Jaladera plana','Bisagras','Push','Espejos closet','Rieles','Sistemas','Bastidores'];
+let herrConf = {};
+function herrConfItems(){ return HERR_CONFIRMAR.map(n=>itemByName(n)).filter(Boolean); }
+function herrConfHtml(){
+  const its = herrConfItems(); if(!its.length) return '';
+  const fila = it => { const esp = fmtNum(stockEsperadoCierre(it.id)), r = herrConf[it.id]||{}, u = it.unidad||'';
+    const b = (on, txt, c, js) => `<button class="btn small" style="min-width:64px;${on?`background:${c};border-color:${c}`:`background:transparent;color:${c};border:1px solid ${c};box-shadow:none`}" onclick="${js}">${txt}</button>`;
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:150px"><strong>${it.nombre}</strong><br><span class="hint" style="margin:0">El inventario dice que tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span></span>
+        <span style="display:flex;gap:6px">${b(r.ok===true,'✅ Sí','#16a34a',`herrConf['${it.id}']={ok:true};herrConfPintar()`)}${b(r.ok===false,'❌ No','#dc2626',`herrConf['${it.id}']={ok:false,tiene:''};herrConfPintar()`)}</span></div>
+      ${r.ok===false?`<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><label class="hint" style="margin:0;flex:1">¿Cuántos tienes en realidad?</label><input type="number" min="0" inputmode="decimal" value="${r.tiene}" placeholder="0" style="max-width:110px" oninput="herrConf['${it.id}'].tiene=this.value"></div>`:''}</div>`; };
+  const n = its.filter(it=>herrConf[it.id] && herrConf[it.id].ok!==undefined).length;
+  return `<div class="card" id="herrconf-card"><div class="paso">3</div><strong>🔩 ¿Tienes estos herrajes?</strong>
+    <p class="hint">Estos herrajes se descuentan solos con las instalaciones. Revisa si tienes lo que dice el inventario y contesta <strong>Sí</strong> o <strong>No</strong>. Si es No, escribe cuántos tienes: le llega a Dirección y <strong>no cambia tu inventario</strong>.</p>
+    <div class="hint" style="margin:0 0 4px">Contestados: <strong>${n} de ${its.length}</strong></div>
+    ${its.map(fila).join('')}</div>`;
+}
+function herrConfPintar(){ const el = document.getElementById('herrconf-card'); if(el) el.outerHTML = herrConfHtml(); }
 function esConsumibleCierre(it){ return CATS_CONSUMIBLES.includes(it.cat) || (it.cat==='Herrajes' && !HERRAJES_AUTOMATICOS.includes(it.nombre)); }
 const CIERRE_CATS = ['Cintilla','PVC','Pegamento','Stickers','Herrajes'];
 const HORA_RECORDATORIO_CIERRE = 16; // el turno termina 4:30 pm: desde las 4 pm se recuerda el cierre (confirmado por el usuario)
@@ -10408,6 +10434,7 @@ function renderCierre(){
       <div class="movlist" id="cierre-cons" style="margin-top:8px"></div>
       <p class="hint" id="cierre-cuenta" style="margin-top:6px">${cuentaCierreTxt()}</p>
     </div>
+    ${herrConfHtml()}
     <div class="card">
       <input id="cierre-nota" placeholder="Nota (opcional)">
       <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarCierre()">✅ Guardar cierre del turno</button>
@@ -10433,6 +10460,12 @@ async function guardarCierre(){
     if(!a.hayReporte && !a.capt && !confirm('⚠️ No has capturado ninguna instalación de hoy.\n\nSi hubo instalaciones, captúralas ANTES del cierre: si faltan, tu inventario puede no cuadrar.\n\n¿Seguro que hoy no hubo instalaciones y quieres guardar el cierre?')) return;
   }catch(e){}
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
+  const herrIts = herrConfItems(), herrSin = herrIts.filter(it=>!herrConf[it.id] || herrConf[it.id].ok===undefined);
+  if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre).join('\n')); }
+  const herrMal = herrIts.filter(it=>herrConf[it.id].ok===false && !(String(herrConf[it.id].tiene).trim()!=='' && Number(herrConf[it.id].tiene)>=0));
+  if(herrMal.length) return alert('🔩 Escribe cuántos tienes de:\n\n'+herrMal.map(it=>'• '+it.nombre).join('\n'));
+  const herrajes = herrIts.map(it=>{ const r = herrConf[it.id], esp = fmtNum(stockEsperadoCierre(it.id)); return {itemId:it.id, nombre:it.nombre, unidad:it.unidad||'', esperado:esp, ok:r.ok, tiene: r.ok ? esp : fmtNum(Number(r.tiene))}; });
+  const herrNo = herrajes.filter(h=>!h.ok);
   const nota = (document.getElementById('cierre-nota').value||'').trim();
   const hojasContadas = CATALOGO.filter(i=>esHoja(i) && !vacioCierre(cierreVals[i.id]));
   for(const it of hojasContadas){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
@@ -10448,7 +10481,7 @@ async function guardarCierre(){
   if(repsHoy.length && !confirm(`🔁 Hoy hay ${repsHoy.length} entrada(s) que parecen anotadas dos veces (${repsHoy.slice(0,3).map(xs=>xs[0].itemNombre).join(', ')}${repsHoy.length>3?'…':''}).\n\nSi haces el cierre así, lo repetido se toma como gastado.\n\n¿Hacer el cierre de todos modos?`)) return;
   const raros = salidas.map(x=>Object.assign({}, x, {raro:usoRaroCierre(x.it.id, x.q, x.esp)})).filter(x=>x.raro);
   if(raros.length && !confirm(`⚠️ Revisa, esto es mucho más de lo normal:\n\n${raros.map(x=>`• ${x.it.nombre}: se usaron ${fmtNum(x.q)} ${x.it.unidad} · ${x.raro.txt}`).join('\n')}\n\n¿Estás seguro? Si llegó material o se anotó una entrada doble, corrígelo antes.\n\nAceptar = sí, está bien · Cancelar = revisar`)) return;
-  if(!hojasContadas.length && !contados.length){
+  if(!hojasContadas.length && !contados.length && !herrNo.length){
     if(!confirm('No escribiste nada.\n\n¿Hoy no se cortaron hojas y no quieres contar consumibles?\n\nAceptar = sí, guardar "sin movimiento" para que no te lo vuelva a recordar hoy.')) return;
   }
   if(hojasContadas.length || contados.length){
@@ -10458,6 +10491,7 @@ async function guardarCierre(){
       + (salidas.length ? '📤 Se usó (se descuenta):\n'+salidas.map(x=>`• ${fmtNum(x.q)} ${x.it.unidad} ${x.it.nombre} (había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)})`).join('\n')+'\n\n' : '')
       + (iguales.length ? `✔️ Sin cambio: ${iguales.length} artículo(s)\n\n` : '')
       + (deMas.length ? '⚠️ Tienes MÁS de lo que dice la app (no se toca; si llegó material, anótalo en "Llegó material"):\n'+deMas.map(x=>`• ${x.it.nombre}: app ${fmtNum(x.esp)}, tú ${fmtNum(x.hay)}`).join('\n')+'\n\n' : '')
+      + (herrNo.length ? '🔩 Herrajes que NO cuadran (le llega a Dirección, no cambia el inventario):\n'+herrNo.map(h=>`• ${h.nombre}: inventario ${h.esperado}, tienes ${h.tiene}`).join('\n')+'\n\n' : '')
       + '¿Guardar?';
     if(!confirm(txt)) return;
   }
@@ -10474,8 +10508,8 @@ async function guardarCierre(){
     // Aviso a Dirección: el módulo ya hizo su cierre del turno.
     try{ await db.collection('cierres').doc(cryptoId()).set({modulo:mod, fecha, dia:fechaHoyLocal(), creadoPor, nota,
       cortes:cortes.map(c=>({nombre:c.it.nombre, q:c.q})), hojasDeMas:hojasDeMas.map(x=>({nombre:x.it.nombre, q:x.deMas})),
-      consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length}); }catch(e){}
-    cierreVals = {}; cierreBuscar = '';
+      consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length, herrajes, herrNo:herrNo.length}); }catch(e){}
+    cierreVals = {}; cierreBuscar = ''; herrConf = {};
     toast('✅ Cierre del turno guardado.'+(hojasDeMas.length?'<br><small>Las hojas de más las revisa Dirección.</small>':''));
     setView('home');
   }catch(e){ alert('Error: '+e.message); }
@@ -11938,6 +11972,7 @@ function resumenCierreTxt(c){
   if(c.consumibles) partes.push(c.consumibles+' consumible(s) descontados');
   if((c.hojasDeMas||[]).length) partes.push('⚠️ Hojas de más: '+c.hojasDeMas.map(x=>fmtNum(x.q)+' '+String(x.nombre).replace('Melamina ','')).join(', ')+' (por aprobar)');
   if((c.consDeMas||[]).length) partes.push('⚠️ Tienen más de: '+c.consDeMas.slice(0,3).join(', '));
+  if(Array.isArray(c.herrajes)) partes.push(c.herrNo ? '🔩 No cuadran: '+c.herrajes.filter(h=>!h.ok).map(h=>h.nombre).slice(0,3).join(', ') : '🔩 Herrajes completos');
   return partes.join(' · ') || 'Sin movimiento';
 }
 // Cierres hechos con versiones anteriores (sin registro en "cierres"): se detectan por los
@@ -12668,6 +12703,19 @@ async function generarReporteDiarioPDF(modo, fechaDia){
     encabezado('Entradas y salidas del día', `Módulo ${mod}  ·  ${esPasado?diaStr:fechaStr}`);
     try{ await cargarPrestamos(); }catch(e){}
     y = dibujarMovsDiaPDF(doc, movsDiaClasif(mod, diaSel), deudasDeModulo(mod), {marginL, W, pageH, y, mod, vacioTxt: t => t + (esPasado ? ' ese día.' : ' hoy.')});
+    // v199: herrajes que el coordinador confirmó en el cierre del turno.
+    const cH = (cierresCache||[]).filter(c=>c.modulo===mod && c.dia===diaSel && Array.isArray(c.herrajes)).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).pop();
+    if(cH){ const mal = cH.herrajes.filter(h=>!h.ok), ROJ=[200,40,40], VER=[22,128,74];
+      if(y > pageH-40){ doc.addPage(); y = 15; } y += 4;
+      const cc = mal.length ? ROJ : VER;
+      doc.setFillColor(...pdfTinte(cc,.88)); doc.rect(marginL, y, W, 8, 'F'); doc.setFillColor(...cc); doc.rect(marginL, y, 1.6, 8, 'F');
+      doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(...cc); doc.text('Herrajes (cierre del turno)', marginL+4, y+5.6);
+      doc.text(mal.length ? `${mal.length} no cuadran` : `Todos cuadran (${cH.herrajes.length})`, marginL+W-2, y+5.6, {align:'right'}); y += 11;
+      doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
+      if(mal.length){ mal.forEach(h=>{ if(y > pageH-15){ doc.addPage(); y = 15; } doc.text(h.nombre, marginL+2, y); doc.text(`Inventario ${h.esperado} · tiene ${h.tiene}`, marginL+W-2, y, {align:'right'}); y += 5.5; });
+        doc.setFontSize(8); doc.setTextColor(110,116,132); doc.text('Solo es lo que contestó el coordinador: el inventario no se movió.', marginL+2, y+1); doc.setTextColor(0,0,0); y += 6; }
+      else { doc.text('El coordinador confirmó que tiene todos los herrajes que dice el inventario.', marginL+2, y); y += 6; }
+    }
   }
 
   const stamp = fechaHoyLocal();
@@ -12986,6 +13034,27 @@ async function coordAvisosPintarCierre(){
     <p class="hint" style="margin:4px 0 0">Dirección marcó que no se instaló. Su material sigue apartado: decide si se vuelve a instalar, regresa al inventario, va a sobrantes o a merma.</p>
     <button class="btn" style="width:100%;margin-top:8px;background:#b45309" onclick="setView('home');window.scrollTo(0,0)">Decidir ahora</button>`));
   el.innerHTML = out.join('');
+}
+// ===== 🔩 Herrajes que no cuadran en el cierre del turno (v199) =====
+function herrNoCuadran(){ const desde = (()=>{ const d=new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-14); return d.toISOString().slice(0,10); })();
+  return (cierresCache||[]).filter(c=>c.herrNo>0 && !c.herrVisto && (c.dia||'')>=desde && Array.isArray(c.herrajes)); }
+function renderHerrCuad(){
+  current = 'herrcuad';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  const xs = herrNoCuadran().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const card = c => `<div class="card" style="padding:12px;border-left:6px solid ${(MODULOS.find(m=>m.nombre===c.modulo)||{}).color||'#dc2626'}">
+      <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:16px">${c.modulo}</strong><span class="hint" style="margin:0">${fCorta(c.dia)} · ${new Date(c.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})} · ${String(c.creadoPor||'').split('@')[0]}</span></div>
+      <div class="wrap-x" style="margin-top:8px"><table><tr><th>Herraje</th><th style="text-align:right">Inventario</th><th style="text-align:right">Tiene</th><th style="text-align:right">Diferencia</th></tr>
+      ${c.herrajes.filter(h=>!h.ok).map(h=>{ const d = fmtNum(Number(h.tiene)-Number(h.esperado)); return `<tr><td>${h.nombre}</td><td style="text-align:right">${h.esperado} ${h.unidad||''}</td><td style="text-align:right"><strong>${h.tiene}</strong></td><td style="text-align:right;font-weight:800;color:${d<0?'var(--bad)':'#b3742c'}">${d>0?'+':''}${d}</td></tr>`; }).join('')}</table></div>
+      <p class="hint" style="margin:6px 0 0">Los demás herrajes (${c.herrajes.filter(h=>h.ok).length}) sí cuadraron. El inventario no se movió.</p>
+      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--ok);border:1px solid var(--ok);box-shadow:none" onclick="herrCuadVisto('${c.id}')">✔ Enterado</button></div>`;
+  $('#main').innerHTML = `<div class="card" style="padding:12px;border:2px solid #dc2626"><div style="font-size:18px;font-weight:900">🔩 Herrajes que no cuadran</div>
+    <p class="hint" style="margin:2px 0 0">En el cierre del turno el coordinador dijo que <strong>no</strong> tiene lo que marca el inventario. No se movió nada: decide si se recuenta, se hace auditoría o se corrige. Al tocar <strong>Enterado</strong> deja de salir aquí (sigue en el reporte de cierres).</p></div>
+    ${xs.length ? xs.map(card).join('') : '<div class="card" style="text-align:center">✅ No hay herrajes pendientes de revisar.</div>'}`;
+}
+async function herrCuadVisto(id){
+  try{ await db.collection('cierres').doc(id).update({herrVisto:true, herrVistoPor:getCurrentUserEmail?getCurrentUserEmail():'', herrVistoEn:new Date().toISOString()});
+    const c = (cierresCache||[]).find(x=>x.id===id); if(c) c.herrVisto = true; renderHerrCuad(); }catch(e){ alert('Error: '+e.message); }
 }
 // ===== 📦 Material apartado sin definir (pedido por el usuario, v191) =====
 // Instalaciones que Dirección marcó "No se instaló" (o "No coincide") y que el coordinador todavía no
