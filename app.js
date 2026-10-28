@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v205';
+const APP_VERSION = 'v206';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -10231,7 +10231,7 @@ function corrCalcHtml(it){
   const row = (lbl, f, sub) => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><label style="flex:1;font-size:14px">${lbl}${sub?`<br><span class="hint" style="margin:0">${sub}</span>`:''}</label>${inp(f)}</div>`;
   const grid = (pre) => `<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:6px">${CORR_TAMS.map(s=>`<div style="text-align:center;font-size:12px" class="hint">de ${s}<div style="margin-top:3px">${inp(pre+s,'100%').replace('width:100%;min-width:100%','width:100%;min-width:0;box-sizing:border-box')}</div></div>`).join('')}</div>`;
   const sub = t => `<div style="font-weight:800;font-size:12.5px;letter-spacing:.4px;margin-top:14px;color:#0e8a8a">${t}</div>`;
-  let body = sub('PIEZAS SUELTAS') + row('📦 Juegos completos (en su bolsa)','jc') + row('🔩 Juegos machos sueltos','mach') + row('🔩 Juegos hembras sueltas','hemb');
+  let body = sub('PIEZAS SUELTAS') + row('📦 Juegos completos','jc') + row('🔩 Juegos machos sueltos','mach') + row('🔩 Juegos hembras sueltas','hemb');
   if(k==='n') body = `<div style="margin-top:10px;padding:10px;border-radius:10px;background:#fde047;color:#1a1a1a;font-weight:700;font-size:13.5px;border:2px solid #d97706">⚠️ Si un cajón o una cajonera normal lleva corredera de <u>extensión</u>, NO la cuentes aquí: va en <strong>Correderas de extensión</strong>.</div>`
       + body + row('🗃️ Cajones','caj','cada cajón trae 1 macho') + sub('🗄️ CAJONERAS SIN CAJONES · 1 hembra por cada cajón que lleva') + grid('sin') + sub('🗄️ CAJONERAS COMPLETAS · con sus cajones puestos') + grid('comp');
   else { const bt = (v, txt) => `<button class="btn small" style="min-width:64px;${c.norm===v?'background:#16a34a;border-color:#16a34a':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="corrCalc.e.norm=${v};herrConfPintar()">${txt}</button>`;
@@ -10250,7 +10250,7 @@ function corrPintarRes(k){
   const dif = fmtNum(r.juegos - esp.juegos);
   const li = (a,b) => `<div style="display:flex;justify-content:space-between;font-size:13.5px;margin-top:3px"><span>${a}</span><strong>${b}</strong></div>`;
   el.innerHTML = `<div style="padding:12px;border-radius:12px;border:2px solid ${ok?'#16a34a':'#dc2626'};background:${ok?'rgba(22,163,74,.10)':'rgba(220,38,38,.10)'}">
-    ${li(`Machos (sueltos + en cajones)`, fmtNum(r.machos))}${li(`Hembras (sueltas + en cajoneras)`, fmtNum(r.hembras))}${li('Se juntan solos (macho + hembra)', fmtNum(r.pares)+' juegos')}${r.compl?li('Cajoneras completas', fmtNum(r.compl)+' juegos'):''}${li('Juegos completos en bolsa', fmtNum(r.jc))}
+    ${li(`Machos (sueltos + en cajones)`, fmtNum(r.machos))}${li(`Hembras (sueltas + en cajoneras)`, fmtNum(r.hembras))}${li('Se juntan solos (macho + hembra)', fmtNum(r.pares)+' juegos')}${r.compl?li('Cajoneras completas', fmtNum(r.compl)+' juegos'):''}${li('Juegos completos', fmtNum(r.jc))}
     <div style="border-top:1px solid var(--line);margin:8px 0"></div>
     <div style="font-size:20px;font-weight:900">Tienes: ${fmtNum(r.juegos)} juegos ${r.sobH>0?`<span class="hint" style="margin:0">+ ${fmtNum(r.sobH)} hembras sin pareja</span>`:''}${r.sobM>0?`<span class="hint" style="margin:0">+ ${fmtNum(r.sobM)} machos sin pareja</span>`:''}</div>
     <div style="font-weight:800;margin-top:5px;color:${ok?'#16a34a':'#dc2626'}">${ok?'✅ Cuadra con el inventario':`❌ No cuadra: el inventario dice ${esp.juegos} juegos${esp.hembras>0?' + '+esp.hembras+' hembras':''}${esp.machos>0?' + '+esp.machos+' machos':''}${Number(dif)?` · ${dif<0?'te faltan '+Math.abs(dif):'tienes '+dif+' de más'}`:''}`}</div></div>`;
@@ -13247,7 +13247,7 @@ function renderHerrCuad(){
         let tr = `<tr><td>${h.nombre}${h.corr?' (juegos)':''}</td><td style="text-align:right">${h.esperado} ${h.unidad||''}</td><td style="text-align:right"><strong>${h.tiene}</strong></td>${dc(d)}</tr>`;
         if(h.corr){ const e=h.corr.esp, r=h.corr.r; [['hembras sin pareja',e.hembras,r.sobH],['machos sin pareja',e.machos,r.sobM]].forEach(([n,a,b])=>{ if(Number(a)||Number(b)) tr += `<tr><td class="hint" style="margin:0">· ${n}</td><td style="text-align:right">${a}</td><td style="text-align:right"><strong>${b}</strong></td>${dc(fmtNum(b-a))}</tr>`; });
           const dt = h.corr.det||{}; const tam = o => o ? Object.keys(o).filter(s=>o[s]).map(s=>`${o[s]} de ${s}`).join(', ') : '';
-          tr += `<tr><td colspan="4" class="hint" style="font-size:12.5px">Contó: ${dt.juegos||0} juegos en bolsa · ${dt.machos||0} machos y ${dt.hembras||0} hembras sueltos${dt.cajones!=null?` · ${dt.cajones} cajones`:''}${tam(dt.cajonerasSin)?` · cajoneras sin cajones: ${tam(dt.cajonerasSin)}`:''}${tam(dt.cajonerasCompletas)?` · completas: ${tam(dt.cajonerasCompletas)}`:''}${dt.cajonesMax!=null?` · ${dt.cajonesMax} cajones Max · ${dt.cajonerasMaxSin} cajoneras Max sin cajones · ${dt.cajonerasMaxCompletas} completas`:''}${dt.cajonesNormales?` · ${dt.cajonesNormales} cajones normales con extensión`:''}</td></tr>`; }
+          tr += `<tr><td colspan="4" class="hint" style="font-size:12.5px">Contó: ${dt.juegos||0} juegos completos · ${dt.machos||0} machos y ${dt.hembras||0} hembras sueltos${dt.cajones!=null?` · ${dt.cajones} cajones`:''}${tam(dt.cajonerasSin)?` · cajoneras sin cajones: ${tam(dt.cajonerasSin)}`:''}${tam(dt.cajonerasCompletas)?` · completas: ${tam(dt.cajonerasCompletas)}`:''}${dt.cajonesMax!=null?` · ${dt.cajonesMax} cajones Max · ${dt.cajonerasMaxSin} cajoneras Max sin cajones · ${dt.cajonerasMaxCompletas} completas`:''}${dt.cajonesNormales?` · ${dt.cajonesNormales} cajones normales con extensión`:''}</td></tr>`; }
         return tr; }).join('')}</table></div>
       <p class="hint" style="margin:6px 0 0">Los demás herrajes (${c.herrajes.filter(h=>h.ok).length}) sí cuadraron. El inventario no se ha movido: con <strong>Meter ajuste</strong> queda igual a lo que contó el coordinador.</p>
       <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn small" style="background:#2563eb" onclick="herrMeterAjuste('${c.id}')">⚖️ Meter ajuste (dejar como lo contó)</button><button class="btn small" style="background:transparent;color:var(--ok);border:1px solid var(--ok);box-shadow:none" onclick="herrCuadVisto('${c.id}')">✔ Enterado, sin ajuste</button></div></div>`;
