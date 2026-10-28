@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v207';
+const APP_VERSION = 'v208';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -7270,7 +7270,7 @@ function verifCoordHtml(){
       if(v.estado==='no' && v.puertas==='pendiente'){ const pl = l.categoria==='Puerta'; ic = pl?'🚪':'🗄️';
         txt = (v.intentos?`Dirección marcó <strong>otra vez</strong> que no se instal${pl?'aron':'ó'}. `:`No se instal${pl?'aron':'ó'}. `)+`El material quedó apartado (ya descontado): ¿qué pasa con ${pl?'ellas':'él'}?`;
         if(v.sinCambio) txt = `Dirección verificó que el modelo corregido <strong>tampoco</strong> se instaló. El material sigue apartado: ¿a dónde va?`;
-        bt = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px"><button class="btn small" style="min-height:42px;background:#0e7490;grid-column:1/-1" onclick="verifPuertasReinstalar('${l.id}')">🔁 Se vuelve${pl?'n':''} a instalar</button><button class="btn small" style="min-height:42px;padding:4px;background:#16a34a" onclick="verifRegresa('${l.id}')">↩️ Regresa</button><button class="btn small" style="min-height:42px;padding:4px;background:#0e8a8a" onclick="verifPuertasSob('${l.id}')">🧩 Sobrantes</button><button class="btn small" style="min-height:42px;padding:4px;background:#dc2626" onclick="verifPuertasMerma('${l.id}')">🗑️ Merma</button>${v.sinCambio?'':`<button class="btn small" style="min-height:42px;background:#3E5CDE;grid-column:1/-1" onclick="verifCambioTrasNo('${l.id}')">✏️ Sí se instaló, pero otro modelo: corregir y mandar a verificar</button>`}</div>`; }
+        bt = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px"><button class="btn small" style="min-height:42px;background:#0e7490;grid-column:1/-1" onclick="verifPuertasReinstalar('${l.id}')">🔁 Se vuelve${pl?'n':''} a instalar</button><button class="btn small" style="min-height:42px;padding:4px;background:#16a34a" onclick="verifRegresa('${l.id}')">↩️ Regresa</button><button class="btn small" style="min-height:42px;padding:4px;background:#0e8a8a" onclick="verifPuertasSob('${l.id}')">🧩 Sobrantes</button><button class="btn small" style="min-height:42px;padding:4px;background:#dc2626" onclick="verifPuertasMerma('${l.id}')">🗑️ Merma</button>${pl && movs.some(m=>m.loteId===l.id && Number(m.hojasFisicas)>0) ? `<button class="btn small" style="min-height:42px;background:#7c3aed;grid-column:1/-1" onclick="verifNoCortadas('${l.id}')">🔙 No se alcanzaron a cortar (regresan las hojas completas)</button>` : ''}${v.sinCambio?'':`<button class="btn small" style="min-height:42px;background:#3E5CDE;grid-column:1/-1" onclick="verifCambioTrasNo('${l.id}')">✏️ Sí se instaló, pero otro modelo: corregir y mandar a verificar</button>`}</div>`; }
       else if(v.estado==='no' && v.puertas==='cambio'){ ic='✏️'; txt = 'Corregiste el modelo: Dirección lo va a volver a verificar.'; }
       else if(v.estado==='no'){ ic='❌'; txt = l.estado==='rechazado' ? 'No se instaló: se rechazó y el material regresó al inventario.' : 'No se instaló.'; }
       else if(v.estado==='parte'){ ic='🔸'; txt='Solo se instaló una parte: lo que regresó ya está en el inventario.'; }
@@ -7295,6 +7295,29 @@ async function verifCoordAccion(id, datos, msg){
   try{ await verifGuardar(id, datos); _verifCoordT = 0; _verifCoord = null; if(msg) toast(msg); renderHome(); }catch(e){ alert('Error: '+e.message); }
 }
 function verifPuertasReinstalar(id){ verifCoordAccion(id, {puertas:'reinstalar', visto:true, fechaDecision:new Date().toISOString()}, '🔁 Queda en "Por volver a instalar". No la captures otra vez.'); }
+// v208 (confirmado por el usuario): puertas que se cancelaron ANTES de cortarse. Se deshace todo lo que
+// movió la captura: regresan las hojas completas, el sobrante del corte se cancela (y la merma de las tiras)
+// y los herrajes regresan. Dirección lo aprueba en Aprobaciones.
+async function verifNoCortadas(id){
+  await cargarInstLog(); const l = (instLog||[]).find(x=>x.id===id); if(!l) return;
+  const ms = movs.filter(m=>m.loteId===id && m.tipo==='instalacion' && m.estado!=='rechazado');
+  const mel = ms.find(m=>Number(m.hojasFisicas)>0); if(!mel) return alert('Esta instalación es de antes del cambio: usa ↩️ Regresa.');
+  const sid = id+'s'; let sob = null; try{ const d = await db.collection('sobrantes').doc(sid).get(); sob = d && d.data && d.data(); }catch(e){}
+  if(sob && (sob.transformaciones||[]).length) return alert('Del sobrante de estas puertas ya se registraron piezas: eso quiere decir que sí se cortaron.\n\nUsa ↩️ Regresa, 🧩 Sobrantes o 🗑️ Merma.');
+  const sobMov = movs.find(m=>m.loteId===sid && m.motivo==='sobranteCortePuertas' && m.estado!=='rechazado');
+  const hf = Number(mel.hojasFisicas), q = Number(mel.cantidad), so = sobMov ? Number(sobMov.cantidad) : 0;
+  const otros = ms.filter(m=>m!==mel);
+  if(!confirm(`🔙 ${l.descripcion.split(' · ').slice(0,2).join(' · ')}${l.calle?' · '+l.calle:''}\n\nLas puertas NO se alcanzaron a cortar:\n\n• Regresan ${fmtNum(hf)} hojas COMPLETAS de ${mel.itemNombre.replace('Melamina ','')}\n• Se cancela el sobrante del corte${so?' ('+fmtNum(so)+' hoja)':''}\n${otros.map(m=>`• Regresa${Number(m.cantidad)===1?'':'n'} ${fmtNum(m.cantidad)} ${m.itemNombre}`).join('\n')}\n\nDirección lo aprueba. ¿Continuar?`)) return;
+  try{
+    const loteId = cryptoId(), fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', nota = 'No se alcanzaron a cortar las puertas · '+l.descripcion+(l.calle?' · 📍 '+l.calle:'');
+    const cDelta = fmtNum(-(hf - q - so));
+    await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:mel.itemId, itemNombre:mel.itemNombre, tipo:'ajuste', motivo:'regresoInstalacion', noCortadas:true, instalacionId:id, cantidad:fmtNum(hf + Number(cDelta)), completasDelta:hf, cortadoDelta:Number(cDelta), nota, fecha, estado:'pendiente', loteId, creadoPor});
+    for(const m of otros) await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:m.itemId, itemNombre:m.itemNombre, tipo:'devolucion', motivo:'regresoInstalacion', noCortadas:true, instalacionId:id, cantidad:Number(m.cantidad), nota, fecha, estado:'pendiente', loteId, creadoPor});
+    if(sob) await db.collection('sobrantes').doc(sid).update({estado:'cerrado', canceladoNoCortadas:true, cerradoEn:fecha, restante:{}, mermaFinal:[]});
+    await verifGuardar(id, Object.assign({}, l.verif||{}, {puertas:'regreso', noCortadas:true, visto:true, fechaDecision:fecha}));
+    _verifCoordT = 0; _verifCoord = null; toast('🔙 Listo. Dirección lo aprueba y regresan las hojas completas.'); renderHome();
+  }catch(e){ alert('Error: '+e.message); }
+}
 async function verifRegresa(id){
   await cargarInstLog(); const l = (instLog||[]).find(x=>x.id===id); if(!l) return;
   verifFlujo = {id, tipo:'reg', volver:'home'};
@@ -7362,6 +7385,7 @@ async function confirmarRegresoLibre(){
 function detalleRegresoInstAprob(items, logs){
   const m = items.find(x=>x.motivo==='regresoInstalacion'); if(!m) return '';
   const l = logs.find(x=>x.id===m.instalacionId);
+  if(items.some(x=>x.noCortadas)) return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(124,58,237,.10);border:1px solid rgba(124,58,237,.45)"><strong>🔙 Puertas que no se alcanzaron a cortar</strong>${l&&l.calle?`<div style="margin:4px 0 0;font-size:15px;font-weight:800">📍 ${escCalle(l.calle)}</div>`:''}<div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · del '+fCorta(l.fechaDia):(m.nota||'')}</div><div class="hint" style="margin:2px 0 0">Regresan las <strong>hojas completas</strong> y los herrajes, y se cancela el sobrante del corte. El inventario queda como si no se hubieran capturado.</div></div>`;
   return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(31,157,85,.10);border:1px solid rgba(31,157,85,.35)"><strong>↩️ Modelo que regresó sin instalar</strong><div class="hint" style="margin:4px 0 0">${l?l.descripcion+' · instalado el '+l.fechaDia:(m.modeloRegreso?m.modeloRegreso+' · elegido a mano (sin instalación registrada)':(m.nota||''))}</div><div class="hint" style="margin:2px 0 0">${items.some(x=>x.motivo==='regresoMerma'||x.motivo==='regresoSobrante') ? [items.some(x=>x.motivo==='regresoMerma')?'🗑️ A <strong>merma</strong> (dañado): '+items.filter(x=>x.motivo==='regresoMerma').map(x=>fmtNum(x.cantidad)+' '+x.itemNombre).join(', ')+'.':'', items.some(x=>x.motivo==='regresoSobrante')?'🧩 A <strong>sobrantes</strong> (para cortarse en otras piezas): '+items.filter(x=>x.motivo==='regresoSobrante').map(x=>fmtNum(x.cantidad)+' '+x.itemNombre).join(', ')+'.':'', 'Lo demás vuelve al inventario.'].filter(Boolean).join('<br>') : 'Todo vuelve al inventario (la melamina como cortado).'}</div></div>`;
 }
 
@@ -8571,7 +8595,7 @@ function calcPuerta(){
   // Sobrante de la última hoja (confirmado por el usuario): cuando las puertas pasan de 2 hojas y
   // de la siguiente solo se usa un poco, se ofrece mandar ese pedazo a Sobrantes para hacer piezas.
   const sobHojas = (!instRegresoLibre && !instCambio) ? (empaque.sobrantesHoja||[]).filter(x=>x.sobra>=0.05) : [];
-  const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:Math.round(Math.max(0, sobHojas.reduce((a,x)=>a+x.sobra,0) - (calc.zoclos||0)/piezasPorHojaIndividual(10, 52, 122, 244))*1000)/1000, itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
+  const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:Math.round(Math.max(0, empaque.hojas - Number(hojasMelamina))*1000)/1000, itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
   const prevSob = puertaPreview && puertaPreview.sobOferta && puertaPreview.tipo===tipo && puertaPreview.alto===alto && puertaPreview.ancho===ancho && puertaPreview.color===color ? puertaPreview.aSob : false;
   puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: !!sobOferta, hojasFisicas: empaque.hojas, melItemId: (itemByName('Melamina '+color)||{}).id, melNeta: melNetaPiezasPuerta(cortes, calc.zoclos)};
 
@@ -8672,7 +8696,8 @@ async function registrarPuerta(tipo, alto, ancho){
     if(so && puertaPreview.aSob && so.cantidad>0){
       const sid = logId+'s', it = CATALOGO.find(i=>i.id===so.itemId), fS = new Date(Date.now()+1).toISOString();
       const lineas = so.hojas.map(x=>`Sobrante de hoja ${x.hoja} de ${so.totalHojas} del corte de puertas (${fmtNum(x.sobra)} hoja${x.pedazos&&x.pedazos.length?', '+x.pedazos.map(z=>`pedazo de ${fmtNum(z.w)}×${fmtNum(z.h)} cm`).join(' y '):(x.libre?`, pedazo aprox. ${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm`:'')})`);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'sobranteCortePuertas', instalacionId:logId, cantidad:so.cantidad, nota:'Sobrante del corte · '+desc, fecha:fS, estado, loteId:sid, sobranteId:sid, creadoPor});
+      // v208 (confirmado por el usuario): el sobrante del corte de puertas entra solo, sin aprobación de Dirección.
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'sobranteCortePuertas', instalacionId:logId, cantidad:so.cantidad, nota:'Sobrante del corte · '+desc, fecha:fS, estado:'aprobado', loteId:sid, sobranteId:sid, creadoPor});
       await db.collection('sobrantes').doc(sid).set({modulo:modulo(), fecha:fS, calle, nota:'Sobrante del corte de '+desc, lineas, lineasData:[], material:[{itemId:it.id, cantidad:so.cantidad}], restante:{[it.id]:so.cantidad}, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId, deCortePuertas:true});
       conSob = true;
     }
@@ -10121,7 +10146,9 @@ async function verifReabrirSiSeRechaza(instIds){
       if(ms.some(m=>m.instalacionId===id && VERIF_MOT_REG.includes(m.motivo) && m.estado!=='rechazado')) continue;
       const d = await db.collection('instalacionesLog').doc(id).get(); const l = d && d.data && d.data(); const v = l && l.verif;
       if(!v || v.estado!=='no' || !['regreso','sobrantes','merma'].includes(v.puertas)) continue;
-      await db.collection('instalacionesLog').doc(id).update({verif:Object.assign({}, v, {puertas:'pendiente', visto:false, nota:'Dirección rechazó a dónde iba el material: decide otra vez', intentos:(v.intentos||0)+1})});
+      await db.collection('instalacionesLog').doc(id).update({verif:Object.assign({}, v, {puertas:'pendiente', visto:false, noCortadas:false, nota:'Dirección rechazó a dónde iba el material: decide otra vez', intentos:(v.intentos||0)+1})});
+      if(v.noCortadas){ try{ const d = await db.collection('sobrantes').doc(id+'s').get(); const so = d && d.data && d.data(); if(so && so.canceladoNoCortadas){ const it = (so.material||[])[0];
+        await db.collection('sobrantes').doc(id+'s').update({estado:'abierto', canceladoNoCortadas:false, cerradoEn:null, restante: it?{[it.itemId]:it.cantidad}:{}}); } }catch(e){} }
     } }catch(e){}
 }
 async function rechazarLote(loteId){
@@ -13435,7 +13462,7 @@ function unaSolaVez(nombre, fn){
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
  'verifRegresa','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
- 'dupQuitar','dupIgnorar','verifCambiarFecha','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
+ 'dupQuitar','dupIgnorar','verifNoCortadas','verifCambiarFecha','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
 // v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
 ['renderInstMueble','renderInstPuertas'].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = function(...a){ const r = f.apply(this, a); try{ instDiaPintar(n==='renderInstMueble'?'i':'p'); }catch(e){} return r; }; }catch(e){} });
