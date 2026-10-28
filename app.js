@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v206';
+const APP_VERSION = 'v207';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -10032,7 +10032,7 @@ async function renderAprobacionesBase(){
           <div><strong>${m0.modulo}</strong><div class="tag">${new Date(m0.fecha).toLocaleString()}</div>${m0.creadoPor?`<div class="tag">${m0.creadoPor}</div>`:''}</div>
         </div>
         ${(()=>{ const e=items.find(x=>x.tipo==='entrada'); if(!e) return ''; const o=origenDeEntrada(e); const c=o.tipo==='proveedor'?'31,157,85':(o.tipo==='modulo'?'217,119,6':'110,116,132');
-          return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(${c},.12);border:1px solid rgba(${c},.45)"><strong>📍 De dónde viene:</strong> ${o.txt}</div>`; })()}${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs)}${detalleRegresoInstAprob(items, todosLogs)}${(()=>{ const m=items.find(x=>x.motivo==='piezasEncontradas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>✂️ Piezas cortadas encontradas</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Se suman al material cortado.</div></div>`:''; })()}${(()=>{ const m=items.find(x=>x.motivo==='mermaPiezas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(224,121,26,.10);border:1px solid rgba(224,121,26,.4)"><strong>⚠️ Piezas dañadas (merma)</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Salen del material cortado.</div></div>`:''; })()}
+          return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(${c},.12);border:1px solid rgba(${c},.45)"><strong>📍 De dónde viene:</strong> ${o.txt}</div>`; })()}${detalleGarantiaAprob(key, garLogs)}${detalleSobranteAprob(key, sobLogs, todosLogs)}${detalleRegresoInstAprob(items, todosLogs)}${(()=>{ const m=items.find(x=>x.motivo==='piezasEncontradas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>✂️ Piezas cortadas encontradas</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Se suman al material cortado.</div></div>`:''; })()}${(()=>{ const m=items.find(x=>x.motivo==='mermaPiezas' && x.piezasDetalle); return m?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(224,121,26,.10);border:1px solid rgba(224,121,26,.4)"><strong>⚠️ Piezas dañadas (merma)</strong><div class="hint" style="margin:4px 0 0">${m.piezasDetalle.join('<br>')}</div><div class="hint" style="margin:2px 0 0">Salen del material cortado.</div></div>`:''; })()}
         <div class="wrap-x" style="margin-top:6px"><table><tr><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr>
         ${items.map(m=>`<tr><td>${m.itemNombre}</td><td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}</td><td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)}</td><td>${m.nota||''}</td></tr>`).join('')}
         </table></div>
@@ -10087,11 +10087,14 @@ function detalleGarantiaAprob(loteId, garLogs){
   }
   return '';
 }
-function detalleSobranteAprob(loteId, sobLogs){
+function detalleSobranteAprob(loteId, sobLogs, logsAll){
   const caja = (titulo, cuerpo) => `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(14,138,138,.10);border:1px solid rgba(14,138,138,.35)"><strong>${titulo}</strong>${cuerpo}</div>`;
   const s = sobLogs.find(x=>x.id===loteId);
   if(s && s.directoMerma) return caja('🗑️ Merma: regresó sin instalar y no sirve', `${s.nota?`<div class="hint" style="margin:4px 0 0">${s.nota}</div>`:''}<ul style="margin:4px 0 0 18px;padding:0;line-height:1.5">${(s.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul>`);
-  if(s) return caja('🧩 Material a sobrantes', `${s.nota?`<div class="hint" style="margin:4px 0 0">${s.nota}</div>`:''}<ul style="margin:4px 0 0 18px;padding:0;line-height:1.5">${(s.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul><div class="hint" style="margin:4px 0 0">No se instaló y regresó al taller. Sale del inventario hasta que se transforme.</div>`);
+  // v207: la calle de donde viene, y el texto correcto para el sobrante del corte de puertas.
+  const calleS = s ? (s.calle || ((logsAll||[]).find(l=>l.id===(s.deInstalacion||s.deGarantia))||{}).calle || '') : '';
+  const calleH = calleS ? `<div style="margin:4px 0 0;font-size:15px;font-weight:800">📍 ${escCalle(calleS)}</div>` : '';
+  if(s) return caja('🧩 Material a sobrantes', `${calleH}${s.nota?`<div class="hint" style="margin:4px 0 0">${s.nota}</div>`:''}<ul style="margin:4px 0 0 18px;padding:0;line-height:1.5">${(s.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul><div class="hint" style="margin:4px 0 0">${s.deCortePuertas?'Lo que sobró de la hoja al cortar las puertas. Queda apartado en Sobrantes hasta que el cortador diga qué piezas sacó.':'No se instaló y regresó al taller. Sale del inventario hasta que se transforme.'}</div>`);
   const t = sobLogs.find(x=>(x.transformaciones||[]).some(tr=>tr.loteId===loteId));
   if(t){ const tr = t.transformaciones.find(z=>z.loteId===loteId);
     return caja('✂️ Sobrante transformado', `<div class="hint" style="margin:4px 0 0">Del sobrante: ${(t.lineas||[]).join(', ')}${t.nota?' — '+t.nota:''}</div><div class="hint" style="margin:4px 0 0"><strong>Salió:</strong> ${tr.piezas.join(', ')}</div>`); }
