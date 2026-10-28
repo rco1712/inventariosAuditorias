@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v204';
+const APP_VERSION = 'v205';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6845,6 +6845,15 @@ function verifQuien(l){ return (l.creadoPor||'').split('@')[0]; }
 const VERIF_TAG = {ok:['✅ Se instaló','#16a34a'], modelo:['❓ No coincide','#3E5CDE'], parte:['🔸 Una parte','#d97706'], no:['❌ No se instaló','#dc2626']};
 // v190: en el historial de instalaciones, la columna Estado muestra lo que Dirección verificó (no solo "Aprobado").
 function estadoInstHist(x){ if(x.estado==='rechazado' || !x.verif || !VERIF_TAG[x.verif.estado]) return badgeEstado(x.estado); return verifEstadoTxt(x); }
+// v205 (pedido por el usuario): Dirección corrige el día de instalación cuando el coordinador eligió mal la
+// fecha. Solo cambia en qué día se verifica; el inventario no se mueve.
+async function verifCambiarFecha(id){
+  const l = (verifLogs||[]).find(x=>x.id===id); if(!l) return;
+  const nueva = diaLocal(l.fecha), hoy = fechaHoyLocal();
+  if(!confirm(`📅 ${l.descripcion.split(' · ').slice(0,2).join(' · ')}${l.calle?' · '+l.calle:''}\n\nCambiar el día de instalación del ${fCorta(l.fechaDia)} al ${fCorta(nueva)} (el día que se capturó).\n\n${nueva>=hoy?'Como es de hoy, la verificas mañana con el reporte del grupo de hoy.':'La verificas con el reporte del grupo de ese día.'}\n\nEl inventario no se mueve. ¿Continuar?`)) return;
+  try{ await db.collection('instalacionesLog').doc(id).update({fechaDia:nueva, fechaCorregida:{antes:l.fechaDia, por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()}}); l.fechaDia = nueva;
+    toast('📅 Fecha corregida.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
+}
 function verifEstadoTxt(l){
   const v = l.verif||{}; const t = VERIF_TAG[v.estado]; if(!t) return '';
   let extra = '';
@@ -6895,6 +6904,7 @@ function verifPintar(){
       <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:22px">${l.categoria==='Puerta'?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
         <strong style="font-size:15px">${l.descripcion}</strong>${calleHtml(l,true)}
         <div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''}${l.nota?' · '+l.nota:''}${l.estado==='pendiente'?' · <span style="color:#d97706">aún sin aprobar · ✅ la aprueba</span>':''}</div>
+        ${(l.fechaDia && l.fecha && diaLocal(l.fecha)!==l.fechaDia && !l.verif) ? `<div style="margin:8px 0 0;padding:9px 11px;border-radius:10px;background:#fde047;color:#1a1a1a;border:2px solid #d97706;font-size:13.5px"><strong>⚠️ Se capturó el ${fCorta(diaLocal(l.fecha))}, pero dice que se instaló el ${fCorta(l.fechaDia)}.</strong> Revisa que sí esté en el reporte del grupo del ${fCorta(l.fechaDia)}.${true?`<div style="margin-top:6px"><button class="btn small" style="background:#b45309" onclick="verifCambiarFecha('${l.id}')">📅 Es del ${fCorta(diaLocal(l.fecha))}: cambiar la fecha</button></div>`:''}</div>` : ''}
         ${verifDetalleHtml(l)}</div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
         ${btn(l.id,'ok','✅ Se instaló','#16a34a')}${btn(l.id,'parte','🔸 Una parte','#d97706')}
@@ -13171,7 +13181,12 @@ function calleEmpata(capturada, d){
   return nomOk && numOk;
 }
 let _instDia = {preguntar:false, elegido:false};
-function instDiaElegir(pre, dia){ const f = document.getElementById(pre+'-fecha'); if(f) f.value = dia; _instDia.elegido = true; instDiaPintar(pre); }
+function instDiaElegir(pre, dia){
+  const hoy = fechaHoyLocal();
+  if(dia!==hoy && !confirm(`📅 ¿Seguro que esta instalación SE INSTALÓ el ${fCorta(dia)}?\n\nSi es algo que se instala HOY (aunque lo captures en la mañana), toca Cancelar y elige "Es de hoy".\n\nDirección la va a comparar con el reporte del grupo del ${fCorta(dia)}.`)) return;
+  const f = document.getElementById(pre+'-fecha'); if(f) f.value = dia; _instDia.elegido = true;
+  if(dia===hoy){ try{ localStorage.setItem('instDiaHoy_'+modulo(), hoy); }catch(e){} }
+  instDiaPintar(pre); }
 function instDiaOk(pre){
   if(!_instDia.preguntar || _instDia.elegido || instRegresoLibre || instCambio) return true;
   const el = document.getElementById(pre+'-diaaviso'); if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
@@ -13181,16 +13196,17 @@ async function instDiaPintar(pre){
   const el = document.getElementById(pre+'-diaaviso'); if(!el || esAdmin() || instRegresoLibre || instCambio) return;
   const hoy = fechaHoyLocal(), ayer = diaAnteriorLaboral(hoy);
   let a; try{ a = await coordAvisosInst(ayer); }catch(e){ return; }
-  const falta = a.hayReporte ? a.faltan.length>0 : !a.capt;
+  let yaHoy = false; try{ yaHoy = localStorage.getItem('instDiaHoy_'+modulo())===hoy; }catch(e){}
+  const falta = (a.hayReporte ? a.faltan.length>0 : !a.capt) && !yaHoy;
   _instDia.preguntar = falta; if(!falta){ el.innerHTML = ''; return; }
   const f = (document.getElementById(pre+'-fecha')||{}).value || hoy;
   const chip = (dia, txt) => { const on = _instDia.elegido && f===dia; return `<button class="btn small" style="${on?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="instDiaElegir('${pre}','${dia}')">${on?'✔ ':''}${txt}</button>`; };
   const otro = _instDia.elegido && f!==hoy && f!==ayer;
   el.innerHTML = `<div style="margin-top:12px;padding:12px;border-radius:12px;border:2px solid #d97706;background:rgba(217,119,6,.10)">
     <strong>📅 ${a.hayReporte ? `De ayer (${fCorta(ayer)}) te falta capturar: ${a.faltan.map(escCalle).join(', ')}` : `Ayer (${fCorta(ayer)}) no capturaste instalaciones.`}</strong>
-    <div style="margin-top:4px">¿De qué día es <strong>esta</strong> instalación?</div>
-    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${chip(hoy,'Hoy · '+fCorta(hoy))}${chip(ayer,'Ayer · '+fCorta(ayer))}<button class="btn small" style="${otro?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="_instDia.elegido=true;const f=document.getElementById('${pre}-fecha');f.focus();try{f.showPicker()}catch(e){};instDiaPintar('${pre}')">${otro?'✔ '+fCorta(f):'Otro día'}</button></div>
-    <p class="hint" style="margin:6px 0 0">Así Dirección la compara con el reporte del grupo del día correcto.</p></div>`;
+    <div style="margin-top:4px">¿Esta instalación es de <strong>hoy</strong> o es una que te faltó capturar de <strong>ayer</strong>?</div>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${chip(hoy,'✅ Es de hoy · '+fCorta(hoy))}${chip(ayer,'Me faltó de ayer · '+fCorta(ayer))}<button class="btn small" style="${otro?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="_instDia.elegido=true;const f=document.getElementById('${pre}-fecha');f.focus();try{f.showPicker()}catch(e){};instDiaPintar('${pre}')">${otro?'✔ '+fCorta(f):'Otro día'}</button></div>
+    <p class="hint" style="margin:6px 0 0">Si se instala hoy (aunque la captures en la mañana), es <strong>de hoy</strong>. Así Dirección la compara con el reporte del grupo del día correcto.</p></div>`;
 }
 // v202: sobrantes de puertas a los que todavía no se les registró qué piezas salieron.
 function sobPuertasSinRegistrar(sobs, mod){ return (sobs||[]).filter(x=>x.deCortePuertas && x.estado!=='cerrado' && x.estado!=='anulado' && !(x.transformaciones||[]).length && (!mod || x.modulo===mod)); }
@@ -13414,7 +13430,7 @@ function unaSolaVez(nombre, fn){
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
  'verifRegresa','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
- 'dupQuitar','dupIgnorar','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
+ 'dupQuitar','dupIgnorar','verifCambiarFecha','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
 // v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
 ['renderInstMueble','renderInstPuertas'].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = function(...a){ const r = f.apply(this, a); try{ instDiaPintar(n==='renderInstMueble'?'i':'p'); }catch(e){} return r; }; }catch(e){} });
