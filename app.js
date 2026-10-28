@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v199';
+const APP_VERSION = 'v200';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6614,7 +6614,24 @@ function regresarInstalacion(logId){
   regInstSel = logId; regMerma = {}; regSob = {}; regMotivo = '';
   mostrarRegresoInst();
 }
-function regCons(){ const x = (instLog||[]).find(l=>l.id===regInstSel); return x ? (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId)) : []; }
+function regCons(){ const x = (instLog||[]).find(l=>l.id===regInstSel); if(!x) return [];
+  const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
+  // v200 (confirmado por el usuario): de unas puertas solo regresan las piezas de las puertas, no las tiras
+  // de los lados de la hoja (esas casi siempre se aprovechan en otros muebles y ya no existen).
+  const net = melNetaPuerta(x); if(net==null) return cons;
+  return cons.map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it && it.cat==='Melamina' && Number(c.cantidad)>net) ? Object.assign({}, c, {cantidad:net, antes:Number(c.cantidad)}) : c; });
+}
+// Hojas que ocupan de verdad las piezas de unas puertas (por área), sin las tiras que sobran a los lados.
+function melNetaPiezasPuerta(cortes, zoclos){ return fmtNum((cortes||[]).reduce((s,c)=>s+(Number(c.ancho)*Number(c.alto)*(Number(c.cantidad)||1)),0)/(122*244) + (zoclos||0)/piezasPorHojaIndividual(10,52,122,244)); }
+function melNetaPuerta(x){
+  if(!x || x.categoria!=='Puerta') return null;
+  if(x.melNeta!=null) return Number(x.melNeta);
+  // Instalaciones de antes de v200: se recalcula con el tipo y las medidas de la descripción.
+  const tipo = String(x.modeloKey||'').replace(/^Puerta /,''); const m = String(x.descripcion||'').match(/([\d.\/]+)×([\d.\/]+) cm/);
+  if(!tipo || !m || typeof TIPOS_PUERTA_HERRAJES==='undefined' || !TIPOS_PUERTA_HERRAJES[tipo]) return null;
+  const an = m[1].split('/').map(Number), al = m[2].split('/').map(Number);
+  try{ const calc = calcularPuerta(tipo, Math.min(...al), Math.max(...an), false, Math.max(...al)); return melNetaPiezasPuerta(calc.cortes, calc.zoclos); }catch(e){ return null; }
+}
 function regTodo(tipo){ // 'nada' | 'hojas' | 'todo' | 'sob'
   regCons().forEach(c=>{ const h = esHojaId(c.itemId);
     if(tipo==='nada'){ delete regMerma[c.itemId]; delete regSob[c.itemId]; }
@@ -6656,6 +6673,7 @@ function mostrarRegresoInst(){
   body.innerHTML = `<div class="card" style="border:2px solid #1f9d55">
     <div style="font-size:16px;font-weight:800">${verifTituloRegreso(x)}</div>
     <p class="hint" style="margin:6px 0 0"><strong>${x.descripcion}</strong> (${fCorta(x.fechaDia)}). Esta instalación ya no va a contar.</p>
+    ${(()=>{ const c = cons.find(z=>z.antes!=null); return c ? `<p style="margin:8px 0 0;padding:8px 10px;border-radius:10px;border:1px solid #0e8a8a;background:rgba(14,138,138,.10);font-size:14px">🚪 De las puertas solo regresan <strong>las piezas</strong>: <strong>${fmtNum(c.cantidad)} hojas</strong>. Las tiras que sobraron a los lados de la hoja (${fmtNum(c.antes-c.cantidad)} hojas) no regresan porque normalmente ya se usaron.</p>` : ''; })()}
     <p class="hint" style="margin:6px 0 0">Todo vuelve al inventario <strong>menos lo que marques como merma</strong> (mojado, roto, dañado). En la casilla de la derecha va cuánto se va a merma.</p>
     <p class="hint" style="margin:4px 0 0">🧩 <strong>A sobrantes</strong>: la melamina/MDF queda apartada para cortarla en otras piezas; en Sobrantes se anota en qué se transformó.</p>
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
@@ -8530,7 +8548,7 @@ function calcPuerta(){
   const sobHojas = (!instRegresoLibre && !instCambio) ? (empaque.sobrantesHoja||[]).filter(x=>x.sobra>=0.05) : [];
   const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:(sobHojas.length===1 ? Math.round((Math.ceil(Number(hojasMelamina)-1e-9)-Number(hojasMelamina))*1000)/1000 : Math.round(sobHojas.reduce((a,x)=>a+x.sobra,0)*1000)/1000), itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
   const prevSob = puertaPreview && puertaPreview.sobOferta && puertaPreview.tipo===tipo && puertaPreview.alto===alto && puertaPreview.ancho===ancho && puertaPreview.color===color ? puertaPreview.aSob : false;
-  puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: sobOferta ? prevSob : false};
+  puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: sobOferta ? prevSob : false, melNeta: melNetaPiezasPuerta(cortes, calc.zoclos)};
 
   let html = `<div class="card"><h3>${tipo} · ${color}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
@@ -8620,7 +8638,7 @@ async function registrarPuerta(tipo, alto, ancho){
     await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,altoMax:puertaPreview.altoMax||alto,medidas:puertaPreview.medidasTxt||'',nota,calle,fechaDia,fecha:new Date().toISOString(),estado});
     await db.collection('instalacionesLog').doc(logId).set({
       modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, calle, fechaDia, modeloKey:'Puerta '+tipo,
-      consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
+      consumo:puertaPreview.consumo, melNeta:puertaPreview.melNeta, fecha:new Date().toISOString(), estado, creadoPor
     });
     const so = puertaPreview.sobOferta; let conSob = false;
     if(so && puertaPreview.aSob && so.cantidad>0){
