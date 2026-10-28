@@ -6558,7 +6558,7 @@ async function guardarCambioModelo(n){
     for(const x of sobs){ const it = CATALOGO.find(i=>i.id===x.itemId); await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'cambioSobrante', instalacionId:L.id, cantidad:Number(x.cantidad), nota:'A sobrantes (sobró del cambio de modelo) · '+nota, fecha:fechaM, estado, loteId:newId, sobranteId:newId, cambioModelo:true, creadoPor}); }
     for(const x of merm){ const it = CATALOGO.find(i=>i.id===x.itemId); await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'cambioMerma', instalacionId:L.id, cantidad:Number(x.cantidad), nota:'Merma (sobró del cambio de modelo) · '+nota, fecha:fechaM, estado, loteId:newId, cambioModelo:true, creadoPor}); }
     if(sobs.length){ const material = sobs.map(x=>({itemId:x.itemId, cantidad:fmtNum(x.cantidad)})), restante = {}; material.forEach(m=>{ restante[m.itemId]=m.cantidad; });
-      await db.collection('sobrantes').doc(newId).set({modulo:mod, fecha, nota:'Sobró del cambio de modelo: '+antes+' → '+n.desc.split(' · ')[0], lineas:[L.descripcion+' → '+n.desc+' · sobró'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:L.id, deCambio:newId}); }
+      await db.collection('sobrantes').doc(newId).set({modulo:mod, fecha, calle:L.calle||'', nota:'Sobró del cambio de modelo: '+antes+' → '+n.desc.split(' · ')[0], lineas:[L.descripcion+' → '+n.desc+' · sobró'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:L.id, deCambio:newId}); }
   };
   // El coordinador nunca aprueba su propia corrección: Dirección la verifica (la de Dirección queda aprobada).
   const verifNuevo = esAdmin() ? verifParaNuevo(L) : {};
@@ -6713,7 +6713,7 @@ async function confirmarRegresoInst(){
     }
     if(sobs.length){ // el sobrante usa el mismo id que el lote, así se aprueba junto con el regreso
       const material = sobs.map(z=>({itemId:z.c.itemId, cantidad:fmtNum(z.q)})); const restante = {}; material.forEach(mm=>{ restante[mm.itemId]=mm.cantidad; });
-      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, nota:(motivo.trim()||'')+' (regresó de instalación)', lineas:[x.descripcion+' · regresó sin instalar'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId});
+      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, calle:x.calle||'', nota:(motivo.trim()||'')+' (regresó de instalación)', lineas:[x.descripcion+' · regresó sin instalar'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId});
     }
     regInstSel = null; regMerma = {}; regSob = {}; regMotivo = '';
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : (sobs.length?'✅ Regresó; la melamina quedó apartada en 🧩 Sobrantes.':(merm.length?'✅ Regresó; lo dañado quedó como merma.':'✅ Regresó al inventario.')));
@@ -7220,7 +7220,7 @@ async function confirmarRegresoParcial(){
         await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'regresoSobrante', instalacionId:logId, cantidad:cant, nota:'A sobrantes · '+nota, fecha:fechaM, estado, loteId, sobranteId:loteId, creadoPor}); }
     }
     if(sobs.length){ const restante = {}; sobs.forEach(m=>{ restante[m.itemId]=m.cantidad; });
-      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, nota:(motivo||'')+' (regresó una parte de una instalación)', lineas:[x.descripcion+' · regresó una parte'], lineasData:[], material:sobs, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId}); }
+      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, calle:x.calle||'', nota:(motivo||'')+' (regresó una parte de una instalación)', lineas:[x.descripcion+' · regresó una parte'], lineasData:[], material:sobs, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId}); }
     regInstSel = null; regVuelve = {}; regMerma = {}; regSob = {}; regMotivo = ''; regParcial = false;
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : '✅ Lo que regresó ya está en el inventario.');
     if(await verifTerminarFlujo()) return;
@@ -8072,7 +8072,7 @@ async function confirmarRetornoGar(){
     if(aSobrante.length){
       sobranteId = cryptoId();
       const restante = {}; aSobrante.forEach(c=>{ restante[c.itemId] = c.cantidad; });
-      await db.collection('sobrantes').doc(sobranteId).set({modulo:log.modulo||modulo(), fecha, nota:nota+' (regresó de garantía)', lineas:sobr, lineasData:[], material:aSobrante, restante, estado:'abierto', transformaciones:[], creadoPor, deGarantia:log.id});
+      await db.collection('sobrantes').doc(sobranteId).set({modulo:log.modulo||modulo(), fecha, calle:log.calle||'', nota:nota+' (regresó de garantía)', lineas:sobr, lineasData:[], material:aSobrante, restante, estado:'abierto', transformaciones:[], creadoPor, deGarantia:log.id});
     }
     await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, sobrante:sobr, sobranteId, devuelto, estado, loteId, creadoPor, fotos:nFotosRet||0}});
     toast((devuelto.length && estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar para que sume al inventario.</small>' : '✅ Guardado lo que regresó.')+(sobranteId?'<br><small>🧩 Lo de sobrante quedó apartado en Sobrantes.</small>':''));
@@ -8656,7 +8656,7 @@ async function registrarPuerta(tipo, alto, ancho){
       const sid = logId+'s', it = CATALOGO.find(i=>i.id===so.itemId), fS = new Date(Date.now()+1).toISOString();
       const lineas = so.hojas.map(x=>`Sobrante de hoja ${x.hoja} de ${so.totalHojas} del corte de puertas (${fmtNum(x.sobra)} hoja${x.pedazos&&x.pedazos.length?', '+x.pedazos.map(z=>`pedazo de ${fmtNum(z.w)}×${fmtNum(z.h)} cm`).join(' y '):(x.libre?`, pedazo aprox. ${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm`:'')})`);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'sobranteCortePuertas', instalacionId:logId, cantidad:so.cantidad, nota:'Sobrante del corte · '+desc, fecha:fS, estado, loteId:sid, sobranteId:sid, creadoPor});
-      await db.collection('sobrantes').doc(sid).set({modulo:modulo(), fecha:fS, nota:'Sobrante del corte de '+desc, lineas, lineasData:[], material:[{itemId:it.id, cantidad:so.cantidad}], restante:{[it.id]:so.cantidad}, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId, deCortePuertas:true});
+      await db.collection('sobrantes').doc(sid).set({modulo:modulo(), fecha:fS, calle, nota:'Sobrante del corte de '+desc, lineas, lineasData:[], material:[{itemId:it.id, cantidad:so.cantidad}], restante:{[it.id]:so.cantidad}, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId, deCortePuertas:true});
       conSob = true;
     }
     toast((estado==='pendiente'
@@ -10962,6 +10962,10 @@ async function renderSob(){
   current = 'sob';
   $('#main').innerHTML = '<div class="card hint">Cargando sobrantes…</div>';
   try{ const snap = await db.collection('sobrantes').get(); sobrantesCache = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }catch(e){ sobrantesCache=[]; }
+  // v202 (pedido por el usuario): la calle de donde viene cada sobrante (también los de antes, por su instalación).
+  if(sobrantesCache.some(x=>!x.calle && (x.deInstalacion||x.deGarantia))){ try{ const [sl, sg] = await Promise.all([db.collection('instalacionesLog').get(), db.collection('garantiasLog').get().catch(()=>({docs:[]}))]);
+    const cal = {}; sl.docs.concat(sg.docs).forEach(d=>{ const v=d.data(); if(v.calle) cal[d.id]=v.calle; });
+    sobrantesCache.forEach(x=>{ if(!x.calle) x.calle = cal[x.deInstalacion] || cal[x.deGarantia] || ''; }); }catch(e){} }
   if(current!=='sob') return;
   const vivos = sobrantesCache.filter(x=>estadoAprobSob(x.id)!=='rechazado');
   const abiertos = vivos.filter(x=>x.estado!=='cerrado'), cerrados = vivos.filter(x=>x.estado==='cerrado');
@@ -10974,6 +10978,7 @@ async function renderSob(){
     const trans = (x.transformaciones||[]).map(t=>`<div class="hint" style="margin:4px 0 0">✂️ ${new Date(t.fecha).toLocaleDateString('es-MX')}: salieron ${t.piezas.join(', ')} ${badgeEstado(estadoAprobSob(t.loteId))}</div>`).join('');
     return `<div class="card">
       <div class="row" style="justify-content:space-between"><strong>${new Date(x.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'long'})}</strong>${badgeEstado(ea)}</div>
+      ${x.calle?`<div style="margin:4px 0 0;font-size:15px;font-weight:800">📍 ${escCalle(x.calle)}</div>`:''}
       ${x.nota?`<p class="hint" style="margin:4px 0">${x.nota}</p>`:''}
       <ul style="margin:6px 0 6px 18px;padding:0;line-height:1.5">${(x.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul>
       ${x.estado==='cerrado' ? `<p class="hint" style="margin:4px 0">${x.directoMerma?'🗑️ Se fue directo a merma':'Terminado'}${x.mermaFinal&&x.mermaFinal.length?' · merma: '+x.mermaFinal.map(m=>{const it=CATALOGO.find(i=>i.id===m.itemId); return fmtNum(m.cantidad)+' '+(it?it.unidad+' '+it.nombre:'');}).join(', '):''}</p>` : `<p class="hint" style="margin:4px 0"><strong>Queda:</strong><br>${rest||'—'}</p>`}
