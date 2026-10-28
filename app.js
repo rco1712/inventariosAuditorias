@@ -100,6 +100,7 @@ const MUEBLE_TIPO_OPCIONES = [
   {value:'zapatera', label:'Zapatera (en vez de entrepañera; solo Lateral y Central)'}
 ];
 let dModoComp=false, dFamiliaComp=null, dMueblesComp=[];
+let iSoloExtras=false; // v208: instalación de solo extras (zapateras, cajoneras…) sin modelo
 let iModoComp=false, iFamiliaComp=null, iMueblesComp=[];
 
 const MODULOS = [
@@ -222,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v207';
+const APP_VERSION = 'v208';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -7375,11 +7376,13 @@ function renderInstMueble(){
     <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="instRegresoLibre=false;instSub='historial';instRegreso=true;renderInst()">Cancelar</button></div>`:''}
   <div class="card">
     <div class="paso">1</div><strong>¿Qué modelo ${reg?'regresó':'se instaló'}?</strong>
-    <div id="i-selector-wrap" style="margin-top:10px"></div>
+    ${reg?'':`<div class="chips" style="margin-top:10px"><button type="button" class="chip ${!iSoloExtras?'on':''}" onclick="iSoloExtras=false;renderInstMueble()">🗄️ Con modelo</button><button type="button" class="chip ${iSoloExtras?'on':''}" onclick="iSoloExtras=true;renderInstMueble()">➕ Solo extras (sin modelo)</button></div>`}
+    ${(iSoloExtras&&!reg)?`<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(63,191,116,.12);border:2px solid #3fbf74;font-size:14px"><strong>➕ Solo se instalaron extras, sin modelo.</strong><br>Ejemplo: 2 zapateras. Agrégalas abajo en el paso <strong>3</strong>. No cuenta como modelo; cada extra vale lo de un extra.</div>`:`<div><div id="i-selector-wrap" style="margin-top:10px"></div>
     <div id="i-max-wrap"></div>
     <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> <span>Las cajoneras <strong>del modelo</strong> llevan corredera de extensión <span class="hint" style="margin:0">(los extras se marcan aparte; la Max siempre la lleva)</span></span></label>
     <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-puertitas-modelo" style="width:22px;min-height:22px;flex:0 0 22px"> <span>Las cajoneras <strong>del modelo</strong> llevan <strong>puertitas</strong> <span class="hint" style="margin:0">(con sus bisagras y jaladeras; en Max, push)</span></span></label>
     <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="iModoComp=!iModoComp;renderInstMueble()">${iModoComp?'← Elegir de la lista de modelos':'¿No está el modelo? Ármalo mueble por mueble'}</button>
+</div>`}
   </div>
   <div class="card">
     <div class="paso">2</div><strong>¿De qué color?</strong>
@@ -7389,7 +7392,7 @@ function renderInstMueble(){
     <label class="row" style="margin-top:12px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-todocolor" style="width:22px;min-height:22px;flex:0 0 22px" onchange="syncTodoColor('i')"> El cliente pidió todo del mismo color (también el interior)</label>
     <p id="i-todocolor-hint" class="hint" style="display:none;margin:6px 0 0">✅ Frente, cajonera, estructura y piezas de cajón van del mismo color.</p>
   </div>
-  <details class="card" ${iAdicionales.length?'open':''}>
+  <details class="card" ${(iAdicionales.length||iSoloExtras)?'open':''}>
     <summary><span class="paso">3</span><strong>¿Lleva algo extra?</strong> <span class="hint" style="margin:0 0 0 6px">(opcional)</span></summary>
     <p class="hint">Cajoneras, zapateras, repisas u otros muebles que se agregaron aparte del modelo.</p>
     <div id="i-adic-box" class="subcard"></div>
@@ -7476,7 +7479,10 @@ function previewInst(){
   const todoColor = $('#i-todocolor').checked;
   const correderaExt = document.getElementById('i-corredera-ext') ? document.getElementById('i-corredera-ext').checked : false;
   let piezasModelo, maxNota, titulo, notaModelo=null, colorCajonera, modeloKey=null, esMax=false;
-  if(iModoComp){
+  if(iSoloExtras && !instRegresoLibre){
+    if(!iAdicionales.length){ alert('Agrega en el paso 3 lo que se instaló (por ejemplo, las zapateras).'); return; }
+    piezasModelo = []; maxNota = ''; titulo = 'Solo extras (sin modelo)'; modeloKey = 'Solo extras'; colorCajonera = null;
+  } else if(iModoComp){
     const maxOn = false; // en combinación, lo Max lo definen los muebles elegidos
     const especial3m = iFamiliaComp==='Doble Especial' && document.getElementById('i-especial3m-comp') ? document.getElementById('i-especial3m-comp').checked : false;
     const incompletos = iMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
@@ -7499,7 +7505,7 @@ function previewInst(){
   }
   // Puertitas en las cajoneras DEL MODELO (confirmado por el usuario): 1 par por cajonera,
   // del color del frente, con la medida de su cajonera (3, 5/Emma o Max).
-  const puertitasModelo = !!(document.getElementById('i-puertitas-modelo') && document.getElementById('i-puertitas-modelo').checked);
+  const puertitasModelo = !(iSoloExtras && !instRegresoLibre) && !!(document.getElementById('i-puertitas-modelo') && document.getElementById('i-puertitas-modelo').checked);
   if(puertitasModelo){
     const claves = [];
     if(iModoComp){ iMueblesComp.forEach(m=>{ const k = {cajonera_3:'3', cajonera_5:'5', cajonera_emma:'5', cajonera_max:'max'}[m.value]; if(k) claves.push(k); }); }
@@ -8145,7 +8151,7 @@ async function confirmarInst(){
       ? '✅ Instalación guardada.<br><small>Dirección la tiene que aprobar para que se descuente.</small>'
       : '✅ Instalación registrada.');
     instPreview=null;
-    iAdicionales=[];
+    iAdicionales=[]; iSoloExtras=false;
     renderInstMueble();
     window.scrollTo(0,0);
   }catch(e){ alert('Error al registrar: '+e.message); }
