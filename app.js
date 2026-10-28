@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v203';
+const APP_VERSION = 'v204';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -776,6 +776,7 @@ async function invCorrGuardar(){
   invCorrCerrar(); toast(`✏️ ${it.nombre} corregido`); if(current==='inv') setTimeout(renderInv, 300);
 }
 function renderInv(){
+  corrAutoJuntar();
   const cats = [...new Set(CATALOGO.map(i=>i.cat))];
   if(!invCat) invCat = cats[0];
   const catsHtml = cats.map(c=>
@@ -856,11 +857,11 @@ function correderasSueltasCardHtml(){
     const n = Math.floor(Math.min(h, m));
     return `<div class="movitem" style="flex-wrap:wrap;gap:8px"><span style="min-width:0"><span class="invname">${t.etiqueta}</span>
         <span class="hint" style="display:block;margin:2px 0 0">${fmtNum(j)} juego(s) completos · <strong>${fmtNum(h)}</strong> hembra(s) y <strong>${fmtNum(m)}</strong> macho(s) sin pareja</span></span>
-        ${n>0 && puedeEscribir() && !esSoloLectura() ? `<button class="btn small" onclick="armarJuegosCorredera('${t.juego}')">🔗 Armar ${n} juego(s)</button>` : ''}</div>`;
+        </div>`;
   }).join('');
   if(!filas) return '';
   return `<div class="card"><strong>🔩 Correderas sin pareja</strong>
-    <p class="hint" style="margin-top:4px">Una corredera completa es hembra + macho. Si juntas una hembra y un macho sueltos, toca "Armar juegos" y pasan a juegos completos.</p>
+    <p class="hint" style="margin-top:4px">Una corredera completa es hembra + macho. Cuando hay hembras y machos sueltos, la app los junta sola en juegos completos. Aquí quedan solo los que no tienen pareja.</p>
     <div class="movlist">${filas}</div></div>`;
 }
 async function armarJuegosCorredera(juegoNombre){
@@ -1421,6 +1422,8 @@ function etiquetaTipoMov(m){
   if(m.motivo==='correccionDireccion') return '✏️ Corrección de Dirección';
   if(m.motivo==='cierreCompletasDeMas') return 'Hojas completas de más (cierre)';
   if(m.motivo==='armarJuegos') return 'Armado de juegos';
+  if(m.motivo==='autoJuntar') return 'Se juntaron solos (correderas)';
+  if(m.motivo==='ajusteCierreHerrajes') return 'Ajuste de herrajes (cierre)';
   if(m.motivo==='sobranteGarantia') return 'Sobrante de garantía';
   if(m.motivo==='tuboAhorrado') return 'Tubo ahorrado';
   if(m.motivo==='deSobrante') return 'Sobrante transformado';
@@ -10182,12 +10185,111 @@ function herrCuentaHoy(it){
     return `${sg}${n(e.q)} ${({reg:'regresaron de instalaciones', entrada:'llegaron', devolucion:'regresaron', salida:'salieron', merma:'merma', garantia:'por garantías', ajuste:'ajuste'})[k]||k}`; });
   return {esp, tenia: fmtNum(esp - delta), partes, movio: partes.length>0, u};
 }
+// ===== v204 (confirmado por el usuario): calculadora de correderas en el cierre del turno =====
+// El coordinador cuenta lo que ve (juegos, machos y hembras sueltos, cajones y cajoneras por tamaño) y la
+// app junta machos con hembras y compara con el inventario. No mueve nada: Dirección decide si mete ajuste.
+const CORR_TAMS = [1,2,3,4,5];
+const CORR_CALC = {
+  'Juego de corredera': {k:'n', titulo:'🔩 Correderas normales', tipo:CORR_TIPOS[0]},
+  'Correderas de extensión': {k:'e', titulo:'🔩 Correderas de extensión', tipo:CORR_TIPOS[1]}
+};
+let corrCalc = {n:{}, e:{}};
+const corrV = v => (v===undefined || v===null || String(v).trim()==='') ? null : Number(v);
+function corrEsperado(t){ const v = n => { const it = itemByName(n); return it ? Number(stockEsperadoCierre(it.id))||0 : 0; };
+  const J = v(t.juego), H = v(t.hembra), M = v(t.macho), p = Math.max(0, Math.min(H, M));
+  return {J, H, M, juegos:fmtNum(J+p), hembras:fmtNum(H-p), machos:fmtNum(M-p)}; }
+function corrCampos(k){ const c = corrCalc[k];
+  const base = ['jc','mach','hemb'];
+  if(k==='n') return base.concat(['caj'], CORR_TAMS.map(s=>'sin'+s), CORR_TAMS.map(s=>'comp'+s));
+  const ex = base.concat(['cajMax','maxSin','maxComp']);
+  return c.norm===true ? ex.concat(['cajN'], CORR_TAMS.map(s=>'sinN'+s), CORR_TAMS.map(s=>'compN'+s)) : ex; }
+function corrResultado(k){
+  const c = corrCalc[k], f = corrCampos(k), falta = f.filter(x=>corrV(c[x])===null || !(corrV(c[x])>=0));
+  if(k==='e' && c.norm===undefined) falta.push('norm');
+  const g = x => corrV(c[x])||0, sum = (pre, mult) => CORR_TAMS.reduce((t,s)=>t+g(pre+s)*(mult?s:1),0);
+  let machos, hembras, compl, det;
+  if(k==='n'){ machos = g('mach')+g('caj'); hembras = g('hemb')+sum('sin',true); compl = sum('comp',true);
+    det = {juegos:g('jc'), machos:g('mach'), hembras:g('hemb'), cajones:g('caj'), cajonerasSin:Object.fromEntries(CORR_TAMS.map(s=>[s,g('sin'+s)])), cajonerasCompletas:Object.fromEntries(CORR_TAMS.map(s=>[s,g('comp'+s)]))}; }
+  else { machos = g('mach')+g('cajMax')+(c.norm?g('cajN'):0); hembras = g('hemb')+4*g('maxSin')+(c.norm?sum('sinN',true):0); compl = 4*g('maxComp')+(c.norm?sum('compN',true):0);
+    det = {juegos:g('jc'), machos:g('mach'), hembras:g('hemb'), cajonesMax:g('cajMax'), cajonerasMaxSin:g('maxSin'), cajonerasMaxCompletas:g('maxComp')};
+    if(c.norm) Object.assign(det, {cajonesNormales:g('cajN'), cajonerasNormSin:Object.fromEntries(CORR_TAMS.map(s=>[s,g('sinN'+s)])), cajonerasNormCompletas:Object.fromEntries(CORR_TAMS.map(s=>[s,g('compN'+s)]))}); }
+  const pares = Math.min(machos, hembras), juegos = g('jc') + pares + compl;
+  return {completo:!falta.length, machos, hembras, pares, compl, jc:g('jc'), juegos, sobH:hembras-pares, sobM:machos-pares, det}; }
+function corrCalcHtml(it){
+  const cfg = CORR_CALC[it.nombre], k = cfg.k, c = corrCalc[k], esp = corrEsperado(cfg.tipo);
+  const inp = (f, w) => `<input type="number" min="0" inputmode="numeric" value="${c[f]===undefined?'':c[f]}" placeholder="—" style="width:${w||70}px;min-width:${w||70}px;text-align:center" oninput="corrCalc.${k}['${f}']=this.value;corrPintarRes('${k}')">`;
+  const row = (lbl, f, sub) => `<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><label style="flex:1;font-size:14px">${lbl}${sub?`<br><span class="hint" style="margin:0">${sub}</span>`:''}</label>${inp(f)}</div>`;
+  const grid = (pre) => `<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:6px">${CORR_TAMS.map(s=>`<div style="text-align:center;font-size:12px" class="hint">de ${s}<div style="margin-top:3px">${inp(pre+s,'100%').replace('width:100%;min-width:100%','width:100%;min-width:0;box-sizing:border-box')}</div></div>`).join('')}</div>`;
+  const sub = t => `<div style="font-weight:800;font-size:12.5px;letter-spacing:.4px;margin-top:14px;color:#0e8a8a">${t}</div>`;
+  let body = sub('PIEZAS SUELTAS') + row('📦 Juegos completos (en su bolsa)','jc') + row('🔩 Juegos machos sueltos','mach') + row('🔩 Juegos hembras sueltas','hemb');
+  if(k==='n') body = `<div style="margin-top:10px;padding:10px;border-radius:10px;background:#fde047;color:#1a1a1a;font-weight:700;font-size:13.5px;border:2px solid #d97706">⚠️ Si un cajón o una cajonera normal lleva corredera de <u>extensión</u>, NO la cuentes aquí: va en <strong>Correderas de extensión</strong>.</div>`
+      + body + row('🗃️ Cajones','caj','cada cajón trae 1 macho') + sub('🗄️ CAJONERAS SIN CAJONES · 1 hembra por cada cajón que lleva') + grid('sin') + sub('🗄️ CAJONERAS COMPLETAS · con sus cajones puestos') + grid('comp');
+  else { const bt = (v, txt) => `<button class="btn small" style="min-width:64px;${c.norm===v?'background:#16a34a;border-color:#16a34a':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="corrCalc.e.norm=${v};herrConfPintar()">${txt}</button>`;
+    body += sub('CAJONERAS MAX · 4 cajones c/u') + row('🗃️ Cajones Max','cajMax','cada cajón trae 1 macho') + row('🗄️ Cajoneras Max sin cajones','maxSin','4 hembras c/u') + row('🗄️ Cajoneras Max completas','maxComp','con sus cajones puestos')
+      + `<div style="margin-top:12px;padding:10px;border-radius:10px;border:2px dashed var(--brand)"><strong>¿Tienes cajones o cajoneras NORMALES con corredera de extensión?</strong><div style="display:flex;gap:6px;margin-top:8px">${bt(true,'Sí')}${bt(false,'No')}</div>
+        ${c.norm===true ? row('🗃️ Cajones normales con extensión','cajN') + sub('CAJONERAS NORMALES CON EXTENSIÓN · sin cajones') + grid('sinN') + sub('· completas, con sus cajones') + grid('compN') : ''}</div>`; }
+  return `<div style="padding:12px 0;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><strong style="font-size:15px">${cfg.titulo}</strong><span class="tag" style="background:#0e8a8a;color:#fff;border-color:#0e8a8a">calculadora</span></div>
+    <div class="hint" style="margin:2px 0 0">El inventario dice: <strong style="color:var(--ink)">${esp.juegos} juegos</strong>${esp.hembras>0?` + ${esp.hembras} hembras sin pareja`:''}${esp.machos>0?` + ${esp.machos} machos sin pareja`:''}</div>
+    ${body}<div id="corr-res-${k}" style="margin-top:12px"></div></div>`;
+}
+function corrPintarRes(k){
+  const el = document.getElementById('corr-res-'+k); if(!el) return;
+  const nombre = k==='n' ? 'Juego de corredera' : 'Correderas de extensión', it = itemByName(nombre), esp = corrEsperado(CORR_CALC[nombre].tipo), r = corrResultado(k);
+  if(!r.completo){ el.innerHTML = `<div class="hint" style="margin:0">Llena todas las casillas (pon 0 si no tienes) para ver el total.</div>`; if(it) delete herrConf[it.id]; herrConfContador(); return; }
+  const ok = fmtNum(r.juegos)===fmtNum(esp.juegos) && fmtNum(r.sobH)===fmtNum(esp.hembras) && fmtNum(r.sobM)===fmtNum(esp.machos);
+  const dif = fmtNum(r.juegos - esp.juegos);
+  const li = (a,b) => `<div style="display:flex;justify-content:space-between;font-size:13.5px;margin-top:3px"><span>${a}</span><strong>${b}</strong></div>`;
+  el.innerHTML = `<div style="padding:12px;border-radius:12px;border:2px solid ${ok?'#16a34a':'#dc2626'};background:${ok?'rgba(22,163,74,.10)':'rgba(220,38,38,.10)'}">
+    ${li(`Machos (sueltos + en cajones)`, fmtNum(r.machos))}${li(`Hembras (sueltas + en cajoneras)`, fmtNum(r.hembras))}${li('Se juntan solos (macho + hembra)', fmtNum(r.pares)+' juegos')}${r.compl?li('Cajoneras completas', fmtNum(r.compl)+' juegos'):''}${li('Juegos completos en bolsa', fmtNum(r.jc))}
+    <div style="border-top:1px solid var(--line);margin:8px 0"></div>
+    <div style="font-size:20px;font-weight:900">Tienes: ${fmtNum(r.juegos)} juegos ${r.sobH>0?`<span class="hint" style="margin:0">+ ${fmtNum(r.sobH)} hembras sin pareja</span>`:''}${r.sobM>0?`<span class="hint" style="margin:0">+ ${fmtNum(r.sobM)} machos sin pareja</span>`:''}</div>
+    <div style="font-weight:800;margin-top:5px;color:${ok?'#16a34a':'#dc2626'}">${ok?'✅ Cuadra con el inventario':`❌ No cuadra: el inventario dice ${esp.juegos} juegos${esp.hembras>0?' + '+esp.hembras+' hembras':''}${esp.machos>0?' + '+esp.machos+' machos':''}${Number(dif)?` · ${dif<0?'te faltan '+Math.abs(dif):'tienes '+dif+' de más'}`:''}`}</div></div>`;
+  if(it) herrConf[it.id] = {ok, tiene:String(fmtNum(r.juegos)), corr:{esp, r}};
+  herrConfContador();
+}
+function herrConfContador(){ const el = document.getElementById('herrconf-n'); if(el){ const its = herrConfItems(); el.textContent = `${its.filter(it=>herrConf[it.id] && herrConf[it.id].ok!==undefined).length} de ${its.length}`; } }
+// Junta solos hembras y machos sueltos en juegos (no cambia la cantidad de material, solo lo reacomoda).
+// El id del lote depende de cuántas juntas lleva el módulo, así dos celulares no lo duplican.
+let _corrJuntando = false;
+async function corrAutoJuntar(){
+  if(_corrJuntando || !puedeEscribir() || esSoloLectura() || !modulo()) return; _corrJuntando = true;
+  try{ for(const t of CORR_TIPOS){
+      const h = calcFormula(slug(t.hembra)).final, m = calcFormula(slug(t.macho)).final, n = Math.floor(Math.min(h, m)+1e-9);
+      if(!(n>0)) continue;
+      const previos = new Set(movs.filter(x=>x.motivo==='autoJuntar' && x.itemId===slug(t.juego)).map(x=>x.loteId)).size;
+      const lote = 'autoj_'+slug(modulo())+'_'+slug(t.juego)+'_'+(previos+1), fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+      const nota = `Se juntaron solos ${n} juego(s) con hembras y machos sueltos`;
+      for(const [nombre, q, suf] of [[t.hembra,-n,'h'],[t.macho,-n,'m'],[t.juego,n,'j']]){ const it = itemByName(nombre);
+        await db.collection('movimientos').doc(lote+'_'+suf).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'ajuste', motivo:'autoJuntar', cantidad:q, completasDelta:q, cortadoDelta:0, nota, fecha, estado:'aprobado', loteId:lote, creadoPor}); }
+    } }catch(e){}
+  _corrJuntando = false;
+}
+// Dirección: meter el ajuste de los herrajes que no cuadraron en un cierre (pide PIN). Las correderas
+// quedan como las contó el coordinador: juegos y medias sin pareja.
+async function herrMeterAjuste(id){
+  const c = (cierresCache||[]).find(x=>x.id===id); if(!c) return;
+  const ajs = [];
+  c.herrajes.filter(h=>!h.ok).forEach(h=>{
+    if(h.corr){ const t = CORR_TIPOS.find(x=>x.juego===h.nombre); const e = h.corr.esp, r = h.corr.r;
+      [[t.juego, fmtNum(r.juegos - e.J)], [t.hembra, fmtNum(r.sobH - e.H)], [t.macho, fmtNum(r.sobM - e.M)]].forEach(([n,d])=>{ if(Number(d)) ajs.push({n, d}); }); }
+    else { const d = fmtNum(Number(h.tiene) - Number(h.esperado)); if(Number(d)) ajs.push({n:h.nombre, d}); } });
+  if(!ajs.length) return alert('No hay diferencias que ajustar.');
+  if(!confirm(`Meter ajuste en ${c.modulo} (cierre del ${fCorta(c.dia)}):\n\n${ajs.map(a=>`• ${a.n}: ${a.d>0?'+':''}${a.d}`).join('\n')}\n\nEl inventario queda igual a lo que contó el coordinador. ¿Continuar?`)) return;
+  if(!(await pedirPinAdmin('meter este ajuste'))) return;
+  try{ const fecha = new Date().toISOString(), loteId = cryptoId(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
+    for(const a of ajs){ const it = itemByName(a.n); if(!it) continue;
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:c.modulo, itemId:it.id, itemNombre:it.nombre, tipo:'ajuste', motivo:'ajusteCierreHerrajes', cantidad:Number(a.d), completasDelta:Number(a.d), cortadoDelta:0, nota:`Ajuste por el conteo del cierre del turno del ${fCorta(c.dia)} (Dirección)`, fecha, estado:'aprobado', loteId, creadoPor}); }
+    await db.collection('cierres').doc(id).update({herrVisto:true, herrAjustado:true, herrAjusteLote:loteId, herrVistoPor:creadoPor, herrVistoEn:fecha});
+    c.herrVisto = true; c.herrAjustado = true; toast('✅ Ajuste guardado.'); renderHerrCuad();
+  }catch(e){ alert('Error: '+e.message); }
+}
 function herrConfHtml(){
   const its = herrConfItems(); if(!its.length) return '';
   const fila = it => { const cu = herrCuentaHoy(it), esp = cu.esp, r = herrConf[it.id]||{}, u = it.unidad||'';
     const cuenta = cu.movio ? `<span class="hint" style="margin:0">Tenías <strong style="color:var(--ink)">${cu.tenia}</strong> · ${cu.partes.join(' · ')}</span><br><span style="font-size:14px">Te deben quedar <strong>${esp} ${u}</strong>. ¿Los tienes?</span>`
       : `<span class="hint" style="margin:0">No se movieron hoy · tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span>`;
     const b = (on, txt, c, js) => `<button class="btn small" style="min-width:64px;${on?`background:${c};border-color:${c}`:`background:transparent;color:${c};border:1px solid ${c};box-shadow:none`}" onclick="${js}">${txt}</button>`;
+    if(CORR_CALC[it.nombre]) return corrCalcHtml(it);
     return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:150px"><strong>${it.nombre}</strong><br>${cuenta}</span>
         <span style="display:flex;gap:6px">${b(r.ok===true,'✅ Sí','#16a34a',`herrConf['${it.id}']={ok:true};herrConfPintar()`)}${b(r.ok===false,'❌ No','#dc2626',`herrConf['${it.id}']={ok:false,tiene:''};herrConfPintar()`)}</span></div>
@@ -10195,10 +10297,10 @@ function herrConfHtml(){
   const n = its.filter(it=>herrConf[it.id] && herrConf[it.id].ok!==undefined).length;
   return `<div class="card" id="herrconf-card"><div class="paso">3</div><strong>🔩 ¿Tienes estos herrajes?</strong>
     <p class="hint">Estos herrajes se descuentan solos con las instalaciones. Revisa si tienes lo que dice el inventario y contesta <strong>Sí</strong> o <strong>No</strong>. Si es No, escribe cuántos tienes: le llega a Dirección y <strong>no cambia tu inventario</strong>.</p>
-    <div class="hint" style="margin:0 0 4px">Contestados: <strong>${n} de ${its.length}</strong></div>
+    <div class="hint" style="margin:0 0 4px">Contestados: <strong id="herrconf-n">${n} de ${its.length}</strong></div>
     ${its.map(fila).join('')}</div>`;
 }
-function herrConfPintar(){ const el = document.getElementById('herrconf-card'); if(el) el.outerHTML = herrConfHtml(); }
+function herrConfPintar(){ const el = document.getElementById('herrconf-card'); if(el) el.outerHTML = herrConfHtml(); ['n','e'].forEach(corrPintarRes); }
 function esConsumibleCierre(it){ return CATS_CONSUMIBLES.includes(it.cat) || (it.cat==='Herrajes' && !HERRAJES_AUTOMATICOS.includes(it.nombre)); }
 const CIERRE_CATS = ['Cintilla','PVC','Pegamento','Stickers','Herrajes'];
 const HORA_RECORDATORIO_CIERRE = 16; // el turno termina 4:30 pm: desde las 4 pm se recuerda el cierre (confirmado por el usuario)
@@ -10465,6 +10567,7 @@ function dibujarMovsDiaPDF(doc, R, D, o){
   return y;
 }
 function renderCierre(){
+  corrAutoJuntar();
   if(!cierrePrestOk){ cierrePrestOk = true; cargarPrestamos().then(()=>{ const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   const hojas = CATALOGO.filter(i=>esHoja(i));
@@ -10500,6 +10603,7 @@ function renderCierre(){
       <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarCierre()">✅ Guardar cierre del turno</button>
     </div>`;
   renderCierreConsumibles();
+  ['n','e'].forEach(corrPintarRes);
   coordAvisosPintarCierre();
   if(!herrHoyLogs) db.collection('instalacionesLog').get().then(sn=>{ herrHoyLogs = sn.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===modulo()); herrConfPintar(); }).catch(()=>{ herrHoyLogs = []; });
 }
@@ -10522,10 +10626,14 @@ async function guardarCierre(){
   }catch(e){}
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const herrIts = herrConfItems(), herrSin = herrIts.filter(it=>!herrConf[it.id] || herrConf[it.id].ok===undefined);
-  if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre).join('\n')); }
+  if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre+(CORR_CALC[it.nombre]?' (llena todas las casillas de la calculadora; pon 0 si no tienes)':'')).join('\n')); }
+  { const cz = ['n','e'].map(k=>corrResultado(k)); if(cz.every(r=>r.completo && r.juegos===0 && r.sobH===0 && r.sobM===0) && !confirm('🔩 En las dos calculadoras de correderas pusiste todo en 0.\n\n¿Seguro que no tienes ninguna corredera?')) return; }
   const herrMal = herrIts.filter(it=>herrConf[it.id].ok===false && !(String(herrConf[it.id].tiene).trim()!=='' && Number(herrConf[it.id].tiene)>=0));
   if(herrMal.length) return alert('🔩 Escribe cuántos tienes de:\n\n'+herrMal.map(it=>'• '+it.nombre).join('\n'));
-  const herrajes = herrIts.map(it=>{ const r = herrConf[it.id], esp = fmtNum(stockEsperadoCierre(it.id)); return {itemId:it.id, nombre:it.nombre, unidad:it.unidad||'', esperado:esp, ok:r.ok, tiene: r.ok ? esp : fmtNum(Number(r.tiene))}; });
+  const herrajes = herrIts.map(it=>{ const r = herrConf[it.id];
+    if(r.corr){ const e = r.corr.esp, x = r.corr.r; return {itemId:it.id, nombre:it.nombre, unidad:'juego', esperado:e.juegos, ok:r.ok, tiene:fmtNum(x.juegos),
+      corr:{esp:{J:e.J, H:e.H, M:e.M, juegos:e.juegos, hembras:e.hembras, machos:e.machos}, r:{juegos:fmtNum(x.juegos), sobH:fmtNum(x.sobH), sobM:fmtNum(x.sobM)}, det:x.det}}; }
+    const esp = fmtNum(stockEsperadoCierre(it.id)); return {itemId:it.id, nombre:it.nombre, unidad:it.unidad||'', esperado:esp, ok:r.ok, tiene: r.ok ? esp : fmtNum(Number(r.tiene))}; });
   const herrNo = herrajes.filter(h=>!h.ok);
   const nota = (document.getElementById('cierre-nota').value||'').trim();
   const hojasContadas = CATALOGO.filter(i=>esHoja(i) && !vacioCierre(cierreVals[i.id]));
@@ -10570,7 +10678,7 @@ async function guardarCierre(){
     try{ await db.collection('cierres').doc(cryptoId()).set({modulo:mod, fecha, dia:fechaHoyLocal(), creadoPor, nota,
       cortes:cortes.map(c=>({nombre:c.it.nombre, q:c.q})), hojasDeMas:hojasDeMas.map(x=>({nombre:x.it.nombre, q:x.deMas})),
       consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length, herrajes, herrNo:herrNo.length}); }catch(e){}
-    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null;
+    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null; corrCalc = {n:{}, e:{}};
     toast('✅ Cierre del turno guardado.'+(hojasDeMas.length?'<br><small>Las hojas de más las revisa Dirección.</small>':''));
     setView('home');
   }catch(e){ alert('Error: '+e.message); }
@@ -13117,9 +13225,14 @@ function renderHerrCuad(){
   const card = c => `<div class="card" style="padding:12px;border-left:6px solid ${(MODULOS.find(m=>m.nombre===c.modulo)||{}).color||'#dc2626'}">
       <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:16px">${c.modulo}</strong><span class="hint" style="margin:0">${fCorta(c.dia)} · ${new Date(c.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})} · ${String(c.creadoPor||'').split('@')[0]}</span></div>
       <div class="wrap-x" style="margin-top:8px"><table><tr><th>Herraje</th><th style="text-align:right">Inventario</th><th style="text-align:right">Tiene</th><th style="text-align:right">Diferencia</th></tr>
-      ${c.herrajes.filter(h=>!h.ok).map(h=>{ const d = fmtNum(Number(h.tiene)-Number(h.esperado)); return `<tr><td>${h.nombre}</td><td style="text-align:right">${h.esperado} ${h.unidad||''}</td><td style="text-align:right"><strong>${h.tiene}</strong></td><td style="text-align:right;font-weight:800;color:${d<0?'var(--bad)':'#b3742c'}">${d>0?'+':''}${d}</td></tr>`; }).join('')}</table></div>
-      <p class="hint" style="margin:6px 0 0">Los demás herrajes (${c.herrajes.filter(h=>h.ok).length}) sí cuadraron. El inventario no se movió.</p>
-      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--ok);border:1px solid var(--ok);box-shadow:none" onclick="herrCuadVisto('${c.id}')">✔ Enterado</button></div>`;
+      ${c.herrajes.filter(h=>!h.ok).map(h=>{ const d = fmtNum(Number(h.tiene)-Number(h.esperado)); const dc = x => `<td style="text-align:right;font-weight:800;color:${x<0?'var(--bad)':'#b3742c'}">${x>0?'+':''}${x}</td>`;
+        let tr = `<tr><td>${h.nombre}${h.corr?' (juegos)':''}</td><td style="text-align:right">${h.esperado} ${h.unidad||''}</td><td style="text-align:right"><strong>${h.tiene}</strong></td>${dc(d)}</tr>`;
+        if(h.corr){ const e=h.corr.esp, r=h.corr.r; [['hembras sin pareja',e.hembras,r.sobH],['machos sin pareja',e.machos,r.sobM]].forEach(([n,a,b])=>{ if(Number(a)||Number(b)) tr += `<tr><td class="hint" style="margin:0">· ${n}</td><td style="text-align:right">${a}</td><td style="text-align:right"><strong>${b}</strong></td>${dc(fmtNum(b-a))}</tr>`; });
+          const dt = h.corr.det||{}; const tam = o => o ? Object.keys(o).filter(s=>o[s]).map(s=>`${o[s]} de ${s}`).join(', ') : '';
+          tr += `<tr><td colspan="4" class="hint" style="font-size:12.5px">Contó: ${dt.juegos||0} juegos en bolsa · ${dt.machos||0} machos y ${dt.hembras||0} hembras sueltos${dt.cajones!=null?` · ${dt.cajones} cajones`:''}${tam(dt.cajonerasSin)?` · cajoneras sin cajones: ${tam(dt.cajonerasSin)}`:''}${tam(dt.cajonerasCompletas)?` · completas: ${tam(dt.cajonerasCompletas)}`:''}${dt.cajonesMax!=null?` · ${dt.cajonesMax} cajones Max · ${dt.cajonerasMaxSin} cajoneras Max sin cajones · ${dt.cajonerasMaxCompletas} completas`:''}${dt.cajonesNormales?` · ${dt.cajonesNormales} cajones normales con extensión`:''}</td></tr>`; }
+        return tr; }).join('')}</table></div>
+      <p class="hint" style="margin:6px 0 0">Los demás herrajes (${c.herrajes.filter(h=>h.ok).length}) sí cuadraron. El inventario no se ha movido: con <strong>Meter ajuste</strong> queda igual a lo que contó el coordinador.</p>
+      <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn small" style="background:#2563eb" onclick="herrMeterAjuste('${c.id}')">⚖️ Meter ajuste (dejar como lo contó)</button><button class="btn small" style="background:transparent;color:var(--ok);border:1px solid var(--ok);box-shadow:none" onclick="herrCuadVisto('${c.id}')">✔ Enterado, sin ajuste</button></div></div>`;
   $('#main').innerHTML = `<div class="card" style="padding:12px;border:2px solid #dc2626"><div style="font-size:18px;font-weight:900">🔩 Herrajes que no cuadran</div>
     <p class="hint" style="margin:2px 0 0">En el cierre del turno el coordinador dijo que <strong>no</strong> tiene lo que marca el inventario. No se movió nada: decide si se recuenta, se hace auditoría o se corrige. Al tocar <strong>Enterado</strong> deja de salir aquí (sigue en el reporte de cierres).</p></div>
     ${xs.length ? xs.map(card).join('') : '<div class="card" style="text-align:center">✅ No hay herrajes pendientes de revisar.</div>'}`;
@@ -13301,7 +13414,7 @@ function unaSolaVez(nombre, fn){
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
  'verifRegresa','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
- 'dupQuitar','dupIgnorar','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
+ 'dupQuitar','dupIgnorar','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
 // v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
 ['renderInstMueble','renderInstPuertas'].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = function(...a){ const r = f.apply(this, a); try{ instDiaPintar(n==='renderInstMueble'?'i':'p'); }catch(e){} return r; }; }catch(e){} });
