@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v200';
+const APP_VERSION = 'v201';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6673,7 +6673,7 @@ function mostrarRegresoInst(){
   body.innerHTML = `<div class="card" style="border:2px solid #1f9d55">
     <div style="font-size:16px;font-weight:800">${verifTituloRegreso(x)}</div>
     <p class="hint" style="margin:6px 0 0"><strong>${x.descripcion}</strong> (${fCorta(x.fechaDia)}). Esta instalación ya no va a contar.</p>
-    ${(()=>{ const c = cons.find(z=>z.antes!=null); return c ? `<p style="margin:8px 0 0;padding:8px 10px;border-radius:10px;border:1px solid #0e8a8a;background:rgba(14,138,138,.10);font-size:14px">🚪 De las puertas solo regresan <strong>las piezas</strong>: <strong>${fmtNum(c.cantidad)} hojas</strong>. Las tiras que sobraron a los lados de la hoja (${fmtNum(c.antes-c.cantidad)} hojas) no regresan porque normalmente ya se usaron.</p>` : ''; })()}
+    ${(()=>{ const c = cons.find(z=>z.antes!=null); return c ? `<p style="margin:8px 0 0;padding:8px 10px;border-radius:10px;border:1px solid #0e8a8a;background:rgba(14,138,138,.10);font-size:14px">🚪 De las puertas solo regresan <strong>las piezas</strong>: <strong>${fmtNum(c.cantidad)} hojas</strong>. Las tiras angostas de menos de 10 cm y lo que se fue en los cortes (${fmtNum(c.antes-c.cantidad)} hojas) no regresan: ya se contaron como merma.</p>` : ''; })()}
     <p class="hint" style="margin:6px 0 0">Todo vuelve al inventario <strong>menos lo que marques como merma</strong> (mojado, roto, dañado). En la casilla de la derecha va cuánto se va a merma.</p>
     <p class="hint" style="margin:4px 0 0">🧩 <strong>A sobrantes</strong>: la melamina/MDF queda apartada para cortarla en otras piezas; en Sobrantes se anota en qué se transformó.</p>
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
@@ -8334,7 +8334,12 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
   hojas.forEach((hoja,hIdx)=>{
     const obligaHojaCompleta = hoja.items.some(it=>piezasPorHojaIndividual(it.ancho,it.alto,anchoHoja,altoHoja)<=1);
     if(obligaHojaCompleta){
-      costo += 1;
+      // v201 (confirmado por el usuario): de una hoja que se abre por una pieza grande (puerta, fijo)
+      // solo se descuenta lo que no se puede aprovechar. Un pedazo libre de 10 cm o más de ancho
+      // (contando el corte de 5 mm) y de al menos 27 cm de largo se queda en el inventario como cortado;
+      // las tiras de menos de 10 cm se van a merma (se descuentan).
+      const aprovechable = (hoja.libres||[]).filter(r=>Math.min(r.w,r.h)-0.5 >= 10 - 1e-9 && Math.max(r.w,r.h)-0.5 >= 27 - 1e-9).reduce((t,r)=>t+r.w*r.h,0);
+      costo += Math.max(0, 1 - aprovechable/(anchoHoja*altoHoja));
     } else {
       let ch = 0;
       hoja.items.forEach(it=>{
