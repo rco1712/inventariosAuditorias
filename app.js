@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v198';
+const APP_VERSION = 'v203';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -503,6 +503,10 @@ function calcularFormula(itemId, inicial, inicialCortado, movsItem){
       // Garantías consumen igual que una instalación (del material cortado), pero se cuentan aparte.
       if(m.tipo==='garantia') garantias+=q; else instalaciones+=q;
       if(!hoja){ completas-=q; return; }
+      // v203 (confirmado por el usuario): las puertas salen siempre de hojas COMPLETAS (no de retazos):
+      // se abren las hojas físicas del corte y lo que no ocupan las puertas queda como cortado.
+      const hf = Number(m.hojasFisicas)||0;
+      if(hf>0 && hf >= q-EPS){ deuda += hf; completas -= hf; cortado += hf - q; return; }
       if(cortado >= q-EPS){ cortado-=q; return; }
       const falta = q - Math.max(0,cortado);
       const hojas = Math.ceil(falta - EPS);
@@ -695,6 +699,7 @@ function setView(v){
   if(v==='dup') renderDup();
   if(v==='apart') renderApart();
   if(v==='maq') renderMaq();
+  if(v==='herrcuad') renderHerrCuad();
 }
 
 let invCat = null, invDetalle = false;
@@ -6557,7 +6562,7 @@ async function guardarCambioModelo(n){
     for(const x of sobs){ const it = CATALOGO.find(i=>i.id===x.itemId); await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'cambioSobrante', instalacionId:L.id, cantidad:Number(x.cantidad), nota:'A sobrantes (sobró del cambio de modelo) · '+nota, fecha:fechaM, estado, loteId:newId, sobranteId:newId, cambioModelo:true, creadoPor}); }
     for(const x of merm){ const it = CATALOGO.find(i=>i.id===x.itemId); await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'cambioMerma', instalacionId:L.id, cantidad:Number(x.cantidad), nota:'Merma (sobró del cambio de modelo) · '+nota, fecha:fechaM, estado, loteId:newId, cambioModelo:true, creadoPor}); }
     if(sobs.length){ const material = sobs.map(x=>({itemId:x.itemId, cantidad:fmtNum(x.cantidad)})), restante = {}; material.forEach(m=>{ restante[m.itemId]=m.cantidad; });
-      await db.collection('sobrantes').doc(newId).set({modulo:mod, fecha, nota:'Sobró del cambio de modelo: '+antes+' → '+n.desc.split(' · ')[0], lineas:[L.descripcion+' → '+n.desc+' · sobró'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:L.id, deCambio:newId}); }
+      await db.collection('sobrantes').doc(newId).set({modulo:mod, fecha, calle:L.calle||'', nota:'Sobró del cambio de modelo: '+antes+' → '+n.desc.split(' · ')[0], lineas:[L.descripcion+' → '+n.desc+' · sobró'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:L.id, deCambio:newId}); }
   };
   // El coordinador nunca aprueba su propia corrección: Dirección la verifica (la de Dirección queda aprobada).
   const verifNuevo = esAdmin() ? verifParaNuevo(L) : {};
@@ -6613,7 +6618,24 @@ function regresarInstalacion(logId){
   regInstSel = logId; regMerma = {}; regSob = {}; regMotivo = '';
   mostrarRegresoInst();
 }
-function regCons(){ const x = (instLog||[]).find(l=>l.id===regInstSel); return x ? (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId)) : []; }
+function regCons(){ const x = (instLog||[]).find(l=>l.id===regInstSel); if(!x) return [];
+  const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
+  // v200 (confirmado por el usuario): de unas puertas solo regresan las piezas de las puertas, no las tiras
+  // de los lados de la hoja (esas casi siempre se aprovechan en otros muebles y ya no existen).
+  const net = melNetaPuerta(x); if(net==null) return cons;
+  return cons.map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it && it.cat==='Melamina' && Number(c.cantidad)>net) ? Object.assign({}, c, {cantidad:net, antes:Number(c.cantidad)}) : c; });
+}
+// Hojas que ocupan de verdad las piezas de unas puertas (por área), sin las tiras que sobran a los lados.
+function melNetaPiezasPuerta(cortes, zoclos){ return fmtNum((cortes||[]).reduce((s,c)=>s+(Number(c.ancho)*Number(c.alto)*(Number(c.cantidad)||1)),0)/(122*244) + (zoclos||0)/piezasPorHojaIndividual(10,52,122,244)); }
+function melNetaPuerta(x){
+  if(!x || x.categoria!=='Puerta') return null;
+  if(x.melNeta!=null) return Number(x.melNeta);
+  // Instalaciones de antes de v200: se recalcula con el tipo y las medidas de la descripción.
+  const tipo = String(x.modeloKey||'').replace(/^Puerta /,''); const m = String(x.descripcion||'').match(/([\d.\/]+)×([\d.\/]+) cm/);
+  if(!tipo || !m || typeof TIPOS_PUERTA_HERRAJES==='undefined' || !TIPOS_PUERTA_HERRAJES[tipo]) return null;
+  const an = m[1].split('/').map(Number), al = m[2].split('/').map(Number);
+  try{ const calc = calcularPuerta(tipo, Math.min(...al), Math.max(...an), false, Math.max(...al)); return melNetaPiezasPuerta(calc.cortes, calc.zoclos); }catch(e){ return null; }
+}
 function regTodo(tipo){ // 'nada' | 'hojas' | 'todo' | 'sob'
   regCons().forEach(c=>{ const h = esHojaId(c.itemId);
     if(tipo==='nada'){ delete regMerma[c.itemId]; delete regSob[c.itemId]; }
@@ -6655,6 +6677,7 @@ function mostrarRegresoInst(){
   body.innerHTML = `<div class="card" style="border:2px solid #1f9d55">
     <div style="font-size:16px;font-weight:800">${verifTituloRegreso(x)}</div>
     <p class="hint" style="margin:6px 0 0"><strong>${x.descripcion}</strong> (${fCorta(x.fechaDia)}). Esta instalación ya no va a contar.</p>
+    ${(()=>{ const c = cons.find(z=>z.antes!=null); return c ? `<p style="margin:8px 0 0;padding:8px 10px;border-radius:10px;border:1px solid #0e8a8a;background:rgba(14,138,138,.10);font-size:14px">🚪 De las puertas solo regresan <strong>las piezas</strong>: <strong>${fmtNum(c.cantidad)} hojas</strong>. Las tiras angostas de menos de 10 cm y lo que se fue en los cortes (${fmtNum(c.antes-c.cantidad)} hojas) no regresan: ya se contaron como merma.</p>` : ''; })()}
     <p class="hint" style="margin:6px 0 0">Todo vuelve al inventario <strong>menos lo que marques como merma</strong> (mojado, roto, dañado). En la casilla de la derecha va cuánto se va a merma.</p>
     <p class="hint" style="margin:4px 0 0">🧩 <strong>A sobrantes</strong>: la melamina/MDF queda apartada para cortarla en otras piezas; en Sobrantes se anota en qué se transformó.</p>
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">
@@ -6694,7 +6717,7 @@ async function confirmarRegresoInst(){
     }
     if(sobs.length){ // el sobrante usa el mismo id que el lote, así se aprueba junto con el regreso
       const material = sobs.map(z=>({itemId:z.c.itemId, cantidad:fmtNum(z.q)})); const restante = {}; material.forEach(mm=>{ restante[mm.itemId]=mm.cantidad; });
-      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, nota:(motivo.trim()||'')+' (regresó de instalación)', lineas:[x.descripcion+' · regresó sin instalar'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId});
+      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, calle:x.calle||'', nota:(motivo.trim()||'')+' (regresó de instalación)', lineas:[x.descripcion+' · regresó sin instalar'], lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId});
     }
     regInstSel = null; regMerma = {}; regSob = {}; regMotivo = '';
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : (sobs.length?'✅ Regresó; la melamina quedó apartada en 🧩 Sobrantes.':(merm.length?'✅ Regresó; lo dañado quedó como merma.':'✅ Regresó al inventario.')));
@@ -7201,7 +7224,7 @@ async function confirmarRegresoParcial(){
         await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'regresoSobrante', instalacionId:logId, cantidad:cant, nota:'A sobrantes · '+nota, fecha:fechaM, estado, loteId, sobranteId:loteId, creadoPor}); }
     }
     if(sobs.length){ const restante = {}; sobs.forEach(m=>{ restante[m.itemId]=m.cantidad; });
-      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, nota:(motivo||'')+' (regresó una parte de una instalación)', lineas:[x.descripcion+' · regresó una parte'], lineasData:[], material:sobs, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId}); }
+      await db.collection('sobrantes').doc(loteId).set({modulo:modulo(), fecha, calle:x.calle||'', nota:(motivo||'')+' (regresó una parte de una instalación)', lineas:[x.descripcion+' · regresó una parte'], lineasData:[], material:sobs, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId}); }
     regInstSel = null; regVuelve = {}; regMerma = {}; regSob = {}; regMotivo = ''; regParcial = false;
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : '✅ Lo que regresó ya está en el inventario.');
     if(await verifTerminarFlujo()) return;
@@ -8053,7 +8076,7 @@ async function confirmarRetornoGar(){
     if(aSobrante.length){
       sobranteId = cryptoId();
       const restante = {}; aSobrante.forEach(c=>{ restante[c.itemId] = c.cantidad; });
-      await db.collection('sobrantes').doc(sobranteId).set({modulo:log.modulo||modulo(), fecha, nota:nota+' (regresó de garantía)', lineas:sobr, lineasData:[], material:aSobrante, restante, estado:'abierto', transformaciones:[], creadoPor, deGarantia:log.id});
+      await db.collection('sobrantes').doc(sobranteId).set({modulo:log.modulo||modulo(), fecha, calle:log.calle||'', nota:nota+' (regresó de garantía)', lineas:sobr, lineasData:[], material:aSobrante, restante, estado:'abierto', transformaciones:[], creadoPor, deGarantia:log.id});
     }
     await db.collection('garantiasLog').doc(log.id).update({retorno:{fecha, lineas:garLineas.map(describirLineaGar), sirve, merma, sobrante:sobr, sobranteId, devuelto, estado, loteId, creadoPor, fotos:nFotosRet||0}});
     toast((devuelto.length && estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo tiene que aprobar para que sume al inventario.</small>' : '✅ Guardado lo que regresó.')+(sobranteId?'<br><small>🧩 Lo de sobrante quedó apartado en Sobrantes.</small>':''));
@@ -8315,7 +8338,15 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
   hojas.forEach((hoja,hIdx)=>{
     const obligaHojaCompleta = hoja.items.some(it=>piezasPorHojaIndividual(it.ancho,it.alto,anchoHoja,altoHoja)<=1);
     if(obligaHojaCompleta){
-      costo += 1;
+      // v201 (confirmado por el usuario): de una hoja que se abre por una pieza grande (puerta, fijo)
+      // solo se descuenta lo que no se puede aprovechar. Un pedazo libre de 10 cm o más de ancho
+      // (contando el corte de 5 mm) y de al menos 27 cm de largo se queda en el inventario como cortado;
+      // las tiras de menos de 10 cm se van a merma (se descuentan).
+      const peds = (hoja.libres||[]).filter(r=>Math.min(r.w,r.h)-0.5 >= 10 - 1e-9 && Math.max(r.w,r.h)-0.5 >= 27 - 1e-9);
+      const aprovechable = peds.reduce((t,r)=>t+r.w*r.h,0), sobra = aprovechable/(anchoHoja*altoHoja);
+      costo += Math.max(0, 1 - sobra);
+      if(sobra > 0) sobrantesHoja.push({hoja:hIdx+1, usado:Math.round((1-sobra)*1000)/1000, sobra:Math.round(sobra*1000)/1000, piezas:hoja.items.length,
+        pedazos: peds.map(r=>({w:Math.round((Math.min(r.w,r.h)-0.5)*10)/10, h:Math.round((Math.max(r.w,r.h)-(Math.max(r.w,r.h)>=altoHoja-0.01?0:0.5))*10)/10})).sort((a,b)=>b.w*b.h-a.w*a.h)});
     } else {
       let ch = 0;
       hoja.items.forEach(it=>{
@@ -8325,11 +8356,11 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
       costo += ch;
       const libre = (hoja.libres||[]).reduce((b,r)=> (!b || r.w*r.h > b.w*b.h) ? r : b, null);
       const usado = Math.min(1, Math.round(ch*1000)/1000);
-      if(usado < 1) sobrantesHoja.push({hoja:hIdx+1, usado, sobra:Math.round((1-usado)*1000)/1000, piezas:hoja.items.length, libre: libre?{w:Math.round(Math.min(libre.w,libre.h)*10)/10, h:Math.round(Math.max(libre.w,libre.h)*10)/10}:null});
+      if(usado < 1) sobrantesHoja.push({hoja:hIdx+1, usado, sobra:Math.round((1-usado)*1000)/1000, piezas:hoja.items.length, libre: libre?{w:Math.round(Math.min(libre.w,libre.h)*10)/10, h:Math.round(Math.max(libre.w,libre.h)*10)/10}:null, proporcional:true});
     }
   });
 
-  sobrantesHoja.forEach((x,i)=>{ x.hoja = hojas.length - sobrantesHoja.length + i + 1; }); // se cuentan al final: son las hojas que se abren de más
+  sobrantesHoja.sort((a,b)=>a.hoja-b.hoja);
   return {hojas: hojas.length, costo: Math.round(costo*1000)/1000, noCaben, sobrantesHoja};
 }
 
@@ -8527,9 +8558,9 @@ function calcPuerta(){
   // Sobrante de la última hoja (confirmado por el usuario): cuando las puertas pasan de 2 hojas y
   // de la siguiente solo se usa un poco, se ofrece mandar ese pedazo a Sobrantes para hacer piezas.
   const sobHojas = (!instRegresoLibre && !instCambio) ? (empaque.sobrantesHoja||[]).filter(x=>x.sobra>=0.05) : [];
-  const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:(sobHojas.length===1 ? Math.round((Math.ceil(Number(hojasMelamina)-1e-9)-Number(hojasMelamina))*1000)/1000 : Math.round(sobHojas.reduce((a,x)=>a+x.sobra,0)*1000)/1000), itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
+  const sobOferta = sobHojas.length ? {hojas:sobHojas, cantidad:Math.round(Math.max(0, sobHojas.reduce((a,x)=>a+x.sobra,0) - (calc.zoclos||0)/piezasPorHojaIndividual(10, 52, 122, 244))*1000)/1000, itemId:itemByName('Melamina '+color).id, totalHojas:empaque.hojas} : null;
   const prevSob = puertaPreview && puertaPreview.sobOferta && puertaPreview.tipo===tipo && puertaPreview.alto===alto && puertaPreview.ancho===ancho && puertaPreview.color===color ? puertaPreview.aSob : false;
-  puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: sobOferta ? prevSob : false};
+  puertaPreview = {sig:puertaSig(), tipo, color, alto, ancho, altoMax, medidasTxt, consumo, faltantes, bloqueado, regreso:instRegresoLibre, conHerrajes:regHerr, sobOferta, aSob: !!sobOferta, hojasFisicas: empaque.hojas, melItemId: (itemByName('Melamina '+color)||{}).id, melNeta: melNetaPiezasPuerta(cortes, calc.zoclos)};
 
   let html = `<div class="card"><h3>${tipo} · ${color}</h3>
     <div class="wrap-x"><table><tr><th>Dato</th><th>Valor</th><th>Regla</th></tr>
@@ -8560,16 +8591,19 @@ function calcPuerta(){
 function pintarSobPuerta(){
   const el = document.getElementById('p-sob-card'); const pp = puertaPreview;
   if(!el || !pp || !pp.sobOferta) return;
-  const o = pp.sobOferta, on = !!pp.aSob;
-  const det = o.hojas.map(x=>`<li>Hoja ${x.hoja} de ${o.totalHojas}: solo se usa <strong>${Math.round(x.usado*100)}%</strong> (${x.piezas} pieza${x.piezas===1?'':'s'}) → sobra <strong>${fmtNum(x.sobra)} hoja</strong>${x.libre?` · pedazo libre aprox. <strong>${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm</strong>`:''}</li>`).join('');
+  const o = pp.sobOferta, color = pp.color;
+  // v202 (confirmado por el usuario): el sobrante aprovechable de las puertas SIEMPRE va a Sobrantes y el
+  // coordinador registra ahí qué piezas sacó el cortador; esas piezas son las que regresan al inventario.
+  const det = o.hojas.map(x=>`<li>Hoja ${x.hoja} de ${o.totalHojas}: ${x.pedazos&&x.pedazos.length?x.pedazos.map(z=>`pedazo de <strong>${fmtNum(z.w)}×${fmtNum(z.h)} cm</strong>`).join(' y '):(x.libre?`pedazo aprox. <strong>${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm</strong>`:'')} (${fmtNum(x.sobra)} hoja)</li>`).join('');
   el.style.border = '2px solid #0e8a8a';
-  el.innerHTML = `<div style="font-size:16px;font-weight:800">🧩 ¿Mandar el sobrante a Sobrantes?</div>
+  el.innerHTML = `<div style="font-size:16px;font-weight:800">🧩 Sobrante de estas puertas → Sobrantes</div>
     <ul style="margin:8px 0 6px 18px;padding:0;line-height:1.6">${det}</ul>
-    <p class="hint" style="margin:0 0 10px">Si lo mandas, ese pedazo sale del inventario y queda apartado en <strong>Sobrantes</strong> para convertirlo en piezas (entrepaños, zóclos, puertas…). Si no, se queda en el inventario como <strong>cortado</strong>.</p>
-    <div class="row" style="gap:8px">
-      <button class="btn" style="flex:1;min-height:50px;${on?'background:linear-gradient(135deg,#0e8a8a,#0b6f6f)':'background:transparent;color:inherit;border:1px solid var(--line);box-shadow:none'}" onclick="puertaPreview.aSob=true;pintarSobPuerta()">${on?'✅ ':''}Sí, a sobrantes (${fmtNum(o.cantidad)})</button>
-      <button class="btn" style="flex:1;min-height:50px;${!on?'background:linear-gradient(135deg,#5b6b7f,#46566a)':'background:transparent;color:inherit;border:1px solid var(--line);box-shadow:none'}" onclick="puertaPreview.aSob=false;pintarSobPuerta()">${!on?'✅ ':''}No, se queda cortado</button>
-    </div>`;
+    <p style="margin:0 0 6px;font-weight:700">Total: ${fmtNum(o.cantidad)} hoja de Melamina ${color}. Al guardar, se va a <span style="color:#0e8a8a">Sobrantes</span>.</p>
+    <div style="margin:4px 0 0;padding:12px 14px;border-radius:12px;background:#fde047;border:3px solid #dc2626;color:#1a1a1a">
+      <div style="font-size:17px;font-weight:900;color:#b91c1c">⚠️ IMPORTANTE: DILE A TU CORTADOR</div>
+      <div style="font-size:15px;font-weight:700;margin-top:4px">Que te diga qué piezas sacó de este sobrante (marcos, zóclos, cargadores, frentes…) y regístralas en <u>Sobrantes → Se transformó</u>.</div>
+      <div style="font-size:13px;margin-top:6px">Solo esas piezas regresan a tu inventario. Si no las registras, tu inventario no va a cuadrar.</div></div>
+    <p class="hint" style="margin:8px 0 0">Las tiras de menos de 10 cm ya se contaron como merma.</p>`;
 }
 
 // Puertas completas que regresan sin instalación registrada (confirmado por el usuario): mismo
@@ -8614,24 +8648,25 @@ async function registrarPuerta(tipo, alto, ancho){
     const logId = cryptoId();
     for(const c of puertaPreview.consumo){
       const item = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc} · 📍 ${calle}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set(Object.assign({modulo:modulo(),itemId:c.itemId,itemNombre:item.nombre,tipo:'instalacion',cantidad:c.cantidad,nota:`${desc} · 📍 ${calle}${nota?(' · '+nota):''}`,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor}, (c.itemId===puertaPreview.melItemId && puertaPreview.hojasFisicas>0) ? {hojasFisicas:puertaPreview.hojasFisicas} : {}));
     }
     await db.collection('instalacionesPuertas').doc(cryptoId()).set({modulo:modulo(),tipo,color:puertaPreview.color,alto,ancho,altoMax:puertaPreview.altoMax||alto,medidas:puertaPreview.medidasTxt||'',nota,calle,fechaDia,fecha:new Date().toISOString(),estado});
     await db.collection('instalacionesLog').doc(logId).set({
       modulo:modulo(), categoria:'Puerta', descripcion:desc, nota, calle, fechaDia, modeloKey:'Puerta '+tipo,
-      consumo:puertaPreview.consumo, fecha:new Date().toISOString(), estado, creadoPor
+      consumo:puertaPreview.consumo, melNeta:puertaPreview.melNeta, fecha:new Date().toISOString(), estado, creadoPor
     });
     const so = puertaPreview.sobOferta; let conSob = false;
     if(so && puertaPreview.aSob && so.cantidad>0){
       const sid = logId+'s', it = CATALOGO.find(i=>i.id===so.itemId), fS = new Date(Date.now()+1).toISOString();
-      const lineas = so.hojas.map(x=>`Sobrante de hoja ${x.hoja} de ${so.totalHojas} del corte de puertas (${fmtNum(x.sobra)} hoja${x.libre?`, pedazo aprox. ${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm`:''})`);
+      const lineas = so.hojas.map(x=>`Sobrante de hoja ${x.hoja} de ${so.totalHojas} del corte de puertas (${fmtNum(x.sobra)} hoja${x.pedazos&&x.pedazos.length?', '+x.pedazos.map(z=>`pedazo de ${fmtNum(z.w)}×${fmtNum(z.h)} cm`).join(' y '):(x.libre?`, pedazo aprox. ${fmtNum(x.libre.w)}×${fmtNum(x.libre.h)} cm`:'')})`);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'sobranteCortePuertas', instalacionId:logId, cantidad:so.cantidad, nota:'Sobrante del corte · '+desc, fecha:fS, estado, loteId:sid, sobranteId:sid, creadoPor});
-      await db.collection('sobrantes').doc(sid).set({modulo:modulo(), fecha:fS, nota:'Sobrante del corte de '+desc, lineas, lineasData:[], material:[{itemId:it.id, cantidad:so.cantidad}], restante:{[it.id]:so.cantidad}, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId, deCortePuertas:true});
+      await db.collection('sobrantes').doc(sid).set({modulo:modulo(), fecha:fS, calle, nota:'Sobrante del corte de '+desc, lineas, lineasData:[], material:[{itemId:it.id, cantidad:so.cantidad}], restante:{[it.id]:so.cantidad}, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:logId, deCortePuertas:true});
       conSob = true;
     }
     toast((estado==='pendiente'
       ? '✅ Puertas guardadas.<br><small>Dirección las tiene que aprobar para que se descuenten.</small>'
-      : '✅ Instalación de puertas registrada.') + (conSob?'<br><small>🧩 El sobrante de la hoja quedó en Sobrantes.</small>':''));
+      : '✅ Instalación de puertas registrada.') + (conSob?'<br><small>🧩 El sobrante quedó en Sobrantes.</small>':''));
+    if(conSob) alert(`⚠️ IMPORTANTE ⚠️\n\n🧩 El sobrante de estas puertas (${fmtNum(so.cantidad)} hoja de ${so.itemId?(CATALOGO.find(i=>i.id===so.itemId)||{}).nombre:''}) quedó en SOBRANTES.\n\n✂️ Pídele a tu cortador qué piezas sacó de ese sobrante (marcos, zóclos, cargadores, frentes…) y regístralas en Sobrantes → "Se transformó".\n\nSolo esas piezas regresan a tu inventario. Si no las registras, tu inventario no va a cuadrar.`);
     puertaPreview = null;
     renderInstPuertas();
     window.scrollTo(0,0);
@@ -9518,7 +9553,8 @@ function renderRepCierres(){
     const hora = ult ? new Date(ult).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
     const quien = hecho ? String((xs.find(m=>m.fecha===ult)||{}).creadoPor||'').split('@')[0] : '';
     const deMasH = xs.filter(m=>m.tipo==='ajuste' && m.motivo==='cierreCompletasDeMas'), consDeMas = [...new Set(c.flatMap(x=>x.consDeMas||[]))];
-    const alerta = deMasH.length || consDeMas.length;
+    const herrC = c.filter(x=>x.herrajes).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).pop(), herrMal = herrC ? herrC.herrajes.filter(h=>!h.ok) : [];
+    const alerta = deMasH.length || consDeMas.length || herrMal.length;
     const est = hecho ? `<strong style="color:${alerta?'#b3742c':'var(--ok)'};white-space:nowrap">${alerta?'⚠️':'✅'} ${hora}</strong>`
       : (domingo ? '<span class="hint" style="margin:0">Domingo</span>' : (dia===hoy && !esHoraDeCierre() ? '<span class="hint" style="margin:0">Aún no</span>' : '<strong style="color:var(--bad);white-space:nowrap">⏳ No cerró</strong>'));
     const abierto = repCierreAbierto===mod && hecho;
@@ -9536,6 +9572,7 @@ function renderRepCierres(){
         ${usos.length ? usos.map(m=>li(m.itemNombre+(m.correccion?' <span class="tag">corregido</span>':''), fmtNum(m.cantidad)+' '+unidad(m.itemId), esAdmin()?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;padding:4px 8px;min-height:0" onclick="repCorrMov('${mod}','${m.id}')">✏️</button>`:'')).join('') : '<p class="hint" style="margin:4px 0">No se anotó consumo de PVC, cintilla, pegamento, stickers ni herrajes.</p>'}
         ${deMasH.length?`<p style="margin:10px 0 0;color:#b3742c"><strong>⚠️ Hojas completas de más</strong> (las revisa Dirección): ${deMasH.map(m=>fmtNum(m.cantidad)+' '+m.itemNombre).join(', ')}</p>`:''}
         ${consDeMas.length?`<p style="margin:8px 0 0;color:#b3742c"><strong>⚠️ Tenía más de lo que dice la app:</strong> ${consDeMas.join(', ')} <span class="hint" style="margin:0">(¿faltó anotar una entrada?)</span></p>`:''}
+        ${herrC?`<div style="font-weight:800;color:#0d9488;margin-top:10px">🔩 Herrajes</div>${herrMal.length?herrMal.map(h=>li(`<span style="color:var(--bad)">❌ ${h.nombre}</span>`, `inventario ${h.esperado} · tiene ${h.tiene}`)).join('')+`<p class="hint" style="margin:4px 0 0">Los demás (${herrC.herrajes.length-herrMal.length}) sí cuadraron. No se movió el inventario.</p>`:`<p style="margin:4px 0;color:var(--ok);font-weight:700">✅ Confirmó que tiene todos (${herrC.herrajes.length}).</p>`}`:''}
         ${notas.length?`<p class="hint" style="margin:8px 0 0">📝 Nota: ${notas.join(' · ')}</p>`:''}
         <button class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#0d7468,#0f766e)" onclick="repCierrePDF('${mod}')">📄 Reporte del día de ${mod} (PDF)</button>
       </div>`;
@@ -9752,10 +9789,12 @@ function diasSinRespaldo(){
 }
 async function respaldoDesdeInicio(){ try{ await exportarRespaldo(); toast('💾 Respaldo descargado.'); }catch(e){ alert('No se pudo descargar: '+e.message); } if(current==='home') renderHome(); }
 // Datos que tarda en juntar (aprobaciones y faltantes de los 5 módulos).
+let _dirSobPu = [];
 async function cargarPendDir(forzar){
   if(_dirCargando || (!forzar && Date.now()-_dirCargadoT < 3000)) return;
   _dirCargando = true;
   try{
+    try{ const hace2 = new Date(Date.now()-2*864e5).toISOString(); _dirSobPu = sobPuertasSinRegistrar((await db.collection('sobrantes').get()).docs.map(d=>({id:d.id,...d.data()}))).filter(x=>(x.fecha||'')<hace2); }catch(e){}
     const [snapMov, snapLog, snapDeu, snapRI] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]})), db.collection('reportesInst').get().catch(()=>({docs:[]}))]);
     const porMod = {}, lotesVistos = new Set();
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ const k = m.loteId||Math.random(); if(lotesVistos.has(k)) return; lotesVistos.add(k); porMod[m.modulo] = (porMod[m.modulo]||0) + 1; });
@@ -9779,6 +9818,10 @@ function pendDirHtml(){
   const rV = verifPendRow(fila); if(rV) rows.push(rV);
   const rA = verifPendRowAtr(fila); if(rA) rows.push(rA);
   const rR = riPendRow(fila); if(rR) rows.push(rR);
+  if(_dirSobPu && _dirSobPu.length){ const por = {}; _dirSobPu.forEach(x=>{ por[x.modulo]=(por[x.modulo]||0)+1; });
+    rows.push(fila('🧩', `Sobrantes de puertas sin registrar: ${_dirSobPu.length}`, Object.keys(por).map(k=>k+' '+por[k]).join(' · ')+' · más de 2 días sin anotar qué piezas salieron', '#0e8a8a', 'Ver', "irA('sob')")); }
+  { const hn = herrNoCuadran(); if(hn.length){ const por = {}; hn.forEach(c=>{ por[c.modulo]=(por[c.modulo]||0)+c.herrajes.filter(h=>!h.ok).length; });
+    rows.push(fila('🔩', `Herrajes que no cuadran: ${Object.values(por).reduce((a,b)=>a+b,0)}`, Object.keys(por).map(k=>k+' '+por[k]).join(' · ')+' · del cierre del turno', '#dc2626', 'Ver', "irA('herrcuad')")); } }
   if(dupCache && dupCache.grupos.length){ const por = {}; dupCache.grupos.forEach(g=>{ por[g.modulo]=(por[g.modulo]||0)+1; });
     rows.push(fila('🔍', `Posibles duplicados: ${dupCache.grupos.length}`, Object.keys(por).map(k=>k+' '+por[k]).join(' · ')+' · capturas guardadas dos veces', '#7c3aed', 'Revisar', "dupMod='';irA('dup')")); }
   const H = herrCache;
@@ -10114,6 +10157,48 @@ const CATS_CONSUMIBLES = ['Cintilla','PVC','Pegamento','Stickers'];
 const HERRAJES_AUTOMATICOS = ['Bastidores','Bisagras','Espejos closet','Jaladeras','Jaladera plana','Juego de corredera','Correderas de extensión',
   'Corredera hembra (sin pareja)','Corredera macho (sin pareja)','Corredera ext. hembra (sin pareja)','Corredera ext. macho (sin pareja)',
   'Rieles','Sistemas','Tubos 1.5 m','Juegos de bridas','Push'];
+// v199 (pedido por los dueños): en el cierre del turno el coordinador confirma, con Sí o No, si tiene
+// los herrajes que la app descuenta sola con las instalaciones. Si dice No, escribe cuántos tiene:
+// solo es un dato para Dirección, NO mueve el inventario (Dirección decide si recuenta o audita).
+const HERR_CONFIRMAR = ['Tubos 1.5 m','Juegos de bridas','Juego de corredera','Correderas de extensión','Jaladeras','Jaladera plana','Bisagras','Push','Espejos closet','Rieles','Sistemas','Bastidores'];
+let herrConf = {}, herrHoyLogs = null;
+function herrConfItems(){ return HERR_CONFIRMAR.map(n=>itemByName(n)).filter(Boolean); }
+// Cuenta del día de un herraje (v199, pedido por el usuario): con cuánto empezó el día, qué lo movió hoy
+// y con cuánto debe terminar. Usa los mismos movimientos que el inventario esperado del cierre.
+function herrCuentaHoy(it){
+  const hoy = fechaHoyLocal(), esp = stockEsperadoCierre(it.id);
+  const ms = movs.filter(m=>m.itemId===it.id && m.estado!=='rechazado' && m.fecha && diaLocal(m.fecha)===hoy && (m.estado==='pendiente' || cuentaEnInventario(m)));
+  const signo = m => ['entrada','devolucion','ajuste'].includes(m.tipo) ? 1 : (['salida','merma','garantia','instalacion'].includes(m.tipo) ? -1 : 0);
+  const g = {};
+  ms.forEach(m=>{ const k = m.tipo==='instalacion' ? 'inst' : m.tipo==='devolucion' && m.motivo==='regresoInstalacion' ? 'reg' : m.tipo;
+    const e = g[k] = g[k] || {q:0, ids:new Set()}; e.q += signo(m)*(Number(m.cantidad)||0); if(m.loteId) e.ids.add(m.loteId); });
+  const delta = Object.values(g).reduce((t,e)=>t+e.q,0);
+  const u = it.unidad||'', n = x => fmtNum(Math.abs(x));
+  const partes = Object.keys(g).filter(k=>Math.abs(g[k].q)>1e-9).map(k=>{ const e = g[k], sg = e.q<0?'−':'+';
+    if(k==='inst'){ const logs = [...e.ids].map(id=>(herrHoyLogs||[]).find(l=>l.id===id)).filter(Boolean); const cats = {}; logs.forEach(l=>{ const c = l.categoria==='Puerta'?'puerta':'modelo'; cats[c]=(cats[c]||0)+1; });
+      const que = Object.keys(cats).map(c=>`${cats[c]} ${c}${cats[c]===1?'':'s'}`).join(' y ') || `${e.ids.size} instalación${e.ids.size===1?'':'es'}`;
+      const calles = logs.map(l=>l.calle).filter(Boolean); const cTxt = calles.length ? ` (${calles.slice(0,3).join(', ')}${calles.length>3?` y ${calles.length-3} más`:''})` : '';
+      return `${sg}${n(e.q)} por ${que}${cTxt}`; }
+    return `${sg}${n(e.q)} ${({reg:'regresaron de instalaciones', entrada:'llegaron', devolucion:'regresaron', salida:'salieron', merma:'merma', garantia:'por garantías', ajuste:'ajuste'})[k]||k}`; });
+  return {esp, tenia: fmtNum(esp - delta), partes, movio: partes.length>0, u};
+}
+function herrConfHtml(){
+  const its = herrConfItems(); if(!its.length) return '';
+  const fila = it => { const cu = herrCuentaHoy(it), esp = cu.esp, r = herrConf[it.id]||{}, u = it.unidad||'';
+    const cuenta = cu.movio ? `<span class="hint" style="margin:0">Tenías <strong style="color:var(--ink)">${cu.tenia}</strong> · ${cu.partes.join(' · ')}</span><br><span style="font-size:14px">Te deben quedar <strong>${esp} ${u}</strong>. ¿Los tienes?</span>`
+      : `<span class="hint" style="margin:0">No se movieron hoy · tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span>`;
+    const b = (on, txt, c, js) => `<button class="btn small" style="min-width:64px;${on?`background:${c};border-color:${c}`:`background:transparent;color:${c};border:1px solid ${c};box-shadow:none`}" onclick="${js}">${txt}</button>`;
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:150px"><strong>${it.nombre}</strong><br>${cuenta}</span>
+        <span style="display:flex;gap:6px">${b(r.ok===true,'✅ Sí','#16a34a',`herrConf['${it.id}']={ok:true};herrConfPintar()`)}${b(r.ok===false,'❌ No','#dc2626',`herrConf['${it.id}']={ok:false,tiene:''};herrConfPintar()`)}</span></div>
+      ${r.ok===false?`<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><label class="hint" style="margin:0;flex:1">¿Cuántos tienes en realidad?</label><input type="number" min="0" inputmode="decimal" value="${r.tiene}" placeholder="0" style="max-width:110px" oninput="herrConf['${it.id}'].tiene=this.value"></div>`:''}</div>`; };
+  const n = its.filter(it=>herrConf[it.id] && herrConf[it.id].ok!==undefined).length;
+  return `<div class="card" id="herrconf-card"><div class="paso">3</div><strong>🔩 ¿Tienes estos herrajes?</strong>
+    <p class="hint">Estos herrajes se descuentan solos con las instalaciones. Revisa si tienes lo que dice el inventario y contesta <strong>Sí</strong> o <strong>No</strong>. Si es No, escribe cuántos tienes: le llega a Dirección y <strong>no cambia tu inventario</strong>.</p>
+    <div class="hint" style="margin:0 0 4px">Contestados: <strong>${n} de ${its.length}</strong></div>
+    ${its.map(fila).join('')}</div>`;
+}
+function herrConfPintar(){ const el = document.getElementById('herrconf-card'); if(el) el.outerHTML = herrConfHtml(); }
 function esConsumibleCierre(it){ return CATS_CONSUMIBLES.includes(it.cat) || (it.cat==='Herrajes' && !HERRAJES_AUTOMATICOS.includes(it.nombre)); }
 const CIERRE_CATS = ['Cintilla','PVC','Pegamento','Stickers','Herrajes'];
 const HORA_RECORDATORIO_CIERRE = 16; // el turno termina 4:30 pm: desde las 4 pm se recuerda el cierre (confirmado por el usuario)
@@ -10152,7 +10237,8 @@ function recordatorioCierreHtml(){
 // descontar dos veces si ayer se hizo un cierre que Dirección no ha aprobado).
 function stockEsperadoCierre(itemId){
   let q = calcFormula(itemId).final;
-  movs.filter(m=>m.itemId===itemId && m.estado==='pendiente').forEach(m=>{
+  // Las instalaciones pendientes ya cuentan en el inventario (v187): no se restan otra vez.
+  movs.filter(m=>m.itemId===itemId && m.estado==='pendiente' && !cuentaEnInventario(m)).forEach(m=>{
     const c = Number(m.cantidad)||0;
     if(m.tipo==='entrada'||m.tipo==='devolucion') q += c;
     else if(m.tipo==='salida'||m.tipo==='merma'||m.tipo==='garantia'||m.tipo==='instalacion') q -= c;
@@ -10408,12 +10494,14 @@ function renderCierre(){
       <div class="movlist" id="cierre-cons" style="margin-top:8px"></div>
       <p class="hint" id="cierre-cuenta" style="margin-top:6px">${cuentaCierreTxt()}</p>
     </div>
+    ${herrConfHtml()}
     <div class="card">
       <input id="cierre-nota" placeholder="Nota (opcional)">
       <button class="btn" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="guardarCierre()">✅ Guardar cierre del turno</button>
     </div>`;
   renderCierreConsumibles();
   coordAvisosPintarCierre();
+  if(!herrHoyLogs) db.collection('instalacionesLog').get().then(sn=>{ herrHoyLogs = sn.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===modulo()); herrConfPintar(); }).catch(()=>{ herrHoyLogs = []; });
 }
 // Solo los artículos que tienen material (o que ya se escribieron); los demás con "Ver todos" (v178).
 let cierreTodosCons = false;
@@ -10433,6 +10521,12 @@ async function guardarCierre(){
     if(!a.hayReporte && !a.capt && !confirm('⚠️ No has capturado ninguna instalación de hoy.\n\nSi hubo instalaciones, captúralas ANTES del cierre: si faltan, tu inventario puede no cuadrar.\n\n¿Seguro que hoy no hubo instalaciones y quieres guardar el cierre?')) return;
   }catch(e){}
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
+  const herrIts = herrConfItems(), herrSin = herrIts.filter(it=>!herrConf[it.id] || herrConf[it.id].ok===undefined);
+  if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre).join('\n')); }
+  const herrMal = herrIts.filter(it=>herrConf[it.id].ok===false && !(String(herrConf[it.id].tiene).trim()!=='' && Number(herrConf[it.id].tiene)>=0));
+  if(herrMal.length) return alert('🔩 Escribe cuántos tienes de:\n\n'+herrMal.map(it=>'• '+it.nombre).join('\n'));
+  const herrajes = herrIts.map(it=>{ const r = herrConf[it.id], esp = fmtNum(stockEsperadoCierre(it.id)); return {itemId:it.id, nombre:it.nombre, unidad:it.unidad||'', esperado:esp, ok:r.ok, tiene: r.ok ? esp : fmtNum(Number(r.tiene))}; });
+  const herrNo = herrajes.filter(h=>!h.ok);
   const nota = (document.getElementById('cierre-nota').value||'').trim();
   const hojasContadas = CATALOGO.filter(i=>esHoja(i) && !vacioCierre(cierreVals[i.id]));
   for(const it of hojasContadas){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
@@ -10448,7 +10542,7 @@ async function guardarCierre(){
   if(repsHoy.length && !confirm(`🔁 Hoy hay ${repsHoy.length} entrada(s) que parecen anotadas dos veces (${repsHoy.slice(0,3).map(xs=>xs[0].itemNombre).join(', ')}${repsHoy.length>3?'…':''}).\n\nSi haces el cierre así, lo repetido se toma como gastado.\n\n¿Hacer el cierre de todos modos?`)) return;
   const raros = salidas.map(x=>Object.assign({}, x, {raro:usoRaroCierre(x.it.id, x.q, x.esp)})).filter(x=>x.raro);
   if(raros.length && !confirm(`⚠️ Revisa, esto es mucho más de lo normal:\n\n${raros.map(x=>`• ${x.it.nombre}: se usaron ${fmtNum(x.q)} ${x.it.unidad} · ${x.raro.txt}`).join('\n')}\n\n¿Estás seguro? Si llegó material o se anotó una entrada doble, corrígelo antes.\n\nAceptar = sí, está bien · Cancelar = revisar`)) return;
-  if(!hojasContadas.length && !contados.length){
+  if(!hojasContadas.length && !contados.length && !herrNo.length){
     if(!confirm('No escribiste nada.\n\n¿Hoy no se cortaron hojas y no quieres contar consumibles?\n\nAceptar = sí, guardar "sin movimiento" para que no te lo vuelva a recordar hoy.')) return;
   }
   if(hojasContadas.length || contados.length){
@@ -10458,6 +10552,7 @@ async function guardarCierre(){
       + (salidas.length ? '📤 Se usó (se descuenta):\n'+salidas.map(x=>`• ${fmtNum(x.q)} ${x.it.unidad} ${x.it.nombre} (había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)})`).join('\n')+'\n\n' : '')
       + (iguales.length ? `✔️ Sin cambio: ${iguales.length} artículo(s)\n\n` : '')
       + (deMas.length ? '⚠️ Tienes MÁS de lo que dice la app (no se toca; si llegó material, anótalo en "Llegó material"):\n'+deMas.map(x=>`• ${x.it.nombre}: app ${fmtNum(x.esp)}, tú ${fmtNum(x.hay)}`).join('\n')+'\n\n' : '')
+      + (herrNo.length ? '🔩 Herrajes que NO cuadran (le llega a Dirección, no cambia el inventario):\n'+herrNo.map(h=>`• ${h.nombre}: inventario ${h.esperado}, tienes ${h.tiene}`).join('\n')+'\n\n' : '')
       + '¿Guardar?';
     if(!confirm(txt)) return;
   }
@@ -10474,8 +10569,8 @@ async function guardarCierre(){
     // Aviso a Dirección: el módulo ya hizo su cierre del turno.
     try{ await db.collection('cierres').doc(cryptoId()).set({modulo:mod, fecha, dia:fechaHoyLocal(), creadoPor, nota,
       cortes:cortes.map(c=>({nombre:c.it.nombre, q:c.q})), hojasDeMas:hojasDeMas.map(x=>({nombre:x.it.nombre, q:x.deMas})),
-      consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length}); }catch(e){}
-    cierreVals = {}; cierreBuscar = '';
+      consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length, herrajes, herrNo:herrNo.length}); }catch(e){}
+    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null;
     toast('✅ Cierre del turno guardado.'+(hojasDeMas.length?'<br><small>Las hojas de más las revisa Dirección.</small>':''));
     setView('home');
   }catch(e){ alert('Error: '+e.message); }
@@ -10871,6 +10966,10 @@ async function renderSob(){
   current = 'sob';
   $('#main').innerHTML = '<div class="card hint">Cargando sobrantes…</div>';
   try{ const snap = await db.collection('sobrantes').get(); sobrantesCache = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }catch(e){ sobrantesCache=[]; }
+  // v202 (pedido por el usuario): la calle de donde viene cada sobrante (también los de antes, por su instalación).
+  if(sobrantesCache.some(x=>!x.calle && (x.deInstalacion||x.deGarantia))){ try{ const [sl, sg] = await Promise.all([db.collection('instalacionesLog').get(), db.collection('garantiasLog').get().catch(()=>({docs:[]}))]);
+    const cal = {}; sl.docs.concat(sg.docs).forEach(d=>{ const v=d.data(); if(v.calle) cal[d.id]=v.calle; });
+    sobrantesCache.forEach(x=>{ if(!x.calle) x.calle = cal[x.deInstalacion] || cal[x.deGarantia] || ''; }); }catch(e){} }
   if(current!=='sob') return;
   const vivos = sobrantesCache.filter(x=>estadoAprobSob(x.id)!=='rechazado');
   const abiertos = vivos.filter(x=>x.estado!=='cerrado'), cerrados = vivos.filter(x=>x.estado==='cerrado');
@@ -10883,6 +10982,7 @@ async function renderSob(){
     const trans = (x.transformaciones||[]).map(t=>`<div class="hint" style="margin:4px 0 0">✂️ ${new Date(t.fecha).toLocaleDateString('es-MX')}: salieron ${t.piezas.join(', ')} ${badgeEstado(estadoAprobSob(t.loteId))}</div>`).join('');
     return `<div class="card">
       <div class="row" style="justify-content:space-between"><strong>${new Date(x.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'long'})}</strong>${badgeEstado(ea)}</div>
+      ${x.calle?`<div style="margin:4px 0 0;font-size:15px;font-weight:800">📍 ${escCalle(x.calle)}</div>`:''}
       ${x.nota?`<p class="hint" style="margin:4px 0">${x.nota}</p>`:''}
       <ul style="margin:6px 0 6px 18px;padding:0;line-height:1.5">${(x.lineas||[]).map(l=>`<li>${l}</li>`).join('')}</ul>
       ${x.estado==='cerrado' ? `<p class="hint" style="margin:4px 0">${x.directoMerma?'🗑️ Se fue directo a merma':'Terminado'}${x.mermaFinal&&x.mermaFinal.length?' · merma: '+x.mermaFinal.map(m=>{const it=CATALOGO.find(i=>i.id===m.itemId); return fmtNum(m.cantidad)+' '+(it?it.unidad+' '+it.nombre:'');}).join(', '):''}</p>` : `<p class="hint" style="margin:4px 0"><strong>Queda:</strong><br>${rest||'—'}</p>`}
@@ -11938,6 +12038,7 @@ function resumenCierreTxt(c){
   if(c.consumibles) partes.push(c.consumibles+' consumible(s) descontados');
   if((c.hojasDeMas||[]).length) partes.push('⚠️ Hojas de más: '+c.hojasDeMas.map(x=>fmtNum(x.q)+' '+String(x.nombre).replace('Melamina ','')).join(', ')+' (por aprobar)');
   if((c.consDeMas||[]).length) partes.push('⚠️ Tienen más de: '+c.consDeMas.slice(0,3).join(', '));
+  if(Array.isArray(c.herrajes)) partes.push(c.herrNo ? '🔩 No cuadran: '+c.herrajes.filter(h=>!h.ok).map(h=>h.nombre).slice(0,3).join(', ') : '🔩 Herrajes completos');
   return partes.join(' · ') || 'Sin movimiento';
 }
 // Cierres hechos con versiones anteriores (sin registro en "cierres"): se detectan por los
@@ -12668,6 +12769,19 @@ async function generarReporteDiarioPDF(modo, fechaDia){
     encabezado('Entradas y salidas del día', `Módulo ${mod}  ·  ${esPasado?diaStr:fechaStr}`);
     try{ await cargarPrestamos(); }catch(e){}
     y = dibujarMovsDiaPDF(doc, movsDiaClasif(mod, diaSel), deudasDeModulo(mod), {marginL, W, pageH, y, mod, vacioTxt: t => t + (esPasado ? ' ese día.' : ' hoy.')});
+    // v199: herrajes que el coordinador confirmó en el cierre del turno.
+    const cH = (cierresCache||[]).filter(c=>c.modulo===mod && c.dia===diaSel && Array.isArray(c.herrajes)).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).pop();
+    if(cH){ const mal = cH.herrajes.filter(h=>!h.ok), ROJ=[200,40,40], VER=[22,128,74];
+      if(y > pageH-40){ doc.addPage(); y = 15; } y += 4;
+      const cc = mal.length ? ROJ : VER;
+      doc.setFillColor(...pdfTinte(cc,.88)); doc.rect(marginL, y, W, 8, 'F'); doc.setFillColor(...cc); doc.rect(marginL, y, 1.6, 8, 'F');
+      doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(...cc); doc.text('Herrajes (cierre del turno)', marginL+4, y+5.6);
+      doc.text(mal.length ? `${mal.length} no cuadran` : `Todos cuadran (${cH.herrajes.length})`, marginL+W-2, y+5.6, {align:'right'}); y += 11;
+      doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
+      if(mal.length){ mal.forEach(h=>{ if(y > pageH-15){ doc.addPage(); y = 15; } doc.text(h.nombre, marginL+2, y); doc.text(`Inventario ${h.esperado} · tiene ${h.tiene}`, marginL+W-2, y, {align:'right'}); y += 5.5; });
+        doc.setFontSize(8); doc.setTextColor(110,116,132); doc.text('Solo es lo que contestó el coordinador: el inventario no se movió.', marginL+2, y+1); doc.setTextColor(0,0,0); y += 6; }
+      else { doc.text('El coordinador confirmó que tiene todos los herrajes que dice el inventario.', marginL+2, y); y += 6; }
+    }
   }
 
   const stamp = fechaHoyLocal();
@@ -12970,9 +13084,12 @@ async function instDiaPintar(pre){
     <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${chip(hoy,'Hoy · '+fCorta(hoy))}${chip(ayer,'Ayer · '+fCorta(ayer))}<button class="btn small" style="${otro?'background:#d97706':'background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none'}" onclick="_instDia.elegido=true;const f=document.getElementById('${pre}-fecha');f.focus();try{f.showPicker()}catch(e){};instDiaPintar('${pre}')">${otro?'✔ '+fCorta(f):'Otro día'}</button></div>
     <p class="hint" style="margin:6px 0 0">Así Dirección la compara con el reporte del grupo del día correcto.</p></div>`;
 }
+// v202: sobrantes de puertas a los que todavía no se les registró qué piezas salieron.
+function sobPuertasSinRegistrar(sobs, mod){ return (sobs||[]).filter(x=>x.deCortePuertas && x.estado!=='cerrado' && x.estado!=='anulado' && !(x.transformaciones||[]).length && (!mod || x.modulo===mod)); }
 async function coordAvisosPintarCierre(){
   const el = document.getElementById('cierre-avisos'); if(!el) return;
   let a; try{ a = await coordAvisosInst(fechaHoyLocal()); }catch(e){ return; }
+  try{ a.sobPu = sobPuertasSinRegistrar((await db.collection('sobrantes').get()).docs.map(d=>({id:d.id,...d.data()})), modulo()); }catch(e){ a.sobPu = []; }
   const caja = (c, html) => `<div class="card" style="padding:12px;border:2px solid ${c};background:linear-gradient(0deg,${c}14,${c}14),var(--card)">${html}</div>`;
   const out = [];
   if(a.hayReporte){ if(a.faltan.length) out.push(caja('#dc2626', `<strong>⚠️ Te falta capturar ${a.faltan.length} instalaci${a.faltan.length===1?'ón':'ones'} de tu reporte de hoy</strong>
@@ -12982,10 +13099,34 @@ async function coordAvisosPintarCierre(){
   else if(!a.capt) out.push(caja('#dc2626', `<strong>⚠️ No has capturado instalaciones de hoy</strong>
     <p class="hint" style="margin:4px 0 0">Si hubo instalaciones, <strong>captúralas antes del cierre</strong>: si faltan, tu inventario puede no cuadrar.</p>
     <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="instSub='';irA('inst')">🔧 Capturar instalaciones</button>`));
+  if(a.sobPu && a.sobPu.length) out.push(caja('#dc2626', `<strong style="color:#dc2626">⚠️ 🧩 Tienes ${a.sobPu.length} sobrante${a.sobPu.length===1?'':'s'} de puertas sin registrar qué piezas salieron</strong>
+    <p class="hint" style="margin:4px 0 0">Pídele a tu cortador qué piezas sacó (marcos, zóclos, cargadores, frentes…) y regístralas. Si ya se usaron en un mueble y no las registras, tu inventario no va a cuadrar.</p>
+    <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="irA('sob')">🧩 Registrar piezas</button>`));
   if(a.pendDecidir) out.push(caja('#b45309', `<strong>📦 Tienes ${a.pendDecidir} instalación${a.pendDecidir===1?'':'es'} rechazada${a.pendDecidir===1?'':'s'} sin decidir</strong>
     <p class="hint" style="margin:4px 0 0">Dirección marcó que no se instaló. Su material sigue apartado: decide si se vuelve a instalar, regresa al inventario, va a sobrantes o a merma.</p>
     <button class="btn" style="width:100%;margin-top:8px;background:#b45309" onclick="setView('home');window.scrollTo(0,0)">Decidir ahora</button>`));
   el.innerHTML = out.join('');
+}
+// ===== 🔩 Herrajes que no cuadran en el cierre del turno (v199) =====
+function herrNoCuadran(){ const desde = (()=>{ const d=new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-14); return d.toISOString().slice(0,10); })();
+  return (cierresCache||[]).filter(c=>c.herrNo>0 && !c.herrVisto && (c.dia||'')>=desde && Array.isArray(c.herrajes)); }
+function renderHerrCuad(){
+  current = 'herrcuad';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  const xs = herrNoCuadran().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const card = c => `<div class="card" style="padding:12px;border-left:6px solid ${(MODULOS.find(m=>m.nombre===c.modulo)||{}).color||'#dc2626'}">
+      <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:16px">${c.modulo}</strong><span class="hint" style="margin:0">${fCorta(c.dia)} · ${new Date(c.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})} · ${String(c.creadoPor||'').split('@')[0]}</span></div>
+      <div class="wrap-x" style="margin-top:8px"><table><tr><th>Herraje</th><th style="text-align:right">Inventario</th><th style="text-align:right">Tiene</th><th style="text-align:right">Diferencia</th></tr>
+      ${c.herrajes.filter(h=>!h.ok).map(h=>{ const d = fmtNum(Number(h.tiene)-Number(h.esperado)); return `<tr><td>${h.nombre}</td><td style="text-align:right">${h.esperado} ${h.unidad||''}</td><td style="text-align:right"><strong>${h.tiene}</strong></td><td style="text-align:right;font-weight:800;color:${d<0?'var(--bad)':'#b3742c'}">${d>0?'+':''}${d}</td></tr>`; }).join('')}</table></div>
+      <p class="hint" style="margin:6px 0 0">Los demás herrajes (${c.herrajes.filter(h=>h.ok).length}) sí cuadraron. El inventario no se movió.</p>
+      <button class="btn small" style="margin-top:8px;background:transparent;color:var(--ok);border:1px solid var(--ok);box-shadow:none" onclick="herrCuadVisto('${c.id}')">✔ Enterado</button></div>`;
+  $('#main').innerHTML = `<div class="card" style="padding:12px;border:2px solid #dc2626"><div style="font-size:18px;font-weight:900">🔩 Herrajes que no cuadran</div>
+    <p class="hint" style="margin:2px 0 0">En el cierre del turno el coordinador dijo que <strong>no</strong> tiene lo que marca el inventario. No se movió nada: decide si se recuenta, se hace auditoría o se corrige. Al tocar <strong>Enterado</strong> deja de salir aquí (sigue en el reporte de cierres).</p></div>
+    ${xs.length ? xs.map(card).join('') : '<div class="card" style="text-align:center">✅ No hay herrajes pendientes de revisar.</div>'}`;
+}
+async function herrCuadVisto(id){
+  try{ await db.collection('cierres').doc(id).update({herrVisto:true, herrVistoPor:getCurrentUserEmail?getCurrentUserEmail():'', herrVistoEn:new Date().toISOString()});
+    const c = (cierresCache||[]).find(x=>x.id===id); if(c) c.herrVisto = true; renderHerrCuad(); }catch(e){ alert('Error: '+e.message); }
 }
 // ===== 📦 Material apartado sin definir (pedido por el usuario, v191) =====
 // Instalaciones que Dirección marcó "No se instaló" (o "No coincide") y que el coordinador todavía no
