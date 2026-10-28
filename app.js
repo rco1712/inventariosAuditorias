@@ -8595,7 +8595,11 @@ function pintarSobPuerta(){
   el.innerHTML = `<div style="font-size:16px;font-weight:800">🧩 Sobrante de estas puertas → Sobrantes</div>
     <ul style="margin:8px 0 6px 18px;padding:0;line-height:1.6">${det}</ul>
     <p style="margin:0 0 6px;font-weight:700">Total: ${fmtNum(o.cantidad)} hoja de Melamina ${color}. Al guardar, se va a <span style="color:#0e8a8a">Sobrantes</span>.</p>
-    <p style="margin:0;padding:9px 11px;border-radius:10px;background:rgba(14,138,138,.12);font-size:14px">✂️ <strong>Pídele a tu cortador qué piezas sacó de este sobrante</strong> (marcos, zóclos, cargadores, frentes…) y regístralas en <strong>Sobrantes → Se transformó</strong>. Esas piezas son las que regresan a tu inventario. Las tiras de menos de 10 cm ya se contaron como merma.</p>`;
+    <div style="margin:4px 0 0;padding:12px 14px;border-radius:12px;background:#fde047;border:3px solid #dc2626;color:#1a1a1a">
+      <div style="font-size:17px;font-weight:900;color:#b91c1c">⚠️ IMPORTANTE: DILE A TU CORTADOR</div>
+      <div style="font-size:15px;font-weight:700;margin-top:4px">Que te diga qué piezas sacó de este sobrante (marcos, zóclos, cargadores, frentes…) y regístralas en <u>Sobrantes → Se transformó</u>.</div>
+      <div style="font-size:13px;margin-top:6px">Solo esas piezas regresan a tu inventario. Si no las registras, tu inventario no va a cuadrar.</div></div>
+    <p class="hint" style="margin:8px 0 0">Las tiras de menos de 10 cm ya se contaron como merma.</p>`;
 }
 
 // Puertas completas que regresan sin instalación registrada (confirmado por el usuario): mismo
@@ -8658,7 +8662,7 @@ async function registrarPuerta(tipo, alto, ancho){
     toast((estado==='pendiente'
       ? '✅ Puertas guardadas.<br><small>Dirección las tiene que aprobar para que se descuenten.</small>'
       : '✅ Instalación de puertas registrada.') + (conSob?'<br><small>🧩 El sobrante quedó en Sobrantes.</small>':''));
-    if(conSob) alert(`🧩 El sobrante de estas puertas (${fmtNum(so.cantidad)} hoja de ${so.itemId?(CATALOGO.find(i=>i.id===so.itemId)||{}).nombre:''}) quedó en SOBRANTES.\n\n✂️ Pídele a tu cortador qué piezas sacó de ese sobrante (marcos, zóclos, cargadores, frentes…) y regístralas en Sobrantes → "Se transformó".\n\nEsas piezas son las que regresan a tu inventario.`);
+    if(conSob) alert(`⚠️ IMPORTANTE ⚠️\n\n🧩 El sobrante de estas puertas (${fmtNum(so.cantidad)} hoja de ${so.itemId?(CATALOGO.find(i=>i.id===so.itemId)||{}).nombre:''}) quedó en SOBRANTES.\n\n✂️ Pídele a tu cortador qué piezas sacó de ese sobrante (marcos, zóclos, cargadores, frentes…) y regístralas en Sobrantes → "Se transformó".\n\nSolo esas piezas regresan a tu inventario. Si no las registras, tu inventario no va a cuadrar.`);
     puertaPreview = null;
     renderInstPuertas();
     window.scrollTo(0,0);
@@ -13086,9 +13090,9 @@ async function coordAvisosPintarCierre(){
   else if(!a.capt) out.push(caja('#dc2626', `<strong>⚠️ No has capturado instalaciones de hoy</strong>
     <p class="hint" style="margin:4px 0 0">Si hubo instalaciones, <strong>captúralas antes del cierre</strong>: si faltan, tu inventario puede no cuadrar.</p>
     <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="instSub='';irA('inst')">🔧 Capturar instalaciones</button>`));
-  if(a.sobPu && a.sobPu.length) out.push(caja('#0e8a8a', `<strong>🧩 Tienes ${a.sobPu.length} sobrante${a.sobPu.length===1?'':'s'} de puertas sin registrar qué piezas salieron</strong>
+  if(a.sobPu && a.sobPu.length) out.push(caja('#dc2626', `<strong style="color:#dc2626">⚠️ 🧩 Tienes ${a.sobPu.length} sobrante${a.sobPu.length===1?'':'s'} de puertas sin registrar qué piezas salieron</strong>
     <p class="hint" style="margin:4px 0 0">Pídele a tu cortador qué piezas sacó (marcos, zóclos, cargadores, frentes…) y regístralas. Si ya se usaron en un mueble y no las registras, tu inventario no va a cuadrar.</p>
-    <button class="btn" style="width:100%;margin-top:8px;background:#0e8a8a" onclick="irA('sob')">🧩 Registrar piezas</button>`));
+    <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="irA('sob')">🧩 Registrar piezas</button>`));
   if(a.pendDecidir) out.push(caja('#b45309', `<strong>📦 Tienes ${a.pendDecidir} instalación${a.pendDecidir===1?'':'es'} rechazada${a.pendDecidir===1?'':'s'} sin decidir</strong>
     <p class="hint" style="margin:4px 0 0">Dirección marcó que no se instaló. Su material sigue apartado: decide si se vuelve a instalar, regresa al inventario, va a sobrantes o a merma.</p>
     <button class="btn" style="width:100%;margin-top:8px;background:#b45309" onclick="setView('home');window.scrollTo(0,0)">Decidir ahora</button>`));
