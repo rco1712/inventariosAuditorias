@@ -222,7 +222,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v197';
+const APP_VERSION = 'v198';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9400,8 +9400,7 @@ async function riPdf(tipo, docs){
         return [String(k+1), dirTxt(d), d.cliente||'', d.cierre==='ok'?{t:'Instalada',col:VER,b:true}:d.cierre==='ruta'?{t:'En ruta',col:AZU,b:true}:{t:'Sin marcar',col:[180,83,9],b:true}, mv?hora(mv.f):'']; }), [13,116,104]); else S.vacio('Ninguna.');
       S.banda('No se instalaron hoy', String(noHoy.length), ROJ);
       if(noHoy.length) S.tabla([{t:'#',w:8},{t:'Calle y número',w:64},{t:'¿Cuándo?',w:40},{t:'Motivo',w:70}], noHoy.map((d,k)=>[String(k+1), dirTxt(d), d.salida==='nosale'?'No salió (mañana)':'Salió pero no se hizo', {t:d.salida==='nosale'?riMotTxt(d.mot,d.motTxt,d.motFecha):riMotTxt(d.motC,d.motCTxt,d.motCFecha), col:ROJ, b:true}]), ROJ); else S.vacio('Ninguna.');
-      const mv = D.movimientos||[];
-      if(mv.length){ S.banda('Movimientos del día', String(mv.length), AZU); S.tabla([{t:'Hora',w:20},{t:'Calle y número',w:62},{t:'Movimiento',w:100}], mv.map(m=>[hora(m.f), m.calle, m.t.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,'').trim()]), AZU); }
+      // v198 (pedido por el usuario): el PDF ya no lleva la lista de movimientos del día.
       if(D.confirmoTodas) S.vacio('El coordinador confirmó que no le mandaron más instalaciones.');
     }
   });
