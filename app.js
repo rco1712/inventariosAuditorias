@@ -2165,12 +2165,11 @@ function herrToolHtml(t, opts){
   let acc = '';
   if(opts.acciones!==false && puedeCapturarHerr()){
     if(t.lugar==='merma') acc = puedeAprobarHerr() ? `<div class="row" style="gap:6px;margin-top:6px">${btnLinea('🗑️ Eliminar para siempre',`herrEliminar('${t.id}')`,'var(--bad)')}</div>` : '';
-    else if(enAlm) acc = puedeAprobarHerr() ? `<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">${btnLinea('✏️ Editar',`herrIniciarEdicion('${t.id}')`)}${desc?`<button class="btn small" style="background:var(--ok)" onclick="herrReparar('${t.id}')">🔧 Se reparó</button><button class="btn small" style="background:var(--bad)" onclick="herrIniciarMerma('${t.id}')">🗑️ Merma / tirar</button>`:btnLinea('⚠️ Está dañada',`herrCambiarEstado('${t.id}')`,'var(--bad)')}</div>` : '';
+    else if(enAlm && t.lugar==='prestamo') acc = herrPrestAccHtml(t);
+    else if(enAlm) acc = puedeAprobarHerr() ? `${desc||t.movPend?'':`<button class="btn" style="width:100%;margin-top:8px;font-size:15px;background:linear-gradient(135deg,#a21caf,#86198f)" onclick="herrIniciarPrestamo('${t.id}')">🤝 Prestar</button>`}<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">${btnLinea('✏️ Editar',`herrIniciarEdicion('${t.id}')`)}${desc?`<button class="btn small" style="background:var(--ok)" onclick="herrReparar('${t.id}')">🔧 Se reparó</button><button class="btn small" style="background:var(--bad)" onclick="herrIniciarMerma('${t.id}')">🗑️ Merma / tirar</button>`:btnLinea('⚠️ Está dañada',`herrCambiarEstado('${t.id}')`,'var(--bad)')}</div>` : '';
     else if(t.enCamino || t.lugar==='encamino') acc = '';
     else if(t.lugar==='porasignar') acc = `<button class="btn" style="width:100%;margin-top:8px;font-size:15px;background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrIniciarAsignar('${t.id}')">📍 ¿A dónde va?</button>`;
-    else if(t.lugar==='prestamo'){ const P = t.prestamo||{};
-      acc = `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.45);font-size:13.5px"><strong>🤝 Prestada a ${herrEsc(herrPrestTxt(P))}</strong>${P.quien?`<br>Recibió: ${herrEsc(P.quien)}`:''}<br>Motivo: ${herrEsc(P.motivo||'')}<br>Desde el ${herrFecha(P.fecha)} · estaba en ${herrEsc(herrDondeDatos(P.desdeLugar||{}))}</div>
-        ${t.movPend?'<div class="tag" style="display:block;text-align:center;color:#d39b06;border-color:#d39b06;padding:8px;margin-top:8px">⏳ Cambio por aprobar</div>':`<button class="btn" style="width:100%;margin-top:8px;font-size:15px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="herrPrestRegresa('${t.id}')">↩️ Ya regresó del préstamo</button>`}`; }
+    else if(t.lugar==='prestamo') acc = herrPrestAccHtml(t);
     else { const big = (txt, js, bg) => `<button class="btn" style="margin:0;padding:11px 6px;font-size:14px;background:${bg}" onclick="${js}">${txt}</button>`;
       acc = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
         ${t.movPend?'<div class="tag" style="grid-column:1/-1;text-align:center;color:#d39b06;border-color:#d39b06;padding:8px">⏳ Cambio de lugar por aprobar</div>':big('📍 Cambiar de lugar',`herrIniciarMover('${t.id}')`,'linear-gradient(135deg,#0891b2,#0e7490)')}
@@ -2304,7 +2303,8 @@ async function herrAplicar(m){
     const t = D.tools.find(x=>x.id===d.toolId && x.lugar==='prestamo'); if(!t) return 'Esa herramienta ya no está prestada.';
     const P = t.prestamo||{}; let v = P.desdeLugar || {lugar:'stock'};
     if(v.lugar==='instalador' && !D.insts.some(i=>i.id===v.instId)) v = {lugar:'stock'};
-    if(!['instalador','taller','stock'].includes(v.lugar)) v = {lugar:'stock'};
+    if(t.modulo===ALM) v = {lugar:'almacen'};
+    else if(!['instalador','taller','stock'].includes(v.lugar)) v = {lugar:'stock'};
     Object.assign(t, lugarDe(v), {lugar:v.lugar, prestamo:null, desde:now, movPend:false});
     t.hist = (t.hist||[]).concat([{f:now, t:`↩️ Regresó del préstamo (${herrPrestTxt(P)}) · vuelve a ${herrDondeDatos(v)} · ${quien}`}]); await herrPut(t); return '';
   }
@@ -2366,22 +2366,35 @@ async function herrRenombrarInstalador(id){
 const HERR_PREST_AREAS = ['Almacén general','Oficina','Mantenimiento','Producción','Ventas'];
 function herrPrestTxt(P){ P = P||{}; return P.tipo==='modulo' ? 'módulo '+(P.modulo||'') : 'área '+(P.area||''); }
 let herrPrest = null;
-function herrIniciarPrestamo(toolId){ herrPrest = {toolId, tipo:'modulo', modulo:'', area:'', quien:'', motivo:'', cantidad:1}; herrLug = null; herrAsig = null; herrMov = null; herrForm = null; herrEdit = null; herrReg = null; renderHerr(); window.scrollTo(0,0); }
-function herrPrestHtml(D){
-  const a = herrPrest, R = 'renderHerr()'; const t = D.tools.find(x=>x.id===a.toolId); if(!t) return '';
+function herrPrestAccHtml(t){ const P = t.prestamo||{};
+  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(162,28,175,.12);border:1px solid rgba(162,28,175,.45);font-size:13.5px"><strong>🤝 ${t.modulo===ALM?'El almacén general':herrEsc(t.modulo)} la prestó a ${herrEsc(herrPrestTxt(P))}</strong>${P.quien?`<br>Recibió: ${herrEsc(P.quien)}`:''}<br>Motivo: ${herrEsc(P.motivo||'')}<br>Desde el ${herrFecha(P.fecha)}${t.modulo!==ALM?' · estaba en '+herrEsc(herrDondeDatos(P.desdeLugar||{})):''}</div>
+    ${t.movPend?'<div class="tag" style="display:block;text-align:center;color:#d39b06;border-color:#d39b06;padding:8px;margin-top:8px">⏳ Cambio por aprobar</div>':`<button class="btn" style="width:100%;margin-top:8px;font-size:15px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="herrPrestRegresa('${t.id}')">↩️ Ya regresó del préstamo</button>`}`; }
+// Herramienta que OTROS (otro módulo o el almacén general) le prestaron al módulo: es su "deuda".
+const herrMeDeben = (D, mod) => D.tools.filter(t=>t.lugar==='prestamo' && t.prestamo && t.prestamo.tipo==='modulo' && t.prestamo.modulo===mod && t.modulo!==mod);
+function herrDeudaHtml(D, mod){
+  const xs = herrMeDeben(D, mod); if(!xs.length) return '';
+  return `<div class="card" style="border:2px solid #a21caf"><strong>🤝 Te prestaron (${herrCuenta(xs)}) · hay que regresarla</strong><p class="hint" style="margin:2px 0 0">Es de otro módulo o del almacén general. Cuando la regreses, quien te la prestó marca que ya regresó.</p>
+    ${xs.map(t=>{ const P = t.prestamo||{}, dias = Math.max(0, Math.round((Date.now()-new Date(P.fecha||Date.now()))/864e5));
+      return `<div style="border-bottom:1px solid var(--line);padding:8px 0"><strong>${herrEsc(t.nombre)}</strong>${(t.cantidad||1)>1?' × '+t.cantidad:''} ${herrChipMarca(t.marca)}<div class="hint" style="margin:2px 0 0">De <strong>${t.modulo===ALM?'Almacén general':herrEsc(t.modulo)}</strong> · ${herrEsc(P.motivo||'')} · <span style="color:${dias>7?'var(--bad)':'inherit'}">hace ${dias} día(s)</span></div></div>`; }).join('')}</div>`;
+}
+function herrIniciarPrestamo(toolId){ herrPrest = {toolId, tipo:'modulo', modulo:'', area:'', quien:'', motivo:'', cantidad:1}; herrLug = null; herrAsig = null; herrMov = null; herrForm = null; herrEdit = null; herrReg = null; herrEnt = null; herrMer = null; current==='alm' ? renderAlmacen() : renderHerr(); window.scrollTo(0,0); }
+function herrPrestHtml(D, R){
+  R = R || 'renderHerr()';
+  const a = herrPrest; const t = D.tools.find(x=>x.id===a.toolId); if(!t) return '';
+  const deAlm = t.modulo===ALM, dueno = deAlm ? 'el Almacén general' : modulo();
   const chip = (k, v, txt) => `<button class="chip ${a[k]===v?'on':''}" style="${a[k]===v?'background:#a21caf;border-color:#a21caf;color:#fff':''}" onclick="herrPrest.${k}='${v}';${R}">${txt}</button>`;
   return `<div class="card" style="border:2px solid #a21caf"><div style="font-size:18px;font-weight:900">🤝 Prestar herramienta</div>
     <div style="border:1px solid var(--line);border-radius:12px;padding:0 10px;margin-top:8px">${herrToolHtml(t,{acciones:false, donde:true})}</div>
     ${(t.cantidad||1)>1?`<label class="hint" style="display:block;margin-top:10px">¿Cuántas prestas? (hay ${t.cantidad})</label><input type="number" min="1" max="${t.cantidad}" value="${a.cantidad}" style="max-width:120px;margin-top:4px" oninput="herrPrest.cantidad=this.value">`:''}
     <label class="hint" style="display:block;margin-top:12px;font-weight:800">¿A dónde va? <span style="color:var(--bad)">*</span></label>
     <div class="chips" style="margin-top:6px">${chip('tipo','modulo','🏬 Otro módulo')}${chip('tipo','area','🏢 Otra área')}</div>
-    ${a.tipo==='modulo'?`<div class="chips" style="margin-top:8px">${MODULOS.filter(m=>m.nombre!==modulo()).map(m=>chip('modulo',m.nombre,m.nombre)).join('')}</div>`
+    ${a.tipo==='modulo'?`<div class="chips" style="margin-top:8px">${MODULOS.filter(m=>deAlm || m.nombre!==modulo()).map(m=>chip('modulo',m.nombre,m.nombre)).join('')}</div>`
       :`<div class="chips" style="margin-top:8px">${HERR_PREST_AREAS.map(x=>chip('area',x,x)).join('')}</div><input placeholder="u otra área (escríbela)" value="${herrEsc(HERR_PREST_AREAS.includes(a.area)?'':a.area)}" oninput="herrPrest.area=this.value" style="margin-top:6px">`}
     <label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Quién la recibe? <span class="hint" style="margin:0;font-weight:400">(opcional)</span></label>
     <input value="${herrEsc(a.quien)}" oninput="herrPrest.quien=this.value" placeholder="Ej. coordinador de Apodaca" style="margin-top:4px">
     <label class="hint" style="display:block;margin-top:12px;font-weight:800">¿Por qué se prestó? <span style="color:var(--bad)">*</span></label>
     <input value="${herrEsc(a.motivo)}" oninput="herrPrest.motivo=this.value" placeholder="Ej. se les descompuso la suya" style="margin-top:4px">
-    <p class="hint" style="margin:8px 0 0">Sigue siendo de ${modulo()}: aparece en la pestaña 🤝 Préstamo hasta que regrese. Al regresar vuelve a donde estaba.</p>
+    <p class="hint" style="margin:8px 0 0">Sigue siendo de ${dueno}: aparece en la pestaña 🤝 Préstamo hasta que regrese${a.tipo==='modulo'?' y al otro módulo le queda anotado que se la prestaron':''}. Al regresar vuelve a donde estaba.</p>
     ${!puedeAprobarHerr()?'<p class="hint" style="margin:4px 0 0">Dirección lo tiene que aprobar.</p>':''}
     <div class="row" style="gap:8px;margin-top:12px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#a21caf,#86198f)" onclick="herrGuardarPrestamo()">${puedeAprobarHerr()?'🤝 Prestar':'📨 Enviar a Dirección'}</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrPrest=null;${R}">Cancelar</button></div></div>`;
 }
@@ -2394,16 +2407,16 @@ async function herrGuardarPrestamo(){
   const prest = {tipo:a.tipo, modulo:a.tipo==='modulo'?a.modulo:'', area:a.tipo==='area'?String(a.area).trim():'', quien:String(a.quien).trim(), motivo:String(a.motivo).trim()};
   if(!confirm(`🤝 Prestar ${q>1?q+' ':''}${herrDesc(t)} a ${herrPrestTxt(prest)}${prest.quien?' ('+prest.quien+')':''}\n\nMotivo: ${prest.motivo}\n\n¿Continuar?`)) return;
   const ok = await herrGuardarMov({tipo:'prestamo', modulo:t.modulo, datos:{toolId:t.id, desc:herrDesc(t), cantidad:q, prest}});
-  if(!ok) return; herrPrest = null; herrTab = 'prest';
-  toast(puedeAprobarHerr() ? '🤝 Prestada' : '📨 Enviado. Dirección lo tiene que aprobar.'); renderHerr();
+  if(!ok) return; herrPrest = null; herrTab = 'prest'; herrAlmTab = 'prestamo';
+  toast(puedeAprobarHerr() ? '🤝 Prestada' : '📨 Enviado. Dirección lo tiene que aprobar.'); t.modulo===ALM ? renderAlmacen() : renderHerr();
 }
 async function herrPrestRegresa(toolId){
   const D = await herrCargar(true); const t = D.tools.find(x=>x.id===toolId && x.lugar==='prestamo'); if(!t) return;
   const P = t.prestamo||{}, v = P.desdeLugar||{lugar:'stock'};
-  const vuelve = (v.lugar==='instalador' && !D.insts.some(i=>i.id===v.instId)) ? 'stock (ese instalador ya no está)' : herrDondeDatos(v);
+  const vuelve = t.modulo===ALM ? 'almacén general' : (v.lugar==='instalador' && !D.insts.some(i=>i.id===v.instId)) ? 'stock (ese instalador ya no está)' : herrDondeDatos(v);
   if(!confirm(`↩️ ¿${herrDesc(t)} ya regresó de ${herrPrestTxt(P)}?\n\nVuelve a: ${vuelve}`)) return;
   const ok = await herrGuardarMov({tipo:'prestRegreso', modulo:t.modulo, datos:{toolId:t.id, desc:herrDesc(t), prest:P}});
-  if(ok){ toast(puedeAprobarHerr() ? '↩️ Regresó' : '📨 Enviado. Dirección lo tiene que aprobar.'); renderHerr(); }
+  if(ok){ toast(puedeAprobarHerr() ? '↩️ Regresó' : '📨 Enviado. Dirección lo tiene que aprobar.'); t.modulo===ALM ? renderAlmacen() : renderHerr(); }
 }
 async function herrQuitarInstalador(id){
   const D = await herrCargar(); const i = D.insts.find(x=>x.id===id); if(!i) return;
@@ -2875,7 +2888,8 @@ async function renderHerr(){
     ${herrForm && !herrForm.almacen ? herrFormHtml(D, 'renderHerr()') : ''}
     ${herrEdit ? herrEditHtml(D, 'renderHerr()') : ''}
     ${herrLug ? herrLugHtml(D) : ''}
-    ${herrPrest ? herrPrestHtml(D) : ''}
+    ${herrPrest ? herrPrestHtml(D, 'renderHerr()') : ''}
+    ${herrDeudaHtml(D, mod)}
     ${herrReg ? herrRegHtml(D) : ''}
     ${porAsig.length?`<div class="card" style="border:2px solid ${HERR_COLOR}"><strong>📥 Por asignar (${herrCuenta(porAsig)})</strong><p class="hint" style="margin:2px 0 0">Llegó del almacén general. Toca cada una y elige a quién va, o mándalas todas al stock.</p>${puedeCapturarHerr()&&porAsig.length>1?`<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#4f46e5,#4338ca)" onclick="herrTodoAlStock()">📦 Mandar todo al stock (${herrCuenta(porAsig)})</button>`:''}${porAsig.map(t=>herrToolHtml(t)).join('')}</div>`:''}
     ${enCamino.length?`<div class="card" style="border-left:5px solid #0891b2"><strong>🚚 En camino al almacén (${enCamino.length})</strong><p class="hint" style="margin:2px 0 0">Siguen contando en ${mod} hasta que Dirección o el Auditor las reciban.</p>${enCamino.map(m=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:8px 0"><span style="min-width:0"><strong>${herrEsc(m.datos.desc)}</strong>${m.datos.cantidad>1?' × '+m.datos.cantidad:''}<span class="hint" style="display:block;margin:0">${herrEsc(herrMotTxt(HERR_REG_MOT,m.datos.motivo,m.datos.nota))} · ${herrFecha(m.fecha)} · ⏳ esperando que el almacén la reciba</span></span>${puedeCapturarHerr()?btnLinea('Cancelar',`herrCancelarRegreso('${m.id}')`,'var(--sub)'):''}</div>`).join('')}</div>`:''}
@@ -2975,7 +2989,7 @@ async function renderAlmacen(){
   if(current!=='alm') return;
   if(herrAlmSec==='fer') return renderFer(D);
   const R = 'renderAlmacen()';
-  const alm = D.tools.filter(t=>t.modulo===ALM), buenas = alm.filter(t=>t.estado!=='descompuesta'), danadas = alm.filter(t=>t.estado==='descompuesta');
+  const almTodo = D.tools.filter(t=>t.modulo===ALM), prestAlm = almTodo.filter(t=>t.lugar==='prestamo'), alm = almTodo.filter(t=>t.lugar!=='prestamo'), buenas = alm.filter(t=>t.estado!=='descompuesta'), danadas = alm.filter(t=>t.estado==='descompuesta');
   const porRec = herrPorRecibir(D), prest = herrPrestada(D), avD = herrAvisosDir(D);
   const pendAlm = D.movs.filter(m=>m.estado==='pendiente' && (m.modulo===ALM || m.tipo==='compra'));
   const entHtml = herrEntHtml(D);
@@ -3004,6 +3018,14 @@ async function renderAlmacen(){
   else if(herrAlmTab==='recibir') cuerpo = `<div class="card" style="border-left:5px solid #0891b2"><strong>🚚 Por recibir (${porRec.length})</strong><p class="hint" style="margin:2px 0 0">Lo que los coordinadores mandaron de regreso. Toca "Ya la recibí" cuando la tengas.</p>${porRec.length?porRec.map(m=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(m.datos.desc)}</strong>${m.datos.cantidad>1?' × '+m.datos.cantidad:''} <span class="tag" style="${m.datos.estadoVuelta==='descompuesta'?'color:var(--bad);border-color:var(--bad)':'color:var(--ok);border-color:var(--ok)'}">${m.datos.estadoVuelta==='descompuesta'?'Dañada':'Sirve'}</span></div><div class="hint" style="margin:0">De <strong>${herrEsc(m.modulo)}</strong>${m.datos.quien?' · la tenía '+herrEsc(m.datos.quien):''} · ${herrEsc(herrMotTxt(HERR_REG_MOT,m.datos.motivo,m.datos.nota))} · ${herrFecha(m.fecha)}</div><button class="btn" style="width:100%;margin-top:6px;background:var(--ok)" onclick="herrRecibir('${m.id}')">✅ Ya la recibí</button></div>`).join(''):'<p class="hint">No hay nada en camino.</p>'}</div>`;
   else if(herrAlmTab==='prest'){ const mods = [...new Set(prest.map(t=>t.modulo))];
     cuerpo = mods.length ? mods.map(md=>{ const xs = prest.filter(t=>t.modulo===md); return `<div class="card" style="border-left:5px solid #1d4ed8"><div class="row" style="justify-content:space-between"><strong>📍 ${herrEsc(md)}</strong><span class="hint" style="margin:0">${herrCuenta(xs)} herramienta(s)</span></div>${xs.map(t=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(t.nombre)}</strong>${(t.cantidad||1)>1?' × '+t.cantidad:''} ${herrChipMarca(t.marca)}${t.enCamino?' <span class="tag" style="color:#38bdf8;border-color:#38bdf8">🚚 En camino</span>':''}</div><div class="hint" style="margin:0">${t.lugar==='porasignar'?'📥 Por asignar':'➜ '+herrEsc(herrDondeTxt(t))} · salió ${herrFecha(t.origenFecha||t.desde)} · ${herrEsc(herrOrigenTxt(t))}</div></div>`).join('')}</div>`; }).join('') : '<div class="card hint">Todavía no has prestado herramienta a los módulos.</div>'; }
+  else if(herrAlmTab==='prestamo'){ const xs = prestAlm.slice().sort((a,b)=>((a.prestamo||{}).fecha||'').localeCompare((b.prestamo||{}).fecha||''));
+    const entre = D.tools.filter(t=>t.lugar==='prestamo' && t.modulo!==ALM);
+    const item = t => { const P = t.prestamo||{}, dias = Math.max(0, Math.round((Date.now()-new Date(P.fecha||Date.now()))/864e5));
+      return `<div class="hint" style="margin:10px 0 -4px;font-weight:800;color:${dias>7?'var(--bad)':'#c084fc'}">${t.modulo!==ALM?herrEsc(t.modulo)+' ':''}➜ ${herrEsc(herrPrestTxt(P))}${P.quien?' · '+herrEsc(P.quien):''} · hace ${dias} día(s)${P.motivo?' · '+herrEsc(P.motivo):''}</div>${herrToolHtml(t,{render:R, acciones:t.modulo===ALM})}`; };
+    cuerpo = `<div class="card" style="border-left:5px solid #a21caf"><strong>🤝 Prestada por el almacén (${herrCuenta(xs)})</strong><p class="hint" style="margin:2px 0 0">Sigue siendo del almacén. Toca una para ver a dónde fue, por qué, y marcar que ya regresó.</p>
+      ${xs.length?xs.map(item).join(''):'<p class="hint">No hay herramienta prestada por el almacén.</p>'}</div>
+      <div class="card" style="border-left:5px solid #7c3aed"><strong>🔁 Préstamos entre módulos (${herrCuenta(entre)})</strong><p class="hint" style="margin:2px 0 0">Quién le prestó a quién. El módulo que prestó marca cuando regresa.</p>
+      ${entre.length?entre.map(item).join(''):'<p class="hint">No hay préstamos entre módulos.</p>'}</div>`; }
   else if(herrAlmTab==='ent'){ const xs = herrEntradasAlm(D); cuerpo = `<div class="card" style="border-left:5px solid var(--ok)"><strong>📥 Entradas al almacén</strong>${xs.length?xs.slice(0,80).map(x=>regRow(x,true)).join(''):'<p class="hint">Todavía no hay entradas.</p>'}</div>`; }
   else if(herrAlmTab==='sal'){ const xs = herrSalidasAlm(D, true).slice(0,120); const vistos = new Set();
     const html = xs.map(x=>{ if(!x.lote) return regRow(x,false); if(vistos.has(x.lote)) return ''; vistos.add(x.lote); const g = xs.filter(y=>y.lote===x.lote);
@@ -3013,7 +3035,7 @@ async function renderAlmacen(){
   $('#main').innerHTML = `${ferToggleHtml()}<div class="card" style="border-left:6px solid #7c2d12"><div class="row" style="justify-content:space-between;gap:8px"><div><div style="font-size:17px;font-weight:800">🏢 Almacén general de herramienta</div>
       <p class="hint" style="margin:2px 0 0">Solo Dirección y Auditor</p></div>
       <button class="btn small" style="background:linear-gradient(135deg,#9a3412,#7c2d12)" onclick="generarAlmacenPDF()">📄 PDF</button></div>
-      <div class="grid2" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px">${[[herrCuenta(buenas),'buenas','var(--ok)','buenas'],[herrCuenta(danadas),'dañadas','var(--bad)','danadas'],[herrCuenta(prest),'prestada','#60a5fa','prest'],[porRec.length,'por recibir','#38bdf8','recibir']].map(k=>`<div onclick="herrAlmTab='${k[3]}';${R}" style="cursor:pointer;background:rgba(127,127,127,.08);border-radius:10px;padding:7px 4px;text-align:center"><div style="font-size:19px;font-weight:800;color:${k[2]}">${k[0]}</div><div class="hint" style="margin:0;font-size:11px">${k[1]}</div></div>`).join('')}</div>
+      <div class="grid2" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px">${[[herrCuenta(buenas),'buenas','var(--ok)','buenas'],[herrCuenta(danadas),'dañadas','var(--bad)','danadas'],[herrCuenta(prest),'en módulos','#60a5fa','prest'],[porRec.length,'por recibir','#38bdf8','recibir']].map(k=>`<div onclick="herrAlmTab='${k[3]}';${R}" style="cursor:pointer;background:rgba(127,127,127,.08);border-radius:10px;padding:7px 4px;text-align:center"><div style="font-size:19px;font-weight:800;color:${k[2]}">${k[0]}</div><div class="hint" style="margin:0;font-size:11px">${k[1]}</div></div>`).join('')}</div>
       <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#ea580c,#c2410c)" onclick="herrNuevoForm('',true)">➕ Alta</button><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrNuevaEntrega()">📤 Entregar</button></div>
       <button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#fb923c;border:1px solid var(--line);box-shadow:none" onclick="irA('herr')">🧰 Herramienta de ${modulo()}</button></div>
     ${avD.length?`<div class="card" style="border:2px solid #0891b2"><strong>📣 El Auditor recogió herramienta</strong>${avD.map(m=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:8px 0"><span style="min-width:0"><strong>${herrEsc(m.datos.desc)}</strong><span class="hint" style="display:block;margin:0">De ${herrEsc(m.modulo)} · recibió ${herrEsc(String(m.recibidoPor||'').split('@')[0])} el ${herrFecha(m.fechaRecibido)}</span></span>${btnLinea('Enterado',`herrDirEnterado('${m.id}')`)}</div>`).join('')}</div>`:''}
@@ -3023,10 +3045,11 @@ async function renderAlmacen(){
       return `<div class="card" style="border-left:5px solid #0891b2"><strong>🚚 Enviado, esperando que lo reciban (${herrCuenta(env)})</strong><p class="hint" style="margin:2px 0 0">Ya se descontó de tu almacén. Si te equivocaste, cancélalo y regresa aquí.</p>${mods.map(md=>`<div class="hint" style="margin:8px 0 0;font-weight:800">➜ ${herrEsc(md)}</div>`+env.filter(t=>t.modulo===md).map(t=>`<div class="row" style="justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:6px 0"><span style="min-width:0"><strong>${herrEsc(t.nombre)}</strong>${(t.cantidad||1)>1?' × '+t.cantidad:''} ${herrChipMarca(t.marca)}<span class="hint" style="margin:0">${herrEsc(t.color||'')} · ${herrFecha(t.origenFecha)}</span></span>${btnLinea('Cancelar',`herrCancelarEnvio('${t.id}')`,'var(--sub)')}</div>`).join('')).join('')}</div>`; })()}
     ${herrForm && herrForm.almacen ? herrFormHtml(D, R) : ''}
     ${herrEdit ? herrEditHtml(D, R) : ''}
+    ${herrPrest ? herrPrestHtml(D, R) : ''}
     ${herrMer ? herrMerHtml(D) : ''}
     ${entHtml}
     ${pendAlm.length?`<div class="hint" style="margin:6px 2px;font-weight:800">⏳ En aprobación</div>`+pendAlm.map(m=>herrAprobCard(m,D)).join(''):''}
-    <div class="subtabs" style="flex-wrap:wrap">${tab('buenas','🟢 Buenas')}${tab('danadas','🔴 Dañadas')}${tab('recibir',`🚚 Por recibir${porRec.length?' ('+porRec.length+')':''}`)}${tab('prest','📍 Prestada')}${tab('ent','📥 Entradas')}${tab('sal','📤 Salidas')}${tab('mermas','🗑️ Mermas')}</div>
+    <div class="subtabs" style="flex-wrap:wrap">${tab('buenas','🟢 Buenas')}${tab('danadas','🔴 Dañadas')}${tab('recibir',`🚚 Por recibir${porRec.length?' ('+porRec.length+')':''}`)}${tab('prestamo',`🤝 Préstamo${prestAlm.length?' ('+herrCuenta(prestAlm)+')':''}`)}${tab('prest','📍 En módulos')}${tab('ent','📥 Entradas')}${tab('sal','📤 Salidas')}${tab('mermas','🗑️ Mermas')}</div>
     ${cuerpo}`;
 }
 async function herrGuardarEntrega(){
@@ -3387,6 +3410,9 @@ async function generarHerrPDF(){
   stk.length ? S.tabla(cols('Estado'), stk.map(t=>fila(t, t.estado==='descompuesta'?{t:'Descompuesta',col:C_MAL,b:true}:{t:'Funcionando',col:[22,128,74],b:true})), C_STOCK) : S.vacio('No hay herramienta en stock.');
   // v211: herramienta en préstamo
   const prs = mias.filter(t=>t.lugar==='prestamo');
+  const deb = herrMeDeben(D, mod);
+  if(deb.length){ const C_DB = [124,58,237]; S.seccion('HERRAMIENTA QUE TE PRESTARON (HAY QUE REGRESARLA)', `${cuenta(deb)} herramienta(s)`, C_DB);
+    S.tabla([{t:'Herramienta',w:38},{t:'Cant.',w:10},{t:'Marca',w:24},{t:'De',w:34},{t:'Motivo',w:52},{t:'Desde',w:24}], deb.map(t=>{ const P = t.prestamo||{}; return [{t:t.nombre, b:true}, String(t.cantidad||1), herrPdfMarca(t), t.modulo===ALM?'Almacén general':t.modulo, P.motivo||'', herrFecha(P.fecha)]; }), C_DB); }
   if(prs.length){ const C_PR = [162,28,175]; S.seccion('HERRAMIENTA EN PRÉSTAMO', `${cuenta(prs)} herramienta(s) prestada(s)`, C_PR);
     S.tabla([{t:'Herramienta',w:38},{t:'Cant.',w:10},{t:'Marca',w:24},{t:'Prestada a',w:34},{t:'Motivo',w:52},{t:'Desde',w:24}], prs.map(t=>{ const P = t.prestamo||{}; return [{t:t.nombre, b:true}, String(t.cantidad||1), herrPdfMarca(t), herrPrestTxt(P)+(P.quien?'\n'+P.quien:''), P.motivo||'', herrFecha(P.fecha)]; }), C_PR); }
   // 3b. PILAS Y CARGADORES SUELTOS
@@ -3405,7 +3431,7 @@ async function generarHerrPDF(){
 async function generarAlmacenPDF(){
   if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
   const D = await herrCargar(true); const cuenta = herrCuenta;
-  const alm = D.tools.filter(t=>t.modulo===ALM), buenas = alm.filter(t=>t.estado!=='descompuesta'), danadas = alm.filter(t=>t.estado==='descompuesta');
+  const almTodo = D.tools.filter(t=>t.modulo===ALM), prestAlm = almTodo.filter(t=>t.lugar==='prestamo'), alm = almTodo.filter(t=>t.lugar!=='prestamo'), buenas = alm.filter(t=>t.estado!=='descompuesta'), danadas = alm.filter(t=>t.estado==='descompuesta');
   const prest = herrPrestada(D), porRec = herrPorRecibir(D);
   const hoy = new Date(), hoyTxt = hoy.toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
   const mesIni = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString(), mesTxt = hoy.toLocaleDateString('es-MX',{month:'long',year:'numeric'});
@@ -3430,6 +3456,10 @@ async function generarAlmacenPDF(){
     S.banda(md, `${cuenta(xs)} herramienta(s)`, C_PREST);
     S.tabla([{t:'Herramienta',w:40},{t:'Cant.',w:11},{t:'Marca',w:26},{t:'Se asignó a',w:40},{t:'Salió',w:17},{t:'Motivo',w:48}],
       xs.map(t=>[{t:t.nombre, b:true}, String(t.cantidad||1), herrPdfMarca(t), t.lugar==='porasignar'?{t:'Por asignar', col:[194,65,12], b:true}:t.lugar==='encamino'?{t:'En camino (sin recibir)', col:[8,145,178], b:true}:herrDondeTxt(t)+(t.enCamino?' · en camino':''), herrFecha(t.origenFecha||t.desde), herrPdfOrigen(t)]), C_PREST); });
+  // v211: préstamos (del almacén y entre módulos)
+  const prA = D.tools.filter(t=>t.lugar==='prestamo');
+  if(prA.length){ const C_PR = [162,28,175]; S.seccion('PRÉSTAMOS DE HERRAMIENTA', `${cuenta(prA)} herramienta(s) prestada(s)`, C_PR);
+    S.tabla([{t:'Herramienta',w:36},{t:'Cant.',w:10},{t:'De',w:28},{t:'Prestada a',w:34},{t:'Motivo',w:50},{t:'Desde',w:22}], prA.map(t=>{ const P = t.prestamo||{}; return [{t:t.nombre, b:true}, String(t.cantidad||1), t.modulo===ALM?'Almacén general':t.modulo, herrPrestTxt(P)+(P.quien?'\n'+P.quien:''), P.motivo||'', herrFecha(P.fecha)]; }), C_PR); }
   // 3. EN CAMINO
   if(porRec.length){ S.banda('En camino de regreso al almacén', String(porRec.length), C_GRIS);
     S.tabla([{t:'Fecha',w:18},{t:'Herramienta',w:48},{t:'De',w:40},{t:'Motivo',w:52},{t:'Cómo viene',w:24}], porRec.map(m=>[herrFecha(m.fecha), {t:(m.datos.cantidad>1?m.datos.cantidad+' ':'')+m.datos.desc, b:true}, m.modulo+(m.datos.quien?' · '+m.datos.quien:''), herrMotTxt(HERR_REG_MOT,m.datos.motivo,m.datos.nota), m.datos.estadoVuelta==='descompuesta'?{t:'Dañada',col:C_MAL,b:true}:{t:'Sirve',col:C_OK,b:true}]), C_GRIS); }
