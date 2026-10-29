@@ -223,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v209';
+const APP_VERSION = 'v210';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6905,11 +6905,13 @@ function verifPintar(){
       <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:22px">${l.categoria==='Puerta'?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
         <strong style="font-size:15px">${l.descripcion}</strong>${calleHtml(l,true)}
         <div class="hint" style="margin:2px 0 0">${l.modulo}${verifQuien(l)?' · '+verifQuien(l):''}${l.nota?' · '+l.nota:''}${l.estado==='pendiente'?' · <span style="color:#d97706">aún sin aprobar · ✅ la aprueba</span>':''}</div>
-        ${(l.fechaDia && l.fecha && diaLocal(l.fecha)!==l.fechaDia && !l.verif) ? `<div style="margin:8px 0 0;padding:9px 11px;border-radius:10px;background:#fde047;color:#1a1a1a;border:2px solid #d97706;font-size:13.5px"><strong>⚠️ Se capturó el ${fCorta(diaLocal(l.fecha))}, pero dice que se instaló el ${fCorta(l.fechaDia)}.</strong> Revisa que sí esté en el reporte del grupo del ${fCorta(l.fechaDia)}.${true?`<div style="margin-top:6px"><button class="btn small" style="background:#b45309" onclick="verifCambiarFecha('${l.id}')">📅 Es del ${fCorta(diaLocal(l.fecha))}: cambiar la fecha</button></div>`:''}</div>` : ''}
+        ${verifPospHtml(l)}
+        ${(l.fechaDia && l.fecha && diaLocal(l.fecha)!==l.fechaDia && !l.verif && !l.pospuesta) ? `<div style="margin:8px 0 0;padding:9px 11px;border-radius:10px;background:#fde047;color:#1a1a1a;border:2px solid #d97706;font-size:13.5px"><strong>⚠️ Se capturó el ${fCorta(diaLocal(l.fecha))}, pero dice que se instaló el ${fCorta(l.fechaDia)}.</strong> Revisa que sí esté en el reporte del grupo del ${fCorta(l.fechaDia)}.${true?`<div style="margin-top:6px"><button class="btn small" style="background:#b45309" onclick="verifCambiarFecha('${l.id}')">📅 Es del ${fCorta(diaLocal(l.fecha))}: cambiar la fecha</button></div>`:''}</div>` : ''}
         ${verifDetalleHtml(l)}</div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
         ${btn(l.id,'ok','✅ Se instaló','#16a34a')}${btn(l.id,'parte','🔸 Una parte','#d97706')}
-        ${btn(l.id,'no','❌ No se instaló','#dc2626')}${btn(l.id,'modelo','❓ No coincide','#3E5CDE')}</div>
+        ${btn(l.id,'no','❌ No se instaló','#dc2626')}${btn(l.id,'modelo','❓ No coincide','#3E5CDE')}
+        <div style="grid-column:1/-1;display:grid">${btn(l.id,'otro','⏳ Se instala otro día','#7c3aed')}</div></div>
       ${verifPanel && verifPanel.id===l.id ? verifPanelHtml(l) : ''}</div>`; };
   $('#main').innerHTML = `
     <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
@@ -7038,6 +7040,14 @@ function verifPanelHtml(l){
     ${l.estado==='pendiente'?`<p class="hint" style="margin:4px 0 0">Esta instalación aún no estaba aprobada: se aprueba lo que sí se instaló.</p>`:''}
     ${nota('Nota para el coordinador (opcional): ej. faltó la cajonera')}
     <button class="btn" style="width:100%;min-height:50px;margin-top:8px;background:#d97706" onclick="verifParte('${l.id}')">🔸 Elegir lo que regresó</button>`);
+  if(acc==='otro'){ const hoy = fechaHoyLocal();
+    return caja('#7c3aed', `<strong>⏳ No se instaló, pero se instala otro día</strong>
+      <p class="hint" style="margin:4px 0 0">No se rechaza: el material <strong>sigue descontado</strong> (ya está cortado para esta instalación) y no se mueve nada. La instalación pasa al día que elijas y te vuelve a salir en Verificar con el reporte del grupo de ese día.</p>
+      <label class="hint" style="display:block;margin:8px 0 0;font-weight:800">¿Qué día se instala?</label>
+      <input type="date" id="verif-otro-f" value="${hoy}" min="${hoy}" style="margin-top:4px">
+      <input id="verif-nota" placeholder="Nota (opcional): ej. el cliente no estaba" style="margin-top:8px">
+      <p class="hint" style="margin:6px 0 0">Al coordinador le sale que ya está capturada y que <strong>no la vuelva a capturar</strong>.</p>
+      <button class="btn" style="width:100%;min-height:50px;margin-top:8px;background:#7c3aed" onclick="verifOtroDia('${l.id}')">⏳ Pasarla a ese día</button>`); }
   if(acc==='no'){ const pl = l.categoria==='Puerta';
     return caja('#dc2626', `<strong>❌ ${l.descripcion.split(' · ').slice(0,2).join(' · ')}: no se instal${pl?'aron':'ó'}</strong>
       <p class="hint" style="margin:4px 0 0">Al coordinador de ${M} le sale el aviso: los <strong>herrajes regresan solos</strong> a su inventario y él elige a dónde va la <strong>melamina</strong>: 📦 a su inventario · 🧩 a Sobrantes · 🗑️ a Merma.</p>${lista}
@@ -7059,6 +7069,33 @@ async function verifAccion(id, acc){
   if(acc==='ok'){ try{ const l=verifLog(id); if(l) await verifAprobarSiPend(l); await verifGuardar(id, {estado:'ok'}); if(l) l.verif={estado:'ok'}; verifPanel=null; if(l && l.aprobadaAqui) toast('✅ Verificada y aprobada.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); } return; }
   verifPanel = (verifPanel && verifPanel.id===id && verifPanel.acc===acc) ? null : {id, acc};
   verifPintar();
+}
+// v210 (pedido por el usuario): "⏳ Se instala otro día". No es un rechazo: el material sigue descontado y
+// la instalación cambia su fecha al día elegido; Dirección la vuelve a verificar con el reporte de ese día.
+async function verifOtroDia(id){
+  const l = verifLog(id); if(!l) return;
+  const el = document.getElementById('verif-otro-f'), nueva = el && el.value, hoy = fechaHoyLocal();
+  if(!nueva || nueva < hoy) return alert('Elige un día de hoy en adelante.');
+  const nota = verifNotaVal(), quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
+  const P = l.pospuesta || {}, hist = (P.historial||[]).concat([{de:l.fechaDia, a:nueva, en:ahora, por:quien, nota}]);
+  if(!confirm(`⏳ ${l.descripcion.split(' · ').slice(0,2).join(' · ')}${l.calle?'\n📍 '+l.calle:''}\n\nPasa del ${fCorta(l.fechaDia)} al ${fCorta(nueva)}.\n\nEl material sigue descontado (no se mueve nada). Te vuelve a salir para verificar con el reporte del ${fCorta(nueva)}.\n\n¿Continuar?`)) return;
+  try{ const upd = {fechaDia:nueva, pospuesta:{primero:P.primero||l.fechaDia, a:nueva, veces:(P.veces||0)+1, por:quien, en:ahora, nota, historial:hist}};
+    await db.collection('instalacionesLog').doc(id).update(upd); Object.assign(l, upd);
+    verifPanel = null; toast('⏳ Pasó al '+fCorta(nueva)+'.'); verifTrasCambio(); }
+  catch(e){ alert('Error: '+e.message); }
+}
+function verifPospHtml(l){
+  const P = l.pospuesta; if(!P) return '';
+  const dias = verifDiasAtras(P.primero||l.fechaDia), rojo = (P.veces||0)>=2 || dias>3, c = rojo?'#dc2626':'#7c3aed';
+  return `<div style="margin:8px 0 0;padding:9px 11px;border-radius:10px;background:${c}1f;border:2px solid ${c};font-size:13.5px"><strong>⏳ Se pasó del ${fCorta(P.primero||'')} al ${fCorta(l.fechaDia)}</strong>${(P.veces||0)>1?` · <strong>${P.veces} veces</strong>`:''}${rojo?` · lleva ${dias} días`:''}<br>No es nueva: ya estaba capturada y su material sigue descontado.${P.nota?`<br>📝 ${P.nota}`:''}</div>`;
+}
+// Instalaciones pasadas a otro día que todavía no se verifican (para el coordinador y el aviso al capturar).
+function instPospuestas(logs){ return (logs||[]).filter(l=>l.pospuesta && !l.verif && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado); }
+async function avisoPospuesta(calle){
+  try{ await cargarInstLog(); }catch(e){ return true; }
+  const c = calleNorm(calle); if(!c) return true;
+  const xs = instPospuestas(instLog).filter(l=>calleNorm(l.calle)===c); if(!xs.length) return true;
+  return confirm(`⏳ ESTA INSTALACIÓN YA ESTÁ CAPTURADA\n\n${xs.map(l=>'• '+l.descripcion.split(' · ').slice(0,3).join(' · ')+'\n  📍 '+l.calle+' · pasó para el '+fCorta(l.fechaDia)).join('\n')}\n\nDirección la pasó a otro día: su material YA está descontado. NO la vuelvas a capturar.\n\nSolo toca Aceptar si es OTRO trabajo distinto en la misma calle.`);
 }
 function verifTrasCambio(){ if(verifLogs) _dirVerif = verifCalcDir(verifLogs, []); cargarPendDir(true); verifPintar(); }
 async function verifTodasOk(){
@@ -7250,8 +7287,9 @@ async function verifCoordCargar(){
   if(Date.now()-_verifCoordT < 4000 && _verifCoord && _verifCoord.mod===modulo()) return;
   _verifCoordT = Date.now();
   try{ const snap = await db.collection('instalacionesLog').get(); const mod = modulo();
-    const logs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===mod && l.verif && l.verif.estado && l.verif.estado!=='ok');
-    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs};
+    const todos = snap.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===mod);
+    const logs = todos.filter(l=>l.verif && l.verif.estado && l.verif.estado!=='ok'), posp = instPospuestas(todos);
+    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp};
     if(JSON.stringify(_verifCoord)!==antes && current==='home' && !esAdmin()) renderHome();
   }catch(e){}
 }
@@ -7287,6 +7325,11 @@ function verifCoordHtml(){
       ${aviso.map(linea).join('')}
       ${nInfo?`<button class="btn small" style="width:100%;margin-top:10px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="verifEnterado()">👍 Enterado</button>`:''}</div>`;
   }
+  const posp = _verifCoord.posp||[];
+  if(posp.length) html += `<div class="card" style="padding:12px;border:2px solid #7c3aed">
+      <div style="font-size:16px;font-weight:900">⏳ Pasaron para otro día (${posp.length})</div>
+      <p class="hint" style="margin:2px 0 0">Dirección dice que se instalan otro día. <strong>Ya están capturadas y descontadas: NO las vuelvas a capturar.</strong></p>
+      ${posp.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">Pasó para el <strong>${fCorta(l.fechaDia)}</strong>${l.pospuesta.nota?' · 📝 '+l.pospuesta.nota:''}</span></span></div>`).join('')}</div>`;
   if(reinst.length) html += `<div class="card" style="padding:12px;border:2px solid #0e7490">
       <div style="font-size:16px;font-weight:900">🔁 Por volver a instalar (${reinst.length})</div>
       <p class="hint" style="margin:2px 0 0">Ya están descontadas: <strong>NO las captures otra vez</strong> como instalación. Cuando se instale y salga en el reporte del grupo, Dirección la marca como instalada.</p>
@@ -8234,6 +8277,7 @@ async function confirmarInst(){
   const nota = ($('#i-nota').value||'').trim();
   if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[], consumo:instPreview.consumo});
   const calle = exigirCalle('i'); if(!calle) return; // v182
+  if(!(await avisoPospuesta(calle))) return; // v210
   if(!(await verifAvisoRecaptura('Mueble', instPreview.modeloKey||null))) return; // v181
   const fechaDia = $('#i-fecha').value || new Date().toISOString().slice(0,10);
   const mod = modulo();
@@ -8764,6 +8808,7 @@ async function registrarPuerta(tipo, alto, ancho){
   const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${puertaPreview.medidasTxt||(ancho+'×'+alto+' cm (ancho×alto)')}`;
   if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo});
   const calle = exigirCalle('p'); if(!calle) return; // v182
+  if(!(await avisoPospuesta(calle))) return; // v210
   if(!(await verifAvisoRecaptura('Puerta'))) return; // v181
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
@@ -13549,7 +13594,7 @@ function unaSolaVez(nombre, fn){
  'confirmarRegresoInst','confirmarRegresoParcial','confirmarRegresoLibre','confirmarRegresoPuerta','guardarCambioModelo',
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
- 'verifRegresa','verifDestino','verifDestGuardar','sobCerrarPuertas','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
+ 'verifRegresa','verifDestino','verifOtroDia','verifDestGuardar','sobCerrarPuertas','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
  'dupQuitar','dupIgnorar','verifCambiarFecha','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
 // v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
