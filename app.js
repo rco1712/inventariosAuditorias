@@ -223,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v209';
+const APP_VERSION = 'v210';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -10357,7 +10357,7 @@ function corrCalcHtml(it){
       + `<div style="margin-top:12px;padding:10px;border-radius:10px;border:2px dashed var(--brand)"><strong>¿Tienes cajones o cajoneras NORMALES con corredera de extensión?</strong><div style="display:flex;gap:6px;margin-top:8px">${bt(true,'Sí')}${bt(false,'No')}</div>
         ${c.norm===true ? row('🗃️ Cajones normales con extensión','cajN') + sub('CAJONERAS NORMALES CON EXTENSIÓN · sin cajones') + grid('sinN') + sub('· completas, con sus cajones') + grid('compN') : ''}</div>`; }
   return `<div style="padding:12px 0;border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><strong style="font-size:15px">${cfg.titulo}</strong><span class="tag" style="background:#0e8a8a;color:#fff;border-color:#0e8a8a">calculadora</span></div>
-    <div class="hint" style="margin:2px 0 0">El inventario dice: <strong style="color:var(--ink)">${esp.juegos} juegos</strong>${esp.hembras>0?` + ${esp.hembras} hembras sin pareja`:''}${esp.machos>0?` + ${esp.machos} machos sin pareja`:''}</div>
+    <div class="hint" style="margin:2px 0 0">Cuenta todo lo que tienes y escríbelo. La app lo compara con el inventario al guardar.</div>
     ${body}<div id="corr-res-${k}" style="margin-top:12px"></div></div>`;
 }
 function corrPintarRes(k){
@@ -10367,11 +10367,11 @@ function corrPintarRes(k){
   const ok = fmtNum(r.juegos)===fmtNum(esp.juegos) && fmtNum(r.sobH)===fmtNum(esp.hembras) && fmtNum(r.sobM)===fmtNum(esp.machos);
   const dif = fmtNum(r.juegos - esp.juegos);
   const li = (a,b) => `<div style="display:flex;justify-content:space-between;font-size:13.5px;margin-top:3px"><span>${a}</span><strong>${b}</strong></div>`;
-  el.innerHTML = `<div style="padding:12px;border-radius:12px;border:2px solid ${ok?'#16a34a':'#dc2626'};background:${ok?'rgba(22,163,74,.10)':'rgba(220,38,38,.10)'}">
+  el.innerHTML = `<div style="padding:12px;border-radius:12px;border:2px solid #0e8a8a;background:rgba(14,138,138,.08)">
     ${li(`Machos (sueltos + en cajones)`, fmtNum(r.machos))}${li(`Hembras (sueltas + en cajoneras)`, fmtNum(r.hembras))}${li('Se juntan solos (macho + hembra)', fmtNum(r.pares)+' juegos')}${r.compl?li('Cajoneras completas', fmtNum(r.compl)+' juegos'):''}${li('Juegos completos', fmtNum(r.jc))}
     <div style="border-top:1px solid var(--line);margin:8px 0"></div>
     <div style="font-size:20px;font-weight:900">Tienes: ${fmtNum(r.juegos)} juegos ${r.sobH>0?`<span class="hint" style="margin:0">+ ${fmtNum(r.sobH)} hembras sin pareja</span>`:''}${r.sobM>0?`<span class="hint" style="margin:0">+ ${fmtNum(r.sobM)} machos sin pareja</span>`:''}</div>
-    <div style="font-weight:800;margin-top:5px;color:${ok?'#16a34a':'#dc2626'}">${ok?'✅ Cuadra con el inventario':`❌ No cuadra: el inventario dice ${esp.juegos} juegos${esp.hembras>0?' + '+esp.hembras+' hembras':''}${esp.machos>0?' + '+esp.machos+' machos':''}${Number(dif)?` · ${dif<0?'te faltan '+Math.abs(dif):'tienes '+dif+' de más'}`:''}`}</div></div>`;
+    </div>`;
   if(it) herrConf[it.id] = {ok, tiene:String(fmtNum(r.juegos)), corr:{esp, r}};
   herrConfContador();
 }
@@ -10411,21 +10411,23 @@ async function herrMeterAjuste(id){
     c.herrVisto = true; c.herrAjustado = true; toast('✅ Ajuste guardado.'); renderHerrCuad();
   }catch(e){ alert('Error: '+e.message); }
 }
+// v210 (pedido por el usuario): CONTEO A CIEGAS. El coordinador no ve cuánto debe tener: escribe lo
+// que cuenta y la app lo compara al guardar (a Dirección le llega si no cuadra). No cambia el inventario.
+function herrCiega(id, v){
+  if(String(v).trim()===''){ delete herrConf[id]; }
+  else herrConf[id] = {ok: fmtNum(Number(v))===fmtNum(stockEsperadoCierre(id)), tiene:String(v)};
+  herrConfContador();
+}
 function herrConfHtml(){
   const its = herrConfItems(); if(!its.length) return '';
-  const fila = it => { const cu = herrCuentaHoy(it), esp = cu.esp, r = herrConf[it.id]||{}, u = it.unidad||'';
-    const cuenta = cu.movio ? `<span class="hint" style="margin:0">Tenías <strong style="color:var(--ink)">${cu.tenia}</strong> · ${cu.partes.join(' · ')}</span><br><span style="font-size:14px">Te deben quedar <strong>${esp} ${u}</strong>. ¿Los tienes?</span>`
-      : `<span class="hint" style="margin:0">No se movieron hoy · tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span>`;
-    const b = (on, txt, c, js) => `<button class="btn small" style="min-width:64px;${on?`background:${c};border-color:${c}`:`background:transparent;color:${c};border:1px solid ${c};box-shadow:none`}" onclick="${js}">${txt}</button>`;
+  const fila = it => { const r = herrConf[it.id]||{}, u = it.unidad||'';
     if(CORR_CALC[it.nombre]) return corrCalcHtml(it);
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="flex:1;min-width:150px"><strong>${it.nombre}</strong><br>${cuenta}</span>
-        <span style="display:flex;gap:6px">${b(r.ok===true,'✅ Sí','#16a34a',`herrConf['${it.id}']={ok:true};herrConfPintar()`)}${b(r.ok===false,'❌ No','#dc2626',`herrConf['${it.id}']={ok:false,tiene:''};herrConfPintar()`)}</span></div>
-      ${r.ok===false?`<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><label class="hint" style="margin:0;flex:1">¿Cuántos tienes en realidad?</label><input type="number" min="0" inputmode="decimal" value="${r.tiene}" placeholder="0" style="max-width:110px" oninput="herrConf['${it.id}'].tiene=this.value"></div>`:''}</div>`; };
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)"><span style="flex:1;min-width:0"><strong>${it.nombre}</strong>${u?` <span class="hint" style="margin:0">(${u})</span>`:''}</span>
+      <input type="number" min="0" inputmode="decimal" value="${r.tiene===undefined?'':r.tiene}" placeholder="¿Cuántos?" style="max-width:120px;text-align:center" oninput="herrCiega('${it.id}', this.value)"></div>`; };
   const n = its.filter(it=>herrConf[it.id] && herrConf[it.id].ok!==undefined).length;
-  return `<div class="card" id="herrconf-card"><div class="paso">3</div><strong>🔩 ¿Tienes estos herrajes?</strong>
-    <p class="hint">Estos herrajes se descuentan solos con las instalaciones. Revisa si tienes lo que dice el inventario y contesta <strong>Sí</strong> o <strong>No</strong>. Si es No, escribe cuántos tienes: le llega a Dirección y <strong>no cambia tu inventario</strong>.</p>
-    <div class="hint" style="margin:0 0 4px">Contestados: <strong id="herrconf-n">${n} de ${its.length}</strong></div>
+  return `<div class="card" id="herrconf-card"><div class="paso">3</div><strong>🔩 Cuenta estos herrajes</strong>
+    <p class="hint">Cuenta lo que tienes <strong>físicamente</strong> y escribe el número (pon 0 si no tienes). La app lo compara con el inventario y, si no cuadra, le llega a Dirección. <strong>No cambia tu inventario.</strong></p>
+    <div class="hint" style="margin:0 0 4px">Contados: <strong id="herrconf-n">${n} de ${its.length}</strong></div>
     ${its.map(fila).join('')}</div>`;
 }
 function herrConfPintar(){ const el = document.getElementById('herrconf-card'); if(el) el.outerHTML = herrConfHtml(); ['n','e'].forEach(corrPintarRes); }
@@ -10750,7 +10752,7 @@ function renderCierreConsumibles(){
 async function guardarCierre(){
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const herrIts = herrConfItems(), herrSin = herrIts.filter(it=>!herrConf[it.id] || herrConf[it.id].ok===undefined);
-  if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre+(CORR_CALC[it.nombre]?' (llena todas las casillas de la calculadora; pon 0 si no tienes)':'')).join('\n')); }
+  if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contar estos herrajes (pon 0 si no tienes):\n\n'+herrSin.map(it=>'• '+it.nombre+(CORR_CALC[it.nombre]?' (llena todas las casillas de la calculadora; pon 0 si no tienes)':'')).join('\n')); }
   { const cz = ['n','e'].map(k=>corrResultado(k)); if(cz.every(r=>r.completo && r.juegos===0 && r.sobH===0 && r.sobM===0) && !confirm('🔩 En las dos calculadoras de correderas pusiste todo en 0.\n\n¿Seguro que no tienes ninguna corredera?')) return; }
   const herrMal = herrIts.filter(it=>herrConf[it.id].ok===false && !(String(herrConf[it.id].tiene).trim()!=='' && Number(herrConf[it.id].tiene)>=0));
   if(herrMal.length) return alert('🔩 Escribe cuántos tienes de:\n\n'+herrMal.map(it=>'• '+it.nombre).join('\n'));
@@ -13024,9 +13026,11 @@ async function generarReporteDiarioPDF(modo, fechaDia){
       doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.setTextColor(...cc); doc.text('Herrajes (cierre del turno)', marginL+4, y+5.6);
       doc.text(mal.length ? `${mal.length} no cuadran` : `Todos cuadran (${cH.herrajes.length})`, marginL+W-2, y+5.6, {align:'right'}); y += 11;
       doc.setFontSize(9); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0);
-      if(mal.length){ mal.forEach(h=>{ if(y > pageH-15){ doc.addPage(); y = 15; } doc.text(h.nombre, marginL+2, y); doc.text(`Inventario ${h.esperado} · tiene ${h.tiene}`, marginL+W-2, y, {align:'right'}); y += 5.5; });
-        doc.setFontSize(8); doc.setTextColor(110,116,132); doc.text('Solo es lo que contestó el coordinador: el inventario no se movió.', marginL+2, y+1); doc.setTextColor(0,0,0); y += 6; }
-      else { doc.text('El coordinador confirmó que tiene todos los herrajes que dice el inventario.', marginL+2, y); y += 6; }
+      if(mal.length){ mal.forEach(h=>{ if(y > pageH-15){ doc.addPage(); y = 15; } doc.text(h.nombre+(h.corr?' (juegos)':''), marginL+2, y); doc.text(`Inventario ${h.esperado} · tiene ${h.tiene}`, marginL+W-2, y, {align:'right'}); y += 5.5;
+          if(h.corr){ const e=h.corr.esp, r=h.corr.r; [['hembras sin pareja',e.hembras,r.sobH],['machos sin pareja',e.machos,r.sobM]].forEach(([n,a,b])=>{ if(!(Number(a)||Number(b))) return; if(y > pageH-15){ doc.addPage(); y = 15; }
+            doc.setTextColor(110,116,132); doc.text('   · '+n, marginL+2, y); doc.text(`Inventario ${fmtNum(a)} · tiene ${fmtNum(b)}`, marginL+W-2, y, {align:'right'}); doc.setTextColor(0,0,0); y += 5.5; }); } });
+        doc.setFontSize(8); doc.setTextColor(110,116,132); doc.text('Solo es lo que contó el coordinador: el inventario no se movió.', marginL+2, y+1); doc.setTextColor(0,0,0); y += 6; }
+      else { doc.text('Lo que contó el coordinador cuadra con el inventario.', marginL+2, y); y += 6; }
     }
   }
 
