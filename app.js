@@ -51,6 +51,7 @@ let dAdicionales = []; // Despiece
 let iAdicionales = []; // Instalación de mueble
 const TIPOS_ADICIONAL = {
   entrepanera: 'Entrepañera',
+  cajonera_2: 'Cajonera de 2 cajones',
   cajonera: 'Cajonera (cantidad libre)',
   cajonera_emma: 'Cajonera Emma (4 cajones)',
   cajonera_espejo: 'Cajonera de espejo',
@@ -89,6 +90,7 @@ const FAMILIAS_COMP = Object.keys(NUM_MUEBLES_FAM);
 const MUEBLE_TIPO_OPCIONES = [
   {value:'entrepanera', label:'Entrepañera'},
   {value:'cajonera_1', label:'Cajonera de 1 cajón'},
+  {value:'cajonera_2', label:'Cajonera de 2 cajones'},
   {value:'cajonera_3', label:'Cajonera de 3 cajones'},
   {value:'cajonera_5', label:'Cajonera de 5 cajones'},
   {value:'cajonera_emma', label:'Cajonera Emma (4 cajones)'},
@@ -223,7 +225,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v216';
+const APP_VERSION = 'v217';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5564,8 +5566,8 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     // de 2 → coincide exactamente.
     const NUM_MUEBLES = {Lateral:1, Central:1, Doble:2, King:2, Triple:3, 'Doble Especial':2};
     const numMuebles = NUM_MUEBLES[fam];
-    const CAJONERA_ENTREPANOS = {1:4, 3:5, 5:4, 6:10, 8:9, 10:8};
-    const MUEBLES_CAJONERA = {1:1, 3:1, 5:1, 6:2, 8:2, 10:2};
+    const CAJONERA_ENTREPANOS = {1:4, 2:5, 3:5, 5:4, 6:10, 8:9, 10:8}; // v217: la de 2 cajones lleva 5 entrepaños (confirmado por el usuario)
+    const MUEBLES_CAJONERA = {1:1, 2:1, 3:1, 5:1, 6:2, 8:2, 10:2};
 
     if(cajones===0 && espejos===0){
       if(maxOn){
@@ -5773,7 +5775,7 @@ const ARMADO_TIPOS = {
 const ARMADO_ES_ESPEJO = t => t==='cajonera_espejo' || t==='puerta_espejo' || t==='puerta_zapatera';
 const ARMADO_SIN_VARIANTE = t => t==='puerta_zapatera'; // espejo sí tiene Normal/Max
 const ARMADO_CORREDERA = {hembra:'Hembra (la que va en la cajonera)', macho:'Macho (la que va en el cajón)'};
-const ARMADO_CAJONERAS = {'1':'De 1 cajón','3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
+const ARMADO_CAJONERAS = {'1':'De 1 cajón','2':'De 2 cajones','3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
 const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
 function armadoTienePuertitas(variante){ return ['3','5','emma','max'].includes(variante); }
 function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon' || a.tipo==='corredera') && a.variante!=='max'; }
@@ -5909,8 +5911,8 @@ function piezasEspejoMax(add, color, n){
 function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, extra){
   const piezas = [];
   const add=(nombre,cantidad,dim,colorDestino,estado,nota)=>piezas.push({nombre,cantidad,dim,colorDestino,estado,nota:nota||''});
-  const CAJONERA_ENTREPANOS = {1:4, 3:5, 5:4, 6:10, 8:9, 10:8};
-  const MUEBLES_CAJONERA = {1:1, 3:1, 5:1, 6:2, 8:2, 10:2};
+  const CAJONERA_ENTREPANOS = {1:4, 2:5, 3:5, 5:4, 6:10, 8:9, 10:8}; // v217: la de 2 cajones lleva 5 entrepaños (confirmado por el usuario)
+  const MUEBLES_CAJONERA = {1:1, 2:1, 3:1, 5:1, 6:2, 8:2, 10:2};
   if(tipo==='entrepanera'){
     add('Pared',2,'191×40 cm',color,'ok','Adicional: entrepañera (2 paredes + 5 entrepaños + 2 zóclos)');
     add('Entrepaño',5,'52×40 cm',color,'ok');
@@ -6018,6 +6020,7 @@ function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
   // Cajonera de 1 cajón (confirmado por el usuario): 2 paredes, 4 entrepaños, 2 zóclos, 1 fondo
   // de cajonera y 1 cajón completo con sus herrajes (1 juego de corredera y 1 jaladera).
   if(value==='cajonera_1') return buildAdicionalPiezas('cajonera', 1, color, correderaExt);
+  if(value==='cajonera_2') return buildAdicionalPiezas('cajonera', 2, color, correderaExt);
   if(value==='cajonera_3') return buildAdicionalPiezas('cajonera', 3, color, correderaExt);
   if(value==='cajonera_5') return buildAdicionalPiezas('cajonera', 5, color, correderaExt);
   if(value==='cajonera_otra') return buildAdicionalPiezas('cajonera', cajonesManual, color, correderaExt);
@@ -6302,8 +6305,8 @@ function toggleAdicionalCajones(prefix){
   const sel = document.getElementById(prefix+'-adic-tipo');
   const wrap = document.getElementById(prefix+'-adic-cajones-wrap');
   if(!sel || !wrap) return;
-  let html = (sel.value==='cajonera')
-    ? `<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">
+  let html = (sel.value==='cajonera' || sel.value==='cajonera_2')
+    ? `${sel.value==='cajonera_2'?'':`<label class="hint" style="display:block;margin-top:8px">Cantidad de cajones</label><input type="number" min="1" id="${prefix}-adic-cajones" placeholder="ej. 3">`}
        <label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="${prefix}-adic-ext" style="width:auto"> Este extra lleva corredera de extensión</label>`
     : (sel.value==='cajonera_max' ? `<p class="hint" style="margin-top:8px">La Cajonera Max siempre lleva 4 cajones (confirmado; no se captura cantidad).</p>`
       : (sel.value==='cajonera_emma' ? `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px"><input type="checkbox" id="${prefix}-adic-ext" style="width:auto"> Este extra lleva corredera de extensión</label>` : ''));
@@ -6343,10 +6346,12 @@ function toggleAdicionalCajones(prefix){
   wrap.innerHTML = html;
 }
 function agregarAdicional(prefix){
-  const tipo = document.getElementById(prefix+'-adic-tipo').value;
+  let tipo = document.getElementById(prefix+'-adic-tipo').value;
+  const fijo2 = tipo==='cajonera_2'; if(fijo2) tipo = 'cajonera'; // v217
   const color = document.getElementById(prefix+'-adic-color').value;
   let cajones = null;
-  if(tipo==='cajonera'){
+  if(tipo==='cajonera' && fijo2) cajones = 2;
+  else if(tipo==='cajonera'){
     const el = document.getElementById(prefix+'-adic-cajones');
     cajones = Number(el && el.value);
     if(!cajones || cajones<=0) return alert('Captura la cantidad de cajones del adicional.');
@@ -7655,6 +7660,7 @@ function renderInstMueble(){
     <div id="i-max-wrap"></div>
     <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-corredera-ext" style="width:22px;min-height:22px;flex:0 0 22px"> <span>Las cajoneras <strong>del modelo</strong> llevan corredera de extensión <span class="hint" style="margin:0">(los extras se marcan aparte; la Max siempre la lleva)</span></span></label>
     <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-puertitas-modelo" style="width:22px;min-height:22px;flex:0 0 22px"> <span>Las cajoneras <strong>del modelo</strong> llevan <strong>puertitas</strong> <span class="hint" style="margin:0">(con sus bisagras y jaladeras; en Max, push)</span></span></label>
+    <label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap;padding:8px 10px;border-radius:10px;border:2px solid #d97706"><input type="checkbox" id="i-sin-tubos" style="width:22px;min-height:22px;flex:0 0 22px"> <span><strong>NO lleva tubos</strong> <span class="hint" style="margin:0">(no se descuentan tubos ni juegos de bridas)</span></span></label>
     <button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="iModoComp=!iModoComp;renderInstMueble()">${iModoComp?'← Elegir de la lista de modelos':'¿No está el modelo? Ármalo mueble por mueble'}</button>
 </div>`}
   </div>
@@ -7779,6 +7785,9 @@ function previewInst(){
   }
   // Puertitas en las cajoneras DEL MODELO (confirmado por el usuario): 1 par por cajonera,
   // del color del frente, con la medida de su cajonera (3, 5/Emma o Max).
+  // v217 (pedido por el usuario): si la instalación NO lleva tubos, no se descuentan tubos ni bridas del modelo.
+  const sinTubos = !!(document.getElementById('i-sin-tubos') && document.getElementById('i-sin-tubos').checked);
+  if(sinTubos){ piezasModelo = piezasModelo.filter(p=>p.nombre!=='Tubo' && p.nombre!=='Juego de bridas'); titulo += ' · sin tubos'; }
   const puertitasModelo = !(iSoloExtras && !instRegresoLibre) && !!(document.getElementById('i-puertitas-modelo') && document.getElementById('i-puertitas-modelo').checked);
   if(puertitasModelo){
     const claves = [];
