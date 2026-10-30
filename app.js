@@ -225,7 +225,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v217';
+const APP_VERSION = 'v218';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -2166,7 +2166,7 @@ function herrToolHtml(t, opts){
   const enAlm = t.modulo===ALM;
   let acc = '';
   if(opts.acciones!==false && puedeCapturarHerr()){
-    if(t.lugar==='merma') acc = puedeAprobarHerr() ? `<div class="row" style="gap:6px;margin-top:6px">${btnLinea('🗑️ Eliminar para siempre',`herrEliminar('${t.id}')`,'var(--bad)')}</div>` : '';
+    if(t.lugar==='merma') acc = puedeAprobarHerr() ? `<button class="btn" style="width:100%;margin-top:8px;font-size:15px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="herrSacarMerma('${t.id}')">♻️ Sacar de mermas (regresa al almacén)</button><div class="row" style="gap:6px;margin-top:6px">${btnLinea('🗑️ Eliminar para siempre',`herrEliminar('${t.id}')`,'var(--bad)')}</div>` : '';
     else if(enAlm && t.lugar==='prestamo') acc = herrPrestAccHtml(t);
     else if(enAlm) acc = puedeAprobarHerr() ? `${desc||t.movPend?'':`<button class="btn" style="width:100%;margin-top:8px;font-size:15px;background:linear-gradient(135deg,#a21caf,#86198f)" onclick="herrIniciarPrestamo('${t.id}')">🤝 Prestar</button>`}<div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">${btnLinea('✏️ Editar',`herrIniciarEdicion('${t.id}')`)}${desc?`<button class="btn small" style="background:var(--ok)" onclick="herrReparar('${t.id}')">🔧 Se reparó</button><button class="btn small" style="background:var(--bad)" onclick="herrIniciarMerma('${t.id}')">🗑️ Merma / tirar</button>`:btnLinea('⚠️ Está dañada',`herrCambiarEstado('${t.id}')`,'var(--bad)')}</div>` : '';
     else if(t.enCamino || t.lugar==='encamino') acc = '';
@@ -2179,6 +2179,7 @@ function herrToolHtml(t, opts){
         ${t.lugar==='taller'||t.lugar==='stock'?big(desc?'✅ Ya funciona':'⚠️ Se descompuso',`herrCambiarEstado('${t.id}')`,desc?'linear-gradient(135deg,#16a34a,#15803d)':'linear-gradient(135deg,#dc2626,#b91c1c)'):''}
         ${big('✏️ Corregir datos',`herrIniciarEdicion('${t.id}')`,'linear-gradient(135deg,#7c3aed,#6d28d9)')}
         ${t.movPend?'':`<div style="grid-column:1/-1;display:grid">${big('🤝 Prestar',`herrIniciarPrestamo('${t.id}')`,'linear-gradient(135deg,#a21caf,#86198f)')}</div>`}
+        ${puedeAprobarHerr() && !t.movPend?`<div style="grid-column:1/-1;display:grid"><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="herrBorrarError('${t.id}')">🗑️ Se capturó por error (borrar)</button></div>`:''}
       </div>`; }
   }
   return `<div style="border-bottom:1px solid var(--line);padding:9px 0">
@@ -2211,6 +2212,8 @@ function herrMovResumen(m){
   if(m.tipo==='prestamo') return `🤝 Préstamo: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} ➜ ${herrPrestTxt(d.prest)}${(d.prest||{}).quien?' (recibe '+d.prest.quien+')':''} · ${(d.prest||{}).motivo||''}`;
   if(m.tipo==='prestRegreso') return `↩️ Regresó del préstamo: ${d.desc||''} (${herrPrestTxt(d.prest)})`;
   if(m.tipo==='renombrar') return `👷 Cambio de nombre de instalador: ${d.anterior} → ${d.nuevo}`;
+  if(m.tipo==='sacarMerma') return `♻️ Salió de mermas: ${d.desc||''} · al almacén ${d.estado==='descompuesta'?'(dañada)':'(buena)'}`;
+  if(m.tipo==='borradoError') return `🗑️ Se borró por captura de más: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} (${d.donde||''}) · ${d.motivo||''}`;
   if(m.tipo==='merma') return `Merma: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} · ${herrMotTxt(HERR_MERMA_MOT,d.motivo,d.nota)}`;
   return m.tipo;
 }
@@ -2812,6 +2815,34 @@ async function herrGuardarMerma(){
   const q = Math.min(t.cantidad||1, Math.max(1, Math.round(Number(r.cantidad)||1)));
   const ok = await herrGuardarMov({tipo:'merma', modulo:ALM, datos:{toolId:t.id, desc:herrDesc(t), cantidad:q, motivo:r.motivo, nota:String(r.nota||'').trim()}});
   if(!ok) return; toast('🗑️ Enviada a mermas'); herrMer = null; herrAlmTab = 'mermas'; renderAlmacen();
+}
+// v218 (pedido por el usuario): una herramienta que estaba en Mermas regresa al almacén (buena o dañada),
+// por ejemplo si un coordinador se la llevó; de ahí se entrega normal al módulo.
+async function herrSacarMerma(toolId){
+  if(!puedeAprobarHerr()) return;
+  const D = await herrCargar(true); const t = D.mermas.find(x=>x.id===toolId); if(!t) return;
+  const sirve = confirm(`♻️ ${herrDesc(t)} sale de Mermas y regresa al almacén general.\n\n¿Funciona?\n\nAceptar = SÍ funciona (va a Buenas)\nCancelar = NO, está dañada (va a Dañadas)`);
+  const now = new Date().toISOString(), quien = herrQuien();
+  Object.assign(t, {lugar:'almacen', estado:sirve?'funcionando':'descompuesta', fechaMerma:null, mermaMotivo:null, desde:now});
+  t.hist = (t.hist||[]).concat([{f:now, t:`♻️ Salió de mermas · regresa al almacén ${sirve?'(buena)':'(dañada)'} · ${quien}`}]);
+  await herrPut(t);
+  { const mid = cryptoId(); await db.collection('herrMovs').doc(mid).set({id:mid, tipo:'sacarMerma', modulo:ALM, fecha:now, estado:'aprobado', creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{toolId, desc:herrDesc(t), cantidad:t.cantidad||1, estado:t.estado}, resumen:`♻️ Salió de mermas: ${herrDesc(t)} · al almacén ${sirve?'(buena)':'(dañada)'}`}); }
+  herrCache = null; herrAlmTab = sirve ? 'buenas' : 'danadas'; toast('♻️ Regresó al almacén'); renderAlmacen();
+}
+// v218 (pedido por el usuario): Dirección borra herramienta de un módulo que se capturó por error (de más).
+// Queda anotado en el historial del módulo.
+async function herrBorrarError(toolId){
+  if(!puedeAprobarHerr()) return;
+  const D = await herrCargar(true); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
+  const hay = t.cantidad||1; let q = hay;
+  if(hay>1){ const r = prompt(`${herrDesc(t)} tiene ${hay}. ¿Cuántas se capturaron de más (se borran)?`, '1'); if(r===null) return; q = Math.round(Number(r)); if(!(q>=1 && q<=hay)) return alert('Escribe un número del 1 al '+hay+'.'); }
+  const motivo = prompt(`🗑️ Borrar ${q} ${herrDesc(t)} de ${t.modulo} (${herrDondeTxt(t)}).\n\nNo regresa al almacén: se borra como si nunca se hubiera capturado.\n\n¿Por qué? (ej. el coordinador la dio de alta dos veces)`, 'Se capturó de más');
+  if(motivo===null) return;
+  const now = new Date().toISOString();
+  if(q<hay){ t.cantidad = hay-q; t.hist = (t.hist||[]).concat([{f:now, t:`🗑️ Se borraron ${q} que se capturaron por error · ${motivo} · ${herrQuien()}`}]); await herrPut(t); }
+  else await db.collection('herramientas').doc(t.id).delete();
+  { const mid = cryptoId(); await db.collection('herrMovs').doc(mid).set({id:mid, tipo:'borradoError', modulo:t.modulo, fecha:now, estado:'aprobado', creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{toolId, desc:herrDesc(t), cantidad:q, motivo, donde:herrDondeTxt(t)}, resumen:`🗑️ Se borró por captura de más: ${q>1?q+' ':''}${herrDesc(t)} (${herrDondeTxt(t)}) · ${motivo}`}); }
+  herrCache = null; herrAbierta = ''; toast('🗑️ Borrada'); renderHerr();
 }
 async function herrEliminar(toolId){
   if(!puedeAprobarHerr()) return;
