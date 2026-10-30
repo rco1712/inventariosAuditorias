@@ -9499,13 +9499,34 @@ async function rpPdf(){
   const R = rpCalc(rpCache, rpMod, rpDesde, rpHasta), M = MODULOS.find(m=>m.nombre===rpMod)||{};
   const X = rpTxt(), rgb = [13,116,104], S = herrPdfBase(`Closets Vera · ${X.tit} · ${rpMod}`, `Del ${fCorta(rpDesde)} al ${fCorta(rpHasta)}  ·  verificadas o no`, rgb);
   S.kpis([[R.n.total,'instalaciones',[55,65,81]],[R.n.ok,'verificadas',[22,128,74]],[R.n.sv,'sin verificar',[107,114,128]],[R.n.no+R.n.nopend,'no se instaló',[192,57,43]],[R.n.rech,'rechazadas',[153,27,27]]]);
-  S.seccion('HERRAJES DE '+X.t.toUpperCase(), `Tenía − en ${X.u} + regresaron ± otros movimientos = debe haber`, rgb);
-  S.tabla([{t:'Herraje',w:40},{t:'Tenía',w:24},{t:X.col,w:26},{t:'Regresaron',w:28},{t:'Otros mov.',w:30},{t:'Debe haber',w:34}],
-    R.herr.map(h=>[{t:h.it.nombre, b:true}, fmtNum(h.tenia)+(h.inicioReal?'*':''), {t:'−'+fmtNum(h.usados), col:[192,57,43]}, {t:'+'+fmtNum(h.regresos), col:[22,128,74]}, (h.otros>0?'+':'')+fmtNum(h.otros), {t:String(fmtNum(h.hoy)), b:true}]), rgb);
-  if(R.herr.some(h=>h.inicioReal)) S.vacio('* Desde el conteo inicial (fue después de la fecha de inicio).');
-  if(R.cierres.length){ S.seccion('CIERRES DEL TURNO: ¿LOS TENÍA?', 'Lo que contestó el coordinador cada día (Sí = tenía lo que dice la app)', [71,85,105]);
-    const w = Math.floor((182-24)/R.its.length);
-    S.tabla([{t:'Día',w:24}].concat(R.its.map(it=>({t:it.nombre.replace('Jaladera plana','Jal. plana'), w}))), R.cierres.map(x=>[{t:fCorta(x.dia), b:true}].concat(x.h.map(h=>!h?'—':h.ok?{t:'Sí · '+fmtNum(h.tiene), col:[22,128,74], b:true}:{t:fmtNum(h.tiene)+' (debía '+fmtNum(h.esp)+')\n'+(h.dif>0?'+':'')+h.dif, col:h.dif<0?[192,57,43]:[180,83,9], b:true}))), [71,85,105]); }
+  // v214: formato sencillo (igual que en pantalla): aviso del último cierre y una tarjeta por herraje.
+  const doc = S.doc, L = S.L, W = S.W, pageH = S.pageH, ROJ=[192,57,43], VER=[22,128,74], NAR=[180,83,9], GRIS=[90,90,90];
+  const ult = R.cierres.length ? R.cierres[R.cierres.length-1] : null;
+  if(ult){ const faltan = [], sobran = []; R.its.forEach((it,i)=>{ const h = ult.h[i]; if(h && !h.ok) (h.dif<0?faltan:sobran).push(`${Math.abs(h.dif)} ${it.nombre}`); });
+    const malo = faltan.length||sobran.length, c = malo?ROJ:VER, lineas = malo ? [faltan.length?'Le faltan: '+faltan.join(', '):'', sobran.length?'Le sobran: '+sobran.join(', '):''].filter(Boolean) : ['Tenía todo completo'];
+    const h = 10 + lineas.length*6; doc.setFillColor(...pdfTinte(c,.88)); doc.rect(L,S.y,W,h,'F'); doc.setFillColor(...c); doc.rect(L,S.y,2,h,'F');
+    doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.setTextColor(...c); doc.text(`${malo?'ATENCIÓN · ':''}En el último cierre (${fCorta(ult.dia)})`, L+5, S.y+7);
+    doc.setFontSize(11); lineas.forEach((t,k)=>doc.text(t, L+5, S.y+13.5+k*6)); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); S.y += h+5; }
+  S.seccion('HERRAJES DE '+X.t.toUpperCase()+' EN '+rpMod.toUpperCase(), 'Cuánto tenía, cuánto se usó y cuánto debe tener hoy', rgb);
+  R.herr.forEach((h,i)=>{
+    const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i]})).filter(x=>x.h), u = dias.length ? dias[dias.length-1].h : null;
+    const c = u && !u.ok ? (u.dif<0?ROJ:NAR) : VER;
+    const filas = [[`Tenía el ${fCorta(h.inicioReal?diaLocal(h.inicioReal):rpDesde)}`, fmtNum(h.tenia), [0,0,0]], [`Se usaron en ${X.u}`, '− '+fmtNum(h.usados), ROJ]];
+    if(h.regresos) filas.push([`Regresaron (${X.u} que no se instalaron)`, '+ '+fmtNum(h.regresos), VER]);
+    if(Math.abs(h.otros)>0.0005) filas.push([`Otros (${rpTipo==='Puerta'?'clósets':'puertas'}, entradas, salidas…)`, (h.otros>0?'+ ':'− ')+fmtNum(Math.abs(h.otros)), [0,0,0]]);
+    const alto = 10 + filas.length*5.5 + 9 + (dias.length ? 6 + dias.length*5 : 0) + 3;
+    if(S.y + alto > pageH-14){ doc.addPage(); S.y = 15; }
+    const y0 = S.y; doc.setDrawColor(210,210,210); doc.setFillColor(...pdfTinte(c,.94)); doc.rect(L, y0, W, alto, 'FD'); doc.setFillColor(...c); doc.rect(L, y0, 2, alto, 'F');
+    doc.setFont(undefined,'bold'); doc.setFontSize(12.5); doc.text(h.it.nombre, L+6, y0+7);
+    let y = y0+13; doc.setFontSize(10.5);
+    filas.forEach(f=>{ doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); doc.text(f[0], L+6, y); doc.setFont(undefined,'bold'); doc.setTextColor(...f[2]); doc.text(f[1], L+W/2+20, y, {align:'right'}); y += 5.5; });
+    doc.setTextColor(0,0,0); doc.setDrawColor(150,150,150); doc.line(L+6, y-2.5, L+W/2+20, y-2.5);
+    doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.text('Debe tener hoy', L+6, y+3.5); doc.text(String(fmtNum(h.hoy)), L+W/2+20, y+3.5, {align:'right'}); y += 9;
+    if(dias.length){ doc.setFontSize(9); doc.setTextColor(...GRIS); doc.text('Lo que contó el coordinador:', L+6, y+1); y += 6; doc.setFontSize(10);
+      dias.forEach(x=>{ const ok = x.h.ok; doc.setTextColor(...(ok?VER:(x.h.dif<0?ROJ:NAR))); doc.setFont(undefined, ok?'normal':'bold');
+        doc.text(ok ? `${fCorta(x.dia)}: sí tenía ${fmtNum(x.h.tiene)}` : `${fCorta(x.dia)}: contó ${fmtNum(x.h.tiene)} y debía tener ${fmtNum(x.h.esp)}  →  ${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}`, L+8, y); y += 5; });
+      doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); }
+    S.y = y0 + alto + 4; });
   S.seccion('INSTALACIONES DE '+X.t.toUpperCase(), `${R.n.total} instalación(es)`, rgb);
   const nomH = c => (CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||'';
   R.logs.length ? S.tabla([{t:'Fecha',w:18},{t:'Calle',w:40},{t:rpTipo==='Puerta'?'Puerta':'Clóset',w:46},{t:'Estado',w:42},{t:'Herrajes',w:36}],
