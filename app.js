@@ -225,7 +225,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v221';
+const APP_VERSION = 'v222';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9250,7 +9250,7 @@ async function renderTraspHistorial(){
     return `<div class="card" style="border-left:6px solid ${col}">
       <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:15.5px;color:${col}">${titulo}</strong><span class="tag">${fCorta(diaLocal(p.fecha))}</span></div>
       <p class="hint" style="margin:6px 0">${p.origen} → ${p.destino} · ${p.itemNombre}${p.esMelamina?' (en melamina cuenta cualquier color)':''} · Prestado ${fmtNum(p.cantidad)} · Regresado ${fmtNum(p.devuelto)}${p.nota?' · '+p.nota:''}</p>
-      ${(p.devoluciones||[]).length?`<div class="hint" style="margin:0 0 6px">${p.devoluciones.map(d=>`✅ ${fCorta(diaLocal(d.fecha))}: regresaron ${fmtNum(d.cantidad)} ${d.itemNombre}`).join('<br>')}</div>`:''}
+      ${(p.devoluciones||[]).length?`<div class="hint" style="margin:0 0 6px">${p.devoluciones.map(d=>`✅ ${fCorta(diaLocal(d.fecha))}: regresaron ${fmtNum(d.cantidad)} ${d.itemNombre}${d.yaContadasEnCierre?' (ya se habían contado en el cierre del turno)':''}`).join('<br>')}</div>`:''}
       ${enC.map(e=>`<div style="margin-top:6px;padding:10px 12px;border-radius:12px;background:rgba(8,145,178,.12);border:1px solid rgba(8,145,178,.5)"><strong>🚚 En camino: ${fmtNum(e.cantidad)} ${e.itemNombre}</strong><div class="hint" style="margin:2px 0 0">${p.destino} lo mandó el ${fCorta(diaLocal(e.fecha))} ${new Date(e.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})}. Ya salió de ${p.destino}; entra a ${p.origen} cuando lo confirme.</div>
         ${(!debe || dir)?`<div class="row" style="gap:6px;margin-top:8px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="prestConfirmar('${p.id}','${e.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="prestConfirmar('${p.id}','${e.id}',false)">❌ No llegaron</button></div>`:`<div class="hint" style="margin:6px 0 0">Esperando que ${p.origen} confirme que llegaron.</div>`}</div>`).join('')}
       ${p.pendiente - enCq > 0.0005 && (debe || dir) ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#dc2626,#b91c1c)" onclick="mostrarFormDevolucion('${p.id}')">💸 Saldar deuda (mandar a ${p.origen})</button><div id="dev-${p.id}"></div>` : ''}
@@ -9314,19 +9314,41 @@ function prestHomeHtml(){
     ${debo.length?`<div style="font-size:15px;font-weight:900;margin-top:${llegan.length?10:0}px;color:#dc2626">🔴 Debes material a otros módulos</div>${debo.map(p=>`<div class="hint" style="margin:4px 0 0">• ${fmtNum(p.pendiente)} ${p.unidad} de ${p.esMelamina?'melamina':p.itemNombre} a <strong>${p.origen}</strong></div>`).join('')}
       <button class="btn small" style="width:100%;margin-top:8px;background:#dc2626" onclick="traspSub='historial';irA('trasp')">💸 Saldar deuda</button>`:''}</div>`;
 }
+function prestModoConfirmar(p, e){
+  return new Promise(res=>{
+    let cierreDesp = null; try{ cierreDesp = (cierresCache||[]).filter(c=>c.modulo===p.origen && (c.fecha||'')>(e.fecha||'')).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))[0]||null; }catch(er){}
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:14px';
+    d.innerHTML = `<div class="card" style="max-width:460px;width:100%;max-height:92vh;overflow:auto;border:3px solid #dc2626">
+      <div style="font-size:18px;font-weight:900">✅ Llegaron ${fmtNum(e.cantidad)} ${e.itemNombre} de ${p.destino}</div>
+      <div style="margin-top:10px;padding:12px 14px;border-radius:12px;background:#dc2626;color:#fff">
+        <div style="font-size:18px;font-weight:900">⚠️ ¿YA HICISTE TU CIERRE DEL TURNO CON ESAS HOJAS?</div>
+        <div style="font-size:15px;font-weight:700;margin-top:6px">Si hiciste el cierre <u>antes</u> de confirmar aquí, pero las hojas <u>ya las tenías físicamente</u>, el cierre YA las sumó. Elige la opción roja para que NO se sumen otra vez.</div>
+        ${cierreDesp?`<div style="font-size:14px;margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.18)">📋 Tu cierre del ${fCorta(cierreDesp.dia)} (${new Date(cierreDesp.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})}) se hizo DESPUÉS de que ${p.destino} te las mandó.</div>`:''}
+      </div>
+      <button class="btn" data-k="cierre" style="width:100%;min-height:62px;margin-top:12px;text-align:left;background:#b91c1c"><div style="font-weight:900;font-size:16px">🔴 Llegaron y YA las conté en mi cierre del turno</div><div style="font-size:13px;font-weight:500;opacity:.95">Solo se salda la deuda. NO se suman otra vez a tu inventario.</div></button>
+      <button class="btn" data-k="sumar" style="width:100%;min-height:62px;margin-top:10px;text-align:left;background:#16a34a"><div style="font-weight:900;font-size:16px">🟢 Llegaron y AÚN NO hago mi cierre</div><div style="font-size:13px;font-weight:500;opacity:.95">Se suman a tu inventario y se salda la deuda.</div></button>
+      <button class="btn small" data-k="" style="width:100%;margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none">Cancelar</button></div>`;
+    d.addEventListener('click', ev=>{ const b = ev.target.closest('button[data-k]'); if(!b) return; const k = b.dataset.k; d.remove(); res(k||null); });
+    document.body.appendChild(d);
+  });
+}
 async function prestConfirmar(prestamoId, envId, llego){
   await cargarPrestamos(); const p = prestamos.find(x=>x.id===prestamoId); if(!p) return;
   const e = (p.envios||[]).find(x=>x.id===envId); if(!e || e.estado!=='encamino') return alert('Ese envío ya se confirmó.');
   const fecha = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
   if(llego){
-    if(!confirm(`✅ ¿Sí llegaron ${fmtNum(e.cantidad)} ${e.itemNombre} de ${p.destino}?\n\nSe suman a ${p.origen} y la deuda baja.`)) return;
+    // v222 (pedido por el usuario): si ya hizo su cierre del turno con esas hojas en la mano, el cierre ya
+    // las sumó ("hojas de más"); entonces solo se cierra la deuda, sin volver a sumarlas.
+    const modo = await prestModoConfirmar(p, e); if(!modo) return;
+    const yaContadas = modo==='cierre';
     try{
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:Number(e.cantidad),nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`,fecha,estado:'aprobado',origenTipo:'modulo',origenModulo:p.destino,creadoPor:quien,prestamoId:p.id,envioDev:e.id});
+      if(!yaContadas) await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:Number(e.cantidad),nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`,fecha,estado:'aprobado',origenTipo:'modulo',origenModulo:p.destino,creadoPor:quien,prestamoId:p.id,envioDev:e.id});
       const dev = Number(p.devuelto||0) + Number(e.cantidad), pend = Math.max(0, fmtNum(Number(p.cantidad) - dev));
       await db.collection('prestamos').doc(prestamoId).update({devuelto:dev, pendiente:pend, estado:pend<=0?'cerrado':'parcial',
         envios:(p.envios||[]).map(x=>x.id===envId?Object.assign({}, x, {estado:'recibido', fechaConf:fecha, confPor:quien}):x),
-        devoluciones:[...(p.devoluciones||[]), {fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha}]});
-      toast(pend<=0 ? '✅ Deuda saldada' : `✅ Recibido · faltan ${fmtNum(pend)} ${p.unidad}`);
+        devoluciones:[...(p.devoluciones||[]), {fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:yaContadas}]});
+      toast((yaContadas?'✅ Deuda saldada (ya estaban contadas en el cierre)':(pend<=0 ? '✅ Deuda saldada' : '✅ Recibido'))+(pend>0?` · faltan ${fmtNum(pend)} ${p.unidad}`:''));
     }catch(er){ return alert('Error: '+er.message); }
   } else {
     if(!confirm(`❌ ¿No llegaron ${fmtNum(e.cantidad)} ${e.itemNombre}?\n\nEl envío se cancela: regresan a ${p.destino} y la deuda sigue igual.`)) return;
