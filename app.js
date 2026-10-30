@@ -223,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v212';
+const APP_VERSION = 'v213';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9368,9 +9368,9 @@ async function repCambiarMod(n){
 const RP_HERR = ['Rieles','Sistemas','Bastidores','Jaladeras','Jaladera plana'];
 let rpMod = '', rpDesde = '', rpHasta = '', rpCache = null;
 async function rpCargar(){
-  const [sm, sl, sr, si] = await Promise.all(['movimientos','instalacionesLog','resets','inicial'].map(c=>db.collection(c).get().catch(()=>({docs:[]}))));
+  const [sm, sl, sr, si, sc] = await Promise.all(['movimientos','instalacionesLog','resets','inicial','cierres'].map(c=>db.collection(c).get().catch(()=>({docs:[]}))));
   const rows = s => s.docs.map(d=>({id:d.id, ...d.data()}));
-  return {movs:rows(sm), logs:rows(sl), resets:rows(sr), ini:rows(si), t:Date.now()};
+  return {movs:rows(sm), logs:rows(sl), resets:rows(sr), ini:rows(si), cierres:rows(sc).filter(c=>!c.tipo && Array.isArray(c.herrajes)), t:Date.now()};
 }
 function rpBase(C, mod, itemId){
   const r = C.resets.find(x=>x.id===mod), doc = C.ini.find(x=>x.id===inicialKey(mod, itemId));
@@ -9410,8 +9410,26 @@ function rpCalc(C, mod, desde, hasta){
     const hoy = rpStock(C, mod, it.id, hastaISO);
     return {it, tenia, usados, regresos, otros: hoy - tenia + usados - regresos, hoy, inicioReal};
   });
+  // v213: lo que contestó el coordinador en cada cierre del turno (el último de cada día).
+  const porDia = {}; (C.cierres||[]).filter(c=>c.modulo===mod && c.dia>=desde && c.dia<=hasta).forEach(c=>{ if(!porDia[c.dia] || (c.fecha||'')>(porDia[c.dia].fecha||'')) porDia[c.dia] = c; });
+  const cierres = Object.keys(porDia).sort().map(dia=>({dia, c:porDia[dia], h:its.map(it=>{ const x = porDia[dia].herrajes.find(z=>z.itemId===it.id); if(!x) return null;
+    return {esp:Number(x.esperado), tiene:Number(x.tiene), ok:!!x.ok, dif:fmtNum(Number(x.tiene)-Number(x.esperado))}; })}));
   const est = logs.map(l=>({l, e:rpEstado(l, C), her:(l.consumo||[]).filter(c=>!esHojaId(c.itemId) && Number(c.cantidad)>0)}));
-  return {logs:est, herr, n:{total:est.length, ok:est.filter(x=>x.e.k==='ok').length, sv:est.filter(x=>x.e.k==='sv').length, no:est.filter(x=>x.e.k==='no').length, nopend:est.filter(x=>x.e.k==='nopend').length, rech:est.filter(x=>x.e.k==='rech').length}};
+  return {logs:est, herr, its, cierres, n:{total:est.length, ok:est.filter(x=>x.e.k==='ok').length, sv:est.filter(x=>x.e.k==='sv').length, no:est.filter(x=>x.e.k==='no').length, nopend:est.filter(x=>x.e.k==='nopend').length, rech:est.filter(x=>x.e.k==='rech').length}};
+}
+function rpCelda(x){ if(!x) return '<span class="hint" style="margin:0">—</span>';
+  if(x.ok) return `<span style="color:#16a34a;font-weight:800">✓ ${fmtNum(x.tiene)}</span>`;
+  return `<span style="color:${x.dif<0?'#dc2626':'#b45309'};font-weight:800">${fmtNum(x.tiene)}</span><br><span style="font-size:11.5px;color:${x.dif<0?'#dc2626':'#b45309'}">debía ${fmtNum(x.esp)} · ${x.dif>0?'+':''}${x.dif}</span>`; }
+function rpCierresHtml(R){
+  const xs = R.cierres; const nom = it => it.nombre.replace('Jaladera plana','Jal. plana');
+  if(!xs.length) return `<div class="card" style="padding:12px"><strong>🧾 Cierres del turno</strong><p class="hint" style="margin:4px 0 0">No hay cierres del turno con herrajes en esas fechas.</p></div>`;
+  const malos = xs.filter(x=>x.h.some(h=>h && !h.ok)).length, ult = xs[xs.length-1];
+  return `<div class="card" style="padding:12px"><strong>🧾 Cierres del turno: ¿los tenía?</strong>
+    <p class="hint" style="margin:2px 0 0">Lo que contestó el coordinador cada día. ✓ = dijo que sí tenía lo que dice la app. En rojo, lo que le faltaba (o en naranja, lo que le sobraba).</p>
+    <div class="wrap-x" style="margin-top:8px"><table class="rp-t" style="font-size:13px"><tr><th>Día</th>${R.its.map(it=>`<th style="text-align:center">${nom(it)}</th>`).join('')}</tr>
+      ${xs.map(x=>`<tr><td style="white-space:nowrap"><strong>${fCorta(x.dia)}</strong></td>${x.h.map(h=>`<td style="text-align:center">${rpCelda(h)}</td>`).join('')}</tr>`).join('')}</table></div>
+    <div style="margin-top:8px;padding:9px 11px;border-radius:10px;background:${malos?'rgba(220,38,38,.10)':'rgba(22,163,74,.10)'};font-size:13.5px">${malos?`<strong>${malos} de ${xs.length} cierre(s) con diferencia.</strong>`:`<strong>✅ En los ${xs.length} cierre(s) dijo que sí los tenía.</strong>`}
+      Último cierre (${fCorta(ult.dia)}): ${R.its.map((it,i)=>{ const h = ult.h[i]; return h ? `${nom(it)} ${h.ok?'✓':(h.dif>0?'+':'')+h.dif}` : ''; }).filter(Boolean).join(' · ')}</div></div>`;
 }
 function renderRepPuertas(){
   if(!document.getElementById('rp-css')){ const st=document.createElement('style'); st.id='rp-css'; st.textContent='.rp-t th,.rp-t td{padding:7px 5px!important}'; document.head.appendChild(st); }
@@ -9434,6 +9452,7 @@ function renderRepPuertas(){
       <div class="wrap-x" style="margin-top:8px"><table class="rp-t" style="font-size:13px"><tr><th>Herraje</th><th style="text-align:right">Tenía${R.herr.some(h=>h.inicioReal)?'*':''}</th><th style="text-align:right">Puertas</th><th style="text-align:right">Regresó</th><th style="text-align:right">Otros</th><th style="text-align:right">Debe<br>haber</th></tr>
       ${R.herr.map(h=>`<tr><td><strong>${h.it.nombre}</strong></td><td style="text-align:right">${fmtNum(h.tenia)}</td><td style="text-align:right;color:var(--bad)">−${fmtNum(h.usados)}</td><td style="text-align:right;color:var(--ok)">+${fmtNum(h.regresos)}</td><td style="text-align:right">${h.otros>0?'+':''}${fmtNum(h.otros)}</td><td style="text-align:right;font-weight:900">${fmtNum(h.hoy)}</td></tr>`).join('')}</table></div>
       <p class="hint" style="margin:6px 0 0">Tenía = al empezar el ${fCorta(rpDesde)}${R.herr.some(h=>h.inicioReal)?' (*o desde el conteo inicial, si fue después)':''}. Otros = entradas, traspasos, mermas, ajustes e instalaciones de muebles. Debe haber = lo que dice la app al terminar el ${fCorta(rpHasta)}.</p></div>
+    ${rpCierresHtml(R)}
     <div class="card" style="padding:12px"><strong>📋 Instalaciones de puertas</strong>
       ${R.logs.length?R.logs.map(x=>{ const l = x.l; return `<div style="border-top:1px solid var(--line);padding:9px 0">
         <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><span style="min-width:0"><strong>${fCorta(l.fechaDia||diaLocal(l.fecha))}</strong> · ${l.calle?'📍 '+escCalle(l.calle):'<span class="hint" style="margin:0">sin calle</span>'}</span><span class="tag" style="color:${x.e.c};border-color:${x.e.c};white-space:nowrap">${x.e.t}</span></div>
@@ -9451,6 +9470,9 @@ async function rpPdf(){
   S.tabla([{t:'Herraje',w:40},{t:'Tenía',w:24},{t:'En puertas',w:26},{t:'Regresaron',w:28},{t:'Otros mov.',w:30},{t:'Debe haber',w:34}],
     R.herr.map(h=>[{t:h.it.nombre, b:true}, fmtNum(h.tenia)+(h.inicioReal?'*':''), {t:'−'+fmtNum(h.usados), col:[192,57,43]}, {t:'+'+fmtNum(h.regresos), col:[22,128,74]}, (h.otros>0?'+':'')+fmtNum(h.otros), {t:String(fmtNum(h.hoy)), b:true}]), rgb);
   if(R.herr.some(h=>h.inicioReal)) S.vacio('* Desde el conteo inicial (fue después de la fecha de inicio).');
+  if(R.cierres.length){ S.seccion('CIERRES DEL TURNO: ¿LOS TENÍA?', 'Lo que contestó el coordinador cada día (Sí = tenía lo que dice la app)', [71,85,105]);
+    const w = Math.floor((182-24)/R.its.length);
+    S.tabla([{t:'Día',w:24}].concat(R.its.map(it=>({t:it.nombre.replace('Jaladera plana','Jal. plana'), w}))), R.cierres.map(x=>[{t:fCorta(x.dia), b:true}].concat(x.h.map(h=>!h?'—':h.ok?{t:'Sí · '+fmtNum(h.tiene), col:[22,128,74], b:true}:{t:fmtNum(h.tiene)+' (debía '+fmtNum(h.esp)+')\n'+(h.dif>0?'+':'')+h.dif, col:h.dif<0?[192,57,43]:[180,83,9], b:true}))), [71,85,105]); }
   S.seccion('INSTALACIONES DE PUERTAS', `${R.n.total} instalación(es)`, rgb);
   const nomH = c => (CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||'';
   R.logs.length ? S.tabla([{t:'Fecha',w:18},{t:'Calle',w:40},{t:'Puerta',w:46},{t:'Estado',w:42},{t:'Herrajes',w:36}],
