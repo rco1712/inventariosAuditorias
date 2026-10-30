@@ -223,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v215';
+const APP_VERSION = 'v216';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9418,6 +9418,12 @@ function rpCalc(C, mod, desde, hasta){
   const porDia = {}; (C.cierres||[]).filter(c=>c.modulo===mod && c.dia>=desde && c.dia<=hasta).forEach(c=>{ if(!porDia[c.dia] || (c.fecha||'')>(porDia[c.dia].fecha||'')) porDia[c.dia] = c; });
   const cierres = Object.keys(porDia).sort().map(dia=>({dia, c:porDia[dia], h:its.map(it=>{ const x = porDia[dia].herrajes.find(z=>z.itemId===it.id); if(!x) return null;
     return {esp:Number(x.esperado), tiene:Number(x.tiene), ok:!!x.ok, dif:fmtNum(Number(x.tiene)-Number(x.esperado))}; })}));
+  // v216: en el ÚLTIMO cierre, lo que se capturó DESPUÉS (ej. una puerta que se instaló ese día pero se
+  // capturó más tarde) cambia lo que la app esperaba. Si con eso ya cuadra, no es faltante.
+  if(cierres.length){ const u = cierres[cierres.length-1], f = u.c.fecha;
+    u.h.forEach((h,i)=>{ if(!h || !f) return; const desp = fmtNum(rpStock(C, mod, its[i].id, null) - rpStock(C, mod, its[i].id, f));
+      if(Math.abs(desp)<0.0005) return; h.despues = desp; h.espAhora = fmtNum(h.esp + desp); h.difAhora = fmtNum(h.tiene - h.espAhora);
+      if(!h.ok && Math.abs(h.difAhora)<0.0005){ h.ok = true; h.yaCuadra = true; } else if(!h.ok){ h.dif = h.difAhora; h.esp = h.espAhora; } }); }
   const est = logs.map(l=>({l, e:rpEstado(l, C), her:(l.consumo||[]).filter(c=>!esHojaId(c.itemId) && Number(c.cantidad)>0)}));
   return {logs:est, herr, its, cierres, n:{total:est.length, ok:est.filter(x=>x.e.k==='ok').length, sv:est.filter(x=>x.e.k==='sv').length, no:est.filter(x=>x.e.k==='no').length, nopend:est.filter(x=>x.e.k==='nopend').length, rech:est.filter(x=>x.e.k==='rech').length}};
 }
@@ -9437,7 +9443,9 @@ function rpSimpleHtml(R, X){
   const cards = R.herr.map((h,i)=>{
     const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i]})).filter(x=>x.h);
     const u = dias.length ? dias[dias.length-1].h : null, mal = u && !u.ok;
-    const cierresTxt = dias.map(x=>x.h.ok
+    const cierresTxt = dias.map(x=>x.h.yaCuadra
+      ? `<div style="font-size:14px;padding:2px 0;color:#16a34a">✅ ${fCorta(x.dia)}: contó <strong>${fmtNum(x.h.tiene)}</strong>. En ese momento la app esperaba ${fmtNum(x.h.esp)}, pero después del cierre se capturó lo que faltaba → <strong>sí cuadra</strong></div>`
+      : x.h.ok
       ? `<div style="font-size:14px;padding:2px 0">✅ ${fCorta(x.dia)}: <strong>sí tenía ${fmtNum(x.h.tiene)}</strong></div>`
       : `<div style="font-size:14px;padding:2px 0;color:${x.h.dif<0?'#dc2626':'#b45309'}">${x.h.dif<0?'❌':'➕'} ${fCorta(x.dia)}: contó <strong>${fmtNum(x.h.tiene)}</strong> y debía tener ${fmtNum(x.h.esp)} → <strong>${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}</strong></div>`).join('');
     return `<div class="card" style="padding:14px;border-left:6px solid ${mal?(u.dif<0?'#dc2626':'#d97706'):'#16a34a'}">
@@ -9512,9 +9520,9 @@ async function rpPdfHacer(){
   R.herr.forEach((h,i)=>{
     const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i]})).filter(x=>x.h), u = dias.length ? dias[dias.length-1].h : null;
     const c = u && !u.ok ? (u.dif<0?ROJ:NAR) : VER;
-    const filas = [[`Tenía el ${fCorta(h.inicioReal?diaLocal(h.inicioReal):rpDesde)}`, String(fmtNum(h.tenia)), [0,0,0]], [`Se usaron en ${X.u}`, '− '+fmtNum(h.usados), ROJ]];
+    const filas = [[`Tenía el ${fCorta(h.inicioReal?diaLocal(h.inicioReal):rpDesde)}`, String(fmtNum(h.tenia)), [0,0,0]], [`Se usaron en ${X.u}`, '- '+fmtNum(h.usados), ROJ]];
     if(h.regresos) filas.push([`Regresaron (${X.u} que no se instalaron)`, '+ '+fmtNum(h.regresos), VER]);
-    if(Math.abs(h.otros)>0.0005) filas.push([`Otros (${rpTipo==='Puerta'?'clósets':'puertas'}, entradas, salidas…)`, (h.otros>0?'+ ':'− ')+fmtNum(Math.abs(h.otros)), [0,0,0]]);
+    if(Math.abs(h.otros)>0.0005) filas.push([`Otros (${rpTipo==='Puerta'?'clósets':'puertas'}, entradas, salidas...)`, (h.otros>0?'+ ':'- ')+fmtNum(Math.abs(h.otros)), [0,0,0]]);
     const alto = 10 + filas.length*5.5 + 9 + (dias.length ? 6 + dias.length*5 : 0) + 3;
     if(S.y + alto > pageH-14){ doc.addPage(); S.y = 15; }
     const y0 = S.y; doc.setDrawColor(210,210,210); doc.setFillColor(...pdfTinte(c,.94)); doc.rect(L, y0, W, alto, 'FD'); doc.setFillColor(...c); doc.rect(L, y0, 2, alto, 'F');
@@ -9525,7 +9533,7 @@ async function rpPdfHacer(){
     doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.text('Debe tener hoy', L+6, y+3.5); doc.text(String(fmtNum(h.hoy)), L+W/2+20, y+3.5, {align:'right'}); y += 9;
     if(dias.length){ doc.setFontSize(9); doc.setTextColor(...GRIS); doc.text('Lo que contó el coordinador:', L+6, y+1); y += 6; doc.setFontSize(10);
       dias.forEach(x=>{ const ok = x.h.ok; doc.setTextColor(...(ok?VER:(x.h.dif<0?ROJ:NAR))); doc.setFont(undefined, ok?'normal':'bold');
-        doc.text(ok ? `${fCorta(x.dia)}: sí tenía ${fmtNum(x.h.tiene)}` : `${fCorta(x.dia)}: contó ${fmtNum(x.h.tiene)} y debía tener ${fmtNum(x.h.esp)}  →  ${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}`, L+8, y); y += 5; });
+        doc.text(x.h.yaCuadra ? `${fCorta(x.dia)}: contó ${fmtNum(x.h.tiene)}. Lo que faltaba se capturó después del cierre: sí cuadra` : ok ? `${fCorta(x.dia)}: sí tenía ${fmtNum(x.h.tiene)}` : `${fCorta(x.dia)}: contó ${fmtNum(x.h.tiene)} y debía tener ${fmtNum(x.h.esp)}: ${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}`, L+8, y); y += 5; });
       doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); }
     S.y = y0 + alto + 4; });
   S.seccion('INSTALACIONES DE '+X.t.toUpperCase(), `${R.n.total} instalación(es)`, rgb);
