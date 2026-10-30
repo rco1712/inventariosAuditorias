@@ -225,7 +225,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v220';
+const APP_VERSION = 'v221';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -1379,6 +1379,7 @@ function renderHome(){
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
+    ${prestHomeHtml()}
     ${riHomeHtml()}
     ${avisosCardHtml()}
     ${cierresHoyHtml()}
@@ -9237,20 +9238,32 @@ async function renderTraspHistorial(){
   if(!document.getElementById('trasp-body')) return;
   $('#trasp-body').innerHTML = `<div class="card hint">Cargando préstamos…</div>`;
   await cargarPrestamos();
-  if(prestamos.length===0){ $('#trasp-body').innerHTML = `<div class="card">Aún no hay traspasos registrados.</div>`; return; }
-  $('#trasp-body').innerHTML = prestamos.map(p=>`
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div><strong>${p.origen} → ${p.destino}</strong><div class="tag">${new Date(p.fecha).toLocaleString()}</div></div>
-        <div class="${p.estado==='cerrado'?'pos':(p.estado==='parcial'?'':'neg')}" style="font-weight:700">${p.estado.toUpperCase()}</div>
-      </div>
-      <p class="hint" style="margin:6px 0">${p.itemNombre}${p.esMelamina?' (hoja de melamina — cualquier color cuenta igual para la deuda)':''} · Prestado: ${fmtNum(p.cantidad)} ${p.unidad} · Devuelto: ${fmtNum(p.devuelto)} · Pendiente: <strong>${fmtNum(p.pendiente)} ${p.unidad}</strong></p>
-      ${p.pendiente>0? `<button class="btn small" onclick="mostrarFormDevolucion('${p.id}')">Registrar devolución</button><div id="dev-${p.id}"></div>` : ''}
-    </div>`).join('');
+  // v221 (pedido por el usuario): el que DEBE salda la deuda (manda el material, sale de su inventario y queda
+  // "en camino"); el que PRESTÓ confirma que sí llegó (entra a su inventario y baja la deuda).
+  const mod = modulo(), dir = esAdmin();
+  const xs = prestamos.filter(p=>p.origen===mod || p.destino===mod);
+  if(!xs.length){ $('#trasp-body').innerHTML = `<div class="card">${mod} no tiene traspasos registrados.</div>`; return; }
+  const env = p => (p.envios||[]).filter(e=>e.estado==='encamino');
+  const card = p => { const debe = p.destino===mod, enC = env(p), enCq = enC.reduce((a,e)=>a+Number(e.cantidad),0);
+    const col = p.estado==='cerrado' ? '#16a34a' : (debe ? '#dc2626' : '#16a34a');
+    const titulo = p.estado==='cerrado' ? `✅ Saldado · ${p.origen} le prestó a ${p.destino}` : debe ? `🔴 Debes ${fmtNum(p.pendiente)} ${p.unidad} a ${p.origen}` : `🟢 ${p.destino} te debe ${fmtNum(p.pendiente)} ${p.unidad}`;
+    return `<div class="card" style="border-left:6px solid ${col}">
+      <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:15.5px;color:${col}">${titulo}</strong><span class="tag">${fCorta(diaLocal(p.fecha))}</span></div>
+      <p class="hint" style="margin:6px 0">${p.origen} → ${p.destino} · ${p.itemNombre}${p.esMelamina?' (en melamina cuenta cualquier color)':''} · Prestado ${fmtNum(p.cantidad)} · Regresado ${fmtNum(p.devuelto)}${p.nota?' · '+p.nota:''}</p>
+      ${(p.devoluciones||[]).length?`<div class="hint" style="margin:0 0 6px">${p.devoluciones.map(d=>`✅ ${fCorta(diaLocal(d.fecha))}: regresaron ${fmtNum(d.cantidad)} ${d.itemNombre}`).join('<br>')}</div>`:''}
+      ${enC.map(e=>`<div style="margin-top:6px;padding:10px 12px;border-radius:12px;background:rgba(8,145,178,.12);border:1px solid rgba(8,145,178,.5)"><strong>🚚 En camino: ${fmtNum(e.cantidad)} ${e.itemNombre}</strong><div class="hint" style="margin:2px 0 0">${p.destino} lo mandó el ${fCorta(diaLocal(e.fecha))} ${new Date(e.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})}. Ya salió de ${p.destino}; entra a ${p.origen} cuando lo confirme.</div>
+        ${(!debe || dir)?`<div class="row" style="gap:6px;margin-top:8px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="prestConfirmar('${p.id}','${e.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="prestConfirmar('${p.id}','${e.id}',false)">❌ No llegaron</button></div>`:`<div class="hint" style="margin:6px 0 0">Esperando que ${p.origen} confirme que llegaron.</div>`}</div>`).join('')}
+      ${p.pendiente - enCq > 0.0005 && (debe || dir) ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#dc2626,#b91c1c)" onclick="mostrarFormDevolucion('${p.id}')">💸 Saldar deuda (mandar a ${p.origen})</button><div id="dev-${p.id}"></div>` : ''}
+    </div>`; };
+  const deb = xs.filter(p=>p.estado!=='cerrado' && p.destino===mod), nos = xs.filter(p=>p.estado!=='cerrado' && p.origen===mod), cer = xs.filter(p=>p.estado==='cerrado');
+  $('#trasp-body').innerHTML = (deb.length?`<div style="font-weight:900;margin:6px 4px">🔴 Lo que ${mod} debe</div>`+deb.map(card).join(''):'')
+    + (nos.length?`<div style="font-weight:900;margin:12px 4px 6px">🟢 Lo que le deben a ${mod}</div>`+nos.map(card).join(''):'')
+    + (cer.length?`<details class="card"><summary><strong>✅ Ya saldados (${cer.length})</strong></summary>${cer.map(card).join('')}</details>`:'');
 }
 
 function mostrarFormDevolucion(prestamoId){
   const p = prestamos.find(x=>x.id===prestamoId);
+  const enC = (p.envios||[]).filter(e=>e.estado==='encamino').reduce((a,e)=>a+Number(e.cantidad),0), max = fmtNum(p.pendiente - enC);
   const opciones = p.esMelamina
     ? MEL_COLORES.map(c=>`<option value="${itemByName('Melamina '+c).id}">Melamina ${c}</option>`).join('')
     : `<option value="${p.itemId}">${p.itemNombre}</option>`;
@@ -9258,37 +9271,72 @@ function mostrarFormDevolucion(prestamoId){
     <div class="warn" style="margin-top:8px">
       <div class="grid2">
         <select id="dev-item-${prestamoId}">${opciones}</select>
-        <input id="dev-cant-${prestamoId}" type="number" min="0" max="${p.pendiente}" placeholder="Cantidad a devolver (máx. ${fmtNum(p.pendiente)})">
+        <input id="dev-cant-${prestamoId}" type="number" min="0" max="${max}" placeholder="¿Cuántas mandas? (máx. ${max})">
       </div>
-      <button class="btn small" style="margin-top:8px" onclick="registrarDevolucion('${prestamoId}')">Confirmar devolución</button>
+      <p class="hint" style="margin:6px 0 0">Sale de ${p.destino} ahora y queda <strong>en camino</strong>. Entra a ${p.origen} y baja la deuda cuando ${p.origen} confirme que llegó.</p>
+      <button class="btn small" style="margin-top:8px;background:#dc2626" onclick="registrarDevolucion('${prestamoId}')">🚚 Mandar</button>
     </div>`;
 }
 
 async function registrarDevolucion(prestamoId){
-  const p = prestamos.find(x=>x.id===prestamoId);
+  const p = prestamos.find(x=>x.id===prestamoId); if(!p) return;
   const itemId = document.getElementById('dev-item-'+prestamoId).value;
   const cantidad = Number(document.getElementById('dev-cant-'+prestamoId).value);
+  const enC = (p.envios||[]).filter(e=>e.estado==='encamino').reduce((a,e)=>a+Number(e.cantidad),0);
   if(!cantidad || cantidad<=0) return alert('Cantidad inválida');
-  if(cantidad > p.pendiente) return alert('No puedes devolver más de lo pendiente ('+fmtNum(p.pendiente)+' '+p.unidad+').');
+  if(cantidad > p.pendiente - enC + 1e-9) return alert('No puedes mandar más de lo que se debe ('+fmtNum(p.pendiente - enC)+' '+p.unidad+(enC?', ya van '+fmtNum(enC)+' en camino':'')+').');
   const item = CATALOGO.find(i=>i.id===itemId);
-  // Quien devuelve es el destino original del préstamo; el material regresa al origen original.
   const fDestino = await calcFormulaForModulo(p.destino, itemId);
   const dispDev = fDestino.esHoja ? fDestino.completas : fDestino.final;
-  if(dispDev - cantidad < -1e-9) return alert(p.destino+' no tiene suficiente "'+item.nombre+'" para devolver ('+fmtNum(dispDev)+(fDestino.esHoja?' hojas completas':'')+' disponibles).');
+  if(dispDev - cantidad < -1e-9) return alert(p.destino+' no tiene suficiente "'+item.nombre+'" para mandar ('+fmtNum(dispDev)+(fDestino.esHoja?' hojas completas':'')+' disponibles).');
+  if(!confirm(`🚚 ${p.destino} le manda a ${p.origen}:\n\n${fmtNum(cantidad)} ${item.nombre}\n\nSe descuenta de ${p.destino} ahora. La deuda baja cuando ${p.origen} confirme que llegó.\n\n¿Mandar?`)) return;
   try{
-    const notaTxt = `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`;
-    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado'});
-    await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId,itemNombre:item.nombre,tipo:'entrada',cantidad,nota:notaTxt,fecha:new Date().toISOString(),estado:'aprobado',origenTipo:'modulo',origenModulo:p.destino});
-    const nuevoDevuelto = p.devuelto + cantidad;
-    const nuevoPendiente = p.cantidad - nuevoDevuelto;
-    const nuevoEstado = nuevoPendiente<=0 ? 'cerrado' : (nuevoDevuelto>0 ? 'parcial' : 'pendiente');
-    await db.collection('prestamos').doc(prestamoId).update({
-      devuelto: nuevoDevuelto, pendiente: Math.max(0,nuevoPendiente), estado: nuevoEstado,
-      devoluciones: [...(p.devoluciones||[]), {fecha:new Date().toISOString(), cantidad, itemId, itemNombre:item.nombre}]
-    });
-    alert('Devolución registrada.'+(nuevoEstado==='cerrado'? ' Préstamo CERRADO.':' Pendiente: '+fmtNum(Math.max(0,nuevoPendiente))+' '+p.unidad+'.'));
-    renderTraspHistorial();
+    const fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', movId = cryptoId(), envId = cryptoId();
+    const notaTxt = `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre}) · en camino`;
+    await db.collection('movimientos').doc(movId).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha,estado:'aprobado',creadoPor,prestamoId:p.id,envioDev:envId});
+    await db.collection('prestamos').doc(prestamoId).update({envios:[...(p.envios||[]), {id:envId, fecha, cantidad, itemId, itemNombre:item.nombre, estado:'encamino', por:creadoPor, salidaMovId:movId}]});
+    toast(`🚚 Mandado. ${p.origen} tiene que confirmar que llegó.`);
+    await cargarPrestamos(); renderTraspHistorial();
   }catch(e){ alert('Error: '+e.message); }
+}
+// v221: en el Inicio del coordinador, lo que le mandaron para saldar una deuda (para confirmar) y lo que debe.
+let _prestHomeT = 0;
+function prestHomeHtml(){
+  if(esAdmin() || esSoloLectura() || !esCoordinador()) return '';
+  if(Date.now()-_prestHomeT > 30000){ _prestHomeT = Date.now(); cargarPrestamos().then(()=>{ if(current==='home') renderHome(); }); }
+  const mod = modulo(), xs = (prestamos||[]).filter(p=>p.estado!=='cerrado');
+  const llegan = xs.filter(p=>p.origen===mod).flatMap(p=>(p.envios||[]).filter(e=>e.estado==='encamino').map(e=>({p, e})));
+  const debo = xs.filter(p=>p.destino===mod && p.pendiente>0);
+  if(!llegan.length && !debo.length) return '';
+  return `<div class="card" style="padding:12px;border:2px solid #0891b2">
+    ${llegan.length?`<div style="font-size:16px;font-weight:900">🚚 Te regresaron material de un préstamo</div>${llegan.map(({p,e})=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${fmtNum(e.cantidad)} ${e.itemNombre}</strong> <span class="hint" style="margin:0">de ${p.destino} · ${fCorta(diaLocal(e.fecha))}</span>
+      <div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="prestConfirmar('${p.id}','${e.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="prestConfirmar('${p.id}','${e.id}',false)">❌ No llegaron</button></div></div>`).join('')}`:''}
+    ${debo.length?`<div style="font-size:15px;font-weight:900;margin-top:${llegan.length?10:0}px;color:#dc2626">🔴 Debes material a otros módulos</div>${debo.map(p=>`<div class="hint" style="margin:4px 0 0">• ${fmtNum(p.pendiente)} ${p.unidad} de ${p.esMelamina?'melamina':p.itemNombre} a <strong>${p.origen}</strong></div>`).join('')}
+      <button class="btn small" style="width:100%;margin-top:8px;background:#dc2626" onclick="traspSub='historial';irA('trasp')">💸 Saldar deuda</button>`:''}</div>`;
+}
+async function prestConfirmar(prestamoId, envId, llego){
+  await cargarPrestamos(); const p = prestamos.find(x=>x.id===prestamoId); if(!p) return;
+  const e = (p.envios||[]).find(x=>x.id===envId); if(!e || e.estado!=='encamino') return alert('Ese envío ya se confirmó.');
+  const fecha = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
+  if(llego){
+    if(!confirm(`✅ ¿Sí llegaron ${fmtNum(e.cantidad)} ${e.itemNombre} de ${p.destino}?\n\nSe suman a ${p.origen} y la deuda baja.`)) return;
+    try{
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:Number(e.cantidad),nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`,fecha,estado:'aprobado',origenTipo:'modulo',origenModulo:p.destino,creadoPor:quien,prestamoId:p.id,envioDev:e.id});
+      const dev = Number(p.devuelto||0) + Number(e.cantidad), pend = Math.max(0, fmtNum(Number(p.cantidad) - dev));
+      await db.collection('prestamos').doc(prestamoId).update({devuelto:dev, pendiente:pend, estado:pend<=0?'cerrado':'parcial',
+        envios:(p.envios||[]).map(x=>x.id===envId?Object.assign({}, x, {estado:'recibido', fechaConf:fecha, confPor:quien}):x),
+        devoluciones:[...(p.devoluciones||[]), {fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha}]});
+      toast(pend<=0 ? '✅ Deuda saldada' : `✅ Recibido · faltan ${fmtNum(pend)} ${p.unidad}`);
+    }catch(er){ return alert('Error: '+er.message); }
+  } else {
+    if(!confirm(`❌ ¿No llegaron ${fmtNum(e.cantidad)} ${e.itemNombre}?\n\nEl envío se cancela: regresan a ${p.destino} y la deuda sigue igual.`)) return;
+    try{
+      if(e.salidaMovId) await db.collection('movimientos').doc(e.salidaMovId).update({estado:'rechazado', anulado:true, nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre}) · cancelada: no llegó`});
+      await db.collection('prestamos').doc(prestamoId).update({envios:(p.envios||[]).map(x=>x.id===envId?Object.assign({}, x, {estado:'cancelado', fechaConf:fecha, confPor:quien}):x)});
+      toast('Envío cancelado');
+    }catch(er){ return alert('Error: '+er.message); }
+  }
+  await cargarPrestamos(); if(document.getElementById('trasp-body')) renderTraspHistorial(); else if(current==='home') renderHome();
 }
 
 // ===== PDF de traspasos (confirmado por el usuario) =====
@@ -11020,7 +11068,8 @@ function movsDiaClasif(mod, dia){
 function deudasDeModulo(mod){
   const g = {}; (prestamos||[]).filter(p=>p.pendiente>0 && (p.origen===mod || p.destino===mod)).forEach(p=>{
     const nos = p.origen===mod, otro = nos ? p.destino : p.origen, k = (nos?'N':'D')+'|'+otro+'|'+grupoDeuda(p.itemId);
-    const x = g[k] || (g[k] = {nos, otro, art: p.esMelamina ? 'Melamina (cualquier color)' : p.itemNombre, unidad:p.unidad, pend:0}); x.pend += Number(p.pendiente)||0; });
+    const x = g[k] || (g[k] = {nos, otro, art: p.esMelamina ? 'Melamina (cualquier color)' : p.itemNombre, unidad:p.unidad, pend:0, camino:0}); x.pend += Number(p.pendiente)||0;
+    x.camino += (p.envios||[]).filter(e=>e.estado==='encamino').reduce((a,e)=>a+Number(e.cantidad),0); });
   const xs = Object.values(g).sort((a,b)=>a.otro.localeCompare(b.otro) || a.art.localeCompare(b.art)); return {nosDeben: xs.filter(x=>x.nos), debemos: xs.filter(x=>!x.nos)};
 }
 let cierrePrestOk = false;
@@ -11156,7 +11205,7 @@ function dibujarMovsDiaPDF(doc, R, D, o){
   else { const y0 = y, mitad = (W-6)/2; let yA = y0, yB = y0;
     const blk = (xs, t, c, x0) => { y = y0; doc.setFont(undefined,'bold'); doc.setFontSize(10); doc.setTextColor(...c); doc.text(t, x0, y+4); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); y += 6;
       if(!xs.length){ doc.setFontSize(9); doc.setTextColor(120,124,136); doc.text('Nada', x0+2, y+3); doc.setTextColor(0,0,0); y += 7; }
-      else tabla([{t:'Módulo',w:24},{t:'Artículo',w:44},{t:'Pendiente',w:24}], xs.map(x=>[x.otro, x.art, {t:fmtNum(x.pend)+' '+x.unidad, b:true, col:c}]), c, x0, mitad); return y; };
+      else tabla([{t:'Módulo',w:24},{t:'Artículo',w:44},{t:'Pendiente',w:24}], xs.map(x=>[x.otro, x.art, {t:fmtNum(x.pend)+' '+x.unidad+(x.camino?'\n('+fmtNum(x.camino)+' en camino)':''), b:true, col:c}]), c, x0, mitad); return y; };
     yA = blk(D.nosDeben, 'Nos deben', VER, L); yB = blk(D.debemos, 'Debemos', ROJ, L+mitad+6); y = Math.max(yA, yB); }
   return y;
 }
@@ -14015,7 +14064,7 @@ function unaSolaVez(nombre, fn){
  'confirmarRegresoInst','confirmarRegresoParcial','confirmarRegresoLibre','confirmarRegresoPuerta','guardarCambioModelo',
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
- 'verifRegresa','verifDestino','verifOtroDia','verifDestGuardar','sobCerrarPuertas','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
+ 'verifRegresa','verifDestino','prestConfirmar','verifOtroDia','verifDestGuardar','sobCerrarPuertas','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
  'dupQuitar','dupIgnorar','verifCambiarFecha','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
 // v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
