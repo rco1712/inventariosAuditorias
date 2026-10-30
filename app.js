@@ -9400,6 +9400,8 @@ function rpEstado(l, C){
   if(l.pospuesta) return {k:'sv', t:'⏳ Pasó a otro día', d:'se instala el '+fCorta(l.fechaDia), c:'#7c3aed'};
   return {k:'sv', t:'Sin verificar', d:l.estado==='pendiente'?'aún sin aprobar':'', c:'#6b7280'};
 }
+const rpHora = iso => iso ? new Date(iso).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
+const rpCuando = iso => iso ? fCorta(diaLocal(iso))+' '+rpHora(iso) : '';
 function rpCalc(C, mod, desde, hasta){
   const logs = C.logs.filter(l=>l.modulo===mod && l.categoria===rpTipo && !l.duplicadoAnulado && !l.cambiadaPor && (l.fechaDia||diaLocal(l.fecha))>=desde && (l.fechaDia||diaLocal(l.fecha))<=hasta)
     .sort((a,b)=>(a.fechaDia||'').localeCompare(b.fechaDia||'') || (a.fecha||'').localeCompare(b.fecha||''));
@@ -9421,6 +9423,9 @@ function rpCalc(C, mod, desde, hasta){
   // v216: en el ÚLTIMO cierre, lo que se capturó DESPUÉS (ej. una puerta que se instaló ese día pero se
   // capturó más tarde) cambia lo que la app esperaba. Si con eso ya cuadra, no es faltante.
   if(cierres.length){ const u = cierres[cierres.length-1], f = u.c.fecha;
+    u.hora = rpHora(f);
+    u.despues = C.logs.filter(l=>l.modulo===mod && (l.fecha||'')>f && l.estado!=='rechazado' && !l.duplicadoAnulado).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))
+      .map(l=>`${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,2).join(' · ').replace(/^Puerta /,'Puerta ')}${l.calle?' · '+l.calle:''} (capturada ${rpCuando(l.fecha)})`);
     u.h.forEach((h,i)=>{ if(!h || !f) return; const desp = fmtNum(rpStock(C, mod, its[i].id, null) - rpStock(C, mod, its[i].id, f));
       if(Math.abs(desp)<0.0005) return; h.despues = desp; h.espAhora = fmtNum(h.esp + desp); h.difAhora = fmtNum(h.tiene - h.espAhora);
       if(!h.ok && Math.abs(h.difAhora)<0.0005){ h.ok = true; h.yaCuadra = true; } else if(!h.ok){ h.dif = h.difAhora; h.esp = h.espAhora; } }); }
@@ -9436,18 +9441,19 @@ function rpSimpleHtml(R, X){
   const faltan = [], sobran = [];
   if(ult) R.its.forEach((it,i)=>{ const h = ult.h[i]; if(h && !h.ok){ (h.dif<0?faltan:sobran).push(`${Math.abs(h.dif)} ${it.nombre}`); } });
   const top = !ult ? '' : (faltan.length||sobran.length)
-    ? `<div class="card" style="padding:14px;border:3px solid #dc2626;background:rgba(220,38,38,.10)"><div style="font-size:17px;font-weight:900">⚠️ En el último cierre (${fCorta(ult.dia)})</div>
+    ? `<div class="card" style="padding:14px;border:3px solid #dc2626;background:rgba(220,38,38,.10)"><div style="font-size:17px;font-weight:900">⚠️ En el último cierre (${fCorta(ult.dia)}, ${ult.hora})</div>
         ${faltan.length?`<div style="font-size:16px;margin-top:6px">❌ <strong>Le faltan:</strong> ${faltan.join(', ')}</div>`:''}${sobran.length?`<div style="font-size:16px;margin-top:6px">➕ <strong>Le sobran:</strong> ${sobran.join(', ')}</div>`:''}</div>`
-    : `<div class="card" style="padding:14px;border:3px solid #16a34a;background:rgba(22,163,74,.10)"><div style="font-size:17px;font-weight:900">✅ En el último cierre (${fCorta(ult.dia)}) tenía todo completo</div></div>`;
+    : `<div class="card" style="padding:14px;border:3px solid #16a34a;background:rgba(22,163,74,.10)"><div style="font-size:17px;font-weight:900">✅ En el último cierre (${fCorta(ult.dia)}, ${ult.hora}) tenía todo completo</div>${R.herr.some((h,i)=>ult.h[i]&&ult.h[i].yaCuadra)?`<div style="font-size:14px;margin-top:6px">Al hacer el cierre parecía que faltaba algo, pero era porque <strong>todavía no se capturaba</strong>: ${(ult.despues||[]).length?'se capturó después:<br>'+ult.despues.map(t=>'• '+escCalle(t)).join('<br>'):'se capturó después del cierre.'}</div>`:''}</div>`;
   const linea = (ic, txt, val, col) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:15px"><span>${ic} ${txt}</span><strong style="color:${col||'var(--ink)'};white-space:nowrap">${val}</strong></div>`;
   const cards = R.herr.map((h,i)=>{
-    const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i]})).filter(x=>x.h);
+    const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i], hora:rpHora(x.c.fecha), despues:x.despues||[]})).filter(x=>x.h);
     const u = dias.length ? dias[dias.length-1].h : null, mal = u && !u.ok;
+    const desp = x => x.despues.length ? `<div style="font-size:12.5px;margin:2px 0 0 18px;color:var(--sub)">Después del cierre se capturó:<br>${x.despues.map(t=>'• '+escCalle(t)).join('<br>')}</div>` : '';
     const cierresTxt = dias.map(x=>x.h.yaCuadra
-      ? `<div style="font-size:14px;padding:2px 0;color:#16a34a">✅ ${fCorta(x.dia)}: contó <strong>${fmtNum(x.h.tiene)}</strong>. En ese momento la app esperaba ${fmtNum(x.h.esp)}, pero después del cierre se capturó lo que faltaba → <strong>sí cuadra</strong></div>`
+      ? `<div style="font-size:14px;padding:2px 0;color:#16a34a">✅ ${fCorta(x.dia)} (cierre ${x.hora}): contó <strong>${fmtNum(x.h.tiene)}</strong>. A esa hora la app esperaba ${fmtNum(x.h.esp)}, pero <strong>después del cierre se capturó lo que faltaba</strong> → <strong>sí cuadra, no falta nada</strong></div>${desp(x)}`
       : x.h.ok
-      ? `<div style="font-size:14px;padding:2px 0">✅ ${fCorta(x.dia)}: <strong>sí tenía ${fmtNum(x.h.tiene)}</strong></div>`
-      : `<div style="font-size:14px;padding:2px 0;color:${x.h.dif<0?'#dc2626':'#b45309'}">${x.h.dif<0?'❌':'➕'} ${fCorta(x.dia)}: contó <strong>${fmtNum(x.h.tiene)}</strong> y debía tener ${fmtNum(x.h.esp)} → <strong>${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}</strong></div>`).join('');
+      ? `<div style="font-size:14px;padding:2px 0">✅ ${fCorta(x.dia)} (cierre ${x.hora}): <strong>sí tenía ${fmtNum(x.h.tiene)}</strong></div>`
+      : `<div style="font-size:14px;padding:2px 0;color:${x.h.dif<0?'#dc2626':'#b45309'}">${x.h.dif<0?'❌':'➕'} ${fCorta(x.dia)} (cierre ${x.hora}): contó <strong>${fmtNum(x.h.tiene)}</strong> y debía tener ${fmtNum(x.h.esp)}${x.h.despues?' (ya contando lo que se capturó después del cierre)':''} → <strong>${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}</strong></div>${x.h.despues?desp(x):''}`).join('');
     return `<div class="card" style="padding:14px;border-left:6px solid ${mal?(u.dif<0?'#dc2626':'#d97706'):'#16a34a'}">
       <div style="font-size:18px;font-weight:900">🔩 ${h.it.nombre}</div>
       <div style="margin-top:6px">
@@ -9499,6 +9505,7 @@ function renderRepPuertas(){
         <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><span style="min-width:0"><strong>${fCorta(l.fechaDia||diaLocal(l.fecha))}</strong> · ${l.calle?'📍 '+escCalle(l.calle):'<span class="hint" style="margin:0">sin calle</span>'}</span><span class="tag" style="color:${x.e.c};border-color:${x.e.c};white-space:nowrap">${x.e.t}</span></div>
         <div style="font-size:13.5px;margin-top:2px">${l.descripcion.replace(/^Puerta /,'')}</div>${extrasLogHtml(l)}
         ${x.e.d?`<div class="hint" style="margin:2px 0 0;color:${x.e.c}">${x.e.d}</div>`:''}
+        <div class="hint" style="margin:2px 0 0">🕒 Capturada: ${rpCuando(l.fecha)}${l.creadoPor?' · '+String(l.creadoPor).split('@')[0]:''}</div>
         <div class="hint" style="margin:2px 0 0">🔩 ${x.her.map(c=>`${fmtNum(c.cantidad)} ${nomH(c)}`).join(' · ')||'—'}</div></div>`; }).join(''):`<p class="hint">No hay ${X.u} en esas fechas.</p>`}</div>`;
 }
 async function rpPdf(){ try{ await rpPdfHacer(); }catch(e){ alert('No se pudo generar el PDF: '+e.message); } }
@@ -9512,18 +9519,19 @@ async function rpPdfHacer(){
   const doc = S.doc, L = S.L, W = S.W, pageH = S.pageH, ROJ=[192,57,43], VER=[22,128,74], NAR=[180,83,9], GRIS=[90,90,90];
   const ult = R.cierres.length ? R.cierres[R.cierres.length-1] : null;
   if(ult){ const faltan = [], sobran = []; R.its.forEach((it,i)=>{ const h = ult.h[i]; if(h && !h.ok) (h.dif<0?faltan:sobran).push(`${Math.abs(h.dif)} ${it.nombre}`); });
-    const malo = faltan.length||sobran.length, c = malo?ROJ:VER, lineas = malo ? [faltan.length?'Le faltan: '+faltan.join(', '):'', sobran.length?'Le sobran: '+sobran.join(', '):''].filter(Boolean) : ['Tenía todo completo'];
+    const malo = faltan.length||sobran.length, c = malo?ROJ:VER, lineas = malo ? [faltan.length?'Le faltan: '+faltan.join(', '):'', sobran.length?'Le sobran: '+sobran.join(', '):''].filter(Boolean) : ['Tenía todo completo'].concat(R.herr.some((h,i)=>ult.h[i]&&ult.h[i].yaCuadra)?['Parecía que faltaba algo, pero era porque todavía no se capturaba (se capturó después del cierre).']:[]);
     const h = 10 + lineas.length*6; doc.setFillColor(...pdfTinte(c,.88)); doc.rect(L,S.y,W,h,'F'); doc.setFillColor(...c); doc.rect(L,S.y,2,h,'F');
-    doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.setTextColor(...c); doc.text(`${malo?'ATENCIÓN · ':''}En el último cierre (${fCorta(ult.dia)})`, L+5, S.y+7);
+    doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.setTextColor(...c); doc.text(`${malo?'ATENCIÓN · ':''}En el último cierre (${fCorta(ult.dia)}, ${ult.hora})`, L+5, S.y+7);
     doc.setFontSize(11); lineas.forEach((t,k)=>doc.text(t, L+5, S.y+13.5+k*6)); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); S.y += h+5; }
   S.seccion('HERRAJES DE '+X.t.toUpperCase()+' EN '+rpMod.toUpperCase(), 'Cuánto tenía, cuánto se usó y cuánto debe tener hoy', rgb);
   R.herr.forEach((h,i)=>{
-    const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i]})).filter(x=>x.h), u = dias.length ? dias[dias.length-1].h : null;
+    const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i], hora:rpHora(x.c.fecha), despues:x.despues||[]})).filter(x=>x.h), u = dias.length ? dias[dias.length-1].h : null;
     const c = u && !u.ok ? (u.dif<0?ROJ:NAR) : VER;
     const filas = [[`Tenía el ${fCorta(h.inicioReal?diaLocal(h.inicioReal):rpDesde)}`, String(fmtNum(h.tenia)), [0,0,0]], [`Se usaron en ${X.u}`, '- '+fmtNum(h.usados), ROJ]];
     if(h.regresos) filas.push([`Regresaron (${X.u} que no se instalaron)`, '+ '+fmtNum(h.regresos), VER]);
     if(Math.abs(h.otros)>0.0005) filas.push([`Otros (${rpTipo==='Puerta'?'clósets':'puertas'}, entradas, salidas...)`, (h.otros>0?'+ ':'- ')+fmtNum(Math.abs(h.otros)), [0,0,0]]);
-    const alto = 10 + filas.length*5.5 + 9 + (dias.length ? 6 + dias.length*5 : 0) + 3;
+    const nDesp = dias.reduce((a,x)=>a+((x.h.despues && x.despues.length)?x.despues.length:0),0);
+    const alto = 10 + filas.length*5.5 + 9 + (dias.length ? 6 + dias.length*5 + nDesp*4.2 : 0) + 3;
     if(S.y + alto > pageH-14){ doc.addPage(); S.y = 15; }
     const y0 = S.y; doc.setDrawColor(210,210,210); doc.setFillColor(...pdfTinte(c,.94)); doc.rect(L, y0, W, alto, 'FD'); doc.setFillColor(...c); doc.rect(L, y0, 2, alto, 'F');
     doc.setFont(undefined,'bold'); doc.setFontSize(12.5); doc.text(h.it.nombre, L+6, y0+7);
@@ -9533,13 +9541,14 @@ async function rpPdfHacer(){
     doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.text('Debe tener hoy', L+6, y+3.5); doc.text(String(fmtNum(h.hoy)), L+W/2+20, y+3.5, {align:'right'}); y += 9;
     if(dias.length){ doc.setFontSize(9); doc.setTextColor(...GRIS); doc.text('Lo que contó el coordinador:', L+6, y+1); y += 6; doc.setFontSize(10);
       dias.forEach(x=>{ const ok = x.h.ok; doc.setTextColor(...(ok?VER:(x.h.dif<0?ROJ:NAR))); doc.setFont(undefined, ok?'normal':'bold');
-        doc.text(x.h.yaCuadra ? `${fCorta(x.dia)}: contó ${fmtNum(x.h.tiene)}. Lo que faltaba se capturó después del cierre: sí cuadra` : ok ? `${fCorta(x.dia)}: sí tenía ${fmtNum(x.h.tiene)}` : `${fCorta(x.dia)}: contó ${fmtNum(x.h.tiene)} y debía tener ${fmtNum(x.h.esp)}: ${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}`, L+8, y); y += 5; });
+        doc.text(x.h.yaCuadra ? `${fCorta(x.dia)} (cierre ${x.hora}): contó ${fmtNum(x.h.tiene)}; la app esperaba ${fmtNum(x.h.esp)} porque faltaba capturar. Ya se capturó: sí cuadra` : ok ? `${fCorta(x.dia)} (cierre ${x.hora}): sí tenía ${fmtNum(x.h.tiene)}` : `${fCorta(x.dia)} (cierre ${x.hora}): contó ${fmtNum(x.h.tiene)} y debía tener ${fmtNum(x.h.esp)}: ${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}`, L+8, y); y += 5;
+        if(x.h.despues && x.despues.length){ doc.setFont(undefined,'normal'); doc.setFontSize(8.5); doc.setTextColor(...GRIS); x.despues.forEach(t=>{ doc.text('  Capturado después del cierre: '+t.replace(/^\S+ /,''), L+10, y); y += 4.2; }); doc.setFontSize(10); } });
       doc.setTextColor(0,0,0); doc.setFont(undefined,'normal'); }
     S.y = y0 + alto + 4; });
   S.seccion('INSTALACIONES DE '+X.t.toUpperCase(), `${R.n.total} instalación(es)`, rgb);
   const nomH = c => (CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||'';
   R.logs.length ? S.tabla([{t:'Fecha',w:18},{t:'Calle',w:40},{t:rpTipo==='Puerta'?'Puerta':'Clóset',w:46},{t:'Estado',w:42},{t:'Herrajes',w:36}],
-    R.logs.map(x=>[fCorta(x.l.fechaDia||diaLocal(x.l.fecha)), x.l.calle||'', x.l.descripcion.replace(/^Puerta /,'')+((x.l.extrasDetalle||[]).length?'\n+ '+x.l.extrasDetalle.join(', '):''), {t:x.e.t.replace(/^[^A-Za-zÁÉÍÓÚáéíóúÑñ]+/,'')+(x.e.d?'\n'+x.e.d.replace(/[^\x20-ÿ·]/g,'').trim():''), col:x.e.k==='ok'?[22,128,74]:x.e.k==='sv'?[90,90,90]:[192,57,43], b:true}, x.her.map(c=>fmtNum(c.cantidad)+' '+nomH(c)).join(', ')]), rgb) : S.vacio(`No hay ${X.u} en esas fechas.`);
+    R.logs.map(x=>[fCorta(x.l.fechaDia||diaLocal(x.l.fecha))+'\ncapt. '+rpHora(x.l.fecha), x.l.calle||'', x.l.descripcion.replace(/^Puerta /,'')+((x.l.extrasDetalle||[]).length?'\n+ '+x.l.extrasDetalle.join(', '):''), {t:x.e.t.replace(/^[^A-Za-zÁÉÍÓÚáéíóúÑñ]+/,'')+(x.e.d?'\n'+x.e.d.replace(/[^\x20-ÿ·]/g,'').trim():''), col:x.e.k==='ok'?[22,128,74]:x.e.k==='sv'?[90,90,90]:[192,57,43], b:true}, x.her.map(c=>fmtNum(c.cantidad)+' '+nomH(c)).join(', ')]), rgb) : S.vacio(`No hay ${X.u} en esas fechas.`);
   await S.fin(`${X.u}-${rpMod}-${rpDesde}_${rpHasta}.pdf`, `Closets Vera · ${X.t} · ${rpMod}`);
 }
 function renderRepVer(){
