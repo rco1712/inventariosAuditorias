@@ -223,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v213';
+const APP_VERSION = 'v214';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9424,6 +9424,36 @@ function rpCalc(C, mod, desde, hasta){
 function rpCelda(x){ if(!x) return '<span class="hint" style="margin:0">—</span>';
   if(x.ok) return `<span style="color:#16a34a;font-weight:800">✓ ${fmtNum(x.tiene)}</span>`;
   return `<span style="color:${x.dif<0?'#dc2626':'#b45309'};font-weight:800">${fmtNum(x.tiene)}</span><br><span style="font-size:11.5px;color:${x.dif<0?'#dc2626':'#b45309'}">debía ${fmtNum(x.esp)} · ${x.dif>0?'+':''}${x.dif}</span>`; }
+// v214 (pedido por el usuario): lo mismo, pero explicado fácil, una tarjeta por herraje.
+function rpSimpleHtml(R, X){
+  const ult = R.cierres.length ? R.cierres[R.cierres.length-1] : null;
+  const faltan = [], sobran = [];
+  if(ult) R.its.forEach((it,i)=>{ const h = ult.h[i]; if(h && !h.ok){ (h.dif<0?faltan:sobran).push(`${Math.abs(h.dif)} ${it.nombre}`); } });
+  const top = !ult ? '' : (faltan.length||sobran.length)
+    ? `<div class="card" style="padding:14px;border:3px solid #dc2626;background:rgba(220,38,38,.10)"><div style="font-size:17px;font-weight:900">⚠️ En el último cierre (${fCorta(ult.dia)})</div>
+        ${faltan.length?`<div style="font-size:16px;margin-top:6px">❌ <strong>Le faltan:</strong> ${faltan.join(', ')}</div>`:''}${sobran.length?`<div style="font-size:16px;margin-top:6px">➕ <strong>Le sobran:</strong> ${sobran.join(', ')}</div>`:''}</div>`
+    : `<div class="card" style="padding:14px;border:3px solid #16a34a;background:rgba(22,163,74,.10)"><div style="font-size:17px;font-weight:900">✅ En el último cierre (${fCorta(ult.dia)}) tenía todo completo</div></div>`;
+  const linea = (ic, txt, val, col) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:15px"><span>${ic} ${txt}</span><strong style="color:${col||'var(--ink)'};white-space:nowrap">${val}</strong></div>`;
+  const cards = R.herr.map((h,i)=>{
+    const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i]})).filter(x=>x.h);
+    const u = dias.length ? dias[dias.length-1].h : null, mal = u && !u.ok;
+    const cierresTxt = dias.map(x=>x.h.ok
+      ? `<div style="font-size:14px;padding:2px 0">✅ ${fCorta(x.dia)}: <strong>sí tenía ${fmtNum(x.h.tiene)}</strong></div>`
+      : `<div style="font-size:14px;padding:2px 0;color:${x.h.dif<0?'#dc2626':'#b45309'}">${x.h.dif<0?'❌':'➕'} ${fCorta(x.dia)}: contó <strong>${fmtNum(x.h.tiene)}</strong> y debía tener ${fmtNum(x.h.esp)} → <strong>${x.h.dif<0?'le faltan '+Math.abs(x.h.dif):'le sobran '+x.h.dif}</strong></div>`).join('');
+    return `<div class="card" style="padding:14px;border-left:6px solid ${mal?(u.dif<0?'#dc2626':'#d97706'):'#16a34a'}">
+      <div style="font-size:18px;font-weight:900">🔩 ${h.it.nombre}</div>
+      <div style="margin-top:6px">
+        ${linea('📦', `Tenía el ${fCorta(h.inicioReal?diaLocal(h.inicioReal):rpDesde)}`, fmtNum(h.tenia))}
+        ${linea(X.ic, `Se usaron en ${X.u}`, '− '+fmtNum(h.usados), '#dc2626')}
+        ${h.regresos?linea('↩️', `Regresaron (${X.u} que no se instalaron)`, '+ '+fmtNum(h.regresos), '#16a34a'):''}
+        ${Math.abs(h.otros)>0.0005?linea('🔄', `Otros (${rpTipo==='Puerta'?'clósets':'puertas'}, entradas, salidas…)`, (h.otros>0?'+ ':'− ')+fmtNum(Math.abs(h.otros))):''}
+        <div style="border-top:2px solid var(--line);margin:4px 0"></div>
+        ${linea('🎯', '<strong>Debe tener hoy</strong>', `<span style="font-size:20px">${fmtNum(h.hoy)}</span>`)}
+      </div>
+      ${dias.length?`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(127,127,127,.10)"><div class="hint" style="margin:0 0 2px;font-weight:800">🧾 Lo que contó el coordinador:</div>${cierresTxt}</div>`:''}
+    </div>`; }).join('');
+  return top + `<div style="font-size:16px;font-weight:900;margin:14px 4px 4px">🔩 Herrajes de ${X.u} en ${rpMod}</div>` + cards;
+}
 function rpCierresHtml(R){
   const xs = R.cierres; const nom = it => it.nombre.replace('Jaladera plana','Jal. plana');
   if(!xs.length) return `<div class="card" style="padding:12px"><strong>🧾 Cierres del turno</strong><p class="hint" style="margin:4px 0 0">No hay cierres del turno con herrajes en esas fechas.</p></div>`;
@@ -9455,11 +9485,7 @@ function renderRepPuertas(){
       <button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#0d7468,#0b5e55)" onclick="rpPdf()">📄 PDF</button></div>
     <div class="card" style="padding:12px;border-left:6px solid ${M.color}"><strong style="font-size:16px">${rpMod} · ${R.n.total} instalación(es) de ${X.u}</strong>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${kpi(R.n.ok,'✅ verificadas','#16a34a')}${kpi(R.n.sv,'sin verificar','#6b7280')}${kpi(R.n.no,'❌ no se instaló (regresó)','#dc2626')}${kpi(R.n.nopend,'❌ falta que decida','#b45309')}${kpi(R.n.rech,'rechazadas en aprob.','#991b1b')}</div></div>
-    <div class="card" style="padding:12px"><strong>🔩 Herrajes de ${X.u} en ${rpMod}</strong>
-      <div class="wrap-x" style="margin-top:8px"><table class="rp-t" style="font-size:13px"><tr><th>Herraje</th><th style="text-align:right">Tenía${R.herr.some(h=>h.inicioReal)?'*':''}</th><th style="text-align:right">${X.t}</th><th style="text-align:right">Regresó</th><th style="text-align:right">Otros</th><th style="text-align:right">Debe<br>haber</th></tr>
-      ${R.herr.map(h=>`<tr><td><strong>${h.it.nombre}</strong></td><td style="text-align:right">${fmtNum(h.tenia)}</td><td style="text-align:right;color:var(--bad)">−${fmtNum(h.usados)}</td><td style="text-align:right;color:var(--ok)">+${fmtNum(h.regresos)}</td><td style="text-align:right">${h.otros>0?'+':''}${fmtNum(h.otros)}</td><td style="text-align:right;font-weight:900">${fmtNum(h.hoy)}</td></tr>`).join('')}</table></div>
-      <p class="hint" style="margin:6px 0 0">Tenía = al empezar el ${fCorta(rpDesde)}${R.herr.some(h=>h.inicioReal)?' (*o desde el conteo inicial, si fue después)':''}. Otros = entradas, traspasos, mermas, ajustes${rpTipo==='Puerta'?' e instalaciones de clósets':', puertas y garantías'}. Debe haber = lo que dice la app al terminar el ${fCorta(rpHasta)}.</p></div>
-    ${rpCierresHtml(R)}
+    ${rpSimpleHtml(R, X)}
     <div class="card" style="padding:12px"><strong>📋 Instalaciones de ${X.u}</strong>
       ${R.logs.length?R.logs.map(x=>{ const l = x.l; return `<div style="border-top:1px solid var(--line);padding:9px 0">
         <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><span style="min-width:0"><strong>${fCorta(l.fechaDia||diaLocal(l.fecha))}</strong> · ${l.calle?'📍 '+escCalle(l.calle):'<span class="hint" style="margin:0">sin calle</span>'}</span><span class="tag" style="color:${x.e.c};border-color:${x.e.c};white-space:nowrap">${x.e.t}</span></div>
