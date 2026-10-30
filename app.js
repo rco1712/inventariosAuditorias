@@ -223,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v214';
+const APP_VERSION = 'v215';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9493,7 +9493,8 @@ function renderRepPuertas(){
         ${x.e.d?`<div class="hint" style="margin:2px 0 0;color:${x.e.c}">${x.e.d}</div>`:''}
         <div class="hint" style="margin:2px 0 0">🔩 ${x.her.map(c=>`${fmtNum(c.cantidad)} ${nomH(c)}`).join(' · ')||'—'}</div></div>`; }).join(''):`<p class="hint">No hay ${X.u} en esas fechas.</p>`}</div>`;
 }
-async function rpPdf(){
+async function rpPdf(){ try{ await rpPdfHacer(); }catch(e){ alert('No se pudo generar el PDF: '+e.message); } }
+async function rpPdfHacer(){
   if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
   if(!rpCache) rpCache = await rpCargar();
   const R = rpCalc(rpCache, rpMod, rpDesde, rpHasta), M = MODULOS.find(m=>m.nombre===rpMod)||{};
@@ -9511,7 +9512,7 @@ async function rpPdf(){
   R.herr.forEach((h,i)=>{
     const dias = R.cierres.map(x=>({dia:x.dia, h:x.h[i]})).filter(x=>x.h), u = dias.length ? dias[dias.length-1].h : null;
     const c = u && !u.ok ? (u.dif<0?ROJ:NAR) : VER;
-    const filas = [[`Tenía el ${fCorta(h.inicioReal?diaLocal(h.inicioReal):rpDesde)}`, fmtNum(h.tenia), [0,0,0]], [`Se usaron en ${X.u}`, '− '+fmtNum(h.usados), ROJ]];
+    const filas = [[`Tenía el ${fCorta(h.inicioReal?diaLocal(h.inicioReal):rpDesde)}`, String(fmtNum(h.tenia)), [0,0,0]], [`Se usaron en ${X.u}`, '− '+fmtNum(h.usados), ROJ]];
     if(h.regresos) filas.push([`Regresaron (${X.u} que no se instalaron)`, '+ '+fmtNum(h.regresos), VER]);
     if(Math.abs(h.otros)>0.0005) filas.push([`Otros (${rpTipo==='Puerta'?'clósets':'puertas'}, entradas, salidas…)`, (h.otros>0?'+ ':'− ')+fmtNum(Math.abs(h.otros)), [0,0,0]]);
     const alto = 10 + filas.length*5.5 + 9 + (dias.length ? 6 + dias.length*5 : 0) + 3;
@@ -9519,7 +9520,7 @@ async function rpPdf(){
     const y0 = S.y; doc.setDrawColor(210,210,210); doc.setFillColor(...pdfTinte(c,.94)); doc.rect(L, y0, W, alto, 'FD'); doc.setFillColor(...c); doc.rect(L, y0, 2, alto, 'F');
     doc.setFont(undefined,'bold'); doc.setFontSize(12.5); doc.text(h.it.nombre, L+6, y0+7);
     let y = y0+13; doc.setFontSize(10.5);
-    filas.forEach(f=>{ doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); doc.text(f[0], L+6, y); doc.setFont(undefined,'bold'); doc.setTextColor(...f[2]); doc.text(f[1], L+W/2+20, y, {align:'right'}); y += 5.5; });
+    filas.forEach(f=>{ f[1] = String(f[1]); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); doc.text(f[0], L+6, y); doc.setFont(undefined,'bold'); doc.setTextColor(...f[2]); doc.text(f[1], L+W/2+20, y, {align:'right'}); y += 5.5; });
     doc.setTextColor(0,0,0); doc.setDrawColor(150,150,150); doc.line(L+6, y-2.5, L+W/2+20, y-2.5);
     doc.setFont(undefined,'bold'); doc.setFontSize(12); doc.text('Debe tener hoy', L+6, y+3.5); doc.text(String(fmtNum(h.hoy)), L+W/2+20, y+3.5, {align:'right'}); y += 9;
     if(dias.length){ doc.setFontSize(9); doc.setTextColor(...GRIS); doc.text('Lo que contó el coordinador:', L+6, y+1); y += 6; doc.setFontSize(10);
