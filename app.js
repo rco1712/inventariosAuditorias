@@ -225,7 +225,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v218';
+const APP_VERSION = 'v219';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -2201,7 +2201,7 @@ function herrToolHtml(t, opts){
 function herrMovResumen(m){
   const d = m.datos||{};
   if(m.tipo==='alta') return `${m.modulo===ALM?'Entró al almacén general':'Alta (ya la tenían)'}: ${d.cantidad>1?d.cantidad+' ':''}${d.nombre} ${d.marca} ${String(d.color||'').toLowerCase()}${herrPilasTxt(d)?' ('+herrPilasTxt(d)+')':''}${m.modulo===ALM?'':' → '+herrDondeDatos(d)}${d.estado==='descompuesta'?' · descompuesta':''}`;
-  if(m.tipo==='estado') return `${d.desc||'Herramienta'}: ${d.estado==='descompuesta'?(m.modulo===ALM?'está dañada':'se descompuso'):(m.modulo===ALM?'se reparó':'ya funciona')}${d.nota?' · "'+d.nota+'"':''}`;
+  if(m.tipo==='estado') return `${d.cantidad>1?d.cantidad+' ':''}${d.desc||'Herramienta'}: ${d.estado==='descompuesta'?(m.modulo===ALM?'está dañada':'se descompuso'):(m.modulo===ALM?'se reparó':'ya funciona')}${d.nota?' · "'+d.nota+'"':''}`;
   if(m.tipo==='cambio') return `Cambio (${(HERR_MOTIVOS[d.motivo]||'').replace(/^\S+ /,'')}): ${d.descVieja||''}${d.quien?' de '+d.quien:''} → ${d.descNueva||''}`;
   if(m.tipo==='editar'){ const c = d.cambios||{}, a = d.antes||{}; const ks = Object.keys(c).filter(k=>String(c[k])!==String(a[k]||'')); return `Corrección de ${d.desc||'herramienta'}: ${ks.map(k=>({nombre:'herramienta',marca:'marca',color:'color',tipo:'tipo',serie:'serie',cantidad:'cantidad',pilas:'pilas',cargadores:'cargadores',area:'área',para:'para',voltaje:'voltaje'}[k]||k)+' '+(k==='tipo'?(HERR_TIPOS[a[k]]||{}).t||a[k]:a[k]||'—')+' → '+(k==='tipo'?(HERR_TIPOS[c[k]]||{}).t||c[k]:c[k])).join(' · ')}`; }
   if(m.tipo==='entrega') return d.destino ? `Almacén general → ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.descTool||''} · recibe ${d.coordinador||''}` : `Salió del almacén ➜ ${m.modulo}: ${d.cantidad>1?d.cantidad+' ':''}${d.descTool||''} · recibe ${d.coordinador||''} · ${herrMotTxt(HERR_ENT_MOT,d.motivo,d.motivoTxt)}`;
@@ -2246,8 +2246,10 @@ async function herrAplicar(m){
     return '';
   }
   if(m.tipo==='estado'){
-    const t = D.tools.find(x=>x.id===d.toolId); if(!t) return 'Ya no existe esa herramienta.';
-    const enAlm = t.modulo===ALM;
+    const t0 = D.tools.find(x=>x.id===d.toolId); if(!t0) return 'Ya no existe esa herramienta.';
+    const enAlm = t0.modulo===ALM;
+    // v219: si el renglón tiene varias (ej. ×3) y solo cambia 1, se separa en su propio renglón.
+    const t = (d.cantidad && d.cantidad < (t0.cantidad||1)) ? await herrSeparar(t0, d.cantidad, `${d.cantidad} ${d.estado==='descompuesta'?(enAlm?'se marcaron dañadas':'se descompusieron'):(enAlm?'se repararon':'ya funcionan')}`) : t0;
     t.estado = d.estado; t.nota = d.estado==='descompuesta' ? (d.nota||t.nota||'') : '';
     t.hist = (t.hist||[]).concat([{f:now, t:(d.estado==='descompuesta'?(enAlm?'🔴 Está dañada':'Se descompuso'):(enAlm?'🔧 Se reparó':'Ya funciona'))+(d.nota?' · "'+d.nota+'"':'')+' · '+quien}]);
     await herrPut(t); return '';
@@ -2336,19 +2338,25 @@ async function herrAprobar(id, ok){
   await db.collection('herrMovs').doc(m.id).set(m);
   herrCache = null; toast(ok?'✅ Aprobado':'Rechazado'); if(current==='alm') renderAlmacen(); else if(current==='herrapr') renderHerrApr(); else renderHerr();
 }
+// v219: cuántas de un renglón con varias (×3) cambian de estado.
+function herrPedirCant(t, txt){ const hay = t.cantidad||1; if(hay<=1) return 1;
+  const r = prompt(`${herrDesc(t)}: hay ${hay}.\n\n¿Cuántas ${txt}?`, '1'); if(r===null) return null; const q = Math.round(Number(r));
+  if(!(q>=1 && q<=hay)){ alert('Escribe un número del 1 al '+hay+'.'); return null; } return q; }
 async function herrCambiarEstado(toolId){
   const D = await herrCargar(); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
   const aDesc = t.estado!=='descompuesta';
+  const q = herrPedirCant(t, aDesc?'se descompusieron':'ya funcionan'); if(!q) return;
   let nota = '';
   if(aDesc){ nota = prompt('¿Qué le pasó? (ej. no prende, se rompió el cable)'); if(nota===null) return; }
   else if(!confirm('¿Marcar como que ya funciona?')) return;
-  const ok = await herrGuardarMov({tipo:'estado', modulo:t.modulo, datos:{toolId, estado:aDesc?'descompuesta':'funcionando', nota:(nota||'').trim(), desc:herrDesc(t)}});
+  const ok = await herrGuardarMov({tipo:'estado', modulo:t.modulo, datos:{toolId, estado:aDesc?'descompuesta':'funcionando', nota:(nota||'').trim(), desc:herrDesc(t), cantidad:q}});
   if(ok){ toast(puedeAprobarHerr() ? '✅ Guardado' : '✅ Enviado. Dirección lo tiene que aprobar.'); t.modulo===ALM ? renderAlmacen() : renderHerr(); }
 }
 async function herrReparar(toolId){
   const D = await herrCargar(); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
-  if(!confirm(`¿${herrDesc(t)} ya se reparó? Pasa a Buenas y se puede volver a entregar.`)) return;
-  const ok = await herrGuardarMov({tipo:'estado', modulo:ALM, datos:{toolId, estado:'funcionando', nota:'', desc:herrDesc(t)}});
+  const q = herrPedirCant(t, 'se repararon'); if(!q) return;
+  if(!confirm(`¿${q>1||(t.cantidad||1)>1?q+' de ':''}${herrDesc(t)} ya se reparó? Pasa a Buenas y se puede volver a entregar.`)) return;
+  const ok = await herrGuardarMov({tipo:'estado', modulo:ALM, datos:{toolId, estado:'funcionando', nota:'', desc:herrDesc(t), cantidad:q}});
   if(ok){ toast('🔧 Reparada'); renderAlmacen(); }
 }
 async function herrAgregarInstalador(){
