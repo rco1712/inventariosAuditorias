@@ -3480,7 +3480,7 @@ async function generarHerrPDF(){
   const inal = mias.filter(t=>t.tipo==='inalambrica');
   const pSueltas = cuenta(mias.filter(t=>t.tipo==='accesorio'&&t.nombre==='Pila')), cSueltos = cuenta(mias.filter(t=>t.tipo==='accesorio'&&t.nombre==='Cargador'));
   S.kpis([[cuenta(mias.filter(t=>herrOrigen(t)==='almacen')),'vinieron del almacén',[29,78,216]],[cuenta(mias.filter(t=>herrOrigen(t)==='compra')),'compras del coordinador',[194,65,12]],[cuenta(inal),'inalámbricas',[22,128,74]],[inal.reduce((s,t)=>s+(Number(t.pilas)||0),0)+pSueltas,'pilas'+(pSueltas?` (${pSueltas} sueltas)`:''),[22,128,74]],[inal.reduce((s,t)=>s+(Number(t.cargadores)||0),0)+cSueltos,'cargadores'+(cSueltos?` (${cSueltos} sueltos)`:''),[22,128,74]]]);
-  const fila = (t, ult) => [{t:t.nombre, b:true}, String(t.cantidad||1), herrPdfMarca(t), t.color||'', herrPdfTipo(t), herrPdfOrigen(t), ult];
+  const fila = (t, ult) => [{t:t.nombre+(t.notaUsr?'\nNota: '+t.notaUsr:''), b:true, col:t.notaUsr?[180,83,9]:undefined}, String(t.cantidad||1), herrPdfMarca(t), t.color||'', herrPdfTipo(t), herrPdfOrigen(t), ult];
   const cols = ultimo => [{t:'Herramienta',w:38},{t:'Cant.',w:10},{t:'Marca',w:24},{t:'Color',w:18},{t:'Tipo\n(pilas/carg.)',w:24},{t:'¿De dónde vino?',w:46},{t:ultimo,w:22}];
   const desde = t => herrFecha(t.desde) + (t.enCamino?'\nen camino':'');
   if(vienenPdf.length){ S.banda('En camino desde el almacén (todavía no la reciben)', `${cuenta(vienenPdf)}`, [8,145,178]); S.tabla(cols('Salió'), vienenPdf.map(t=>fila(t, herrFecha(t.origenFecha))), [8,145,178]); }
@@ -3533,11 +3533,11 @@ async function generarAlmacenPDF(){
   const mesIni = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString(), mesTxt = hoy.toLocaleDateString('es-MX',{month:'long',year:'numeric'});
   const C_ALM = [194,65,12], C_OK = [22,128,74], C_MAL = [192,57,43], C_PREST = [29,78,216], C_GRIS = [71,85,105];
   const S = herrPdfBase('Closets Vera · Almacén general de herramienta', `${hoyTxt}  ·  cuánta tengo y a dónde se ha prestado`, C_ALM);
-  S.kpis([[cuenta(buenas),'en almacén · buenas',C_OK],[cuenta(danadas),'en almacén · dañadas',C_MAL],[cuenta(prest),'prestada a módulos',C_PREST],[porRec.length,'en camino de regreso',C_GRIS]]);
+  S.kpis([[cuenta(buenas),'en almacén · buenas',C_OK],[cuenta(danadas),'en almacén · dañadas',C_MAL],[cuenta(prest),'prestada a módulos',C_PREST],[porRec.length,'en camino de regreso',C_GRIS],[cuenta(D.tools.filter(t=>t.modulo===ALM && t.lugar==='garantia')),'en garantía',[37,99,235]]]);
   const accA = alm.filter(t=>t.tipo==='accesorio');
   if(accA.length) S.kpis([[cuenta(accA.filter(t=>t.nombre==='Pila')),'pilas sueltas en almacén',[13,116,104]],[cuenta(accA.filter(t=>t.nombre==='Cargador')),'cargadores sueltos en almacén',[13,116,104]]]);
   const cols = ult => [{t:'Herramienta',w:44},{t:'Cant.',w:12},{t:'Marca',w:28},{t:'Color',w:24},{t:'Tipo\n(pilas/carg.)',w:30},{t:ult,w:44}];
-  const fila = (t, ult) => [{t:t.nombre, b:true}, String(t.cantidad||1), herrPdfMarca(t), t.color||'', herrPdfTipo(t), ult];
+  const fila = (t, ult) => [{t:t.nombre+(t.notaUsr?'\nNota: '+t.notaUsr:''), b:true, col:t.notaUsr?[180,83,9]:undefined}, String(t.cantidad||1), herrPdfMarca(t), t.color||'', herrPdfTipo(t), ult];
   // 1. LO QUE TENGO
   S.seccion('1. LO QUE TENGO EN EL ALMACÉN', `${cuenta(alm)} herramienta(s) · ${cuenta(buenas)} buenas · ${cuenta(danadas)} dañadas`, C_ALM);
   S.banda('Buenas · listas para entregar', String(cuenta(buenas)), C_OK);
