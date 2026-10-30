@@ -223,7 +223,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v211';
+const APP_VERSION = 'v212';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9285,6 +9285,7 @@ function repGrupos(){
   G.push({ic:'🏠', t:'Instalaciones y garantías', c:'#0d7468', items:[
     {t:'Instalaciones del día (PDF)', s:'modelo, calle y estado', k:'instalaciones dia pdf calle', js:"repInstDia=fechaHoyLocal();repInstCache=null;repAbrir('instDia')"},
     {t:'Instalaciones de la semana', s:modulo(), k:'instalaciones semana closet puertas', js:"repAbrir('inst')"},
+    ...(A ? [{t:'🚪 Puertas instaladas y sus herrajes', s:'por fechas · verificadas o no', k:'puertas instaladas calles herrajes rieles sistemas bastidores jaladeras rechazadas regreso', js:"rpCache=null;repAbrir('puertas')"}] : []),
     {t:'Consumo por instalaciones', s:'acumulado', k:'consumo instalaciones acumulado', js:"repAbrir('consInst')"},
     {t:'Material en garantía', s:'acumulado', k:'garantia garantias acumulado', js:"repAbrir('garAcum')"}
   ]});
@@ -9360,11 +9361,108 @@ async function repCambiarMod(n){
   const t0 = Date.now(); while((_snapMovsN===m0 || _snapIniN===i0) && Date.now()-t0<6000) await new Promise(r=>setTimeout(r,80));
   if(current==='repver') renderRepVer();
 }
+// ===== v212 (pedido por el usuario, solo Dirección): 🚪 Puertas instaladas y sus herrajes =====
+// Todas las puertas que capturaron los coordinadores (verificadas o no), con calle y fecha, si se
+// rechazaron y a dónde regresó su material; y por cada herraje de puertas: cuánto tenían al empezar,
+// cuánto se fue en puertas, cuánto regresó y cuánto debe haber hoy.
+const RP_HERR = ['Rieles','Sistemas','Bastidores','Jaladeras','Jaladera plana'];
+let rpMod = '', rpDesde = '', rpHasta = '', rpCache = null;
+async function rpCargar(){
+  const [sm, sl, sr, si] = await Promise.all(['movimientos','instalacionesLog','resets','inicial'].map(c=>db.collection(c).get().catch(()=>({docs:[]}))));
+  const rows = s => s.docs.map(d=>({id:d.id, ...d.data()}));
+  return {movs:rows(sm), logs:rows(sl), resets:rows(sr), ini:rows(si), t:Date.now()};
+}
+function rpBase(C, mod, itemId){
+  const r = C.resets.find(x=>x.id===mod), doc = C.ini.find(x=>x.id===inicialKey(mod, itemId));
+  return lineaBase(r ? r.fecha : null, doc||null);
+}
+// Existencia de un artículo en un módulo justo ANTES de `antesDe` (ISO). Sin fecha = hoy.
+function rpStock(C, mod, itemId, antesDe){
+  const b = rpBase(C, mod, itemId);
+  const lista = C.movs.filter(m=>m.modulo===mod && m.itemId===itemId && (!b.desde || m.fecha>b.desde) && cuentaEnInventario(m) && (!antesDe || m.fecha<antesDe)).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+  return calcularFormula(itemId, b.inicial, b.inicialCortado, lista).final;
+}
+function rpEstado(l, C){
+  const v = l.verif||{}, reg = C.movs.filter(m=>m.motivo==='regresoInstalacion' && m.instalacionId===l.id && m.estado!=='rechazado');
+  if(l.estado==='rechazado') return {k:'rech', t:'❌ Rechazada en Aprobaciones', d:'No se descontó nada', c:'#dc2626'};
+  if(v.estado==='no'){
+    const dest = v.puertas==='sobrantes' ? '🧩 la melamina a Sobrantes' : v.puertas==='merma' ? '🗑️ la melamina a merma' : v.puertas==='regreso' ? '📦 regresó al inventario' : null;
+    if(reg.length) return {k:'no', t:'❌ No se instaló', d:(dest||'regresó al inventario')+' · herrajes regresaron'+(reg[0].fecha?' el '+fCorta(diaLocal(reg[0].fecha)):''), c:'#dc2626'};
+    return {k:'nopend', t:'❌ No se instaló', d:'⏳ el coordinador todavía no decide: sigue descontado', c:'#b45309'};
+  }
+  if(v.estado==='ok') return {k:'ok', t:'✅ Verificada', d:'', c:'#16a34a'};
+  if(v.estado==='parte') return {k:'ok', t:'🔸 Se instaló una parte', d:reg.length?'lo demás regresó':'', c:'#d97706'};
+  if(v.estado==='modelo') return {k:'sv', t:'❓ No coincide', d:'', c:'#3E5CDE'};
+  if(l.pospuesta) return {k:'sv', t:'⏳ Pasó a otro día', d:'se instala el '+fCorta(l.fechaDia), c:'#7c3aed'};
+  return {k:'sv', t:'Sin verificar', d:l.estado==='pendiente'?'aún sin aprobar':'', c:'#6b7280'};
+}
+function rpCalc(C, mod, desde, hasta){
+  const logs = C.logs.filter(l=>l.modulo===mod && l.categoria==='Puerta' && !l.duplicadoAnulado && !l.cambiadaPor && (l.fechaDia||diaLocal(l.fecha))>=desde && (l.fechaDia||diaLocal(l.fecha))<=hasta)
+    .sort((a,b)=>(a.fechaDia||'').localeCompare(b.fechaDia||'') || (a.fecha||'').localeCompare(b.fecha||''));
+  const ids = new Set(logs.map(l=>l.id));
+  const its = RP_HERR.map(n=>itemByName(n)).filter(Boolean);
+  const desdeISO = new Date(desde+'T00:00:00').toISOString(), hastaISO = new Date(new Date(hasta+'T00:00:00').getTime()+864e5).toISOString();
+  const herr = its.map(it=>{
+    const b = rpBase(C, mod, it.id), inicioReal = (b.desde && b.desde>desdeISO) ? b.desde : null;
+    const tenia = inicioReal ? b.inicial : rpStock(C, mod, it.id, desdeISO);
+    const usados = C.movs.filter(m=>m.itemId===it.id && m.tipo==='instalacion' && ids.has(m.loteId) && cuentaEnInventario(m)).reduce((s,m)=>s+Number(m.cantidad||0),0);
+    const regresos = C.movs.filter(m=>m.itemId===it.id && m.motivo==='regresoInstalacion' && ids.has(m.instalacionId) && cuentaEnInventario(m)).reduce((s,m)=>s+Number(m.cantidad||0),0);
+    const hoy = rpStock(C, mod, it.id, hastaISO);
+    return {it, tenia, usados, regresos, otros: hoy - tenia + usados - regresos, hoy, inicioReal};
+  });
+  const est = logs.map(l=>({l, e:rpEstado(l, C), her:(l.consumo||[]).filter(c=>!esHojaId(c.itemId) && Number(c.cantidad)>0)}));
+  return {logs:est, herr, n:{total:est.length, ok:est.filter(x=>x.e.k==='ok').length, sv:est.filter(x=>x.e.k==='sv').length, no:est.filter(x=>x.e.k==='no').length, nopend:est.filter(x=>x.e.k==='nopend').length, rech:est.filter(x=>x.e.k==='rech').length}};
+}
+function renderRepPuertas(){
+  if(!document.getElementById('rp-css')){ const st=document.createElement('style'); st.id='rp-css'; st.textContent='.rp-t th,.rp-t td{padding:7px 5px!important}'; document.head.appendChild(st); }
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  const hoy = fechaHoyLocal(); if(!rpHasta) rpHasta = hoy; if(!rpDesde){ const d = new Date(hoy+'T12:00:00'); d.setDate(1); rpDesde = ymdLocal(d); }
+  rpMod = modulo() || (MODULOS[0]||{}).nombre; // el módulo se elige arriba, como en los demás reportes
+  if(!rpCache || Date.now()-rpCache.t > 60000){ $('#main').innerHTML = repVolverHtml('🚪 Puertas instaladas y sus herrajes','',true)+'<div class="card hint">Cargando…</div>';
+    rpCargar().then(c=>{ rpCache = c; if(current==='repver' && repSec==='puertas') renderRepPuertas(); }).catch(e=>{ $('#main').innerHTML = '<div class="card">No se pudo cargar: '+e.message+'</div>'; }); return; }
+  const R = rpCalc(rpCache, rpMod, rpDesde, rpHasta), M = MODULOS.find(m=>m.nombre===rpMod)||{color:'#666'};
+  const chips = MODULOS.map(m=>`<button onclick="rpMod='${m.nombre}';renderRepPuertas()" style="border-radius:12px;padding:7px 11px;border:2px solid ${m.color};background:${m.nombre===rpMod?m.color:'transparent'};color:${m.nombre===rpMod?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:13.5px;cursor:pointer">${m.nombre}</button>`).join('');
+  const kpi = (n, t, c) => `<div style="flex:1;min-width:70px;text-align:center;padding:8px 4px;border-radius:12px;background:${c}1f;border:1px solid ${c}66"><div style="font-size:20px;font-weight:900;color:${c}">${n}</div><div class="hint" style="margin:0;font-size:11.5px">${t}</div></div>`;
+  const nomH = c => (CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||'';
+  $('#main').innerHTML = repVolverHtml('🚪 Puertas instaladas y sus herrajes', 'Todas las que capturaron los coordinadores, verificadas o no.', true) + `
+    <div class="card" style="padding:12px">
+      <div class="grid2"><div><label class="hint">Desde</label><input type="date" value="${rpDesde}" max="${hoy}" onchange="rpDesde=this.value;renderRepPuertas()"></div><div><label class="hint">Hasta</label><input type="date" value="${rpHasta}" max="${hoy}" onchange="rpHasta=this.value;renderRepPuertas()"></div></div>
+      <button class="btn" style="width:100%;margin-top:10px;background:linear-gradient(135deg,#0d7468,#0b5e55)" onclick="rpPdf()">📄 PDF</button></div>
+    <div class="card" style="padding:12px;border-left:6px solid ${M.color}"><strong style="font-size:16px">${rpMod} · ${R.n.total} instalación(es) de puertas</strong>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${kpi(R.n.ok,'✅ verificadas','#16a34a')}${kpi(R.n.sv,'sin verificar','#6b7280')}${kpi(R.n.no,'❌ no se instaló (regresó)','#dc2626')}${kpi(R.n.nopend,'❌ falta que decida','#b45309')}${kpi(R.n.rech,'rechazadas en aprob.','#991b1b')}</div></div>
+    <div class="card" style="padding:12px"><strong>🔩 Herrajes de puertas en ${rpMod}</strong>
+      <div class="wrap-x" style="margin-top:8px"><table class="rp-t" style="font-size:13px"><tr><th>Herraje</th><th style="text-align:right">Tenía${R.herr.some(h=>h.inicioReal)?'*':''}</th><th style="text-align:right">Puertas</th><th style="text-align:right">Regresó</th><th style="text-align:right">Otros</th><th style="text-align:right">Debe<br>haber</th></tr>
+      ${R.herr.map(h=>`<tr><td><strong>${h.it.nombre}</strong></td><td style="text-align:right">${fmtNum(h.tenia)}</td><td style="text-align:right;color:var(--bad)">−${fmtNum(h.usados)}</td><td style="text-align:right;color:var(--ok)">+${fmtNum(h.regresos)}</td><td style="text-align:right">${h.otros>0?'+':''}${fmtNum(h.otros)}</td><td style="text-align:right;font-weight:900">${fmtNum(h.hoy)}</td></tr>`).join('')}</table></div>
+      <p class="hint" style="margin:6px 0 0">Tenía = al empezar el ${fCorta(rpDesde)}${R.herr.some(h=>h.inicioReal)?' (*o desde el conteo inicial, si fue después)':''}. Otros = entradas, traspasos, mermas, ajustes e instalaciones de muebles. Debe haber = lo que dice la app al terminar el ${fCorta(rpHasta)}.</p></div>
+    <div class="card" style="padding:12px"><strong>📋 Instalaciones de puertas</strong>
+      ${R.logs.length?R.logs.map(x=>{ const l = x.l; return `<div style="border-top:1px solid var(--line);padding:9px 0">
+        <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><span style="min-width:0"><strong>${fCorta(l.fechaDia||diaLocal(l.fecha))}</strong> · ${l.calle?'📍 '+escCalle(l.calle):'<span class="hint" style="margin:0">sin calle</span>'}</span><span class="tag" style="color:${x.e.c};border-color:${x.e.c};white-space:nowrap">${x.e.t}</span></div>
+        <div style="font-size:13.5px;margin-top:2px">${l.descripcion.replace(/^Puerta /,'')}</div>
+        ${x.e.d?`<div class="hint" style="margin:2px 0 0;color:${x.e.c}">${x.e.d}</div>`:''}
+        <div class="hint" style="margin:2px 0 0">🔩 ${x.her.map(c=>`${fmtNum(c.cantidad)} ${nomH(c)}`).join(' · ')||'—'}</div></div>`; }).join(''):'<p class="hint">No hay puertas en esas fechas.</p>'}</div>`;
+}
+async function rpPdf(){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  if(!rpCache) rpCache = await rpCargar();
+  const R = rpCalc(rpCache, rpMod, rpDesde, rpHasta), M = MODULOS.find(m=>m.nombre===rpMod)||{};
+  const rgb = [13,116,104], S = herrPdfBase(`Closets Vera · Puertas instaladas · ${rpMod}`, `Del ${fCorta(rpDesde)} al ${fCorta(rpHasta)}  ·  verificadas o no`, rgb);
+  S.kpis([[R.n.total,'instalaciones',[55,65,81]],[R.n.ok,'verificadas',[22,128,74]],[R.n.sv,'sin verificar',[107,114,128]],[R.n.no+R.n.nopend,'no se instaló',[192,57,43]],[R.n.rech,'rechazadas',[153,27,27]]]);
+  S.seccion('HERRAJES DE PUERTAS', 'Tenía − en puertas + regresaron ± otros movimientos = debe haber', rgb);
+  S.tabla([{t:'Herraje',w:40},{t:'Tenía',w:24},{t:'En puertas',w:26},{t:'Regresaron',w:28},{t:'Otros mov.',w:30},{t:'Debe haber',w:34}],
+    R.herr.map(h=>[{t:h.it.nombre, b:true}, fmtNum(h.tenia)+(h.inicioReal?'*':''), {t:'−'+fmtNum(h.usados), col:[192,57,43]}, {t:'+'+fmtNum(h.regresos), col:[22,128,74]}, (h.otros>0?'+':'')+fmtNum(h.otros), {t:String(fmtNum(h.hoy)), b:true}]), rgb);
+  if(R.herr.some(h=>h.inicioReal)) S.vacio('* Desde el conteo inicial (fue después de la fecha de inicio).');
+  S.seccion('INSTALACIONES DE PUERTAS', `${R.n.total} instalación(es)`, rgb);
+  const nomH = c => (CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||'';
+  R.logs.length ? S.tabla([{t:'Fecha',w:18},{t:'Calle',w:40},{t:'Puerta',w:46},{t:'Estado',w:42},{t:'Herrajes',w:36}],
+    R.logs.map(x=>[fCorta(x.l.fechaDia||diaLocal(x.l.fecha)), x.l.calle||'', x.l.descripcion.replace(/^Puerta /,''), {t:x.e.t.replace(/^[^A-Za-zÁÉÍÓÚáéíóúÑñ]+/,'')+(x.e.d?'\n'+x.e.d.replace(/[^\x20-ÿ·]/g,'').trim():''), col:x.e.k==='ok'?[22,128,74]:x.e.k==='sv'?[90,90,90]:[192,57,43], b:true}, x.her.map(c=>fmtNum(c.cantidad)+' '+nomH(c)).join(', ')]), rgb) : S.vacio('No hay puertas en esas fechas.');
+  await S.fin(`puertas-${rpMod}-${rpDesde}_${rpHasta}.pdf`, `Closets Vera · Puertas instaladas · ${rpMod}`);
+}
 function renderRepVer(){
   const s = repSec;
   if(s==='dia') return renderRepDia();
   if(s==='cierres') return renderRepCierres();
   if(s==='instDia') return renderRepInstDia();
+  if(s==='puertas') return renderRepPuertas();
   if(s==='rinstDir') return renderRepRInst();
   if(s==='inst'){ $('#main').innerHTML = repVolverHtml('🔧 Instalaciones de la semana', '', true) + `<div class="card" id="rep-inst"><strong>🔧 Instalaciones de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`; setTimeout(repInstalacionesSemana, 0); return; }
   if(s==='gas'){ $('#main').innerHTML = repVolverHtml('⛽ Gasolina', '', true) + `<div class="card" id="rep-gas"><strong>⛽ Gasolina de ${modulo()}</strong><p class="hint" style="margin:4px 0 0">Calculando…</p></div>`; setTimeout(repGasolinaSemana, 0); return; }
