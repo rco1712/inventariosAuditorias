@@ -204,6 +204,9 @@ async function pushDirty(){
         const t1 = new Date().toISOString();
         const r = await sb.from('docs').upsert({ ...aFila(row), updated_at: t1 }, { onConflict: 'collection,id' });
         if (!r.error) await marcarLimpio(name, row, t1);
+        // v225: un cambio de un coordinador a un préstamo ajeno la nube lo rechaza siempre (no es de su módulo);
+        // la app ya lo vuelve a mandar como evento, así que se deja de reintentar para que no quede "por sincronizar".
+        else if (name === 'prestamos' && /row-level security|permission|policy/i.test(r.error.message || '')) await marcarLimpio(name, row, t1);
         else console.warn('No se pudo subir', name, row.id, r.error.message);
       }
     }
