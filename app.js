@@ -61,7 +61,7 @@ const TIPOS_ADICIONAL = {
   zapatera: 'Zapatera',
   repisa: 'Repisa',
   piso_zoclo: 'Piso y zóclo',
-  piezas_sueltas: 'Piezas sueltas (tubos, maleteros, cargadores, zóclos)'
+  piezas_sueltas: 'Piezas sueltas (tubos, maleteros, cargadores, zóclos, entrepaños)'
 };
 // Piso y zóclo (confirmado por el usuario): el coordinador elige cuánto de cada pieza y de qué color.
 const PISO_ZOCLO_PIEZAS = [
@@ -78,7 +78,9 @@ const PIEZAS_SUELTAS = [
   {k:'maleteroG', t:'Maletero grande', nombre:'Maletero grande', dim:'40×244 cm'},
   {k:'maleteroC', t:'Maletero chico', nombre:'Maletero chico', dim:'191×40 cm'},
   {k:'cargador', t:'Cargador 10×40', nombre:'Cargador', dim:'10×40 cm'},
-  {k:'zoclo', t:'Zóclo 10×52', nombre:'Zóclo normal', dim:'10×52 cm'}
+  {k:'zoclo', t:'Zóclo 10×52', nombre:'Zóclo normal', dim:'10×52 cm'},
+  // v228 (pedido por el usuario): entrepaño suelto 52×40 como extra; solo descuenta material.
+  {k:'entrepano', t:'Entrepaño 52×40', nombre:'Entrepaño', dim:'52×40 cm'}
 ];
 const EXTRAS_SIN_VALOR = ['piezas_sueltas'];
 
@@ -225,7 +227,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v227';
+const APP_VERSION = 'v228';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6465,7 +6467,7 @@ function agregarAdicional(prefix){
   if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera' || String(tipo).startsWith('entrepanera')) && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
   if(tipo==='piezas_sueltas'){
     nuevo.ps = PIEZAS_SUELTAS.map(d=>({k:d.k, cantidad:Math.round(Number((document.getElementById(prefix+'-ps-'+d.k)||{}).value)||0), color:d.sinColor?'':((document.getElementById(prefix+'-psc-'+d.k)||{}).value||color)})).filter(r=>r.cantidad>0);
-    if(!nuevo.ps.length) return alert('Escribe cuántas piezas lleva de al menos una (tubo, maletero, cargador o zóclo).');
+    if(!nuevo.ps.length) return alert('Escribe cuántas piezas lleva de al menos una (tubo, maletero, cargador, zóclo o entrepaño).');
   }
   if(tipo==='piso_zoclo'){
     nuevo.pz = PISO_ZOCLO_PIEZAS.map(d=>({k:d.k, cantidad:Math.round(Number((document.getElementById(prefix+'-pz-'+d.k)||{}).value)||0), color:(document.getElementById(prefix+'-pzc-'+d.k)||{}).value||color})).filter(r=>r.cantidad>0);
