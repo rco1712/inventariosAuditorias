@@ -10580,11 +10580,21 @@ function diasSinRespaldo(){
 async function respaldoDesdeInicio(){ try{ await exportarRespaldo(); toast('💾 Respaldo descargado.'); }catch(e){ alert('No se pudo descargar: '+e.message); } if(current==='home') renderHome(); }
 // Datos que tarda en juntar (aprobaciones y faltantes de los 5 módulos).
 let _dirSobPu = [];
+// v227: quién tiene la app sin actualizar (se guarda la versión de cada usuario cada vez que abre la app).
+let _dirVers = [];
+function versionesViejas(){ const hace7 = new Date(Date.now()-7*864e5).toISOString();
+  return (_dirVers||[]).filter(v=>v.fecha>hace7 && numVersion(v.version||'v0') < numVersion(APP_VERSION)); }
+function verVersiones(){
+  const hace7 = new Date(Date.now()-7*864e5).toISOString();
+  const xs = (_dirVers||[]).filter(v=>v.fecha>hace7).sort((a,b)=>numVersion(a.version||'v0')-numVersion(b.version||'v0'));
+  alert('📱 Versión de la app de cada usuario (los que la abrieron en los últimos 7 días)\nLa más nueva es la '+APP_VERSION+'\n\n'+xs.map(v=>`${numVersion(v.version||'v0')<numVersion(APP_VERSION)?'⚠️':'✅'} ${String(v.email||v.id).split('@')[0]} (${v.rol==='admin'?'Dirección':v.modulo||''}): ${v.version} · abrió ${new Date(v.fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}`).join('\n')+'\n\nEl que tenga ⚠️ tiene que abrir la app con internet y picarle a Actualizar.');
+}
 async function cargarPendDir(forzar){
   if(_dirCargando || (!forzar && Date.now()-_dirCargadoT < 3000)) return;
   _dirCargando = true;
   try{
     try{ await cargarPrestamos(); }catch(e){}
+    try{ _dirVers = (await db.collection('versiones').get()).docs.map(d=>({id:d.id,...d.data()})); }catch(e){ _dirVers = []; }
     try{ const hace2 = new Date(Date.now()-2*864e5).toISOString(); _dirSobPu = sobPuertasSinRegistrar((await db.collection('sobrantes').get()).docs.map(d=>({id:d.id,...d.data()}))).filter(x=>(x.fecha||'')<hace2); }catch(e){}
     const [snapMov, snapLog, snapDeu, snapRI] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]})), db.collection('reportesInst').get().catch(()=>({docs:[]}))]);
     const porMod = {}, lotesVistos = new Set();
@@ -10606,6 +10616,7 @@ function pendDirHtml(){
   const apr = _dirAprPorMod ? Object.keys(_dirAprPorMod).filter(k=>_dirAprPorMod[k]) : [];
   const nApr = apr.reduce((s,k)=>s+_dirAprPorMod[k],0);
   if(nApr) rows.push(fila('✅', `${nApr} captura${nApr===1?'':'s'} por aprobar`, apr.map(k=>k+' '+_dirAprPorMod[k]).join(' · '), '#16a34a', 'Aprobar', "irA('apr')"));
+  { const vv = versionesViejas(); if(vv.length) rows.push(fila('📱', `App sin actualizar: ${vv.length}`, vv.map(v=>String(v.email||v.id).split('@')[0]+' '+v.version).join(' · ')+' · la nueva es '+APP_VERSION, '#64748b', 'Ver', 'verVersiones()')); }
   const rV = verifPendRow(fila); if(rV) rows.push(rV);
   const rA = verifPendRowAtr(fila); if(rA) rows.push(rA);
   const rR = riPendRow(fila); if(rR) rows.push(rR);
