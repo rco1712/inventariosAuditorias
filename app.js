@@ -225,7 +225,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v226';
+const APP_VERSION = 'v227';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8642,8 +8642,11 @@ function _mejorEspacioParaPieza(libres, w, h){
   return mejor;
 }
 let _corteVerticalPrimero = false; // lo cambia hojasParaCortesCombinado al probar las dos formas de cortar
+let _sierraCm = 0; // v227: grueso de la sierra que se deja junto a cada pieza al acomodar (0.5 cm)
 function _colocarPiezaEnLibres(libres, idx, pw, ph){
   const r = libres[idx];
+  // v227: cada pieza se lleva 5 mm de la sierra hacia donde sigue habiendo material (en la orilla de la hoja no).
+  if(_sierraCm){ pw = Math.min(r.w, pw + _sierraCm); ph = Math.min(r.h, ph + _sierraCm); }
   libres.splice(idx,1);
   if(_corteVerticalPrimero){
     // Primero el corte a lo largo: la tira de al lado queda del alto completo (p. ej. junto a una
@@ -8694,13 +8697,21 @@ function piezasPorHojaIndividual(anchoPieza, altoPieza, anchoHoja, altoHoja){
 // Se prueban dos órdenes de acomodo y se queda el mejor (menos hojas físicas y, a igual número de
 // hojas, lo que menos se descuenta). El segundo orden pone primero las piezas que ocupan una hoja
 // entera (puertas), para que los marcos aprovechen la tira que queda al lado de cada puerta.
+// v227 (confirmado por el usuario: "así es el corte correcto"): se acomoda como corta el taller. Primero las
+// piezas grandes (puertas, pared falsa) y luego marcos y fijos EN LOS SOBRANTES de esas hojas si caben, con
+// 5 mm de sierra entre piezas. Lo que no cabe en ningún sobrante se cobra proporcional de otra hoja (no se abre
+// una hoja completa). Entre las dos formas de cortar se queda la que usa menos hojas y, si empatan, la que
+// aprovecha más los sobrantes de las hojas de puertas.
 function hojasParaCortesCombinado(cortes, anchoHoja, altoHoja){
   let mejor = null;
-  for(const vert of [false, true]) for(const gp of [false, true]){
-    _corteVerticalPrimero = vert;
-    let r; try{ r = _empacarCortes(cortes, anchoHoja, altoHoja, gp); } finally { _corteVerticalPrimero = false; }
-    if(!mejor || r.hojas<mejor.hojas || (r.hojas===mejor.hojas && r.costo<mejor.costo-1e-9)) mejor = r;
-  }
+  const prevS = _sierraCm; _sierraCm = 0.5;
+  try{
+    for(const vert of [false, true]){
+      _corteVerticalPrimero = vert;
+      let r; try{ r = _empacarCortes(cortes, anchoHoja, altoHoja, true); } finally { _corteVerticalPrimero = false; }
+      if(!mejor || r.hojas<mejor.hojas || (r.hojas===mejor.hojas && (r.enGrandes>mejor.enGrandes+1e-6 || (Math.abs(r.enGrandes-mejor.enGrandes)<=1e-6 && r.costo<mejor.costo-1e-9)))) mejor = r;
+    }
+  } finally { _sierraCm = prevS; }
   return mejor;
 }
 function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
@@ -8735,7 +8746,7 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
     }
   });
 
-  let costo = 0;
+  let costo = 0, enGrandes = 0;
   const sobrantesHoja = []; // hojas cobradas en proporción: lo que no se usa de ellas
   hojas.forEach((hoja,hIdx)=>{
     const obligaHojaCompleta = hoja.items.some(it=>piezasPorHojaIndividual(it.ancho,it.alto,anchoHoja,altoHoja)<=1);
@@ -8744,11 +8755,13 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
       // solo se descuenta lo que no se puede aprovechar. Un pedazo libre de 10 cm o más de ancho
       // (contando el corte de 5 mm) y de al menos 27 cm de largo se queda en el inventario como cortado;
       // las tiras de menos de 10 cm se van a merma (se descuentan).
-      const peds = (hoja.libres||[]).filter(r=>Math.min(r.w,r.h)-0.5 >= 10 - 1e-9 && Math.max(r.w,r.h)-0.5 >= 27 - 1e-9);
+      hoja.items.forEach(it=>{ enGrandes += it.ancho*it.alto; });
+      const kf = _sierraCm ? 0 : 0.5; // con sierra en el acomodo, los pedazos libres ya vienen sin el corte
+      const peds = (hoja.libres||[]).filter(r=>Math.min(r.w,r.h)-kf >= 10 - 1e-9 && Math.max(r.w,r.h)-kf >= 27 - 1e-9);
       const aprovechable = peds.reduce((t,r)=>t+r.w*r.h,0), sobra = aprovechable/(anchoHoja*altoHoja);
       costo += Math.max(0, 1 - sobra);
       if(sobra > 0) sobrantesHoja.push({hoja:hIdx+1, usado:Math.round((1-sobra)*1000)/1000, sobra:Math.round(sobra*1000)/1000, piezas:hoja.items.length,
-        pedazos: peds.map(r=>({w:Math.round((Math.min(r.w,r.h)-0.5)*10)/10, h:Math.round((Math.max(r.w,r.h)-(Math.max(r.w,r.h)>=altoHoja-0.01?0:0.5))*10)/10})).sort((a,b)=>b.w*b.h-a.w*a.h)});
+        pedazos: peds.map(r=>({w:Math.round((Math.min(r.w,r.h)-kf)*10)/10, h:Math.round((Math.max(r.w,r.h)-(Math.max(r.w,r.h)>=altoHoja-0.01?0:kf))*10)/10})).sort((a,b)=>b.w*b.h-a.w*a.h)});
     } else {
       let ch = 0;
       hoja.items.forEach(it=>{
@@ -8763,7 +8776,7 @@ function _empacarCortes(cortes, anchoHoja, altoHoja, grandesPrimero){
   });
 
   sobrantesHoja.sort((a,b)=>a.hoja-b.hoja);
-  return {hojas: hojas.length, costo: Math.round(costo*1000)/1000, noCaben, sobrantesHoja};
+  return {hojas: hojas.length, costo: Math.round(costo*1000)/1000, noCaben, sobrantesHoja, enGrandes};
 }
 
 let puertaPreview = null;
@@ -10567,11 +10580,21 @@ function diasSinRespaldo(){
 async function respaldoDesdeInicio(){ try{ await exportarRespaldo(); toast('💾 Respaldo descargado.'); }catch(e){ alert('No se pudo descargar: '+e.message); } if(current==='home') renderHome(); }
 // Datos que tarda en juntar (aprobaciones y faltantes de los 5 módulos).
 let _dirSobPu = [];
+// v227: quién tiene la app sin actualizar (se guarda la versión de cada usuario cada vez que abre la app).
+let _dirVers = [];
+function versionesViejas(){ const hace7 = new Date(Date.now()-7*864e5).toISOString();
+  return (_dirVers||[]).filter(v=>v.fecha>hace7 && numVersion(v.version||'v0') < numVersion(APP_VERSION)); }
+function verVersiones(){
+  const hace7 = new Date(Date.now()-7*864e5).toISOString();
+  const xs = (_dirVers||[]).filter(v=>v.fecha>hace7).sort((a,b)=>numVersion(a.version||'v0')-numVersion(b.version||'v0'));
+  alert('📱 Versión de la app de cada usuario (los que la abrieron en los últimos 7 días)\nLa más nueva es la '+APP_VERSION+'\n\n'+xs.map(v=>`${numVersion(v.version||'v0')<numVersion(APP_VERSION)?'⚠️':'✅'} ${String(v.email||v.id).split('@')[0]} (${v.rol==='admin'?'Dirección':v.modulo||''}): ${v.version} · abrió ${new Date(v.fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}`).join('\n')+'\n\nEl que tenga ⚠️ tiene que abrir la app con internet y picarle a Actualizar.');
+}
 async function cargarPendDir(forzar){
   if(_dirCargando || (!forzar && Date.now()-_dirCargadoT < 3000)) return;
   _dirCargando = true;
   try{
     try{ await cargarPrestamos(); }catch(e){}
+    try{ _dirVers = (await db.collection('versiones').get()).docs.map(d=>({id:d.id,...d.data()})); }catch(e){ _dirVers = []; }
     try{ const hace2 = new Date(Date.now()-2*864e5).toISOString(); _dirSobPu = sobPuertasSinRegistrar((await db.collection('sobrantes').get()).docs.map(d=>({id:d.id,...d.data()}))).filter(x=>(x.fecha||'')<hace2); }catch(e){}
     const [snapMov, snapLog, snapDeu, snapRI] = await Promise.all([db.collection('movimientos').get(), db.collection('instalacionesLog').get(), db.collection('deudasAuditoria').get().catch(()=>({docs:[]})), db.collection('reportesInst').get().catch(()=>({docs:[]}))]);
     const porMod = {}, lotesVistos = new Set();
@@ -10593,6 +10616,7 @@ function pendDirHtml(){
   const apr = _dirAprPorMod ? Object.keys(_dirAprPorMod).filter(k=>_dirAprPorMod[k]) : [];
   const nApr = apr.reduce((s,k)=>s+_dirAprPorMod[k],0);
   if(nApr) rows.push(fila('✅', `${nApr} captura${nApr===1?'':'s'} por aprobar`, apr.map(k=>k+' '+_dirAprPorMod[k]).join(' · '), '#16a34a', 'Aprobar', "irA('apr')"));
+  { const vv = versionesViejas(); if(vv.length) rows.push(fila('📱', `App sin actualizar: ${vv.length}`, vv.map(v=>String(v.email||v.id).split('@')[0]+' '+v.version).join(' · ')+' · la nueva es '+APP_VERSION, '#64748b', 'Ver', 'verVersiones()')); }
   const rV = verifPendRow(fila); if(rV) rows.push(rV);
   const rA = verifPendRowAtr(fila); if(rA) rows.push(rA);
   const rR = riPendRow(fila); if(rR) rows.push(rR);
