@@ -225,7 +225,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v225';
+const APP_VERSION = 'v226';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9169,6 +9169,19 @@ async function prestRepararLocal(bases){
     }
     if(b.salidaMovId && (b.recibido || b.estado==='cancelado') && (adm || b.destino===mod) && !evDe(b.id,'traspConf')){
       await prestEvento(b, {tipo:'traspConf', llego:!!b.recibido, yaContadas:!!(b.recibido||{}).yaContadasEnCierre, fecha:(b.recibido||{}).fecha||b.canceladoEn||new Date().toISOString()}); hubo = true; }
+  }
+  // Si el envío no quedó guardado en ningún lado pero la salida sí se subió (prestamoId + envioDev), se recupera
+  // desde la salida. Lo puede hacer Dirección o el módulo que debe.
+  for(const p of (prestamos||[])){
+    if(!(adm || p.destino===mod) || p.estado==='cerrado') continue;
+    try{
+      const snap = await db.collection('movimientos').where('modulo','==',p.destino).get();
+      const sal = snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.tipo==='salida' && m.prestamoId===p.id && m.envioDev && m.estado!=='rechazado' && !m.anulado);
+      for(const m of sal){
+        if((p.envios||[]).some(e=>e.id===m.envioDev) || evDe(p.id,'envio',m.envioDev)) continue;
+        await prestEvento(p, {tipo:'envio', envId:m.envioDev, cantidad:Number(m.cantidad), itemId:m.itemId, itemNombre:m.itemNombre, salidaMovId:m.id, fecha:m.fecha, creadoPor:m.creadoPor||''}); hubo = true;
+      }
+    }catch(e){}
   }
   // "No llegó": la salida es del módulo que mandó; solo ese módulo (o Dirección) puede anularla.
   const anular = [];
