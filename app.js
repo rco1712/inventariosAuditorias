@@ -9113,11 +9113,75 @@ let prestamos = [];
 function esMelaminaId(itemId){ const it=CATALOGO.find(i=>i.id===itemId); return it && it.cat==='Melamina'; }
 function grupoDeuda(itemId){ return esMelaminaId(itemId) ? 'Melamina' : itemId; } // clave de agrupación de la deuda
 
+// v225: un coordinador NO puede modificar el documento del préstamo en la nube (no es de su módulo), solo
+// crear documentos nuevos. Por eso cada paso (mandar, confirmar, cancelar) se guarda como un EVENTO nuevo
+// {evento:true, prestamoId, ...} y el estado del préstamo se calcula aquí juntando el préstamo + sus eventos.
+let prestEventos = [];
+function prestAplicarEventos(bases, evs){
+  const porP = {}; evs.forEach(ev=>{ (porP[ev.prestamoId] = porP[ev.prestamoId] || []).push(ev); });
+  return bases.map(b=>{
+    const p = Object.assign({}, b, {envios:(b.envios||[]).map(e=>Object.assign({}, e)), devoluciones:[...(b.devoluciones||[])]});
+    const xs = (porP[p.id]||[]).sort((a,c)=>(a.fecha||'').localeCompare(c.fecha||''));
+    xs.forEach(ev=>{
+      if(ev.tipo==='envio'){ if(!p.envios.some(e=>e.id===ev.envId)) p.envios.push({id:ev.envId, fecha:ev.fecha, cantidad:Number(ev.cantidad), itemId:ev.itemId, itemNombre:ev.itemNombre, estado:'encamino', por:ev.creadoPor, salidaMovId:ev.salidaMovId}); }
+      else if(ev.tipo==='confEnvio'){ const e = p.envios.find(x=>x.id===ev.envId); if(!e || e.estado!=='encamino') return;
+        if(ev.llego){ e.estado='recibido'; e.fechaConf=ev.fecha; e.confPor=ev.creadoPor; p.devuelto = Number(p.devuelto||0) + Number(e.cantidad);
+          p.devoluciones.push({fecha:ev.fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:!!ev.yaContadas}); }
+        else { e.estado='cancelado'; e.fechaConf=ev.fecha; e.confPor=ev.creadoPor; } }
+      else if(ev.tipo==='traspConf'){ if(p.estado!=='encamino') return;
+        if(ev.llego){ p.estado='pendiente'; p.recibido={fecha:ev.fecha, por:ev.creadoPor, yaContadasEnCierre:!!ev.yaContadas}; }
+        else { p.estado='cancelado'; p.canceladoEn=ev.fecha; p.canceladoPor=ev.creadoPor; } }
+    });
+    if(p.estado!=='encamino' && p.estado!=='cancelado'){
+      const pend = Math.max(0, fmtNum(Number(p.cantidad) - Number(p.devuelto||0)));
+      p.pendiente = pend; p.estado = pend<=0 ? 'cerrado' : (Number(p.devuelto||0)>0 ? 'parcial' : 'pendiente');
+    }
+    return p;
+  });
+}
+async function prestEvento(p, datos){
+  await db.collection('prestamos').doc(cryptoId()).set(Object.assign({evento:true, prestamoId:p.id, origen:p.origen, destino:p.destino,
+    fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}, datos));
+}
 async function cargarPrestamos(){
   try{
     const snap = await db.collection('prestamos').get();
-    prestamos = snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.estado!=='anulado').sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+    const todos = snap.docs.map(d=>({id:d.id,...d.data()}));
+    prestEventos = todos.filter(x=>x.evento);
+    const bases = todos.filter(x=>!x.evento && x.estado!=='anulado');
+    prestamos = prestAplicarEventos(bases, prestEventos).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+    prestRepararLocal(bases).catch(()=>{});
   }catch(e){ prestamos=[]; }
+}
+// Lo que este teléfono guardó con la versión anterior directo en el préstamo (y la nube no aceptó) se vuelve a
+// mandar como evento; y si al otro módulo le dijeron "no llegó", el que mandó anula su propia salida.
+let _prestRepT = 0;
+async function prestRepararLocal(bases){
+  if(Date.now()-_prestRepT < 20000 || esSoloLectura()) return; _prestRepT = Date.now();
+  const mod = modulo(), adm = esAdmin(); let hubo = false;
+  const evDe = (pid, tipo, envId) => prestEventos.some(ev=>ev.prestamoId===pid && ev.tipo===tipo && (!envId || ev.envId===envId));
+  for(const b of bases){
+    for(const e of (b.envios||[])){
+      if((adm || b.destino===mod) && !evDe(b.id,'envio',e.id) && e.salidaMovId){
+        await prestEvento(b, {tipo:'envio', envId:e.id, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, salidaMovId:e.salidaMovId, fecha:e.fecha, creadoPor:e.por||''}); hubo = true; }
+      if((e.estado==='recibido'||e.estado==='cancelado') && (adm || b.origen===mod) && !evDe(b.id,'confEnvio',e.id)){
+        await prestEvento(b, {tipo:'confEnvio', envId:e.id, llego:e.estado==='recibido', yaContadas:!!((b.devoluciones||[]).find(d=>d.mandado===e.fecha)||{}).yaContadasEnCierre, fecha:e.fechaConf||new Date().toISOString(), creadoPor:e.confPor||''}); hubo = true; }
+    }
+    if(b.salidaMovId && (b.recibido || b.estado==='cancelado') && (adm || b.destino===mod) && !evDe(b.id,'traspConf')){
+      await prestEvento(b, {tipo:'traspConf', llego:!!b.recibido, yaContadas:!!(b.recibido||{}).yaContadasEnCierre, fecha:(b.recibido||{}).fecha||b.canceladoEn||new Date().toISOString()}); hubo = true; }
+  }
+  // "No llegó": la salida es del módulo que mandó; solo ese módulo (o Dirección) puede anularla.
+  const anular = [];
+  (prestamos||[]).forEach(p=>{
+    if(p.estado==='cancelado' && p.salidaMovId && (adm || p.origen===mod)) anular.push([p.salidaMovId, `Traspaso ${p.origen} → ${p.destino} · cancelado: no llegó`]);
+    (p.envios||[]).forEach(e=>{ if(e.estado==='cancelado' && e.salidaMovId && (adm || p.destino===mod)) anular.push([e.salidaMovId, `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre}) · cancelada: no llegó`]); });
+  });
+  for(const [id, nota] of anular){
+    try{ const r = await db.collection('movimientos').doc(id).get(); const m = r && r.data ? r.data() : null;
+      if(m && m.estado!=='rechazado'){ await db.collection('movimientos').doc(id).update({estado:'rechazado', anulado:true, nota}); hubo = true; } }catch(e){}
+  }
+  if(hubo){ const snap = await db.collection('prestamos').get(); const todos = snap.docs.map(d=>({id:d.id,...d.data()}));
+    prestEventos = todos.filter(x=>x.evento); prestamos = prestAplicarEventos(todos.filter(x=>!x.evento && x.estado!=='anulado'), prestEventos).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }
 }
 
 function renderTrasp(){
@@ -9303,7 +9367,7 @@ async function registrarDevolucion(prestamoId){
     const fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', movId = cryptoId(), envId = cryptoId();
     const notaTxt = `Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre}) · en camino`;
     await db.collection('movimientos').doc(movId).set({modulo:p.destino,itemId,itemNombre:item.nombre,tipo:'salida',cantidad,nota:notaTxt,fecha,estado:'aprobado',creadoPor,prestamoId:p.id,envioDev:envId});
-    await db.collection('prestamos').doc(prestamoId).update({envios:[...(p.envios||[]), {id:envId, fecha, cantidad, itemId, itemNombre:item.nombre, estado:'encamino', por:creadoPor, salidaMovId:movId}]});
+    await prestEvento(p, {tipo:'envio', envId, cantidad, itemId, itemNombre:item.nombre, salidaMovId:movId, fecha});
     toast(`🚚 Mandado. ${p.origen} tiene que confirmar que llegó.`);
     await cargarPrestamos(); renderTraspHistorial();
   }catch(e){ alert('Error: '+e.message); }
@@ -9316,15 +9380,18 @@ function prestHomeHtml(){
   const mod = modulo(), xs = (prestamos||[]).filter(p=>p.estado!=='cerrado');
   const llegan = xs.filter(p=>p.origen===mod).flatMap(p=>(p.envios||[]).filter(e=>e.estado==='encamino').map(e=>({p, e})));
   const trLlegan = xs.filter(p=>p.estado==='encamino' && p.destino===mod);
-  const debo = xs.filter(p=>p.destino===mod && p.pendiente>0);
-  if(!llegan.length && !debo.length && !trLlegan.length) return '';
+  const enCam = p => (p.envios||[]).filter(e=>e.estado==='encamino').reduce((t,e)=>t+Number(e.cantidad),0);
+  const debo = xs.filter(p=>p.destino===mod && p.pendiente - enCam(p) > 1e-9);
+  const esperando = xs.filter(p=>p.destino===mod && p.pendiente>0 && enCam(p)>0);
+  if(!llegan.length && !debo.length && !trLlegan.length && !esperando.length) return '';
   return `<div class="card" style="padding:12px;border:2px solid #0891b2">
     ${trLlegan.length?`<div style="font-size:16px;font-weight:900">🚚 Te mandaron material (traspaso)</div>${trLlegan.map(p=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${fmtNum(p.cantidad)} ${p.itemNombre}</strong> <span class="hint" style="margin:0">de ${p.origen} · ${fCorta(diaLocal(p.fecha))}${p.nota?' · '+p.nota:''}</span>
       <div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="traspConfirmar('${p.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="traspConfirmar('${p.id}',false)">❌ No llegaron</button></div></div>`).join('')}<div style="height:8px"></div>`:''}
     ${llegan.length?`<div style="font-size:16px;font-weight:900">↩️ Te regresaron material de un préstamo</div>${llegan.map(({p,e})=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${fmtNum(e.cantidad)} ${e.itemNombre}</strong> <span class="hint" style="margin:0">de ${p.destino} · ${fCorta(diaLocal(e.fecha))}</span>
       <div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="prestConfirmar('${p.id}','${e.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="prestConfirmar('${p.id}','${e.id}',false)">❌ No llegaron</button></div></div>`).join('')}`:''}
     ${debo.length?`<div style="font-size:15px;font-weight:900;margin-top:${llegan.length?10:0}px;color:#dc2626">🔴 Debes material a otros módulos</div>${debo.map(p=>`<div class="hint" style="margin:4px 0 0">• ${fmtNum(p.pendiente)} ${p.unidad} de ${p.esMelamina?'melamina':p.itemNombre} a <strong>${p.origen}</strong></div>`).join('')}
-      <button class="btn small" style="width:100%;margin-top:8px;background:#dc2626" onclick="traspSub='historial';irA('trasp')">💸 Saldar deuda</button>`:''}</div>`;
+      <button class="btn small" style="width:100%;margin-top:8px;background:#dc2626" onclick="traspSub='historial';irA('trasp')">💸 Saldar deuda</button>`:''}
+    ${esperando.length?`<div style="font-size:15px;font-weight:900;margin-top:10px;color:#0891b2">🚚 Ya mandaste, falta que lo confirmen</div>${esperando.map(p=>`<div class="hint" style="margin:4px 0 0">• ${fmtNum(enCam(p))} ${p.unidad} a <strong>${p.origen}</strong>: la deuda se salda cuando ${p.origen} confirme que llegaron. No lo vuelvas a mandar.</div>`).join('')}`:''}</div>`;
 }
 function prestModoConfirmar(p, e, deMod, aMod){
   deMod = deMod || p.destino; aMod = aMod || p.origen;
@@ -9354,14 +9421,15 @@ async function traspConfirmar(prestamoId, llego){
     const ya = modo==='cierre';
     try{
       if(!ya) await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId:p.itemId,itemNombre:p.itemNombre,tipo:'entrada',cantidad:Number(p.cantidad),nota:`Traspaso ${p.origen} → ${p.destino}${p.nota?(' · '+p.nota):''}`,fecha,estado:'aprobado',creadoPor:quien,origenTipo:'modulo',origenModulo:p.origen,prestamoId:p.id});
-      await db.collection('prestamos').doc(prestamoId).update({estado:'pendiente', pendiente:Number(p.cantidad), recibido:{fecha, por:quien, yaContadasEnCierre:ya}});
+      await prestEvento(p, {tipo:'traspConf', llego:true, yaContadas:ya, fecha});
       toast(ya ? '✅ Recibido (ya estaba contado en el cierre). Queda la deuda.' : '✅ Recibido. Se sumó y queda la deuda.');
     }catch(er){ return alert('Error: '+er.message); }
   } else {
     if(!confirm(`❌ ¿No llegaron ${fmtNum(p.cantidad)} ${p.itemNombre} de ${p.origen}?\n\nEl traspaso se cancela: regresan a ${p.origen} y no queda deuda.`)) return;
     try{
-      if(p.salidaMovId) await db.collection('movimientos').doc(p.salidaMovId).update({estado:'rechazado', anulado:true, nota:`Traspaso ${p.origen} → ${p.destino} · cancelado: no llegó`});
-      await db.collection('prestamos').doc(prestamoId).update({estado:'cancelado', canceladoEn:fecha, canceladoPor:quien});
+      await prestEvento(p, {tipo:'traspConf', llego:false, fecha});
+      // La salida es del módulo que mandó: la anula ese módulo (o Dirección) al abrir la app (prestRepararLocal).
+      if(esAdmin() && p.salidaMovId) await db.collection('movimientos').doc(p.salidaMovId).update({estado:'rechazado', anulado:true, nota:`Traspaso ${p.origen} → ${p.destino} · cancelado: no llegó`});
       toast('Traspaso cancelado');
     }catch(er){ return alert('Error: '+er.message); }
   }
@@ -9379,16 +9447,14 @@ async function prestConfirmar(prestamoId, envId, llego){
     try{
       if(!yaContadas) await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:Number(e.cantidad),nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`,fecha,estado:'aprobado',origenTipo:'modulo',origenModulo:p.destino,creadoPor:quien,prestamoId:p.id,envioDev:e.id});
       const dev = Number(p.devuelto||0) + Number(e.cantidad), pend = Math.max(0, fmtNum(Number(p.cantidad) - dev));
-      await db.collection('prestamos').doc(prestamoId).update({devuelto:dev, pendiente:pend, estado:pend<=0?'cerrado':'parcial',
-        envios:(p.envios||[]).map(x=>x.id===envId?Object.assign({}, x, {estado:'recibido', fechaConf:fecha, confPor:quien}):x),
-        devoluciones:[...(p.devoluciones||[]), {fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:yaContadas}]});
+      await prestEvento(p, {tipo:'confEnvio', envId, llego:true, yaContadas, fecha});
       toast((yaContadas?'✅ Deuda saldada (ya estaban contadas en el cierre)':(pend<=0 ? '✅ Deuda saldada' : '✅ Recibido'))+(pend>0?` · faltan ${fmtNum(pend)} ${p.unidad}`:''));
     }catch(er){ return alert('Error: '+er.message); }
   } else {
     if(!confirm(`❌ ¿No llegaron ${fmtNum(e.cantidad)} ${e.itemNombre}?\n\nEl envío se cancela: regresan a ${p.destino} y la deuda sigue igual.`)) return;
     try{
-      if(e.salidaMovId) await db.collection('movimientos').doc(e.salidaMovId).update({estado:'rechazado', anulado:true, nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre}) · cancelada: no llegó`});
-      await db.collection('prestamos').doc(prestamoId).update({envios:(p.envios||[]).map(x=>x.id===envId?Object.assign({}, x, {estado:'cancelado', fechaConf:fecha, confPor:quien}):x)});
+      await prestEvento(p, {tipo:'confEnvio', envId, llego:false, fecha});
+      if(esAdmin() && e.salidaMovId) await db.collection('movimientos').doc(e.salidaMovId).update({estado:'rechazado', anulado:true, nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre}) · cancelada: no llegó`});
       toast('Envío cancelado');
     }catch(er){ return alert('Error: '+er.message); }
   }
@@ -14010,7 +14076,7 @@ function dupFirma(obj){ return JSON.stringify(obj); }
 function dupCerca(a, b){ return Math.abs(Date.parse(a||0) - Date.parse(b||0)) <= DUP_SEG*1000; }
 async function dupCargar(){
   const [sm, sl, sp, sc] = await Promise.all(['movimientos','instalacionesLog','prestamos','config'].map(c=>db.collection(c).get()));
-  const movsT = sm.docs.map(d=>({id:d.id,...d.data()})), logs = sl.docs.map(d=>({id:d.id,...d.data()})), pres = sp.docs.map(d=>({id:d.id,...d.data()}));
+  const movsT = sm.docs.map(d=>({id:d.id,...d.data()})), logs = sl.docs.map(d=>({id:d.id,...d.data()})), pres = sp.docs.map(d=>({id:d.id,...d.data()})).filter(x=>!x.evento);
   const cfg = sc.docs.find(d=>d.id==='duplicadosRevisados'); const ignorados = new Set(cfg ? ((cfg.data()||{}).claves||[]) : []);
   const grupos = [];
   const agrupar = (xs, firma, fecha) => { const por = {}; xs.forEach(x=>{ const k = firma(x); (por[k]=por[k]||[]).push(x); });
