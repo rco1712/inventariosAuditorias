@@ -1425,6 +1425,7 @@ const TIPO_LABEL = {entrada:'Entrada', salida:'Salida', instalacion:'Instalació
 function etiquetaTipoMov(m){
   if(m.motivo==='correccionDireccion') return '✏️ Corrección de Dirección';
   if(m.motivo==='cierreCompletasDeMas') return 'Hojas completas de más (cierre)';
+  if(m.motivo==='deshacerCorte') return '↩️ No se cortó (regresa a completas)';
   if(m.motivo==='armarJuegos') return 'Armado de juegos';
   if(m.motivo==='autoJuntar') return 'Se juntaron solos (correderas)';
   if(m.motivo==='ajusteCierreHerrajes') return 'Ajuste de herrajes (cierre)';
@@ -9365,7 +9366,7 @@ async function traspConfirmar(prestamoId, llego){
       toast('Traspaso cancelado');
     }catch(er){ return alert('Error: '+er.message); }
   }
-  await cargarPrestamos(); if(document.getElementById('trasp-body')) renderTraspHistorial(); else if(current==='home') (esAdmin()&&enDirModo()?renderHomeDir():renderHome());
+  await cargarPrestamos(); if(document.getElementById('trasp-body')) renderTraspHistorial(); else if(current==='home') (esAdmin()&&enDirModo()?renderHomeDir():renderHome()); else if(current==='cierre') renderCierre();
 }
 async function prestConfirmar(prestamoId, envId, llego){
   await cargarPrestamos(); const p = prestamos.find(x=>x.id===prestamoId); if(!p) return;
@@ -9392,7 +9393,7 @@ async function prestConfirmar(prestamoId, envId, llego){
       toast('Envío cancelado');
     }catch(er){ return alert('Error: '+er.message); }
   }
-  await cargarPrestamos(); if(document.getElementById('trasp-body')) renderTraspHistorial(); else if(current==='home') renderHome();
+  await cargarPrestamos(); if(document.getElementById('trasp-body')) renderTraspHistorial(); else if(current==='home') renderHome(); else if(current==='cierre') renderCierre();
 }
 
 // ===== PDF de traspasos (confirmado por el usuario) =====
@@ -11066,14 +11067,61 @@ function corteDesdeConteo(itemId, contadas){
   const esp = fmtNum(sim.completas), deuda = fmtNum(sim.autoCortes||0), c = Number(contadas);
   const corte = fmtNum(deuda + Math.max(0, esp - c));
   const deMas = fmtNum(Math.max(0, c - esp));
-  return {esp, deuda, contadas:c, corte, deMas};
+  // v224: si cuentan completas DE MÁS y hubo un corte en los últimos días, lo más seguro es que una hoja
+  // se contó como cortada sin cortarse (estaba apartada). Se regresa de cortado a completas: el total
+  // del inventario NO cambia. Tope: lo cortado en los últimos días y el cortado que hay (hojas enteras).
+  // Si le mandaron material de este color y no lo ha confirmado, lo de más puede ser eso: esa parte NO se regresa
+  // de cortado (iría a Dirección), para no descontar de más cuando confirme que llegó.
+  let regresa = 0, recientes = 0, ultCorte = '', camino = 0;
+  if(deMas>0){
+    camino = fmtNum(enCaminoAMi(itemId));
+    const r = cortesRecientes(itemId); recientes = fmtNum(r.q + deuda); ultCorte = r.ult;
+    regresa = Math.max(0, Math.min(Math.floor(deMas - camino + 1e-6), Math.floor(recientes+1e-6), Math.floor((Number(sim.cortado)||0)+1e-6)));
+  }
+  const aDireccion = fmtNum(deMas - regresa);
+  return {esp, deuda, contadas:c, corte, deMas, regresa, aDireccion, recientes, ultCorte, camino};
+}
+const DIAS_CORTE_RECIENTE = 3;
+// v224: material que le mandaron a este módulo y todavía no confirma (traspaso o pago de deuda), por artículo.
+function enCaminoAMi(itemId){
+  const mod = modulo(); let q = 0;
+  (prestamos||[]).forEach(p=>{
+    if(p.estado==='encamino' && p.destino===mod && p.itemId===itemId) q += Number(p.cantidad)||0;
+    if(p.origen===mod) (p.envios||[]).forEach(e=>{ if(e.estado==='encamino' && (e.itemId||p.itemId)===itemId) q += Number(e.cantidad)||0; });
+  });
+  return q;
+}
+function enCaminoAMiLista(){
+  const mod = modulo(), xs = (prestamos||[]).filter(p=>p.estado!=='cerrado');
+  return [...xs.filter(p=>p.estado==='encamino' && p.destino===mod).map(p=>({txt:`${fmtNum(p.cantidad)} ${p.itemNombre}`, de:p.origen, fecha:p.fecha, si:`traspConfirmar('${p.id}',true)`, no:`traspConfirmar('${p.id}',false)`})),
+    ...xs.filter(p=>p.origen===mod).flatMap(p=>(p.envios||[]).filter(e=>e.estado==='encamino').map(e=>({txt:`${fmtNum(e.cantidad)} ${e.itemNombre||p.itemNombre}`, de:p.destino, fecha:e.fecha, si:`prestConfirmar('${p.id}','${e.id}',true)`, no:`prestConfirmar('${p.id}','${e.id}',false)`})))];
+}
+function cierreCaminoHtml(){
+  const ls = enCaminoAMiLista(); if(!ls.length) return '';
+  return `<div class="card" style="border:3px solid #dc2626;padding:12px">
+    <div style="font-size:17px;font-weight:900;color:#dc2626">🚚 ANTES DE CONTAR: te mandaron material que no has confirmado</div>
+    <p class="hint" style="margin:4px 0 6px">Si ya lo tienes físicamente, confírmalo primero. Si lo cuentas sin confirmar, te va a salir de más.</p>
+    ${ls.map(x=>`<div style="padding:8px 0;border-top:1px solid var(--line)"><strong>${x.txt}</strong> <span class="hint" style="margin:0">de ${x.de} · ${fCorta(diaLocal(x.fecha))}</span>
+      <div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="${x.si}">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="${x.no}">❌ No llegaron</button></div></div>`).join('')}</div>`;
+}
+// Cortes de este artículo en los últimos días (menos lo que ya se regresó de cortado a completas).
+function cortesRecientes(itemId){
+  const desde = new Date(Date.now() - DIAS_CORTE_RECIENTE*864e5).toISOString();
+  const xs = movs.filter(m=>m.itemId===itemId && (!m.modulo || m.modulo===modulo()) && m.estado!=='rechazado' && !m.anulado && (m.fecha||'')>=desde);
+  let q = 0, ult = '';
+  xs.forEach(m=>{ if(m.tipo==='corte'){ q += Number(m.cantidad)||0; if((m.fecha||'')>ult) ult = m.fecha; }
+    else if(m.tipo==='ajuste' && m.motivo==='deshacerCorte') q -= Number(m.completasDelta)||0; });
+  return {q: Math.max(0, q), ult};
 }
 let cierreTodasHojas = false;
 function filaConteoHoja(it){
   const v = cierreVals[it.id]; const r = corteDesdeConteo(it.id, vacioCierre(v)?0:v);
   let res = '';
   if(!vacioCierre(v)){
-    if(r.deMas>0) res = `<span style="color:#b3742c"> → ⚠️ hay ${fmtNum(r.deMas)} de más (se avisa a Dirección)</span>${r.corte>0?`<span class="neg"> · corte ${fmtNum(r.corte)}</span>`:''}`;
+    if(r.deMas>0) res = (r.regresa>0 ? `<span style="color:var(--ok)"> → ${fmtNum(r.regresa)} se habían contado como cortadas${r.ultCorte?` (corte del ${fCorta(diaLocal(r.ultCorte))})`:''}: regresan a completas</span>` : '')
+      + (r.aDireccion>0 ? `<span style="color:#b3742c"> → ⚠️ hay ${fmtNum(r.aDireccion)} de más (se avisa a Dirección)</span>` : '')
+      + (r.camino>0 ? `<span style="display:block;color:#dc2626;font-weight:800">🚚 Tienes ${fmtNum(r.camino)} en camino sin confirmar: si ya llegaron, confírmalas arriba antes de guardar.</span>` : '')
+      + (r.corte>0?`<span class="neg"> · corte ${fmtNum(r.corte)}</span>`:'');
     else if(r.corte>0) res = `<span class="neg"> → se cortaron ${fmtNum(r.corte)}</span>`;
     else res = '<span class="pos"> → sin corte</span>';
   }
@@ -11132,7 +11180,7 @@ function deudasDeModulo(mod){
     x.camino += (p.envios||[]).filter(e=>e.estado==='encamino').reduce((a,e)=>a+Number(e.cantidad),0); });
   const xs = Object.values(g).sort((a,b)=>a.otro.localeCompare(b.otro) || a.art.localeCompare(b.art)); return {nosDeben: xs.filter(x=>x.nos), debemos: xs.filter(x=>!x.nos)};
 }
-let cierrePrestOk = false;
+let cierrePrestT = 0;
 // ===== Avisos para que los errores no lleguen al inventario (confirmado por el usuario) =====
 // 1) Cierre: entradas de hoy que parecen repetidas (mismo artículo y cantidad) → "no hagas el cierre todavía".
 // 2) Cierre: si lo que se gastó es mucho más de lo normal (promedio de los cierres del último mes).
@@ -11271,7 +11319,7 @@ function dibujarMovsDiaPDF(doc, R, D, o){
 }
 function renderCierre(){
   corrAutoJuntar();
-  if(!cierrePrestOk){ cierrePrestOk = true; cargarPrestamos().then(()=>{ const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
+  if(Date.now()-cierrePrestT > 30000){ cierrePrestT = Date.now(); cargarPrestamos().then(()=>{ if(current==='cierre' && enCaminoAMiLista().length){ renderCierre(); return; } const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
   const hojas = CATALOGO.filter(i=>esHoja(i));
   const cp = cortesPendientes();
@@ -11284,6 +11332,7 @@ function renderCierre(){
       ${(()=>{ const ds = cierreHechoHoy() ? [] : diasSinCierre(); return ds.length ? `<p style="margin:10px 0 0;padding:9px 11px;border-radius:10px;background:rgba(37,99,235,.12);border:1px solid rgba(37,99,235,.5);font-size:14px">📆 Este cierre incluye <strong>${ds.length+1} días</strong> (${diasCortosTxt(ds.slice(-4))}${ds.length>4?'…':''} y hoy): no se hizo cierre antes. Cuenta lo que te queda como siempre.</p>` : ''; })()}
     </div>
     <div id="cierre-avisos"></div>
+    ${cierreCaminoHtml()}
     ${cierreRepetidasHtml()}
     ${cierreMovsHoyHtml()}
     <div class="card">
@@ -11339,7 +11388,8 @@ async function guardarCierre(){
   for(const it of hojasContadas){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
   const conteoHojas = hojasContadas.map(it=>Object.assign({it}, corteDesdeConteo(it.id, cierreVals[it.id])));
   const cortes = conteoHojas.filter(x=>x.corte>0).map(x=>({it:x.it, q:x.corte, esp:x.esp, contadas:x.contadas}));
-  const hojasDeMas = conteoHojas.filter(x=>x.deMas>0);
+  const hojasRegresan = conteoHojas.filter(x=>x.regresa>0);
+  const hojasDeMas = conteoHojas.filter(x=>x.aDireccion>0).map(x=>Object.assign({}, x, {deMas:x.aDireccion, esp:fmtNum(x.esp + x.regresa)}));
   const contados = CATALOGO.filter(i=>esConsumibleCierre(i) && !vacioCierre(cierreVals[i.id]));
   for(const it of contados){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
   const salidas = [], deMas = [], iguales = [];
@@ -11355,6 +11405,8 @@ async function guardarCierre(){
   if(hojasContadas.length || contados.length){
     const txt = `Cierre del turno:\n\n`
       + (cortes.length ? '✂️ Se cortaron (pasan de completas a cortado):\n'+cortes.map(c=>`• ${fmtNum(c.q)} ${c.it.nombre} (quedan ${fmtNum(c.contadas)} completas)`).join('\n')+'\n\n' : '')
+      + (conteoHojas.some(x=>x.camino>0) ? '🚚 OJO: tienes material en camino sin confirmar ('+conteoHojas.filter(x=>x.camino>0).map(x=>fmtNum(x.camino)+' '+x.it.nombre).join(', ')+'). Si ya llegó, mejor Cancela y confírmalo primero arriba.\n\n' : '')
+      + (hojasRegresan.length ? '↩️ Se habían contado como cortadas y siguen enteras (regresan de cortado a completas, el total no cambia):\n'+hojasRegresan.map(x=>`• ${fmtNum(x.regresa)} ${x.it.nombre}`).join('\n')+'\n\n' : '')
       + (hojasDeMas.length ? '⚠️ Hay MÁS hojas completas de las que dice la app (se avisa a Dirección para que lo revise):\n'+hojasDeMas.map(x=>`• ${x.it.nombre}: app ${fmtNum(x.esp)}, tú ${fmtNum(x.contadas)}`).join('\n')+'\n\n' : '')
       + (salidas.length ? '📤 Se usó (se descuenta):\n'+salidas.map(x=>`• ${fmtNum(x.q)} ${x.it.unidad} ${x.it.nombre} (había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)})`).join('\n')+'\n\n' : '')
       + (iguales.length ? `✔️ Sin cambio: ${iguales.length} artículo(s)\n\n` : '')
@@ -11367,7 +11419,10 @@ async function guardarCierre(){
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), mod = modulo();
     const loteC = cryptoId(), loteS = cryptoId();
     for(const c of cortes) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.it.id, itemNombre:c.it.nombre, tipo:'corte', cantidad:c.q, nota:`Cierre del turno: quedan ${fmtNum(c.contadas)} completas`+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteC, creadoPor, cierreTurno:true, conteoCompletas:{esperado:c.esp, contado:c.contadas}});
-    // Hojas completas de más: no se tocan solas; van a Dirección como ajuste por aprobar.
+    // v224: hojas que se contaron como cortadas en un corte reciente y siguen enteras: de cortado a completas (total igual).
+    const loteR = cryptoId();
+    for(const x of hojasRegresan) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'ajuste', motivo:'deshacerCorte', cantidad:0, completasDelta:x.regresa, cortadoDelta:-x.regresa, nota:`Cierre del turno: la app esperaba ${fmtNum(x.esp)} completas y contaron ${fmtNum(x.contadas)}. ${fmtNum(x.regresa)} se había(n) contado como cortada(s)${x.ultCorte?' el '+fCorta(diaLocal(x.ultCorte)):''}: regresa(n) de cortado a completas (el total no cambia)`+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteR, creadoPor, cierreTurno:true});
+    // Hojas completas de más (sin corte reciente que lo explique): no se tocan solas; van a Dirección como ajuste por aprobar.
     const loteA = cryptoId();
     for(const x of hojasDeMas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'ajuste', motivo:'cierreCompletasDeMas', cantidad:x.deMas, completasDelta:x.deMas, cortadoDelta:0, nota:`Cierre del turno: la app esperaba ${fmtNum(x.esp)} completas y contaron ${fmtNum(x.contadas)}`+(nota?' · '+nota:''), fecha, estado:'pendiente', loteId:loteA, creadoPor, cierreTurno:true});
     const estado = 'aprobado'; // Cierre del turno entra directo, sin aprobación (confirmado por el usuario)
@@ -11526,6 +11581,7 @@ async function generarMovHistPDF(){
       if(d.tipo==='modulo') t.salMod += q; else if(d.tipo==='proveedor') t.salProv += q; else t.salOtro += q;
       if(hoja && !m.cierreTurno) salComp.push({dia, it, q, a: d.txt+(d.porque?' · '+d.porque:'')}); }
     else if(m.tipo==='corte') t.cortes += q;
+    else if(m.tipo==='ajuste' && m.motivo==='deshacerCorte') t.cortes -= Number(m.completasDelta)||0;
     else if(m.tipo==='instalacion') t.inst += q;
     else if(m.tipo==='garantia') t.gar += q;
     else if(m.tipo==='devolucion'){ t.ent += q; if(m.motivo==='piezasEncontradas') t.piezas += q; else t.regresos += q; }
@@ -13392,7 +13448,7 @@ async function generarReporteDiarioPDF(modo, fechaDia){
       const q = Number(m.cantidad)||0;
       if(m.tipo==='entrada' || m.tipo==='devolucion') t.ent += q; else if(m.tipo==='salida' || m.tipo==='sobrante') t.sal += q;
       else if(m.tipo==='corte') t.corte += q; else if(m.tipo==='instalacion') t.inst += q; else if(m.tipo==='garantia') t.gar += q;
-      else if(m.tipo==='merma') t.merma += q; else if(m.tipo==='ajuste') t.aj += q; });
+      else if(m.tipo==='merma') t.merma += q; else if(m.tipo==='ajuste'){ if(m.motivo==='deshacerCorte') t.corte -= Number(m.completasDelta)||0; else t.aj += q; } });
     // Cómo estaba cada artículo en un momento (mismo cálculo que el inventario): al empezar el día
     // (sin lo de ese día) y al cerrar el día (con todo lo de ese día).
     const alCorte = (itemId, cutISO, incluye) => {
