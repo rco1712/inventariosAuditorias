@@ -11075,8 +11075,12 @@ function corteDesdeConteo(itemId, contadas){
   let regresa = 0, recientes = 0, ultCorte = '', camino = 0;
   if(deMas>0){
     camino = fmtNum(enCaminoAMi(itemId));
-    const r = cortesRecientes(itemId); recientes = fmtNum(r.q + deuda); ultCorte = r.ult;
-    regresa = Math.max(0, Math.min(Math.floor(deMas - camino + 1e-6), Math.floor(recientes+1e-6), Math.floor((Number(sim.cortado)||0)+1e-6)));
+    // Si HOY la app abrió hojas por su cuenta (deuda: el cortado no alcanzaba para lo instalado) y aun así
+    // sobran completas, lo más seguro es que se usaron retazos que la app no tenía contados: eso SÍ es
+    // material de más y va a Dirección (no se regresa de cortado). Solo lo que pase de eso, y que se haya
+    // cortado en cierres anteriores, se toma como hoja contada como cortada.
+    const r = cortesRecientes(itemId); recientes = fmtNum(r.q); ultCorte = r.ult;
+    regresa = Math.max(0, Math.min(Math.floor(deMas - deuda - camino + 1e-6), Math.floor(recientes+1e-6), Math.floor((Number(sim.cortado)||0)+1e-6)));
   }
   const aDireccion = fmtNum(deMas - regresa);
   return {esp, deuda, contadas:c, corte, deMas, regresa, aDireccion, recientes, ultCorte, camino};
