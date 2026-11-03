@@ -14415,6 +14415,8 @@ function pzpInstPiezas(l){
 // Motor de la prueba. `hasta` (YYYY-MM-DD) corta la cuenta en ese día; `borrador` reemplaza la captura de su día.
 function pzpCalcular(D, hasta, borrador){
   const base = D.cfg && D.auds.find(a=>a.id===D.cfg.auditoriaId); if(!base) return null;
+  // v231: `hasta` puede ser una hora exacta (conteo final entre semana): solo cuenta lo capturado ANTES de esa hora.
+  const hastaT = (hasta && hasta.length>10) ? hasta : null; if(hastaT) hasta = diaLocal(hastaT);
   const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, avisos = [];
   const addA = (o, id, v) => { o[id] = (o[id]||0) + v; };
   const add = (itemId, dim, q, n) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNorm(dim), n:pzpNombre(dim, n), area:pzpArea(dim)}; };
@@ -14428,11 +14430,12 @@ function pzpCalcular(D, hasta, borrador){
   const dias = new Set(), cortes = {}, otros = {};
   D.movs.forEach(m=>{
     if(!((m.fecha||'') > t0) || !esHojaId(m.itemId) || !cuentaEnInventario(m)) return;
+    if(hastaT && (m.fecha||'') > hastaT) return;
     const dia = diaLocal(m.fecha); if(hasta && dia > hasta) return;
     if(m.tipo==='corte'){ (cortes[dia] = cortes[dia]||{}); cortes[dia][m.itemId] = (cortes[dia][m.itemId]||0) + (Number(m.cantidad)||0); dias.add(dia); }
     else if(pzpEsOtro(m)){ (otros[dia] = otros[dia]||[]).push(m); dias.add(dia); }
   });
-  const insts = D.logs.filter(l=>!l.cambiadaPor && l.estado!=='rechazado' && (l.fecha||'') > t0)
+  const insts = D.logs.filter(l=>!l.cambiadaPor && l.estado!=='rechazado' && (l.fecha||'') > t0 && (!hastaT || (l.fecha||'') <= hastaT))
     .map(l=>({l, dia:l.fechaDia || diaLocal(l.fecha)})).filter(x=>!hasta || x.dia <= hasta);
   insts.forEach(x=>dias.add(x.dia));
   const capt = {};
@@ -14771,9 +14774,9 @@ const PZP_PRINCIPALES = ['pared','entrepano','maletero','frente','zoclo'];
 function pzpResultadoHtml(){
   const D = pzpD, base = D.auds.find(a=>a.id===D.cfg.auditoriaId); if(!base) return '';
   const finales = pzpAudsBase(D).filter(a=>(a.fecha||'') > base.fecha);
-  if(!finales.length) return `<div class="card"><h3>Resultado</h3><p class="hint">Cuando termines la prueba, haz el <strong>conteo final</strong> (auditoría con piezas y armados, igual que el inicial) y aquí sale si cuadra.</p></div>`;
+  if(!finales.length) return `<div class="card"><h3>Resultado</h3><p class="hint">Cuando termines la prueba, haz el <strong>conteo final</strong> el viernes después del cierre del turno (auditoría con piezas y armados, igual que el inicial) y aquí sale si cuadra.</p></div>`;
   if(!pzpFinalId || !finales.some(a=>a.id===pzpFinalId)) pzpFinalId = finales[0].id;
-  const fin = finales.find(a=>a.id===pzpFinalId), R = pzpCalcular(D, diaLocal(fin.fecha)); if(!R) return '';
+  const fin = finales.find(a=>a.id===pzpFinalId), R = pzpCalcular(D, fin.fecha); if(!R) return '';
   const C = pzpTotalesAud(fin), keys = new Set([...Object.keys(R.T), ...Object.keys(C.T)]), N = Object.assign({}, R.N, C.N);
   const porColor = {};
   keys.forEach(k=>{ const n = N[k]; const p = R.T[k]||0, c = C.T[k]||0; if(Math.abs(p)+Math.abs(c)<0.0005) return;
