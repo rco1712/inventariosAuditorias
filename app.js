@@ -227,7 +227,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v228';
+const APP_VERSION = 'v229';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9154,9 +9154,57 @@ function prestAplicarEventos(bases, evs){
     return p;
   });
 }
+// v229 (problema reportado por el usuario): un traspaso que YA se confirmó seguía "en camino" en otros
+// teléfonos. Al confirmar se guardan dos cosas: la ENTRADA al inventario (sí llega a la nube) y el aviso de
+// "confirmado" (evento). Si el evento no llega a la nube (p. ej. lo rechaza por permisos, o el teléfono traía
+// una versión vieja), los demás lo siguen viendo en camino, y si alguien vuelve a tocar "Sí llegaron" se
+// suma DOS veces. Ahora: la entrada guarda a qué traspaso pertenece (prestamoId / envioDev); si esa entrada
+// existe, el traspaso (o el pago) se da por recibido aunque falte el evento, y Dirección o el módulo que
+// recibió vuelve a guardar el evento que faltaba. Así ya no aparece y no se puede confirmar dos veces.
+async function prestPorEntradas(lista){
+  const enCam = lista.filter(p=>p.estado==='encamino');
+  const envCam = lista.filter(p=>(p.envios||[]).some(e=>e.estado==='encamino'));
+  if(!enCam.length && !envCam.length) return;
+  const mods = [...new Set([...enCam.map(p=>p.destino), ...envCam.map(p=>p.origen)])];
+  const ents = [];
+  for(const m of mods){
+    try{ const sn = await db.collection('movimientos').where('modulo','==',m).get();
+      sn.docs.forEach(d=>{ const x = Object.assign({id:d.id}, d.data()); if(x.tipo==='entrada' && x.prestamoId && x.estado!=='rechazado' && !x.anulado) ents.push(x); }); }catch(e){}
+  }
+  if(!ents.length) return;
+  const puedeReparar = !esSoloLectura();
+  for(const p of enCam){
+    const m = ents.find(x=>x.prestamoId===p.id && !x.envioDev && x.modulo===p.destino); if(!m) continue;
+    p.estado = 'pendiente'; p.recibido = {fecha:m.fecha, por:m.creadoPor||'', yaContadasEnCierre:false, porEntrada:m.id};
+    const pend = Math.max(0, fmtNum(Number(p.cantidad) - Number(p.devuelto||0)));
+    p.pendiente = pend; p.estado = pend<=0 ? 'cerrado' : (Number(p.devuelto||0)>0 ? 'parcial' : 'pendiente');
+    if(puedeReparar && (esAdmin() || p.destino===modulo()) && !prestEventos.some(ev=>ev.prestamoId===p.id && ev.tipo==='traspConf')){
+      try{ await prestEvento(p, {tipo:'traspConf', llego:true, yaContadas:false, fecha:m.fecha, porEntrada:m.id}); }catch(e){}
+    }
+  }
+  for(const p of envCam){
+    for(const e of (p.envios||[])){
+      if(e.estado!=='encamino') continue;
+      const m = ents.find(x=>x.prestamoId===p.id && x.envioDev===e.id && x.modulo===p.origen); if(!m) continue;
+      e.estado = 'recibido'; e.fechaConf = m.fecha; e.confPor = m.creadoPor||'';
+      p.devuelto = Number(p.devuelto||0) + Number(e.cantidad);
+      p.devoluciones = (p.devoluciones||[]).concat([{fecha:m.fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:false}]);
+      if(puedeReparar && (esAdmin() || p.origen===modulo()) && !prestEventos.some(ev=>ev.prestamoId===p.id && ev.tipo==='confEnvio' && ev.envId===e.id)){
+        try{ await prestEvento(p, {tipo:'confEnvio', envId:e.id, llego:true, yaContadas:false, fecha:m.fecha, porEntrada:m.id}); }catch(er){}
+      }
+    }
+    if(p.estado!=='encamino' && p.estado!=='cancelado'){
+      const pend = Math.max(0, fmtNum(Number(p.cantidad) - Number(p.devuelto||0)));
+      p.pendiente = pend; p.estado = pend<=0 ? 'cerrado' : (Number(p.devuelto||0)>0 ? 'parcial' : 'pendiente');
+    }
+  }
+}
 async function prestEvento(p, datos){
+  // v229: el evento lleva el módulo de quien lo escribe (coordinador), para que la nube lo acepte; sin módulo la
+  // nube rechazaba el evento del coordinador y el traspaso seguía "en camino" en los demás teléfonos.
+  const extra = (!esAdmin() && modulo()) ? {modulo:modulo()} : {};
   await db.collection('prestamos').doc(cryptoId()).set(Object.assign({evento:true, prestamoId:p.id, origen:p.origen, destino:p.destino,
-    fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}, datos));
+    fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}, extra, datos));
 }
 async function cargarPrestamos(){
   try{
@@ -9165,6 +9213,7 @@ async function cargarPrestamos(){
     prestEventos = todos.filter(x=>x.evento);
     const bases = todos.filter(x=>!x.evento && x.estado!=='anulado');
     prestamos = prestAplicarEventos(bases, prestEventos).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+    await prestPorEntradas(prestamos);
     prestRepararLocal(bases).catch(()=>{});
   }catch(e){ prestamos=[]; }
 }
