@@ -6787,7 +6787,7 @@ async function guardarCambioModelo(n){
   if(sinDest.length){ alert('🪵 Elige a dónde va el material que sobró:\n\n'+sinDest.map(x=>'• '+CATALOGO.find(i=>i.id===x.itemId).nombre).join('\n')+'\n\n↩️ Inventario · 🧩 Sobrantes · 🗑️ Merma'); const el=document.getElementById('cambio-prev'); if(el && el.scrollIntoView) el.scrollIntoView({block:'start'}); return; }
   const destinos = {}; hojasSob.forEach(x=>{ destinos[x.itemId] = dest[x.itemId]; });
   // Dirección la vuelve a verificar cuando ella pidió la corrección o ya la había revisado.
-  const correccion = {deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta, destinos, pedidaPorDir:!!(L.verif || verifFlujo)};
+  const correccion = {deDesc:L.descripcion, deExtras:L.extrasDetalle||[], regresa:d.regresa, descuenta:d.descuenta, destinos, pedidaPorDir:!!(L.verif || verifFlujo)}; // v230: también los extras de antes
   // Lo que sobró y va a sobrantes o merma: sale otra vez del inventario (como en un regreso).
   const apartarSobrante = async () => {
     const sobs = hojasSob.filter(x=>destinos[x.itemId]==='sob'), merm = hojasSob.filter(x=>destinos[x.itemId]==='merma');
@@ -6814,7 +6814,7 @@ async function guardarCambioModelo(n){
       for(const x of d.descuenta) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad, {cambioModelo:true});
       await apartarSobrante();
       await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor,
-        cambioDe:L.id, calle:L.calle||'', cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta, destinos}, correccion, ...verifNuevo});
+        cambioDe:L.id, calle:L.calle||'', cambio:{deDesc:L.descripcion, deExtras:L.extrasDetalle||[], regresa:d.regresa, descuenta:d.descuenta, destinos}, correccion, ...verifNuevo});
       if(estado==='aprobado') await db.collection('instalacionesLog').doc(L.id).update({cambiadaPor:newId});
     }
     toast(estado==='pendiente' ? '✅ Cambio de modelo guardado.<br><small>Dirección lo tiene que aprobar.</small>' : '✅ Modelo cambiado.');
@@ -7172,6 +7172,7 @@ function verifReinstHtml(mod){
 // v187 (confirmado por el usuario): cuando el coordinador corrige el modelo, a Dirección le llega con
 // el modelo de antes y el de ahora, qué regresa (y a dónde) y qué se descuenta de más. Ella da el sí o
 // el no final. Si dice que no, el coordinador ya solo decide a dónde va el material.
+const _corrViejas = {};
 function verifCorrDetalleHtml(l){
   const c = l.correccion || l.cambio || {}; const dest = c.destinos || {};
   const nom = x => { const it = CATALOGO.find(i=>i.id===x.itemId); return it ? it.nombre : x.itemId; };
@@ -7179,9 +7180,29 @@ function verifCorrDetalleHtml(l){
   const destTxt = x => esHojaId(x.itemId) ? ({inv:'inventario', sob:'🧩 sobrantes', merma:'🗑️ merma'}[dest[x.itemId]]||'inventario') : 'inventario';
   const fila = (x, signo, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:13.5px"><span>${nom(x)}</span><strong style="white-space:nowrap">${signo}${can(x)}${extra?' · '+extra:''}</strong></div>`;
   const reg = c.regresa||[], desc = c.descuenta||[];
+  // v230 (pedido por el usuario): decir QUÉ cambió, no solo el material. Antes solo salía "modelo · color",
+  // así que si el coordinador agregó o quitó un extra (cajonera, zapatera, piezas sueltas…) se veía igual.
+  let vieja = (verifLogs||[]).find(x=>x.id===l.cambioDe) || (instLog||[]).find(x=>x.id===l.cambioDe) || _corrViejas[l.cambioDe] || null;
+  if(!vieja && l.cambioDe && !Array.isArray(c.deExtras) && !(l.cambioDe in _corrViejas)){
+    _corrViejas[l.cambioDe] = null; // se busca una sola vez la instalación de antes y se vuelve a pintar
+    db.collection('instalacionesLog').doc(l.cambioDe).get().then(d=>{ if(d && d.data){ _corrViejas[l.cambioDe] = d.data(); try{ verifPintar(); }catch(e){} } }).catch(()=>{});
+  }
+  const exAntes = Array.isArray(c.deExtras) ? c.deExtras : (vieja ? (vieja.extrasDetalle||[]) : null);
+  const exAhora = l.extrasDetalle||[];
+  const resta = (a, b) => { const r = b.slice(); return a.filter(x=>{ const i = r.indexOf(x); if(i>=0){ r.splice(i,1); return false; } return true; }); };
+  const agrego = exAntes ? resta(exAhora, exAntes) : null, quito = exAntes ? resta(exAntes, exAhora) : null;
+  const dAntes = String(c.deDesc||l.cambioDeDesc||''), dAhora = String(l.descripcion||'');
+  const exLinea = xs => xs && xs.length ? `<div class="hint" style="margin:2px 0 0;text-align:right">+ ${xs.join(', ')}</div>` : '';
+  const cambios = (agrego===null)
+    ? `<div class="hint" style="margin:6px 0 0">No se guardó qué extras tenía antes (se corrigió con una versión anterior de la app).</div>`
+    : ((agrego.length||quito.length||dAntes!==dAhora) ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:13.5px">
+        ${agrego.length?`<div><strong style="color:#2563eb">➕ Agregó:</strong> ${agrego.join(', ')}</div>`:''}
+        ${quito.length?`<div><strong style="color:#b45309">➖ Quitó:</strong> ${quito.join(', ')}</div>`:''}</div>`
+      : `<div class="hint" style="margin:6px 0 0">Mismo modelo y mismos extras.</div>`);
   return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--bg);border:1px solid var(--line)">
-      <div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span class="hint" style="margin:0">Antes</span><span style="text-decoration:line-through;opacity:.75;text-align:right">${(c.deDesc||l.cambioDeDesc||'').split(' · ').slice(0,2).join(' · ')}</span></div>
-      <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;margin-top:4px"><span class="hint" style="margin:0">Ahora</span><strong style="text-align:right">${l.descripcion.split(' · ').slice(0,2).join(' · ')}</strong></div></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span class="hint" style="margin:0">Antes</span><span style="text-decoration:line-through;opacity:.75;text-align:right">${dAntes}${exAntes&&exAntes.length?'<br><span style="font-size:12.5px">+ '+exAntes.join(', ')+'</span>':''}</span></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;margin-top:4px"><span class="hint" style="margin:0">Ahora</span><strong style="text-align:right">${dAhora}${exAhora.length?'<br><span style="font-size:12.5px;font-weight:600">+ '+exAhora.join(', ')+'</span>':''}</strong></div>
+      ${cambios}</div>
     <div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(22,163,74,.10);border:1px solid rgba(22,163,74,.4)"><strong style="color:#16a34a">↩️ Regresa</strong>
       ${reg.length?reg.map(x=>fila(x,'+',destTxt(x))).join(''):'<div class="hint" style="margin:2px 0 0">Nada</div>'}</div>
     <div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.35)"><strong style="color:#dc2626">📤 Se descuenta de más</strong>
