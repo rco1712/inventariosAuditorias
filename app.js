@@ -227,7 +227,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v229';
+const APP_VERSION = 'v230';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6787,7 +6787,7 @@ async function guardarCambioModelo(n){
   if(sinDest.length){ alert('🪵 Elige a dónde va el material que sobró:\n\n'+sinDest.map(x=>'• '+CATALOGO.find(i=>i.id===x.itemId).nombre).join('\n')+'\n\n↩️ Inventario · 🧩 Sobrantes · 🗑️ Merma'); const el=document.getElementById('cambio-prev'); if(el && el.scrollIntoView) el.scrollIntoView({block:'start'}); return; }
   const destinos = {}; hojasSob.forEach(x=>{ destinos[x.itemId] = dest[x.itemId]; });
   // Dirección la vuelve a verificar cuando ella pidió la corrección o ya la había revisado.
-  const correccion = {deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta, destinos, pedidaPorDir:!!(L.verif || verifFlujo)};
+  const correccion = {deDesc:L.descripcion, deExtras:L.extrasDetalle||[], regresa:d.regresa, descuenta:d.descuenta, destinos, pedidaPorDir:!!(L.verif || verifFlujo)}; // v230: también los extras de antes
   // Lo que sobró y va a sobrantes o merma: sale otra vez del inventario (como en un regreso).
   const apartarSobrante = async () => {
     const sobs = hojasSob.filter(x=>destinos[x.itemId]==='sob'), merm = hojasSob.filter(x=>destinos[x.itemId]==='merma');
@@ -6814,7 +6814,7 @@ async function guardarCambioModelo(n){
       for(const x of d.descuenta) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad, {cambioModelo:true});
       await apartarSobrante();
       await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor,
-        cambioDe:L.id, calle:L.calle||'', cambio:{deDesc:L.descripcion, regresa:d.regresa, descuenta:d.descuenta, destinos}, correccion, ...verifNuevo});
+        cambioDe:L.id, calle:L.calle||'', cambio:{deDesc:L.descripcion, deExtras:L.extrasDetalle||[], regresa:d.regresa, descuenta:d.descuenta, destinos}, correccion, ...verifNuevo});
       if(estado==='aprobado') await db.collection('instalacionesLog').doc(L.id).update({cambiadaPor:newId});
     }
     toast(estado==='pendiente' ? '✅ Cambio de modelo guardado.<br><small>Dirección lo tiene que aprobar.</small>' : '✅ Modelo cambiado.');
@@ -7172,6 +7172,7 @@ function verifReinstHtml(mod){
 // v187 (confirmado por el usuario): cuando el coordinador corrige el modelo, a Dirección le llega con
 // el modelo de antes y el de ahora, qué regresa (y a dónde) y qué se descuenta de más. Ella da el sí o
 // el no final. Si dice que no, el coordinador ya solo decide a dónde va el material.
+const _corrViejas = {};
 function verifCorrDetalleHtml(l){
   const c = l.correccion || l.cambio || {}; const dest = c.destinos || {};
   const nom = x => { const it = CATALOGO.find(i=>i.id===x.itemId); return it ? it.nombre : x.itemId; };
@@ -7179,9 +7180,29 @@ function verifCorrDetalleHtml(l){
   const destTxt = x => esHojaId(x.itemId) ? ({inv:'inventario', sob:'🧩 sobrantes', merma:'🗑️ merma'}[dest[x.itemId]]||'inventario') : 'inventario';
   const fila = (x, signo, extra) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:13.5px"><span>${nom(x)}</span><strong style="white-space:nowrap">${signo}${can(x)}${extra?' · '+extra:''}</strong></div>`;
   const reg = c.regresa||[], desc = c.descuenta||[];
+  // v230 (pedido por el usuario): decir QUÉ cambió, no solo el material. Antes solo salía "modelo · color",
+  // así que si el coordinador agregó o quitó un extra (cajonera, zapatera, piezas sueltas…) se veía igual.
+  let vieja = (verifLogs||[]).find(x=>x.id===l.cambioDe) || (instLog||[]).find(x=>x.id===l.cambioDe) || _corrViejas[l.cambioDe] || null;
+  if(!vieja && l.cambioDe && !Array.isArray(c.deExtras) && !(l.cambioDe in _corrViejas)){
+    _corrViejas[l.cambioDe] = null; // se busca una sola vez la instalación de antes y se vuelve a pintar
+    db.collection('instalacionesLog').doc(l.cambioDe).get().then(d=>{ if(d && d.data){ _corrViejas[l.cambioDe] = d.data(); try{ verifPintar(); }catch(e){} } }).catch(()=>{});
+  }
+  const exAntes = Array.isArray(c.deExtras) ? c.deExtras : (vieja ? (vieja.extrasDetalle||[]) : null);
+  const exAhora = l.extrasDetalle||[];
+  const resta = (a, b) => { const r = b.slice(); return a.filter(x=>{ const i = r.indexOf(x); if(i>=0){ r.splice(i,1); return false; } return true; }); };
+  const agrego = exAntes ? resta(exAhora, exAntes) : null, quito = exAntes ? resta(exAntes, exAhora) : null;
+  const dAntes = String(c.deDesc||l.cambioDeDesc||''), dAhora = String(l.descripcion||'');
+  const exLinea = xs => xs && xs.length ? `<div class="hint" style="margin:2px 0 0;text-align:right">+ ${xs.join(', ')}</div>` : '';
+  const cambios = (agrego===null)
+    ? `<div class="hint" style="margin:6px 0 0">No se guardó qué extras tenía antes (se corrigió con una versión anterior de la app).</div>`
+    : ((agrego.length||quito.length||dAntes!==dAhora) ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:13.5px">
+        ${agrego.length?`<div><strong style="color:#2563eb">➕ Agregó:</strong> ${agrego.join(', ')}</div>`:''}
+        ${quito.length?`<div><strong style="color:#b45309">➖ Quitó:</strong> ${quito.join(', ')}</div>`:''}</div>`
+      : `<div class="hint" style="margin:6px 0 0">Mismo modelo y mismos extras.</div>`);
   return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--bg);border:1px solid var(--line)">
-      <div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span class="hint" style="margin:0">Antes</span><span style="text-decoration:line-through;opacity:.75;text-align:right">${(c.deDesc||l.cambioDeDesc||'').split(' · ').slice(0,2).join(' · ')}</span></div>
-      <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;margin-top:4px"><span class="hint" style="margin:0">Ahora</span><strong style="text-align:right">${l.descripcion.split(' · ').slice(0,2).join(' · ')}</strong></div></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:13.5px"><span class="hint" style="margin:0">Antes</span><span style="text-decoration:line-through;opacity:.75;text-align:right">${dAntes}${exAntes&&exAntes.length?'<br><span style="font-size:12.5px">+ '+exAntes.join(', ')+'</span>':''}</span></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:14px;margin-top:4px"><span class="hint" style="margin:0">Ahora</span><strong style="text-align:right">${dAhora}${exAhora.length?'<br><span style="font-size:12.5px;font-weight:600">+ '+exAhora.join(', ')+'</span>':''}</strong></div>
+      ${cambios}</div>
     <div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(22,163,74,.10);border:1px solid rgba(22,163,74,.4)"><strong style="color:#16a34a">↩️ Regresa</strong>
       ${reg.length?reg.map(x=>fila(x,'+',destTxt(x))).join(''):'<div class="hint" style="margin:2px 0 0">Nada</div>'}</div>
     <div style="margin-top:8px;padding:10px 12px;border-radius:12px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.35)"><strong style="color:#dc2626">📤 Se descuenta de más</strong>
@@ -7536,9 +7557,9 @@ function verifCoordHtml(){
       if(v.estado==='no' && v.puertas==='pendiente'){ const pl = l.categoria==='Puerta'; ic = pl?'🚪':'🗄️';
         txt = (v.intentos?`Dirección marcó <strong>otra vez</strong> que no se instal${pl?'aron':'ó'}. `:`No se instal${pl?'aron':'ó'}. `)+`El material quedó apartado (ya descontado): ¿qué pasa con ${pl?'ellas':'él'}?`;
         if(v.sinCambio) txt = `Dirección verificó que el modelo corregido <strong>tampoco</strong> se instaló. El material sigue apartado: ¿a dónde va?`;
-        txt = (v.intentos?`Dirección marcó <strong>otra vez</strong> que no se instal${pl?'aron':'ó'}. `:`No se instal${pl?'aron':'ó'}. `)+`Los <strong>herrajes regresan a tu inventario</strong>. Elige a dónde va cada pieza de <strong>melamina</strong>:`;
+        txt = (v.intentos?`Dirección marcó <strong>otra vez</strong> que no se instal${pl?'aron':'ó'}. `:`No se instal${pl?'aron':'ó'}. `)+`¿Se va a instalar? Elige <strong>hoy</strong> u <strong>otro día</strong> (no se mueve material). Si ya <strong>no</strong> se va a instalar, elige a dónde va cada pieza de <strong>melamina</strong> (los herrajes regresan a tu inventario).`;
         if(v.sinCambio) txt = `Dirección verificó que el modelo corregido <strong>tampoco</strong> se instaló. Los herrajes regresan solos. ¿A dónde va la melamina?`;
-        bt = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px"><button class="btn small" style="min-height:46px;padding:4px;background:#16a34a" onclick="verifDestino('${l.id}','inv')">📦 A mi inventario</button><button class="btn small" style="min-height:46px;padding:4px;background:#0e8a8a" onclick="verifDestino('${l.id}','sob')">🧩 A Sobrantes</button><button class="btn small" style="min-height:46px;padding:4px;background:#dc2626" onclick="verifDestino('${l.id}','merma')">🗑️ A Merma</button>${v.sinCambio?'':`<button class="btn small" style="min-height:42px;background:#3E5CDE;grid-column:1/-1" onclick="verifCambioTrasNo('${l.id}')">✏️ Sí se instaló, pero otro modelo: corregir y mandar a verificar</button>`}</div>`; }
+        bt = verifCoordReprogHtml(l) + `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px"><button class="btn small" style="min-height:46px;padding:4px;background:#16a34a" onclick="verifDestino('${l.id}','inv')">📦 A mi inventario</button><button class="btn small" style="min-height:46px;padding:4px;background:#0e8a8a" onclick="verifDestino('${l.id}','sob')">🧩 A Sobrantes</button><button class="btn small" style="min-height:46px;padding:4px;background:#dc2626" onclick="verifDestino('${l.id}','merma')">🗑️ A Merma</button>${v.sinCambio?'':`<button class="btn small" style="min-height:42px;background:#3E5CDE;grid-column:1/-1" onclick="verifCambioTrasNo('${l.id}')">✏️ Sí se instaló, pero otro modelo: corregir y mandar a verificar</button>`}</div>`; }
       else if(v.estado==='no' && v.puertas==='cambio'){ ic='✏️'; txt = 'Corregiste el modelo: Dirección lo va a volver a verificar.'; }
       else if(v.estado==='no'){ ic='❌'; txt = l.estado==='rechazado' ? 'No se instaló: se rechazó y el material regresó al inventario.' : 'No se instaló.'; }
       else if(v.estado==='parte'){ ic='🔸'; txt='Solo se instaló una parte: lo que regresó ya está en el inventario.'; }
@@ -7563,6 +7584,37 @@ function verifCoordHtml(){
       <p class="hint" style="margin:2px 0 0">Ya están descontadas: <strong>NO las captures otra vez</strong> como instalación. Cuando se instale y salga en el reporte del grupo, Dirección la marca como instalada.</p>
       ${reinst.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:8px"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion.split(' · ').slice(0,3).join(' · ')}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">Del ${fCorta(l.fechaDia)}${(()=>{ const d = verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha)); return d>VERIF_DIAS_REINST?` · <strong style="color:#dc2626">esperando ${d} días</strong>`:''; })()}</span></span></div>`).join('')}</div>`;
   return html;
+}
+// v230 (pedido por el usuario): cuando Dirección marca "No se instaló", el coordinador puede decir que se
+// instala HOY u OTRO DÍA. No es un regreso: el material sigue descontado (no se mueve nada), la instalación
+// cambia su fecha a ese día y Dirección la vuelve a verificar con el reporte de ese día (igual que
+// "⏳ Se instala otro día" de Dirección). Si ya no se va a instalar, sigue eligiendo a dónde va el material.
+let verifCoordOtro = null;
+function verifManana(){ const d = new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); }
+function verifCoordReprogHtml(l){
+  const m = verifManana();
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px"><button class="btn small" style="min-height:46px;padding:4px;background:#7c3aed" onclick="verifCoordReprogramar('${l.id}','hoy')">📅 Se instala hoy</button><button class="btn small" style="min-height:46px;padding:4px;background:${verifCoordOtro===l.id?'#5b21b6':'#7c3aed'}" onclick="verifCoordOtro=(verifCoordOtro==='${l.id}'?null:'${l.id}');renderHome()">⏳ Se instala otro día</button></div>`
+    + (verifCoordOtro===l.id ? `<div style="display:flex;gap:6px;margin-top:6px;align-items:center"><input type="date" id="vco-f-${l.id}" min="${m}" value="${m}" style="flex:1;min-width:0"><button class="btn small" style="min-height:44px;background:#7c3aed;white-space:nowrap" onclick="verifCoordReprogramar('${l.id}','otro')">Pasar a ese día</button></div>` : '')
+    + `<div class="hint" style="margin:10px 0 0;font-weight:800">Si ya NO se va a instalar:</div>`;
+}
+async function verifCoordReprogramar(id, cuando){
+  let l = null; try{ const d = await db.collection('instalacionesLog').doc(id).get(); l = d && d.data ? d.data() : null; }catch(e){}
+  if(!l || !l.verif || l.verif.estado!=='no' || l.verif.puertas!=='pendiente') return alert('Esta instalación ya se resolvió.');
+  try{ await cargarInstLog(); }catch(e){}
+  if(regresoDeInstalacion(id)) return alert('Esta instalación ya se regresó al inventario.');
+  const hoy = fechaHoyLocal();
+  let nueva = hoy;
+  if(cuando!=='hoy'){ const el = document.getElementById('vco-f-'+id); nueva = el && el.value; if(!nueva || nueva<=hoy) return alert('Elige un día de mañana en adelante.'); }
+  const cuandoTxt = nueva===hoy ? 'HOY' : 'el '+fCorta(nueva);
+  if(!confirm(`📅 ${String(l.descripcion||'').split(' · ').slice(0,2).join(' · ')}${l.calle?'\n📍 '+l.calle:''}\n\nSe instala ${cuandoTxt}.\n\nEl material sigue descontado: NO se mueve nada.\nNO la vuelvas a capturar.\nDirección la vuelve a revisar con el reporte del grupo de ese día.`)) return;
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
+  const nota = 'Dirección marcó que no se instaló'+(l.verif.nota?(' ('+l.verif.nota+')'):'')+'; el coordinador dice que se instala '+(nueva===hoy?'hoy':'el '+fCorta(nueva));
+  const P = l.pospuesta || {}, hist = (P.historial||[]).concat([{de:l.fechaDia, a:nueva, en:ahora, por:quien, nota, trasRechazo:true}]);
+  const upd = {fechaDia:nueva, pospuesta:{primero:P.primero||l.fechaDia, a:nueva, veces:(P.veces||0)+1, por:quien, en:ahora, nota, historial:hist, trasRechazo:true},
+    verif:null, verifPrevios:(l.verifPrevios||[]).concat([Object.assign({}, l.verif, {reprogramada:ahora})])};
+  try{ await db.collection('instalacionesLog').doc(id).update(upd); verifCoordOtro = null; _verifCoordT = 0; _verifCoord = null;
+    toast(nueva===hoy ? '📅 Queda para hoy. No la vuelvas a capturar.' : '⏳ Pasó al '+fCorta(nueva)+'. No la vuelvas a capturar.'); renderHome(); }
+  catch(e){ alert('Error: '+e.message); }
 }
 async function verifCoordAccion(id, datos, msg){
   try{ await verifGuardar(id, datos); _verifCoordT = 0; _verifCoord = null; if(msg) toast(msg); renderHome(); }catch(e){ alert('Error: '+e.message); }
@@ -14279,7 +14331,7 @@ function unaSolaVez(nombre, fn){
  'guardarCierre','guardarMermaArm','guardarMermaPiezas','confirmarSobrante','confirmarTransformacion','guardarPzEnc',
  'guardarTubos','guardarGas','guardarPedido','borrarInstalacionError','aplicarAuditoriaUI','guardarIni',
  'verifRegresa','verifDestino','prestConfirmar','traspConfirmar','verifOtroDia','verifDestGuardar','sobCerrarPuertas','verifPuertasSob','verifPuertasMerma','verifPuertasReinstalar','verifYaRegresado','verifDirReinstalada','verifDirRedecidir','verifEnterado',
- 'dupQuitar','dupIgnorar','verifCambiarFecha','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
+ 'dupQuitar','dupIgnorar','verifCambiarFecha','verifCoordReprogramar','herrMeterAjuste','maqGuardar','maqServGuardar','maqBorrar','maqServBorrar','riAgregarTexto','riAgregarTarde','riMandar','riSalida','riTodasSalen','riGuardarMotivo','riCierre','riGuardarEdit','riBorrarDir','riBorrarTodo'
 ].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = unaSolaVez(n, f); }catch(e){} });
 // v194: después de dibujar el formulario de instalación, pregunta de qué día es si ayer no se capturó nada.
 ['renderInstMueble','renderInstPuertas'].forEach(n=>{ try{ const f = window[n]; if(typeof f==='function') window[n] = function(...a){ const r = f.apply(this, a); try{ instDiaPintar(n==='renderInstMueble'?'i':'p'); }catch(e){} return r; }; }catch(e){} });
