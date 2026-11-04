@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v239';
+const APP_VERSION = 'v241';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -349,7 +349,7 @@ function renderSyncBadge(state){
     el.textContent = '🔄 Sincronizando…';
     el.style.background = 'rgba(255,255,255,.15)';
   } else if(state.pendientes>0){
-    el.textContent = '⏳ '+state.pendientes+' cambio(s) por sincronizar';
+    el.textContent = '⏳ '+state.pendientes+' cambio(s) por sincronizar · ver';
     el.style.background = 'rgba(224,121,26,.35)';
   } else {
     el.textContent = '✅ Sincronizado';
@@ -695,6 +695,7 @@ function setView(v){
   if(v==='ferrec') renderFerRec();
   if(v==='bridas') renderBridasPend();
   if(v==='revherr') renderRevHerr();
+  if(v==='pendsync') renderPendSync();
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -15056,6 +15057,37 @@ async function renderRevHerr(){
     : (malas.length ? card(`⚠️ Instalaciones que no cuadran (${malas.length})`, `<div class="wrap-x"><table><tr><th>Captura</th><th>Calle</th><th>Lleva</th><th>Se descontó</th></tr>${malas.map(x=>`<tr><td>${fTxt(x.l.fecha)}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}</div></td><td style="text-align:center">${n(x.lleva)}</td><td style="text-align:center;font-weight:900;color:var(--bad)">${n(x.quito)}</td></tr>`).join('')}</table></div>`, 'var(--bad)') : '')
       + (huerfanos.length ? card(`⚠️ Descuentos sin instalación (${huerfanos.length})`, `<p class="hint" style="margin:2px 0 6px">Movimientos de instalación de ${n(huerfQ)} ${u} cuya instalación ya no existe.</p>${huerfanos.map(m=>`<div class="hint" style="margin:0">${fTxt(m.fecha)} · ${n(m.cantidad)} · ${String(m.nota||'').replace(/</g,'&lt;').slice(0,90)}</div>`).join('')}`, '#d97706') : '')
       + (muertos.length ? card(`⚠️ Descuentos de instalaciones rechazadas o reemplazadas (${muertos.length})`, muertos.map(m=>`<div class="hint" style="margin:0">${fTxt(m.fecha)} · ${n(m.cantidad)} · ${String(m.nota||'').replace(/</g,'&lt;').slice(0,90)}</div>`).join(''), '#d97706') : '');
-  h += `<div class="card"><details><summary style="font-weight:800;cursor:pointer">Ver las ${filas.length} instalaciones</summary><div class="wrap-x"><table><tr><th>Captura</th><th>Se instala</th><th>Calle</th><th>Lleva</th></tr>${filas.map(x=>`<tr><td>${fTxt(x.l.fecha)}</td><td>${x.l.fechaDia||'—'}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}${x.l.estado==='pendiente'?' · sin verificar':''}</div></td><td style="text-align:center">${n(x.lleva)}</td></tr>`).join('')}</table></div></details></div>`;
+  // v240 (pedido por el usuario): por instalación, cuánto se descontó, separado en verificadas y pendientes.
+  const tabla = xs => xs.length ? `<div class="wrap-x"><table><tr><th>Captura</th><th>Calle</th><th>Lleva</th><th>Descontó</th></tr>${xs.map(x=>{ const mal = Math.abs(x.lleva-x.quito)>0.001; return `<tr${mal?' style="background:rgba(224,69,63,.10)"':''}><td>${fTxt(x.l.fecha)}${x.l.fechaDia && x.l.fechaDia>hoy?`<div class="hint" style="margin:0;color:#7c3aed;font-weight:700">se instala ${x.l.fechaDia}</div>`:''}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}</div></td><td style="text-align:center">${n(x.lleva)}</td><td style="text-align:center;font-weight:900;color:${mal?'var(--bad)':'var(--ok)'}">${n(x.quito)}${mal?' ⚠️':''}</td></tr>`; }).join('')}</table></div>` : '<p class="hint" style="margin:4px 0 0">Ninguna.</p>';
+  const ver = filas.filter(x=>x.l.estado!=='pendiente'), pen = filas.filter(x=>x.l.estado==='pendiente');
+  const suma = (xs,k) => n(xs.reduce((s,x)=>s+x[k],0));
+  h += card(`✅ Verificadas por ti (${ver.length})`, `<div class="hint" style="margin:2px 0 6px">Llevan ${suma(ver,'lleva')} · se descontaron ${suma(ver,'quito')} ${u}</div>${tabla(ver)}`, 'var(--ok)');
+  h += card(`⏳ Pendientes de verificar (${pen.length})`, `<div class="hint" style="margin:2px 0 6px">Llevan ${suma(pen,'lleva')} · se descontaron ${suma(pen,'quito')} ${u}. Ya están descontadas; si rechazas una, regresa al inventario.</div>${tabla(pen)}`, '#d97706');
   $('#main').innerHTML = h;
 }
+
+
+// ===== v241: ver qué cambio está "por sincronizar" y por qué =====
+// Al tocar el aviso naranja se ve cada cambio que no ha subido a la nube, con el motivo si la nube
+// lo rechazó. No borra ni cambia nada; solo permite intentar de nuevo.
+const PEND_COL_TXT = {movimientos:'Movimiento de material', instalacionesLog:'Instalación', cierres:'Cierre del turno', herramientas:'Herramienta', herrMovs:'Movimiento de herramienta / ferretería', prestamos:'Préstamo / traspaso', pedidos:'Pedido (Por llegar)', config:'Configuración', borradores:'Avance de auditoría', auditorias:'Auditoría', inicial:'Stock inicial', gasolina:'Gasolina', vehiculos:'Vehículo'};
+async function renderPendSync(){
+  current = 'pendsync';
+  $('#main').innerHTML = '<div class="card hint">Revisando…</div>';
+  let xs = [];
+  try{ xs = typeof pendientesDetalle==='function' ? await pendientesDetalle() : []; }catch(e){}
+  if(current!=='pendsync') return;
+  const fTxt = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
+  const esc = t => String(t||'').replace(/</g,'&lt;');
+  $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:900">⏳ Cambios por sincronizar (${xs.length})</div>
+      <p class="hint" style="margin:2px 0 0">Están guardados en este teléfono pero todavía no suben a la nube. ${xs.length?'Si alguno dice "La nube lo rechazó", mándale una foto de esta pantalla a Dirección.':'Ya no hay nada pendiente.'}</p>
+      <button class="btn" style="width:100%;margin-top:10px" onclick="(async()=>{ toast('Intentando…'); try{ await syncAll(); }catch(e){} setTimeout(renderPendSync, 1500); })()">🔄 Intentar subir otra vez</button></div>
+    ${xs.map(x=>`<div class="card" style="border-left:5px solid ${x.error?'var(--bad)':'#d97706'}">
+      <strong>${PEND_COL_TXT[x.collection]||x.collection}${x.borrado?' (borrado)':''}</strong>
+      <div class="hint" style="margin:2px 0">${fTxt(x.cuando)} · módulo: ${esc(x.modulo||'ninguno')}</div>
+      ${x.resumen?`<div style="font-size:13px">${esc(x.resumen)}</div>`:''}
+      <div class="hint" style="margin:4px 0 0;font-weight:700;color:${x.error?'var(--bad)':'#d97706'}">${x.error?'❌ La nube lo rechazó: '+esc(x.error):'⏳ Todavía no se intenta subir (espera un momento con internet)'}</div>
+      <div class="hint" style="margin:2px 0 0;font-size:11px">${esc(x.collection)} / ${esc(x.id)}</div></div>`).join('')}
+    <button class="btn small" style="width:100%;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="irA('home')">← Inicio</button>`;
+}
+document.addEventListener('click', e=>{ const b = e.target && e.target.closest && e.target.closest('#syncBadge'); if(b && /por sincronizar/.test(b.textContent||'')) setView('pendsync'); });

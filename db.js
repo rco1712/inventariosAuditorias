@@ -162,6 +162,19 @@ const syncListeners = new Set();
 export function onSyncStateChange(cb){ syncListeners.add(cb); cb(syncState); return () => syncListeners.delete(cb); }
 function touchSyncState(patch){ Object.assign(syncState, patch); syncListeners.forEach(cb => cb(syncState)); }
 
+// v241: último error de subida por documento, para poder ver por qué algo se queda "por sincronizar".
+const syncErrores = {};
+export async function pendientesDetalle(){
+  const out = [];
+  for (const c of COLLECTIONS) {
+    if (!ddb.tables.some(t => t.name === c)) continue;
+    const rows = (await ddb.table(c).toArray()).filter(r => r._dirty);
+    rows.forEach(r => out.push({ collection: c, id: r.id, modulo: r.modulo ?? null, cuando: r._updatedAt || '', borrado: !!r._deleted,
+      error: syncErrores[c + '/' + r.id] || '',
+      resumen: [r.tipo, r.itemNombre, r.cantidad, r.descripcion, r.calle, r.nota, r.nombre].filter(x => x !== undefined && x !== null && x !== '').join(' · ').slice(0, 160) }));
+  }
+  return out;
+}
 async function countPendingSafe(){
   let n = 0;
   for (const c of COLLECTIONS) {
@@ -201,16 +214,16 @@ async function pushDirty(){
       const ts = new Date().toISOString();
       const aFila = row => ({ collection: name, id: row.id, modulo: row.modulo ?? null, payload: stripMeta(row), updated_at: ts, deleted: !!row._deleted });
       const { error } = await sb.from('docs').upsert(lote.map(aFila), { onConflict: 'collection,id' });
-      if (!error) { for (const row of lote) await marcarLimpio(name, row, ts); continue; }
+      if (!error) { for (const row of lote){ delete syncErrores[name + '/' + row.id]; await marcarLimpio(name, row, ts); } continue; }
       // Si el lote falla (p. ej. un documento sin permiso), se sube uno por uno para no atorar a los demás.
       for (const row of lote) {
         const t1 = new Date().toISOString();
         const r = await sb.from('docs').upsert({ ...aFila(row), updated_at: t1 }, { onConflict: 'collection,id' });
-        if (!r.error) await marcarLimpio(name, row, t1);
+        if (!r.error){ delete syncErrores[name + '/' + row.id]; await marcarLimpio(name, row, t1); }
         // v225: un cambio de un coordinador a un préstamo ajeno la nube lo rechaza siempre (no es de su módulo);
         // la app ya lo vuelve a mandar como evento, así que se deja de reintentar para que no quede "por sincronizar".
         else if (name === 'prestamos' && /row-level security|permission|policy/i.test(r.error.message || '')) await marcarLimpio(name, row, t1);
-        else console.warn('No se pudo subir', name, row.id, r.error.message);
+        else { syncErrores[name + '/' + row.id] = r.error.message || String(r.error); console.warn('No se pudo subir', name, row.id, r.error.message); }
       }
     }
   }
