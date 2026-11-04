@@ -75,7 +75,7 @@ const PISO_ZOCLO_PIEZAS = [
 
 // Piezas sueltas extra (confirmado por el usuario): solo descuentan material, NO suman valor a la instalación.
 const PIEZAS_SUELTAS = [
-  {k:'tubo', t:'Tubo 1.5 m', nombre:'Tubo', dim:'—', sinColor:true},
+  {k:'tubo', t:'Tubo 1.5 m (con su par de bridas)', nombre:'Tubo', dim:'—', sinColor:true},
   {k:'maleteroG', t:'Maletero grande', nombre:'Maletero grande', dim:'40×244 cm'},
   {k:'maleteroC', t:'Maletero chico', nombre:'Maletero chico', dim:'191×40 cm'},
   {k:'cargador', t:'Cargador 10×40', nombre:'Cargador', dim:'10×40 cm'},
@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v236';
+const APP_VERSION = 'v237';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6125,7 +6125,9 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     if(!(extra && extra.sinTapa)) add('Tapa zapatera grande',1,'60×40 cm',color,'ok','Tapa de 60×40: solo cuando va como extra (12 por hoja)');
     add('Zóclo zapatera grande',2,'57×10 cm',color,'ok','Zapatera grande: 2 zóclos de 57×10');
   } else if(tipo==='piezas_sueltas'){
-    (extra && extra.ps || []).forEach(r=>{ const d = PIEZAS_SUELTAS.find(x=>x.k===r.k); if(d && r.cantidad>0) add(d.nombre, r.cantidad, d.dim, d.sinColor?'—':(r.color||color), 'ok', 'Pieza suelta extra'); });
+    (extra && extra.ps || []).forEach(r=>{ const d = PIEZAS_SUELTAS.find(x=>x.k===r.k); if(d && r.cantidad>0){ add(d.nombre, r.cantidad, d.dim, d.sinColor?'—':(r.color||color), 'ok', 'Pieza suelta extra');
+      // v237 (pedido por el usuario): cada tubo extra lleva su juego (par) de bridas, igual que en los modelos.
+      if(r.k==='tubo') add('Juego de bridas', r.cantidad, '—', '—', 'ok', '1 juego de bridas por tubo extra'); } });
   } else if(tipo==='piso_zoclo'){
     (extra && extra.pz || []).forEach(r=>{ const d = PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); if(d && r.cantidad>0) add(d.nombre, r.cantidad, d.dim, r.color||color, 'ok', 'Piso y zóclo'); });
   } else if(tipo==='repisa'){
