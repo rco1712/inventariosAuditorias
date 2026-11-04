@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v234';
+const APP_VERSION = 'v235';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -439,7 +439,7 @@ async function loadStock(){
       if(!herrPrimera[c]){ herrPrimera[c] = true; return; }
       clearTimeout(herrT); herrT = setTimeout(()=>{
         herrCache = null;
-        if(current==='home') renderHome(); else if(current==='ferrec') renderFerRec();
+        if(current==='home') renderHome(); else if(current==='ferrec') renderFerRec(); else if(current==='ped' && !pedRecibiendo) renderPed();
       }, 500);
     })));
   }catch(e){}
@@ -1323,8 +1323,8 @@ function renderHome(){
     t('entrada','Llegó material','Anotar hojas, herrajes, etc. que entraron',"irA('mov',{tipo:'entrada'})",'mat',ENTRA);
     t('salida','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'mat',SALE);
     t('traspaso','Traspaso','Enviar material a otro módulo',"irA('trasp')",'mat',MUEVE);
-    const enCamino = pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p)).length;
-    t('camion','Por llegar', enCamino ? `${enCamino} pedido(s) en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'mat', enCamino?{k:'num', t:String(enCamino)}:null);
+    const enCamino = pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p)).length + ferEnCaminoMod(modulo());
+    t('camion','Por llegar', enCamino ? `${enCamino} en camino` : (esAdmin()?'Subir material pedido':'Material pedido que viene'),"irA('ped')",'mat', enCamino?{k:'num', t:String(enCamino)}:null);
     t('reciclar','Tubos ahorrados','Tubos que regresan los instaladores',"irA('tubos')",'mat',ENTRA);
     t('cierre','Cierre del turno','Corte de hojas, PVC, cintilla, pegamento…',"irA('cierre')",'dia');
     t('herramienta','Instalación','Registrar un clóset o puerta instalada',"irA('inst')",'dia');
@@ -3265,6 +3265,7 @@ async function ferGuardarNuevo(){
 }
 const ferEsTipo = t => t==='ferEntrada' || t==='ferEnvio' || t==='ferConfig';
 function ferStock(D){ const s = {}; (D.fer||[]).forEach(m=>{ if(m.estado==='cancelado' || m.tipo==='ferConfig') return; const sg = m.tipo==='ferEntrada' ? 1 : -1; ((m.datos||{}).items||[]).forEach(x=>{ s[x.itemId] = (s[x.itemId]||0) + sg*(Number(x.q)||0); }); }); return s; }
+const ferEnCaminoMod = mod => herrCache ? ferEnvios(herrCache, mod).length : 0;
 const ferEnvios = (D, mod) => (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado==='encamino' && (!mod || m.modulo===mod));
 const ferRecibidosSinVer = D => (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado==='recibido' && !m.dirAck);
 const ferPiezas = m => ((m.datos||{}).items||[]).reduce((s,x)=>s+(Number(x.q)||0),0);
@@ -3366,7 +3367,7 @@ async function ferRecibir(id){
     Object.assign(m, {estado:'recibido', fechaRecibido:fecha, recibidoPor:creadoPor, dirAck:false}); await db.collection('herrMovs').doc(m.id).set(m);
   }catch(e){ return alert('Error: '+e.message); }
   herrCache = null; entrCache = null; try{ catSync(await herrCargar(true)); if(typeof loadStock==='function') await loadStock(); }catch(e){}
-  toast('✅ Recibido: ya está en tu inventario'); if(current==='ferrec') renderFerRec(); else renderHome();
+  toast('✅ Recibido: ya está en tu inventario'); if(current==='ferrec') renderFerRec(); else if(current==='ped') renderPed(); else renderHome();
 }
 async function ferEnterado(){ const D = await herrCargar(true); for(const m of ferRecibidosSinVer(D)){ m.dirAck = true; await db.collection('herrMovs').doc(m.id).set(m); } herrCache = null; renderAlmacen(); }
 function ferEnvioCard(m, dir){
@@ -10827,7 +10828,9 @@ function renderHomeModDir(){
   const sec = (t, c, xs) => `<div class="home-sec" style="--tc:${c}"><div class="home-sec-t">${t}</div><div class="tiles">${xs.join('')}</div></div>`;
   const tile = (icon, titulo, sub, js, color, badge) => `<button class="tile" style="--tc:${color}" onclick="${js}" title="${String(sub).replace(/"/g,'&quot;')}">${badge?`<span class="tile-b ${badge.k||'num'}">${badge.t}</span>`:''}<span class="tile-ic">${homeIcon(icon)}</span><span class="tile-t">${titulo}</span><span class="tile-s">${sub}</span></button>`;
   const ENTRA = {k:'ent', t:'↓ Entra'}, SALE = {k:'sal', t:'↑ Sale'}, MUEVE = {k:'mov', t:'⇄ Mueve'};
-  const enCamino = pedidos.filter(p=>p.modulo===mod && pedidoEnCamino(p)).length;
+  const fV = herrCache ? ferEnvios(herrCache, mod) : [];
+  const enCamino = pedidos.filter(p=>p.modulo===mod && pedidoEnCamino(p)).length + fV.length;
+  if(!herrCache) herrCargar().then(()=>{ if(current==='home' && esAdmin() && !dirModo) renderHomeModDir(); }).catch(()=>{});
   const V = vehCache, nVeh = V ? vehAvisos(V, mod).length + vehPendientes(V, mod).length : 0;
   const cp = cortesPendientes();
   $('#main').innerHTML = `
@@ -10837,6 +10840,7 @@ function renderHomeModDir(){
       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:#5b21b6" onclick="volverDireccion()">‹ Volver a Dirección</button><button class="btn" style="flex:1;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="irElegirModulo('home')">🔄 Otro módulo</button></div>
     </div>
     ${cp.length?`<div class="card" style="padding:12px"><div class="pend"><div>✂️ <strong>Corte sin anotar</strong>: ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}</div><button class="btn small" onclick="irA('cierre')">Cierre</button></div></div>`:''}
+    ${fV.length?`<div class="card" style="padding:12px;border:2px solid #ca8a04;cursor:pointer" onclick="pedSub='camino';irA('ped')"><strong>🚚 Ferretería en camino a ${mod}</strong><p class="hint" style="margin:2px 0 0">${fV.reduce((s,m)=>s+ferPiezas(m),0)} pieza(s). Falta que ${mod} toque "Ya lo recibí". Toca para verlo.</p></div>`:''}
     ${stockBajoHtml()}
     ${sec(mod, M.color, [
       tile('cajas','Inventario','Cuánto hay de cada cosa',"irA('inv')",M.color),
@@ -10846,7 +10850,7 @@ function renderHomeModDir(){
       tile('entrada','Llegó material','Hojas, herrajes, etc. que entraron',"irA('mov',{tipo:'entrada'})",'#2348b5',ENTRA),
       tile('salida','Salida o merma','Material que salió o se dañó',"irA('mov',{tipo:'salida'})",'#2348b5',SALE),
       tile('traspaso','Traspaso','Enviar material a otro módulo',"irA('trasp')",'#2348b5',MUEVE),
-      tile('camion','Por llegar', enCamino ? enCamino+' pedido(s) en camino' : 'Subir material pedido',"irA('ped')",'#2348b5', enCamino?{t:String(enCamino)}:null),
+      tile('camion','Por llegar', enCamino ? enCamino+' en camino' : 'Subir material pedido',"irA('ped')",'#2348b5', enCamino?{t:String(enCamino)}:null),
       tile('reciclar','Tubos ahorrados','Tubos que regresan los instaladores',"irA('tubos')",'#2348b5',ENTRA),
       tile('capas','Sobrantes','Material que regresó sin instalar',"irA('sob')",'#2348b5')])}
     ${sec('Trabajo del día','#0d7468', [
@@ -13208,7 +13212,8 @@ function renderPed(){
   const enCamino = visibles.filter(pedidoEnCamino);
   const recibidos = visibles.filter(p=>!pedidoEnCamino(p));
   const porAprobar = visibles.filter(p=>recepcionesDe(p).some(r=>estadoRecepcion(r)==='pendiente'));
-  const tabs = [['camino',`En camino (${enCamino.length})`],['recibidos',`Recibidos (${recibidos.length})`]]
+  const nFer = esSoloLectura() ? 0 : ferEnCaminoMod(modulo());
+  const tabs = [['camino',`En camino (${enCamino.length + nFer})`],['recibidos',`Recibidos (${recibidos.length})`]]
     .concat(puedePedidos()&&porAprobar.length?[['porAprobar',`Por aprobar (${porAprobar.length})`]]:[])
     .concat(puedePedidos()?[['faltan','📋 Falta por entregar'],['nuevo','+ Nuevo pedido']]:[]);
   if(!tabs.some(t=>t[0]===pedSub)) pedSub='camino';
@@ -13221,11 +13226,19 @@ function renderPed(){
     const lista = pedSub==='camino' ? enCamino : recibidos;
     cuerpo = lista.length ? lista.map(pedCardHtml).join('') : `<div class="card hint">${pedSub==='camino'?'No hay material en camino para '+modulo()+'.':'Todavía no hay pedidos recibidos.'}</div>`;
   }
+  // v235: lo que Dirección manda de la ferretería del almacén general también sale aquí (antes solo en Inicio).
+  let ferHtml = '';
+  if(!esSoloLectura() && pedSub==='camino' && !pedRecibiendo){
+    if(!herrCache) herrCargar().then(()=>{ if(current==='ped') renderPed(); }).catch(()=>{});
+    const fv = herrCache ? ferEnvios(herrCache, modulo()) : [];
+    if(fv.length) ferHtml = `<div class="card" style="border:2px solid #ca8a04"><strong>🔩 Ferretería del almacén general (${fv.length})</strong><p class="hint" style="margin:2px 0 0">${esAdmin()?'Ya salió de tu ferretería. Le entra a '+modulo()+' cuando toque "Ya lo recibí todo".':'Dirección te lo mandó. Cuando lo tengas, toca <strong>✅ Ya lo recibí todo</strong> y se suma a tu inventario.'}</p>${fv.map(m=>ferEnvioCard(m, esAdmin())).join('')}</div>`;
+  }
+  if(ferHtml && pedSub==='camino' && !pedRecibiendo && !enCamino.length) cuerpo = ''; // no decir "no hay nada en camino" si viene ferretería
   $('#main').innerHTML = `<div class="card">
       <div style="font-size:17px;font-weight:800">🚚 Material por llegar · ${esSoloLectura()?'los 5 módulos':modulo()}</div>
       <p class="hint">${esAdministracion()?'Aquí subes lo que va a llegar a cada módulo. Cuando llega, el coordinador marca lo que recibió y tú lo apruebas para sumarlo a su inventario. Si llega incompleto, lo que falta sigue en camino.':esAdmin()?'Sube lo que pediste para este módulo. Cuando llegue, el coordinador marca lo que recibió y tú lo apruebas para sumarlo al inventario. Si llega incompleto, lo que falta sigue en camino.':'Aquí ves lo que Dirección pidió para tu módulo. Cuando llegue, marca lo que recibiste. Si llega incompleto, lo que falta sigue aquí hasta que llegue.'}</p>
       <div class="subtabs" style="margin:8px 0 0">${tabs.map(([k,l])=>`<button class="${pedSub===k?'active':''}" onclick="pedSub='${k}';pedRecibiendo=null;renderPed()">${l}</button>`).join('')}</div>
-    </div>${cuerpo}`;
+    </div>${ferHtml}${cuerpo}`;
 }
 function pedCardHtml(p){
   const r = resumenPedido(p);
