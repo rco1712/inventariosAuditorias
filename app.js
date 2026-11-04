@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v240';
+const APP_VERSION = 'v241';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -349,7 +349,7 @@ function renderSyncBadge(state){
     el.textContent = '🔄 Sincronizando…';
     el.style.background = 'rgba(255,255,255,.15)';
   } else if(state.pendientes>0){
-    el.textContent = '⏳ '+state.pendientes+' cambio(s) por sincronizar';
+    el.textContent = '⏳ '+state.pendientes+' cambio(s) por sincronizar · ver';
     el.style.background = 'rgba(224,121,26,.35)';
   } else {
     el.textContent = '✅ Sincronizado';
@@ -695,6 +695,7 @@ function setView(v){
   if(v==='ferrec') renderFerRec();
   if(v==='bridas') renderBridasPend();
   if(v==='revherr') renderRevHerr();
+  if(v==='pendsync') renderPendSync();
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -15064,3 +15065,29 @@ async function renderRevHerr(){
   h += card(`⏳ Pendientes de verificar (${pen.length})`, `<div class="hint" style="margin:2px 0 6px">Llevan ${suma(pen,'lleva')} · se descontaron ${suma(pen,'quito')} ${u}. Ya están descontadas; si rechazas una, regresa al inventario.</div>${tabla(pen)}`, '#d97706');
   $('#main').innerHTML = h;
 }
+
+
+// ===== v241: ver qué cambio está "por sincronizar" y por qué =====
+// Al tocar el aviso naranja se ve cada cambio que no ha subido a la nube, con el motivo si la nube
+// lo rechazó. No borra ni cambia nada; solo permite intentar de nuevo.
+const PEND_COL_TXT = {movimientos:'Movimiento de material', instalacionesLog:'Instalación', cierres:'Cierre del turno', herramientas:'Herramienta', herrMovs:'Movimiento de herramienta / ferretería', prestamos:'Préstamo / traspaso', pedidos:'Pedido (Por llegar)', config:'Configuración', borradores:'Avance de auditoría', auditorias:'Auditoría', inicial:'Stock inicial', gasolina:'Gasolina', vehiculos:'Vehículo'};
+async function renderPendSync(){
+  current = 'pendsync';
+  $('#main').innerHTML = '<div class="card hint">Revisando…</div>';
+  let xs = [];
+  try{ xs = typeof pendientesDetalle==='function' ? await pendientesDetalle() : []; }catch(e){}
+  if(current!=='pendsync') return;
+  const fTxt = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
+  const esc = t => String(t||'').replace(/</g,'&lt;');
+  $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:900">⏳ Cambios por sincronizar (${xs.length})</div>
+      <p class="hint" style="margin:2px 0 0">Están guardados en este teléfono pero todavía no suben a la nube. ${xs.length?'Si alguno dice "La nube lo rechazó", mándale una foto de esta pantalla a Dirección.':'Ya no hay nada pendiente.'}</p>
+      <button class="btn" style="width:100%;margin-top:10px" onclick="(async()=>{ toast('Intentando…'); try{ await syncAll(); }catch(e){} setTimeout(renderPendSync, 1500); })()">🔄 Intentar subir otra vez</button></div>
+    ${xs.map(x=>`<div class="card" style="border-left:5px solid ${x.error?'var(--bad)':'#d97706'}">
+      <strong>${PEND_COL_TXT[x.collection]||x.collection}${x.borrado?' (borrado)':''}</strong>
+      <div class="hint" style="margin:2px 0">${fTxt(x.cuando)} · módulo: ${esc(x.modulo||'ninguno')}</div>
+      ${x.resumen?`<div style="font-size:13px">${esc(x.resumen)}</div>`:''}
+      <div class="hint" style="margin:4px 0 0;font-weight:700;color:${x.error?'var(--bad)':'#d97706'}">${x.error?'❌ La nube lo rechazó: '+esc(x.error):'⏳ Todavía no se intenta subir (espera un momento con internet)'}</div>
+      <div class="hint" style="margin:2px 0 0;font-size:11px">${esc(x.collection)} / ${esc(x.id)}</div></div>`).join('')}
+    <button class="btn small" style="width:100%;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="irA('home')">← Inicio</button>`;
+}
+document.addEventListener('click', e=>{ const b = e.target && e.target.closest && e.target.closest('#syncBadge'); if(b && /por sincronizar/.test(b.textContent||'')) setView('pendsync'); });
