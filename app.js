@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v239';
+const APP_VERSION = 'v240';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -15056,6 +15056,11 @@ async function renderRevHerr(){
     : (malas.length ? card(`⚠️ Instalaciones que no cuadran (${malas.length})`, `<div class="wrap-x"><table><tr><th>Captura</th><th>Calle</th><th>Lleva</th><th>Se descontó</th></tr>${malas.map(x=>`<tr><td>${fTxt(x.l.fecha)}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}</div></td><td style="text-align:center">${n(x.lleva)}</td><td style="text-align:center;font-weight:900;color:var(--bad)">${n(x.quito)}</td></tr>`).join('')}</table></div>`, 'var(--bad)') : '')
       + (huerfanos.length ? card(`⚠️ Descuentos sin instalación (${huerfanos.length})`, `<p class="hint" style="margin:2px 0 6px">Movimientos de instalación de ${n(huerfQ)} ${u} cuya instalación ya no existe.</p>${huerfanos.map(m=>`<div class="hint" style="margin:0">${fTxt(m.fecha)} · ${n(m.cantidad)} · ${String(m.nota||'').replace(/</g,'&lt;').slice(0,90)}</div>`).join('')}`, '#d97706') : '')
       + (muertos.length ? card(`⚠️ Descuentos de instalaciones rechazadas o reemplazadas (${muertos.length})`, muertos.map(m=>`<div class="hint" style="margin:0">${fTxt(m.fecha)} · ${n(m.cantidad)} · ${String(m.nota||'').replace(/</g,'&lt;').slice(0,90)}</div>`).join(''), '#d97706') : '');
-  h += `<div class="card"><details><summary style="font-weight:800;cursor:pointer">Ver las ${filas.length} instalaciones</summary><div class="wrap-x"><table><tr><th>Captura</th><th>Se instala</th><th>Calle</th><th>Lleva</th></tr>${filas.map(x=>`<tr><td>${fTxt(x.l.fecha)}</td><td>${x.l.fechaDia||'—'}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}${x.l.estado==='pendiente'?' · sin verificar':''}</div></td><td style="text-align:center">${n(x.lleva)}</td></tr>`).join('')}</table></div></details></div>`;
+  // v240 (pedido por el usuario): por instalación, cuánto se descontó, separado en verificadas y pendientes.
+  const tabla = xs => xs.length ? `<div class="wrap-x"><table><tr><th>Captura</th><th>Calle</th><th>Lleva</th><th>Descontó</th></tr>${xs.map(x=>{ const mal = Math.abs(x.lleva-x.quito)>0.001; return `<tr${mal?' style="background:rgba(224,69,63,.10)"':''}><td>${fTxt(x.l.fecha)}${x.l.fechaDia && x.l.fechaDia>hoy?`<div class="hint" style="margin:0;color:#7c3aed;font-weight:700">se instala ${x.l.fechaDia}</div>`:''}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}</div></td><td style="text-align:center">${n(x.lleva)}</td><td style="text-align:center;font-weight:900;color:${mal?'var(--bad)':'var(--ok)'}">${n(x.quito)}${mal?' ⚠️':''}</td></tr>`; }).join('')}</table></div>` : '<p class="hint" style="margin:4px 0 0">Ninguna.</p>';
+  const ver = filas.filter(x=>x.l.estado!=='pendiente'), pen = filas.filter(x=>x.l.estado==='pendiente');
+  const suma = (xs,k) => n(xs.reduce((s,x)=>s+x[k],0));
+  h += card(`✅ Verificadas por ti (${ver.length})`, `<div class="hint" style="margin:2px 0 6px">Llevan ${suma(ver,'lleva')} · se descontaron ${suma(ver,'quito')} ${u}</div>${tabla(ver)}`, 'var(--ok)');
+  h += card(`⏳ Pendientes de verificar (${pen.length})`, `<div class="hint" style="margin:2px 0 6px">Llevan ${suma(pen,'lleva')} · se descontaron ${suma(pen,'quito')} ${u}. Ya están descontadas; si rechazas una, regresa al inventario.</div>${tabla(pen)}`, '#d97706');
   $('#main').innerHTML = h;
 }
