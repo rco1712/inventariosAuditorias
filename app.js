@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v235';
+const APP_VERSION = 'v236';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3357,25 +3357,32 @@ let ferRecibiendoId = '';
 async function ferRecibir(id){
   if(ferRecibiendoId===id) return; // evita que un doble toque lo reciba dos veces
   const D = await herrCargar(true), m = (D.fer||[]).find(x=>x.id===id);
-  if(m && m.estado==='encamino' && movs.some(x=>x.ferEnvioId===id && x.estado!=='rechazado')){ m.estado='recibido'; m.fechaRecibido = m.fechaRecibido||new Date().toISOString(); try{ await db.collection('herrMovs').doc(m.id).set(m); }catch(e){} }
-  if(!m || m.estado!=='encamino') { toast('Ya estaba recibido'); herrCache=null; return current==='home'?renderHome():renderFerRec(); }
-  if(!confirm(`¿Ya recibiste todo?\n\n${m.datos.items.map(ferTxtItem).join('\n')}\n\nSe suma a tu inventario de ${m.modulo}.`)) return;
+  // v236: se revisan las entradas del módulo DESTINO (Dirección puede recibir desde otra vista), para no sumar dos veces.
+  let yaEntro = m && movs.some(x=>x.ferEnvioId===id && x.estado!=='rechazado');
+  if(m && !yaEntro){ try{ const q = await db.collection('movimientos').where('modulo','==',m.modulo).get(); yaEntro = q.docs.some(d=>{ const x = d.data(); return x.ferEnvioId===id && x.estado!=='rechazado'; }); }catch(e){} }
+  if(m && m.estado==='encamino' && yaEntro){ m.estado='recibido'; m.fechaRecibido = m.fechaRecibido||new Date().toISOString(); try{ await db.collection('herrMovs').doc(m.id).set(m); }catch(e){} }
+  const porDir = esAdmin();
+  if(!m || m.estado!=='encamino') { toast('Ya estaba recibido'); herrCache=null; return ferVolver(); }
+  if(!confirm(porDir
+    ? `¿${m.modulo} ya recibió todo?\n\n${m.datos.items.map(ferTxtItem).join('\n')}\n\nSe suma al inventario de ${m.modulo} y queda anotado que lo recibiste tú (Dirección).`
+    : `¿Ya recibiste todo?\n\n${m.datos.items.map(ferTxtItem).join('\n')}\n\nSe suma a tu inventario de ${m.modulo}.`)) return;
   if(ferRecibiendoId===id) return; ferRecibiendoId = id; setTimeout(()=>{ if(ferRecibiendoId===id) ferRecibiendoId=''; }, 15000);
   const fecha = new Date().toISOString(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
   try{
     for(const x of m.datos.items) await db.collection('movimientos').doc(cryptoId()).set({modulo:m.modulo, itemId:x.itemId, itemNombre:x.nombre, tipo:'entrada', cantidad:Number(x.q), nota:'Del Almacén general (ferretería)', fecha, estado:'aprobado', loteId:m.id, ferEnvioId:m.id, origenTipo:'almacen', creadoPor});
-    Object.assign(m, {estado:'recibido', fechaRecibido:fecha, recibidoPor:creadoPor, dirAck:false}); await db.collection('herrMovs').doc(m.id).set(m);
+    Object.assign(m, {estado:'recibido', fechaRecibido:fecha, recibidoPor:creadoPor, dirAck:porDir, recibidoPorDir:porDir}); await db.collection('herrMovs').doc(m.id).set(m);
   }catch(e){ return alert('Error: '+e.message); }
   herrCache = null; entrCache = null; try{ catSync(await herrCargar(true)); if(typeof loadStock==='function') await loadStock(); }catch(e){}
-  toast('✅ Recibido: ya está en tu inventario'); if(current==='ferrec') renderFerRec(); else if(current==='ped') renderPed(); else renderHome();
+  toast(porDir ? '✅ Recibido: ya está en el inventario de '+m.modulo : '✅ Recibido: ya está en tu inventario'); ferVolver();
 }
+function ferVolver(){ if(current==='ferrec') renderFerRec(); else if(current==='ped') renderPed(); else if(current==='alm') renderAlmacen(); else renderHome(); }
 async function ferEnterado(){ const D = await herrCargar(true); for(const m of ferRecibidosSinVer(D)){ m.dirAck = true; await db.collection('herrMovs').doc(m.id).set(m); } herrCache = null; renderAlmacen(); }
 function ferEnvioCard(m, dir){
   const col = m.estado==='recibido' ? '#16a34a' : m.estado==='cancelado' ? '#6b7280' : '#0891b2';
-  const est = m.estado==='recibido' ? `✅ Recibido ${herrFecha(m.fechaRecibido)}` : m.estado==='cancelado' ? '✖️ Cancelado' : '🚚 En camino';
+  const est = m.estado==='recibido' ? `✅ Recibido ${herrFecha(m.fechaRecibido)}${m.recibidoPorDir?' (por Dirección)':''}` : m.estado==='cancelado' ? '✖️ Cancelado' : '🚚 En camino';
   return `<div style="border-left:5px solid ${col};background:${col}1a;border-radius:12px;padding:10px;margin-top:8px"><div class="row" style="justify-content:space-between;gap:8px"><strong>📍 ${herrEsc(m.modulo)}</strong><span style="font-size:12px;font-weight:800;color:${col}">${est}</span></div>
     <div class="hint" style="margin:2px 0 4px">Salió ${herrFecha(m.fecha)} · ${fmtNum(ferPiezas(m))} pieza(s)</div>${ferItemsLista(m)}
-    ${m.estado==='encamino' ? (dir ? `<button class="btn small" style="margin-top:8px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="ferCancelarEnvio('${m.id}')">Cancelar envío</button>` : `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#16a34a,#15803d);min-height:50px;font-size:16px" onclick="ferRecibir('${m.id}')">✅ Ya lo recibí todo</button>`) : ''}</div>`;
+    ${m.estado==='encamino' ? (dir ? `<div class="row" style="gap:8px;margin-top:8px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="ferRecibir('${m.id}')">📥 Ya lo recibió ${herrEsc(m.modulo)}</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="ferCancelarEnvio('${m.id}')">Cancelar envío</button></div>` : `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#16a34a,#15803d);min-height:50px;font-size:16px" onclick="ferRecibir('${m.id}')">✅ Ya lo recibí todo</button>`) : ''}</div>`;
 }
 function ferHistHtml(D, id){
   const it = ferItem(id); if(!it) return ''; const N = ferCaja(D, id), P = FER_COL[it.cat]||'#db2777', st = ferStock(D)[id]||0, f = q => ferFmt(q, N, it.unidad);
@@ -13231,7 +13238,7 @@ function renderPed(){
   if(!esSoloLectura() && pedSub==='camino' && !pedRecibiendo){
     if(!herrCache) herrCargar().then(()=>{ if(current==='ped') renderPed(); }).catch(()=>{});
     const fv = herrCache ? ferEnvios(herrCache, modulo()) : [];
-    if(fv.length) ferHtml = `<div class="card" style="border:2px solid #ca8a04"><strong>🔩 Ferretería del almacén general (${fv.length})</strong><p class="hint" style="margin:2px 0 0">${esAdmin()?'Ya salió de tu ferretería. Le entra a '+modulo()+' cuando toque "Ya lo recibí todo".':'Dirección te lo mandó. Cuando lo tengas, toca <strong>✅ Ya lo recibí todo</strong> y se suma a tu inventario.'}</p>${fv.map(m=>ferEnvioCard(m, esAdmin())).join('')}</div>`;
+    if(fv.length) ferHtml = `<div class="card" style="border:2px solid #ca8a04"><strong>🔩 Ferretería del almacén general (${fv.length})</strong><p class="hint" style="margin:2px 0 0">${esAdmin()?'Ya salió de tu ferretería. Le entra a '+modulo()+' cuando el coordinador toque "Ya lo recibí todo", o cuando tú toques "Ya lo recibió '+modulo()+'".':'Dirección te lo mandó. Cuando lo tengas, toca <strong>✅ Ya lo recibí todo</strong> y se suma a tu inventario.'}</p>${fv.map(m=>ferEnvioCard(m, esAdmin())).join('')}</div>`;
   }
   if(ferHtml && pedSub==='camino' && !pedRecibiendo && !enCamino.length) cuerpo = ''; // no decir "no hay nada en camino" si viene ferretería
   $('#main').innerHTML = `<div class="card">
