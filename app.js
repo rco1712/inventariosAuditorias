@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v241';
+const APP_VERSION = 'v242';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -11125,7 +11125,7 @@ function herrConfItems(){ return HERR_CONFIRMAR.map(n=>itemByName(n)).filter(Boo
 // y con cuánto debe terminar. Usa los mismos movimientos que el inventario esperado del cierre.
 function herrCuentaHoy(it){
   const hoy = fechaHoyLocal(), esp = stockEsperadoCierre(it.id);
-  const ms = movs.filter(m=>m.itemId===it.id && m.estado!=='rechazado' && m.fecha && diaLocal(m.fecha)===hoy && (m.estado==='pendiente' || cuentaEnInventario(m)));
+  const ms = movs.filter(m=>m.itemId===it.id && m.estado!=='rechazado' && m.fecha && diaLocal(m.fecha)===hoy && (cuentaEnInventario(m) || (m.estado==='pendiente' && !['entrada','devolucion','ajuste'].includes(m.tipo))));
   const signo = m => ['entrada','devolucion','ajuste'].includes(m.tipo) ? 1 : (['salida','merma','garantia','instalacion'].includes(m.tipo) ? -1 : 0);
   const g = {};
   ms.forEach(m=>{ const k = m.tipo==='instalacion' ? 'inst' : m.tipo==='devolucion' && m.motivo==='regresoInstalacion' ? 'reg' : m.tipo;
@@ -11241,8 +11241,8 @@ async function herrMeterAjuste(id){
 function herrConfHtml(){
   const its = herrConfItems(); if(!its.length) return '';
   const fila = it => { const cu = herrCuentaHoy(it), esp = cu.esp, r = herrConf[it.id]||{}, u = it.unidad||'';
-    const cuenta = cu.movio ? `<span class="hint" style="margin:0">Tenías <strong style="color:var(--ink)">${cu.tenia}</strong> · ${cu.partes.join(' · ')}</span><br><span style="font-size:14px">Te deben quedar <strong>${esp} ${u}</strong>. ¿Los tienes?</span>`
-      : `<span class="hint" style="margin:0">No se movieron hoy · tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span>`;
+    const cuenta = cu.movio ? `<span class="hint" style="margin:0">Tenías <strong style="color:var(--ink)">${cu.tenia}</strong> · ${cu.partes.join(' · ')}</span><br><span style="font-size:14px">Te deben quedar <strong>${esp} ${u}</strong>. ¿Los tienes?</span>${pendAprobTxt(it.id, u)}`
+      : `<span class="hint" style="margin:0">No se movieron hoy · tienes <strong style="color:var(--ink)">${esp} ${u}</strong>. ¿Los tienes?</span>${pendAprobTxt(it.id, u)}`;
     const b = (on, txt, c, js) => `<button class="btn small" style="min-width:64px;${on?`background:${c};border-color:${c}`:`background:transparent;color:${c};border:1px solid ${c};box-shadow:none`}" onclick="${js}">${txt}</button>`;
     if(CORR_CALC[it.nombre]) return corrCalcHtml(it);
     return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
@@ -11295,14 +11295,21 @@ function recordatorioCierreHtml(){
 function stockEsperadoCierre(itemId){
   let q = calcFormula(itemId).final;
   // Las instalaciones pendientes ya cuentan en el inventario (v187): no se restan otra vez.
+  // v242 (confirmado por el usuario): lo que ENTRA y está pendiente (entradas, regresos, ajustes) no
+  // está en ningún lado hasta que Dirección lo aprueba, así que NO se suma aquí; se muestra aparte.
+  // Lo que SALE pendiente sí se resta, porque ya no está (y así nunca se descuenta de más).
   movs.filter(m=>m.itemId===itemId && m.estado==='pendiente' && !cuentaEnInventario(m)).forEach(m=>{
     const c = Number(m.cantidad)||0;
-    if(m.tipo==='entrada'||m.tipo==='devolucion') q += c;
-    else if(m.tipo==='salida'||m.tipo==='merma'||m.tipo==='garantia'||m.tipo==='instalacion') q -= c;
-    else if(m.tipo==='ajuste') q += c;
+    if(m.tipo==='salida'||m.tipo==='merma'||m.tipo==='garantia'||m.tipo==='instalacion') q -= c;
   });
   return fmtNum(q);
 }
+// v242: lo que espera aprobación de Dirección y SUMARÍA (entradas, regresos, ajustes). Solo para mostrarlo.
+function pendientePorAprobar(itemId){
+  return fmtNum(movs.filter(m=>m.itemId===itemId && m.estado==='pendiente' && !cuentaEnInventario(m) && ['entrada','devolucion','ajuste'].includes(m.tipo))
+    .reduce((s,m)=>s+(Number(m.cantidad)||0),0));
+}
+const pendAprobTxt = (itemId, u) => { const p = pendientePorAprobar(itemId); return p>0 ? `<span style="display:block;margin-top:2px;font-size:12px;font-weight:700;color:#d97706">⏳ +${fmtNum(p)} ${u||''} esperando aprobación de Dirección (no cuentan todavía)</span>` : ''; };
 // Fórmula como si lo pendiente ya estuviera aprobado (para el conteo de completas del cierre).
 function calcFormulaConPendientes(itemId){
   const resetFecha = resetMap[modulo()];
@@ -11344,7 +11351,7 @@ function filaCierreConteo(it){
   let dif = '';
   if(!vacioCierre(v)){ const d = fmtNum(esp - Number(v)), raro = d>0 ? usoRaroCierre(it.id, d, esp) : null;
     dif = d>0 ? (raro ? `<span style="display:block;margin-top:3px;color:#f59e0b;font-weight:700">⚠️ Se usó ${fmtNum(d)} ${it.unidad} — <b>es mucho para un día</b>. ${raro.txt}. ¿Se anotó doble una entrada o salió material sin anotar?</span>` : `<span class="neg"> → se usó ${fmtNum(d)}</span>`) : (d<0 ? `<span style="color:#b3742c"> → tienes ${fmtNum(-d)} de más</span>` : '<span class="pos"> → sin cambio</span>'); }
-  return `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0" id="cdif-${it.id}">La app dice: ${fmtNum(esp)} ${it.unidad}${dif}</span></span>
+  return `<label class="movitem"><span style="min-width:0"><span class="invname">${it.nombre}</span><span class="hint" style="display:block;margin:2px 0 0" id="cdif-${it.id}">La app dice: ${fmtNum(esp)} ${it.unidad}${dif}</span>${pendAprobTxt(it.id, it.unidad)}</span>
     <input type="number" min="0" inputmode="decimal" placeholder="Hay" value="${vacioCierre(v)?'':v}" oninput="cierreVals['${it.id}']=this.value;refrescarDifCierre('${it.id}')"></label>`;
 }
 function refrescarDifCierre(id){
