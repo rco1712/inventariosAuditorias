@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v232';
+const APP_VERSION = 'v233';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -429,6 +429,19 @@ async function loadStock(){
       if(current==='aud') renderAud();
       if(current==='conteo') renderConteoDir();
     }));
+  }catch(e){}
+  try{
+    // v233: lo que Dirección manda (ferretería y herramienta) se guardaba en una copia en memoria que
+    // solo se cargaba una vez; si el envío llegaba después, el coordinador no veía el aviso hasta
+    // entrar a Herramienta. Ahora, cuando llegan cambios de herrMovs/herramientas, se vuelve a leer.
+    let herrPrimera = {}, herrT = null;
+    ['herrMovs','herramientas'].forEach(c=>sub(db.collection(c).onSnapshot(()=>{
+      if(!herrPrimera[c]){ herrPrimera[c] = true; return; }
+      clearTimeout(herrT); herrT = setTimeout(()=>{
+        herrCache = null;
+        if(current==='home') renderHome(); else if(current==='ferrec') renderFerRec();
+      }, 500);
+    })));
   }catch(e){}
   try{
     sub(db.collection('auditorias').where('modulo','==',modulo()).onSnapshot(snap=>{
