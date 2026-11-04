@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v238';
+const APP_VERSION = 'v239';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -694,6 +694,7 @@ function setView(v){
   if(v==='veh'){ vehCache=null; renderVeh(); }
   if(v==='ferrec') renderFerRec();
   if(v==='bridas') renderBridasPend();
+  if(v==='revherr') renderRevHerr();
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -9731,6 +9732,7 @@ function repGrupos(){
     {t:'Instalaciones del día (PDF)', s:'modelo, calle y estado', k:'instalaciones dia pdf calle', js:"repInstDia=fechaHoyLocal();repInstCache=null;repAbrir('instDia')"},
     {t:'Instalaciones de la semana', s:modulo(), k:'instalaciones semana closet puertas', js:"repAbrir('inst')"},
     ...(A ? [{t:'🚪🗄️ Instalaciones y sus herrajes', s:'puertas o clósets · verificadas o no', k:'puertas closets clóset instaladas calles herrajes rieles sistemas bastidores jaladeras tubos bridas correderas bisagras rechazadas regreso', js:"rpCache=null;repAbrir('puertas')"}] : []),
+    ...(A ? [{t:'🔎 Revisión de un herraje', s:'desde el conteo inicial · ¿se descontó todo?', k:'revision herraje jaladeras jaladera bisagras correderas tubos instalaciones descontadas faltan error', js:"irA('revherr')"}] : []),
     ...(A ? [{t:'🔩 Bridas sin descontar (tubos extra)', s:'después de la última auditoría', k:'bridas tubos extra piezas sueltas faltan descontar', js:"irA('bridas')"}] : []),
     {t:'Consumo por instalaciones', s:'acumulado', k:'consumo instalaciones acumulado', js:"repAbrir('consInst')"},
     {t:'Material en garantía', s:'acumulado', k:'garantia garantias acumulado', js:"repAbrir('garAcum')"}
@@ -9806,6 +9808,7 @@ async function repCambiarMod(n){
   await loadStock();
   const t0 = Date.now(); while((_snapMovsN===m0 || _snapIniN===i0) && Date.now()-t0<6000) await new Promise(r=>setTimeout(r,80));
   if(current==='repver') renderRepVer();
+  else if(current==='revherr') renderRevHerr();
 }
 // ===== v212 (pedido por el usuario, solo Dirección): 🚪 Puertas instaladas y sus herrajes =====
 // Todas las puertas que capturaron los coordinadores (verificadas o no), con calle y fecha, si se
@@ -15003,4 +15006,56 @@ async function renderBridasPend(){
     <div class="card" style="text-align:center"><div class="hint" style="margin:0">Total en los 5 módulos</div><div style="font-size:30px;font-weight:900;color:${total?'var(--bad)':'var(--ok)'}">${total} juego(s) de bridas</div>
     <p class="hint" style="margin:4px 0 0">Esta lista no cambia el inventario. Si decides ajustarlo, anota una salida de "Juegos de bridas" en cada módulo.</p></div>
     ${bloques.join('')}`;
+}
+
+
+// ===== v239 (pedido por el usuario): revisión de un herraje en un módulo =====
+// Desde el stock inicial (conteo inicial) hasta ahora: cuánto debe haber según la fórmula del
+// inventario, y comparación instalación por instalación entre lo que la instalación dice que
+// lleva (su consumo) y lo que de verdad se descontó (sus movimientos). Solo lectura.
+let revHerrItem = 'Jaladeras';
+async function renderRevHerr(){
+  current = 'revherr';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  const mod = modulo(), it = itemByName(revHerrItem) || itemByName('Jaladeras');
+  const opciones = ['Jaladeras','Jaladera plana','Bisagras','Juego de corredera','Correderas de extensión','Tubos 1.5 m','Juegos de bridas','Push','Rieles','Sistemas','Bastidores','Espejos closet'].filter(n=>itemByName(n));
+  const head = `${repVolverHtml('🔎 Revisión de un herraje', 'Desde el stock inicial hasta ahora. No cambia nada del inventario.', true)}
+    <div class="card" style="padding:12px"><label class="hint">Herraje</label><select style="margin-top:4px" onchange="revHerrItem=this.value;renderRevHerr()">${opciones.map(n=>`<option ${n===it.nombre?'selected':''}>${n}</option>`).join('')}</select></div>`;
+  $('#main').innerHTML = head + '<div class="card hint">Cargando…</div>';
+  let logs;
+  try{ const sl = await db.collection('instalacionesLog').where('modulo','==',mod).get(); logs = sl.docs.map(d=>({id:d.id, ...d.data()})).filter(l=>l.modulo===mod); }
+  catch(e){ $('#main').innerHTML = head + '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
+  if(current!=='revherr' || modulo()!==mod) return;
+  const F = calcFormula(it.id), u = it.unidad||'pza', n = x => fmtNum(Math.round(x*1000)/1000);
+  const doc = inicialMap[it.id]!==undefined ? {fecha:inicialFechaMap[it.id]} : null;
+  const b = lineaBase(resetMap[mod], doc ? {cantidad:inicialMap[it.id], cortado:0, fecha:doc.fecha} : null);
+  const desde = b.desde || '';
+  const fTxt = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+  const hoy = fechaHoyLocal();
+  const consIt = l => (l.consumo||[]).filter(c=>c.itemId===it.id).reduce((s,c)=>s+(Number(c.cantidad)||0),0);
+  const mvIt = movs.filter(m=>m.itemId===it.id && m.tipo==='instalacion' && (!desde || (m.fecha||'') > desde));
+  const desc = id => mvIt.filter(m=>m.loteId===id && cuentaEnInventario(m)).reduce((s,m)=>s+(Number(m.cantidad)||0),0);
+  const vivos = logs.filter(l=>(!desde || (l.fecha||'') > desde) && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado);
+  const filas = vivos.map(l=>({l, lleva:consIt(l), quito:desc(l.id)})).filter(x=>x.lleva>0 || x.quito>0);
+  const malas = filas.filter(x=>Math.abs(x.lleva - x.quito) > 0.001);
+  const idsLog = new Set(logs.map(l=>l.id));
+  const huerfanos = mvIt.filter(m=>cuentaEnInventario(m) && (!m.loteId || !idsLog.has(m.loteId)));
+  const huerfQ = huerfanos.reduce((s,m)=>s+(Number(m.cantidad)||0),0);
+  const muertos = mvIt.filter(m=>cuentaEnInventario(m) && m.loteId && idsLog.has(m.loteId) && (()=>{ const l = logs.find(x=>x.id===m.loteId); return l.estado==='rechazado' || l.cambiadaPor || l.duplicadoAnulado; })());
+  const futuras = filas.filter(x=>x.l.fechaDia && x.l.fechaDia > hoy);
+  const totLleva = filas.reduce((s,x)=>s+x.lleva,0), totQuito = filas.reduce((s,x)=>s+x.quito,0);
+  const fila = (t, v, c) => `<tr><td>${t}</td><td style="text-align:right;font-weight:800${c?';color:'+c:''}">${v}</td></tr>`;
+  const card = (t, body, borde) => `<div class="card" style="${borde?'border:2px solid '+borde:''}"><strong>${t}</strong>${body}</div>`;
+  let h = head;
+  h += card(`📦 ${it.nombre} · ${mod}`, `<div class="hint" style="margin:2px 0 6px">${desde?'Stock inicial del '+fTxt(desde):'Sin fecha de stock inicial: se toman todos los movimientos.'}</div>
+    <table>${fila('Stock inicial', n(F.inicial)+' '+u)}${fila('+ Entradas', n(F.entradas))}${fila('− Salidas', n(F.salidas))}${fila('− Instalaciones', n(F.instalaciones))}${F.garantias?fila('− Garantías', n(F.garantias)):''}${fila('− Mermas', n(F.mermas))}${F.ajustes?fila('± Ajustes de auditoría', (F.ajustes>0?'+':'')+n(F.ajustes)):''}
+    ${fila('<strong>= Debe haber hoy</strong>', `<span style="font-size:20px">${n(F.final)} ${u}</span>`, 'var(--brand)')}</table>`);
+  h += card('🏠 Instalaciones desde el stock inicial', `<table>${fila('Instalaciones que llevan '+it.nombre.toLowerCase(), filas.length)}${fila('Lo que dicen que llevan', n(totLleva)+' '+u)}${fila('Lo que se descontó de verdad', n(totQuito)+' '+u, Math.abs(totLleva-totQuito)>0.001?'var(--bad)':'var(--ok)')}${futuras.length?fila('Programadas para otro día (ya descontadas)', futuras.length+' · '+n(futuras.reduce((s,x)=>s+x.quito,0))+' '+u):''}</table>`);
+  const ok = !malas.length && !huerfanos.length && !muertos.length;
+  h += ok ? card('✅ Todo cuadra', `<p class="hint" style="margin:4px 0 0">Cada instalación descontó exactamente lo que lleva. No hay descuentos sueltos ni de instalaciones rechazadas.</p>`, 'var(--ok)')
+    : (malas.length ? card(`⚠️ Instalaciones que no cuadran (${malas.length})`, `<div class="wrap-x"><table><tr><th>Captura</th><th>Calle</th><th>Lleva</th><th>Se descontó</th></tr>${malas.map(x=>`<tr><td>${fTxt(x.l.fecha)}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}</div></td><td style="text-align:center">${n(x.lleva)}</td><td style="text-align:center;font-weight:900;color:var(--bad)">${n(x.quito)}</td></tr>`).join('')}</table></div>`, 'var(--bad)') : '')
+      + (huerfanos.length ? card(`⚠️ Descuentos sin instalación (${huerfanos.length})`, `<p class="hint" style="margin:2px 0 6px">Movimientos de instalación de ${n(huerfQ)} ${u} cuya instalación ya no existe.</p>${huerfanos.map(m=>`<div class="hint" style="margin:0">${fTxt(m.fecha)} · ${n(m.cantidad)} · ${String(m.nota||'').replace(/</g,'&lt;').slice(0,90)}</div>`).join('')}`, '#d97706') : '')
+      + (muertos.length ? card(`⚠️ Descuentos de instalaciones rechazadas o reemplazadas (${muertos.length})`, muertos.map(m=>`<div class="hint" style="margin:0">${fTxt(m.fecha)} · ${n(m.cantidad)} · ${String(m.nota||'').replace(/</g,'&lt;').slice(0,90)}</div>`).join(''), '#d97706') : '');
+  h += `<div class="card"><details><summary style="font-weight:800;cursor:pointer">Ver las ${filas.length} instalaciones</summary><div class="wrap-x"><table><tr><th>Captura</th><th>Se instala</th><th>Calle</th><th>Lleva</th></tr>${filas.map(x=>`<tr><td>${fTxt(x.l.fecha)}</td><td>${x.l.fechaDia||'—'}</td><td><strong>${String(x.l.calle||'—').replace(/</g,'&lt;')}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}${x.l.estado==='pendiente'?' · sin verificar':''}</div></td><td style="text-align:center">${n(x.lleva)}</td></tr>`).join('')}</table></div></details></div>`;
+  $('#main').innerHTML = h;
 }
