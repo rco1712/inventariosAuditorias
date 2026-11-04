@@ -59,6 +59,7 @@ const TIPOS_ADICIONAL = {
   cajonera_max: 'Cajonera Max (4 cajones)',
   entrepanera_max: 'Entrepañera Max',
   zapatera: 'Zapatera',
+  zapatera_grande: 'Zapatera grande',
   repisa: 'Repisa',
   piso_zoclo: 'Piso y zóclo',
   piezas_sueltas: 'Piezas sueltas (tubos, maleteros, cargadores, zóclos, entrepaños)'
@@ -101,7 +102,9 @@ const MUEBLE_TIPO_OPCIONES = [
   {value:'cajonera_max', label:'Cajonera Max (4 cajones)'},
   {value:'entrepanera_max', label:'Entrepañera Max'},
   {value:'cajonera_otra', label:'Cajonera (otra cantidad)'},
-  {value:'zapatera', label:'Zapatera (en vez de entrepañera; solo Lateral y Central)'}
+  {value:'zapatera', label:'Zapatera (en vez de entrepañera; solo Lateral y Central)'},
+  // v231 (pedido por el usuario): zapatera grande dentro del modelo, sin tapa.
+  {value:'zapatera_grande', label:'Zapatera grande (en vez de entrepañera; solo Lateral y Central)'}
 ];
 let dModoComp=false, dFamiliaComp=null, dMueblesComp=[];
 let iSoloExtras=false; // v208: instalación de solo extras (zapateras, cajoneras…) sin modelo
@@ -227,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v230';
+const APP_VERSION = 'v231';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4535,7 +4538,7 @@ const FAMILIAS_PIEZA = [
   {k:'est', t:'Estructura', ic:'🧱', c:'#5b8def', keys:['maletero','pared','entrepano','cargador','zoclo']},
   {k:'caj', t:'Cajones', ic:'🗄️', c:'#e3b341', keys:['frente','pgrande','pchica','fondocajon','fondocajonera']},
   {k:'max', t:'MAX', ic:'⭐', c:'#b07cf2', keys:['paredmax','entmaxlargo','entmaxcorto','respaldomax','frentemax','puertitamax','pgrandemax','pchicamax','zoclomax','espzoclo18max','espzoclo16max','espmarco160max','fondomax']},
-  {k:'zap', t:'Zapatera', ic:'👟', c:'#3fbf74', keys:['puertazap','entzap','zoclozap12','zoclozap']},
+  {k:'zap', t:'Zapatera', ic:'👟', c:'#3fbf74', keys:['puertazap','entzap','zoclozap12','zoclozap','entzapg','tapazapg','zoclozapg']},
   {k:'esp', t:'Espejo', ic:'🪞', c:'#35c2d0', keys:['espmarco160','espzoclo18','espzoclo16','espmarco35']},
   {k:'pta', t:'Puertitas', ic:'🚪', c:'#f08a3c', keys:['puertita5','puertita3']}
 ];
@@ -5830,6 +5833,9 @@ const PIEZAS_AUDIT = [
   {key:'puertita3',   tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['3'].dim,   label:'Puertita de cajonera de 3',        rinde:PUERTITA_CAJONERA['3'].porHoja+' por hoja'},
   {key:'puertita5',   tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['5'].dim,   label:'Puertita de cajonera de 5 / Emma', rinde:PUERTITA_CAJONERA['5'].porHoja+' por hoja'},
   {key:'puertitamax', tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['max'].dim, label:'Puertita de cajonera Max',         rinde:PUERTITA_CAJONERA['max'].porHoja+' por hoja'},
+  {key:'entzapg',     tipo:'mel', nombre:'Entrepaño zapatera grande', dim:'57×40 cm',  label:'Entrepaño de zapatera grande 57×40', rinde:'12 por hoja'},
+  {key:'tapazapg',    tipo:'mel', nombre:'Tapa zapatera grande',     dim:'60×40 cm',    label:'Tapa de zapatera grande 60×40', rinde:'12 por hoja'},
+  {key:'zoclozapg',   tipo:'mel', nombre:'Zóclo zapatera grande',    dim:'57×10 cm',    label:'Zóclo de zapatera grande 57×10', rinde:'48 por hoja'},
   {key:'puertazap',   tipo:'mel', nombre:'Puerta de zapatera',       dim:'172×30 cm',   label:'Puerta de zapatera',       rinde:'Corte combinado (igual que en despiece)'},
   {key:'zoclo',       tipo:'mel', nombre:'Zóclo normal',             dim:'10×52 cm',    label:'Zóclo 10×52',              rinde:'48 por hoja'},
   {key:'zoclomax',    tipo:'mel', nombre:'Zóclo Max',                dim:'12×58 cm',    label:'Zóclo Max 12×58',          rinde:'39 por hoja'},
@@ -6089,6 +6095,14 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
       add('Bisagra (zapatera)',1.5,'—','—','ok','Confirmado por el usuario');
       add('Jaladera (zapatera)',1,'—',color,'ok','Confirmado por el usuario');
     }
+  } else if(tipo==='zapatera_grande'){
+    // v231 (confirmado por el usuario): zapatera GRANDE = 2 paredes (191×40) + 7 entrepaños de 57×40
+    // + 2 zóclos de 57×10. La tapa de 60×40 solo la lleva cuando va como EXTRA; dentro de un modelo
+    // (Lateral o Central, en vez de entrepañera) no lleva tapa (extra.sinTapa).
+    add('Pared',2,'191×40 cm',color,'ok','Zapatera grande: 2 paredes (191×40)');
+    add('Entrepaño zapatera grande',7,'57×40 cm',color,'ok','Zapatera grande: 7 entrepaños de 57×40 (12 por hoja)');
+    if(!(extra && extra.sinTapa)) add('Tapa zapatera grande',1,'60×40 cm',color,'ok','Tapa de 60×40: solo cuando va como extra (12 por hoja)');
+    add('Zóclo zapatera grande',2,'57×10 cm',color,'ok','Zapatera grande: 2 zóclos de 57×10');
   } else if(tipo==='piezas_sueltas'){
     (extra && extra.ps || []).forEach(r=>{ const d = PIEZAS_SUELTAS.find(x=>x.k===r.k); if(d && r.cantidad>0) add(d.nombre, r.cantidad, d.dim, d.sinColor?'—':(r.color||color), 'ok', 'Pieza suelta extra'); });
   } else if(tipo==='piso_zoclo'){
@@ -6109,11 +6123,11 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
   // Zapatera (confirmado por el usuario): los zóclos y la puerta van del color del frente.
   if(colorFrente && colorFrente!==color && String(tipo).startsWith('entrepanera'))
     piezas.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = colorFrente; });
-  if(colorFrente && colorFrente!==color && tipo==='zapatera')
+  if(colorFrente && colorFrente!==color && (tipo==='zapatera' || tipo==='zapatera_grande'))
     piezas.forEach(p=>{ if(PIEZAS_ZAPATERA_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
   return piezas;
 }
-const PIEZAS_ZAPATERA_FRENTE = ['Zóclo zapatera','Puerta de zapatera','Jaladera (zapatera)'];
+const PIEZAS_ZAPATERA_FRENTE = ['Zóclo zapatera','Zóclo zapatera grande','Puerta de zapatera','Jaladera (zapatera)'];
 const PIEZAS_COLOR_FRENTE = ['Zóclo normal','Zóclo Max','Zóclo especial','Marco de espejo','Frente','Frente Max','Puertita de cajonera'];
 
 // Traduce el valor del selector "por muebles" (MUEBLE_TIPO_OPCIONES) a buildAdicionalPiezas
@@ -6126,6 +6140,7 @@ function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
   if(value==='cajonera_5') return buildAdicionalPiezas('cajonera', 5, color, correderaExt);
   if(value==='cajonera_otra') return buildAdicionalPiezas('cajonera', cajonesManual, color, correderaExt);
   if(value==='cajonera_emma') return buildAdicionalPiezas('cajonera_emma', 4, color, correderaExt);
+  if(value==='zapatera_grande') return buildAdicionalPiezas('zapatera_grande', null, color, false, false, {sinTapa:true}); // v231: dentro del modelo no lleva tapa
   return buildAdicionalPiezas(value, cajonesManual, color); // entrepanera, cajonera_espejo, cajonera_max
 }
 
@@ -6309,7 +6324,7 @@ function piezasAConsumo(piezas, color){
   // Zóclos (todos: normal, Max, zapatera, de espejo) y marcos de espejo (confirmado por el usuario):
   // proporcional según cuántas piezas de esa medida salen de una hoja de 122×244, en la melamina
   // de su color (p. ej. zóclo 10×52 → 48 por hoja → cada uno = 1/48 de hoja).
-  const PIEZAS_PROPORCIONALES = ['Zóclo normal','Zóclo Max','Zóclo zapatera','Marco 10×244'];
+  const PIEZAS_PROPORCIONALES = ['Zóclo normal','Zóclo Max','Zóclo zapatera','Marco 10×244','Entrepaño zapatera grande','Tapa zapatera grande','Zóclo zapatera grande']; // v231: zapatera grande, por cuántas salen de una hoja
   // Frente de espejo completo (2 marcos 10×160 + 2 marcos 10×35 + zóclos 16×52 y 18×52): se cortan
   // juntos; con sierra de 5 mm, 1 hoja da para los frentes de 5 espejos (confirmado por el usuario)
   // → 0.20 hojas por espejo, en el color del frente. Se cuenta un espejo por cada 2 marcos largos.
@@ -6434,9 +6449,9 @@ function toggleAdicionalCajones(prefix){
         <input type="number" min="0" inputmode="numeric" id="${prefix}-pz-${d.k}" placeholder="0" style="width:64px;min-width:64px;text-align:center">
         <select id="${prefix}-pzc-${d.k}" style="width:auto;min-width:110px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select></div>`).join('')}</div>`;
   }
-  if(String(sel.value).startsWith('cajonera') || sel.value==='zapatera' || String(sel.value).startsWith('entrepanera')){
+  if(String(sel.value).startsWith('cajonera') || sel.value==='zapatera' || sel.value==='zapatera_grande' || String(sel.value).startsWith('entrepanera')){
     const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
-    html += `<label class="hint" style="display:block;margin-top:8px">${sel.value==='zapatera'?'Color del frente (zóclos y puerta)':(String(sel.value).startsWith('entrepanera')?'Color de los zóclos':'Color de frentes y zóclos')}</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
+    html += `<label class="hint" style="display:block;margin-top:8px">${sel.value==='zapatera'?'Color del frente (zóclos y puerta)':sel.value==='zapatera_grande'?'Color de los zóclos':(String(sel.value).startsWith('entrepanera')?'Color de los zóclos':'Color de frentes y zóclos')}</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
   }
   const labelPuerta = ADIC_CON_PUERTA_LABEL[sel.value];
   if(labelPuerta){
@@ -6464,7 +6479,7 @@ function agregarAdicional(prefix){
   const nuevo = {tipo, cajones, color, conPuerta};
   const extEl = document.getElementById(prefix+'-adic-ext'); if((tipo==='cajonera' || tipo==='cajonera_emma') && extEl && extEl.checked) nuevo.ext = true;
   const cf = document.getElementById(prefix+'-adic-colorfrente');
-  if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera' || String(tipo).startsWith('entrepanera')) && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
+  if(cf && (String(tipo).startsWith('cajonera') || tipo==='zapatera' || tipo==='zapatera_grande' || String(tipo).startsWith('entrepanera')) && cf.value && cf.value!==color) nuevo.colorFrente = cf.value;
   if(tipo==='piezas_sueltas'){
     nuevo.ps = PIEZAS_SUELTAS.map(d=>({k:d.k, cantidad:Math.round(Number((document.getElementById(prefix+'-ps-'+d.k)||{}).value)||0), color:d.sinColor?'':((document.getElementById(prefix+'-psc-'+d.k)||{}).value||color)})).filter(r=>r.cantidad>0);
     if(!nuevo.ps.length) return alert('Escribe cuántas piezas lleva de al menos una (tubo, maletero, cargador, zóclo o entrepaño).');
