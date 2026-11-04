@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v233';
+const APP_VERSION = 'v234';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14472,13 +14472,13 @@ function pzpCalcular(D, hasta, borrador){
   const lista = [...dias].sort();
   const porDia = {};
   lista.forEach(dia=>{
-    const c = capt[dia], cutH = cortes[dia]||{}, libre = {}, info = {cortes:cutH, puertas:{}, otros:otros[dia]||[], insts:insts.filter(x=>x.dia===dia).map(x=>x.l)};
+    const c = capt[dia], cutH = cortes[dia]||{}, libre = {}, pendHoy = {}, info = {cortes:cutH, puertas:{}, otros:otros[dia]||[], insts:insts.filter(x=>x.dia===dia).map(x=>x.l)};
     Object.keys(cutH).forEach(id=>{
       const H = cutH[id]*PZP_A;
       if(!c){ addA(sinCap, id, H); return; }
       const cc = (c.corte||{})[id] || {}; let usado = 0;
       (cc.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); usado += r.q*pzpArea(P.dim); });
-      const ph = Number(cc.puertasOtroDia)||0; if(ph>0){ addA(pend, id, ph*PZP_A); usado += ph*PZP_A; }
+      const ph = Number(cc.puertasOtroDia)||0; if(ph>0){ addA(pend, id, ph*PZP_A); pendHoy[id] = ph*PZP_A; usado += ph*PZP_A; }
       libre[id] = H - usado;
     });
     info.insts.forEach(l=>{
@@ -14493,7 +14493,8 @@ function pzpCalcular(D, hasta, borrador){
         if(!PZP_A_LA_MEDIDA.includes(p.n)){ add(p.itemId, p.dim, -q, p.n); return; }
         let a = q*pzpArea(p.dim); const id = p.itemId;
         info.puertas[id] = (info.puertas[id]||0) + a;
-        const dp = Math.min(a, Math.max(0, pend[id]||0)); if(dp>0){ pend[id] -= dp; a -= dp; }
+        // v234: lo apartado HOY es para puertas de otro día; las puertas de hoy solo toman lo apartado antes.
+        const dp = Math.min(a, Math.max(0, (pend[id]||0) - (pendHoy[id]||0))); if(dp>0){ pend[id] -= dp; a -= dp; }
         if(a>0 && libre[id]!==undefined){ const dl = Math.min(a, Math.max(0, libre[id])); libre[id] -= dl; a -= dl; }
         if(a>0) addA(ret, id, -a);
       });
@@ -14738,7 +14739,7 @@ function pzpCapturaHtml(){
   const pendIds = Object.keys(R0 ? R0.pend : {}).filter(id=>R0.pend[id] > 0.005*PZP_A);
   if(pendIds.length){
     h += `<div class="card"><div style="font-size:15px;font-weight:800">2 · Hojas apartadas para puertas</div>
-      ${pendIds.map(id=>`<label style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)"><input type="checkbox" style="width:22px;min-height:22px" ${pzpCap.liberar.includes(id)?'checked':''} onchange="pzpLiberar('${id}')"><span><strong>${pzpColor(id)}</strong>: ${pzpH(R0.pend[id])} hojas apartadas<div class="hint" style="margin:0">Marca si ya se instalaron esas puertas: lo que sobró pasa a retazo.</div></span></label>`).join('')}</div>`;
+      ${pendIds.map(id=>`<label style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)"><input type="checkbox" style="width:22px;min-height:22px" ${pzpCap.liberar.includes(id)?'checked':''} onchange="pzpLiberar('${id}')"><span><strong>${pzpColor(id)}</strong>: ${pzpH(R0.pend[id])} hoja${pzpH(R0.pend[id])==1?'':'s'} apartada${pzpH(R0.pend[id])==1?'':'s'}${(()=>{ const us = Math.min(R0.pend[id], info.puertas[id]||0); if(!(us>0.005*PZP_A)) return '<div class="hint" style="margin:0">Hoy no se instalaron puertas de este color.</div>'; const cs = info.insts.filter(l=>(pzpInstPiezas(l)||[]).some(p=>p.itemId===id && PZP_A_LA_MEDIDA.includes(p.n))).map(l=>l.calle||String(l.descripcion||'').split(' · ')[0]); return `<div style="margin:2px 0;font-weight:700">🚪 Hoy se usaron ${pzpH(us)} para: ${cs.join(' · ')}</div><div style="margin:0 0 2px;font-weight:700">Quedan ${pzpH(Math.max(0,R0.pend[id]-us))} apartadas</div>`; })()}<div class="hint" style="margin:0">Marca si ya se instalaron esas puertas: lo que sobró pasa a retazo.</div></span></label>`).join('')}</div>`;
   }
   // 3. Cortado de retazo
   const retIds = Object.keys(R0 ? R0.ret : {}).filter(id=>R0.ret[id] > 0.01*PZP_A);
