@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v237';
+const APP_VERSION = 'v238';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -693,6 +693,7 @@ function setView(v){
   if(v==='herrapr'){ herrCache=null; renderHerrApr(); }
   if(v==='veh'){ vehCache=null; renderVeh(); }
   if(v==='ferrec') renderFerRec();
+  if(v==='bridas') renderBridasPend();
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -9730,6 +9731,7 @@ function repGrupos(){
     {t:'Instalaciones del día (PDF)', s:'modelo, calle y estado', k:'instalaciones dia pdf calle', js:"repInstDia=fechaHoyLocal();repInstCache=null;repAbrir('instDia')"},
     {t:'Instalaciones de la semana', s:modulo(), k:'instalaciones semana closet puertas', js:"repAbrir('inst')"},
     ...(A ? [{t:'🚪🗄️ Instalaciones y sus herrajes', s:'puertas o clósets · verificadas o no', k:'puertas closets clóset instaladas calles herrajes rieles sistemas bastidores jaladeras tubos bridas correderas bisagras rechazadas regreso', js:"rpCache=null;repAbrir('puertas')"}] : []),
+    ...(A ? [{t:'🔩 Bridas sin descontar (tubos extra)', s:'después de la última auditoría', k:'bridas tubos extra piezas sueltas faltan descontar', js:"irA('bridas')"}] : []),
     {t:'Consumo por instalaciones', s:'acumulado', k:'consumo instalaciones acumulado', js:"repAbrir('consInst')"},
     {t:'Material en garantía', s:'acumulado', k:'garantia garantias acumulado', js:"repAbrir('garAcum')"}
   ]});
@@ -14963,3 +14965,42 @@ async function pzpInicio(){
   pzpGuardar = unaSolaVez('pzpGuardar', pzpGuardar);
   pzpCambiar = unaSolaVez('pzpCambiar', pzpCambiar);
 })();
+
+
+// ===== v238 (pedido por el usuario): bridas que no se descontaron de tubos extra =====
+// Antes de v237 un tubo agregado como "pieza suelta" extra descontaba el tubo pero no su juego de
+// bridas. Esta lista (solo Dirección, solo lectura) muestra, por módulo, las instalaciones capturadas
+// DESPUÉS de la última auditoría aplicada que contó bridas, con cuántos juegos faltó descontar.
+// No mueve inventario: Dirección decide si ajusta.
+async function renderBridasPend(){
+  current = 'bridas';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  $('#main').innerHTML = '<div class="card hint">Cargando…</div>';
+  let auds, logs;
+  try{ const [sa, sl] = await Promise.all([db.collection('auditorias').get(), db.collection('instalacionesLog').get()]);
+    auds = sa.docs.map(d=>({id:d.id, ...d.data()})); logs = sl.docs.map(d=>({id:d.id, ...d.data()})); }
+  catch(e){ $('#main').innerHTML = '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
+  if(current!=='bridas') return;
+  const cons = (l, id) => (l.consumo||[]).filter(c=>c.itemId===id).reduce((s,c)=>s+(Number(c.cantidad)||0),0);
+  const fTxt = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+  let total = 0;
+  const bloques = MODULOS.map(M=>{
+    const mod = M.nombre;
+    const aud = auds.filter(a=>a.modulo===mod && a.aplicada && (a.resultados||[]).some(r=>r.itemId==='juegos_de_bridas'))
+      .sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''))[0];
+    const desde = aud ? aud.fecha : '';
+    const filas = logs.filter(l=>l.modulo===mod && l.estado!=='rechazado' && !l.cambiadaPor && (!desde || (l.fecha||'') > desde))
+      .map(l=>({l, falta: Math.round(cons(l,'tubos_1_5_m') - cons(l,'juegos_de_bridas'))})).filter(x=>x.falta>0)
+      .sort((a,b)=>(a.l.fecha||'').localeCompare(b.l.fecha||''));
+    const n = filas.reduce((s,x)=>s+x.falta,0); total += n;
+    return `<div class="card" style="border-left:6px solid ${M.color||'#2348b5'}">
+      <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:16px">📍 ${mod}</strong><span style="font-size:18px;font-weight:900;color:${n?'var(--bad)':'var(--ok)'}">${n?n+' juego(s)':'✅ 0'}</span></div>
+      <div class="hint" style="margin:2px 0 6px">${aud?'Desde la auditoría del '+fTxt(aud.fecha):'⚠️ No hay auditoría aplicada que haya contado bridas: se revisan todas las instalaciones.'}</div>
+      ${filas.length?`<div class="wrap-x"><table><tr><th>Fecha</th><th>Calle / instalación</th><th>Faltan</th></tr>${filas.map(x=>`<tr><td>${fTxt(x.l.fecha)}</td><td><strong>${String(x.l.calle||'').replace(/</g,'&lt;')||'—'}</strong><div class="hint" style="margin:0">${String(x.l.descripcion||'').replace(/</g,'&lt;')}${x.l.estado==='pendiente'?' · sin verificar':''}</div></td><td style="text-align:center;font-weight:900">${x.falta}</td></tr>`).join('')}</table></div>`:'<p class="hint" style="margin:0">Ninguna instalación con tubos extra sin bridas.</p>'}
+    </div>`;
+  });
+  $('#main').innerHTML = `${repVolverHtml('🔩 Bridas sin descontar', 'Tubos agregados como extra antes de la v237: el tubo sí se descontó, su juego de bridas no. Solo se cuentan las instalaciones capturadas después de la última auditoría de cada módulo.', false)}
+    <div class="card" style="text-align:center"><div class="hint" style="margin:0">Total en los 5 módulos</div><div style="font-size:30px;font-weight:900;color:${total?'var(--bad)':'var(--ok)'}">${total} juego(s) de bridas</div>
+    <p class="hint" style="margin:4px 0 0">Esta lista no cambia el inventario. Si decides ajustarlo, anota una salida de "Juegos de bridas" en cada módulo.</p></div>
+    ${bloques.join('')}`;
+}
