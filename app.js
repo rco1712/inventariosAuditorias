@@ -14478,12 +14478,29 @@ function pzpCalcular(D, hasta, borrador){
     if(c){
       Object.keys(c.retazo||{}).forEach(id=>{ (c.retazo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(ret, id, -r.q*pzpArea(P.dim)); }); });
       (c.liberar||[]).forEach(id=>{ if((pend[id]||0)>0){ addA(ret, id, pend[id]); pend[id] = 0; } });
+      // Recortar una pieza (pedido por el usuario): una pieza buena se corta en otras más chicas. La pieza baja,
+      // las nuevas suben y lo que sobra es retazo o desperdicio (nunca puede salir más área de la que tenía).
+      (c.recortes||[]).forEach(rc=>{ const id = rc.itemId, P = PIEZAS_AUDIT.find(x=>x.key===rc.k); if(!id || !P || !(rc.q>0)) return;
+        add(id, P.dim, -rc.q, P.nombre); const aO = rc.q*pzpArea(P.dim); let aS = 0;
+        (rc.salio||[]).forEach(r=>{ const Q = PIEZAS_AUDIT.find(x=>x.key===r.k); if(Q && r.q>0){ add(id, Q.dim, r.q, Q.nombre); aS += r.q*pzpArea(Q.dim); } });
+        const resto = aO - aS;
+        if(resto < -1) avisos.push({dia, id, t:pzpColor(id)+': de '+rc.q+' '+P.label+' no caben las piezas anotadas.'});
+        else if(resto > 0){ if(rc.resto==='retazo') addA(ret, id, resto); else addA(des, id, resto); } });
     }
     info.otros.forEach(m=>{
       const s = pzpEsOtro(m), q = pzpOtroQ(m), o = c && (c.otros||{})[m.id];
       if(!o){ addA(sinCap, m.itemId, s*q*PZP_A); return; }
-      if(o.modo==='retazo'){ addA(ret, m.itemId, s*q*PZP_A); return; }
-      (o.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0) add(m.itemId, P.dim, s*r.q, P.nombre); });
+      let aBase = 0;
+      if(o.modo==='retazo'){ addA(ret, m.itemId, s*q*PZP_A); aBase = q*PZP_A; }
+      else (o.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0){ add(m.itemId, P.dim, s*r.q, P.nombre); aBase += r.q*pzpArea(P.dim); } });
+      // Merma (pedido por el usuario): "Se tiró completa" = sale y ya; "Se aprovechó lo bueno" = de esa merma
+      // salieron piezas nuevas (suben) y lo que sobra es retazo o desperdicio.
+      if(s<0 && m.tipo==='merma' && o.dest==='aprov'){
+        let aAp = 0; (o.aprov||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0){ add(m.itemId, P.dim, r.q, P.nombre); aAp += r.q*pzpArea(P.dim); } });
+        const resto = aBase - aAp;
+        if(resto < -1) avisos.push({dia, id:m.itemId, t:pzpColor(m.itemId)+': lo aprovechado de la merma no cabe en lo que se mermó.'});
+        else if(resto > 0){ if(o.restoAprov==='retazo') addA(ret, m.itemId, resto); else addA(des, m.itemId, resto); }
+      }
     });
     if(c && Array.isArray(c.armados)) arm = c.armados.map(a=>Object.assign({}, a));
     if(!c && (Object.keys(cutH).length || info.otros.length)) avisos.push({dia, falta:true, t:'Falta capturar la prueba de este día.'});
@@ -14520,8 +14537,8 @@ async function pzpAbrir(){
 }
 function pzpCapturaDe(fecha){
   const c = pzpD.dias.find(x=>x.fecha===fecha);
-  if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
-  return {fecha, corte:{}, retazo:{}, liberar:[], otros:{}, armados:null};
+  if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, recortes:c.recortes||[], liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
+  return {fecha, corte:{}, retazo:{}, recortes:[], liberar:[], otros:{}, armados:null};
 }
 function pzpRender(){
   const D = pzpD, mod = D.mod;
@@ -14619,6 +14636,18 @@ function pzpRetQ(id, k, d){ (pzpCap.retazo[id] = pzpCap.retazo[id]||[]); pzpQ(pz
 function pzpRetAdd(id, k){ pzpRetQ(id, k, 1); }
 function pzpRetColorSel(id){ pzpRetColor = id || null; if(id) pzpCap.retazo[id] = pzpCap.retazo[id]||[]; pzpRender(); }
 function pzpLiberar(id){ const l = pzpCap.liberar; const i = l.indexOf(id); if(i>=0) l.splice(i,1); else l.push(id); pzpRender(); }
+function pzpMermaDest(mid, v){ const o = pzpOtro(mid); o.dest = v; if(v==='aprov' && !o.aprov) o.aprov = []; pzpRender(); }
+function pzpAprovQ(mid, k, d){ const o = pzpOtro(mid); o.aprov = o.aprov||[]; pzpQ(o.aprov, k, d); pzpRender(); }
+function pzpAprovAdd(mid, k){ pzpAprovQ(mid, k, 1); }
+function pzpAprovResto(mid, v){ pzpOtro(mid).restoAprov = v; pzpRender(); }
+function pzpRecs(){ if(!pzpCap.recortes) pzpCap.recortes = []; return pzpCap.recortes; }
+function pzpRecNuevo(){ const it = itemByName('Melamina Blanco'); pzpRecs().push({itemId:it?it.id:'', k:'pared', q:1, salio:[], resto:'desperdicio'}); pzpRender(); }
+function pzpRecSet(i, campo, v){ const rc = pzpRecs()[i]; if(!rc) return; rc[campo] = v; if(campo==='itemId'){ const ps = pzpPiezasDe(v); rc.k = ps.length ? ps[0].key : ''; rc.salio = []; } if(campo==='k') rc.salio = []; pzpRender(); }
+function pzpRecQ(i, d){ const rc = pzpRecs()[i]; if(rc){ rc.q = Math.max(1, (Number(rc.q)||1) + d); } pzpRender(); }
+function pzpRecSalQ(i, k, d){ const rc = pzpRecs()[i]; if(rc){ rc.salio = rc.salio||[]; pzpQ(rc.salio, k, d); } pzpRender(); }
+function pzpRecSalAdd(i, k){ pzpRecSalQ(i, k, 1); }
+function pzpRecQuitar(i){ pzpRecs().splice(i, 1); pzpRender(); }
+function pzpChips(opc, actual, fn){ return `<div class="row" style="gap:6px;margin-top:4px">${opc.map(([k,t])=>`<button class="btn small" style="flex:1;${actual===k?'':'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="${fn}('${k}')">${t}</button>`).join('')}</div>`; }
 function pzpOtro(mid){ if(!pzpCap.otros[mid]) pzpCap.otros[mid] = {modo:'piezas', piezas:[]}; return pzpCap.otros[mid]; }
 function pzpOtroModo(mid, modo){ pzpOtro(mid).modo = modo; pzpRender(); }
 function pzpOtroQ2(mid, k, d){ pzpQ(pzpOtro(mid).piezas, k, d); pzpRender(); }
@@ -14697,9 +14726,30 @@ function pzpCapturaHtml(){
       ${usado > disp + 1 ? `<div class="warn" style="background:#fdecec;border-color:#f0a9a6;border-left-color:#e0453f;color:#8a1f1b"><strong>⛔ No hay tanto retazo de ${pzpColor(id)}.</strong> Anotaste ${pzpH(usado)} hojas y hay ${pzpH(disp)}.</div>` : ''}</div>`;
   });
   h += `<select style="margin-top:8px" onchange="pzpRetColorSel(this.value)"><option value="">${retIds.length?'+ Elegir color del retazo…':'No hay retazo anotado todavía'}</option>${retIds.filter(id=>!conRet.includes(id)).map(id=>`<option value="${id}">${pzpColor(id)} · ${pzpH(R0.ret[id])} hojas</option>`).join('')}</select></div>`;
-  // 4. Otros movimientos del cortado
+  // 4. Recortar una pieza (pedido por el usuario)
+  h += `<div class="card"><div style="font-size:15px;font-weight:800">4 · ✂️ Recortar una pieza</div>
+    <p class="hint">Una pieza que se cortó en otras más chicas para aprovecharla (ej. 1 pared → 3 entrepaños). No es merma: la pieza se transforma.</p>`;
+  pzpRecs().forEach((rc,i)=>{
+    const P = PIEZAS_AUDIT.find(x=>x.key===rc.k), aO = P ? rc.q*pzpArea(P.dim) : 0;
+    const aS = (rc.salio||[]).reduce((t,r)=>{ const Q = PIEZAS_AUDIT.find(x=>x.key===r.k); return t + (Q ? r.q*pzpArea(Q.dim) : 0); }, 0), resto = aO - aS;
+    if(resto < -1) noCabe = true;
+    const hojaIds = CATALOGO.filter(it=>esHoja(it)).map(it=>it.id);
+    h += `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
+      <div class="grid2"><div><label class="hint">Color</label><select style="margin-top:4px" onchange="pzpRecSet(${i},'itemId',this.value)">${hojaIds.map(id=>`<option value="${id}" ${id===rc.itemId?'selected':''}>${pzpColor(id)}</option>`).join('')}</select></div>
+      <div><label class="hint">Pieza que se recortó</label><select style="margin-top:4px" onchange="pzpRecSet(${i},'k',this.value)">${pzpPiezasDe(rc.itemId).map(Q=>`<option value="${Q.key}" ${Q.key===rc.k?'selected':''}>${Q.label} · ${Q.dim}</option>`).join('')}</select></div></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 0"><div style="flex:1"><strong>¿Cuántas?</strong></div>${pzpStep(rc.q, `pzpRecQ(${i},-1)`, `pzpRecQ(${i},1)`)}</div>
+      <div style="font-weight:800;margin-top:4px">¿Qué salió?</div>
+      ${pzpListaPiezasHtml(rc.itemId, rc.salio||[], 'pzpRecSalQ', 'pzpRecSalAdd', i)}
+      ${pzpBarra([{t:'Piezas nuevas', v:aS, c:'#3E5CDE'}, {t:resto<0?'No cabe':'Sobra', v:Math.abs(resto), c:resto<0?'#e0453f':'#cfd6e6'}])}
+      ${resto < -1 ? `<div class="warn" style="background:#fdecec;border-color:#f0a9a6;border-left-color:#e0453f;color:#8a1f1b"><strong>⛔ Eso no cabe en ${rc.q} ${P?P.label:''}.</strong></div>`
+        : resto > 0.005*PZP_A ? `<div class="hint" style="margin-top:6px"><strong>Lo que sobró:</strong></div>${pzpChips([['retazo','Retazo útil'],['desperdicio','Desperdicio']], rc.resto||'desperdicio', `(v=>pzpRecSet(${i},'resto',v))`)}` : ''}
+      <button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzpRecQuitar(${i})">Quitar este recorte</button>
+    </div>`;
+  });
+  h += `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--brand);border:1px dashed var(--brand);box-shadow:none" onclick="pzpRecNuevo()">+ Recortar una pieza</button></div>`;
+  // 5. Otros movimientos del cortado
   if(info.otros.length){
-    h += `<div class="card"><div style="font-size:15px;font-weight:800">4 · Otros movimientos de hoy: ¿qué piezas fueron?</div><p class="hint">El coordinador ya los capturó en la app; aquí solo dices qué piezas eran.</p>`;
+    h += `<div class="card"><div style="font-size:15px;font-weight:800">5 · Otros movimientos de hoy: ¿qué piezas fueron?</div><p class="hint">El coordinador ya los capturó en la app; aquí solo dices qué piezas eran.</p>`;
     info.otros.forEach(m=>{
       const o = pzpOtro(m.id), s = pzpEsOtro(m);
       h += `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
@@ -14707,13 +14757,25 @@ function pzpCapturaHtml(){
         <div class="hint" style="margin:2px 0 6px">${String(m.nota||'').slice(0,160)}</div>
         <div class="row" style="gap:6px">${[['piezas','Eran piezas'],['retazo','Era retazo / pedazo']].map(([k,t])=>`<button class="btn small" style="flex:1;${o.modo===k?'':'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="pzpOtroModo('${m.id}','${k}')">${t}</button>`).join('')}</div>
         ${o.modo==='piezas' ? pzpListaPiezasHtml(m.itemId, o.piezas, 'pzpOtroQ2', 'pzpOtroAdd', `'${m.id}'`) : ''}
+        ${m.tipo==='merma' ? (()=>{
+          const aBase = o.modo==='retazo' ? pzpOtroQ(m)*PZP_A : (o.piezas||[]).reduce((t,r)=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return t + (P ? r.q*pzpArea(P.dim) : 0); }, 0);
+          let x = `<div style="font-weight:800;margin-top:10px">¿Qué se hizo con la merma?</div>${pzpChips([['tira','🗑️ Se tiró completa'],['aprov','♻️ Se aprovechó lo bueno']], o.dest||'tira', `(v=>pzpMermaDest('${m.id}',v))`)}`;
+          if(o.dest==='aprov'){
+            const aAp = (o.aprov||[]).reduce((t,r)=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return t + (P ? r.q*pzpArea(P.dim) : 0); }, 0), resto = aBase - aAp;
+            if(resto < -1) noCabe = true;
+            x += `<div class="hint" style="margin-top:6px">¿Qué piezas salieron de lo bueno?</div>${pzpListaPiezasHtml(m.itemId, o.aprov||[], 'pzpAprovQ', 'pzpAprovAdd', `'${m.id}'`)}
+              ${pzpBarra([{t:'Se aprovechó', v:aAp, c:'#16a34a'}, {t:resto<0?'No cabe':'Sobra', v:Math.abs(resto), c:resto<0?'#e0453f':'#cfd6e6'}])}
+              ${resto < -1 ? `<div class="warn" style="background:#fdecec;border-color:#f0a9a6;border-left-color:#e0453f;color:#8a1f1b"><strong>⛔ Lo aprovechado no cabe en lo que se mermó.</strong> Primero anota arriba qué pieza se mermó.</div>`
+                : resto > 0.005*PZP_A ? `<div class="hint" style="margin-top:6px"><strong>Lo que sobró:</strong></div>${pzpChips([['retazo','Retazo útil'],['desperdicio','Desperdicio']], o.restoAprov||'desperdicio', `(v=>pzpAprovResto('${m.id}',v))`)}` : ''}`;
+          }
+          return x; })() : ''}
       </div>`;
     });
     h += `</div>`;
   }
   // 5. Armados
   const arm = pzpArmados(), ayer = R0 ? R0.arm : [];
-  h += `<div class="card"><div class="row" style="justify-content:space-between"><div style="font-size:15px;font-weight:800">5 · Armados (opcional)</div><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="pzpArmIgual()">Igual que ayer</button></div>
+  h += `<div class="card"><div class="row" style="justify-content:space-between"><div style="font-size:15px;font-weight:800">6 · Armados (opcional)</div><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="pzpArmIgual()">Igual que ayer</button></div>
     <p class="hint"><strong>Opcional.</strong> Si no lo cuentas, se queda igual que ayer. No cambia el total de piezas: solo dice cuántas están armadas.</p>
     <div class="wrap-x"><table><tr><th>Armado</th><th style="text-align:right">Ayer</th><th style="text-align:right">Hoy hay</th></tr>
     ${arm.map((a,i)=>{ const y = ayer.find(x=>pzpArmKey(x)===pzpArmKey(a)); return `<tr><td><strong>${pzpArmTxt(a)}</strong></td><td style="text-align:right">${y?fmtNum(y.cantidad):0}</td><td style="text-align:right">${pzpStep(a.cantidad||0, `pzpArmQ(${i},-1)`, `pzpArmQ(${i},1)`)}</td></tr>`; }).join('') || '<tr><td colspan="3" class="hint">Sin armados.</td></tr>'}
@@ -14753,8 +14815,9 @@ async function pzpGuardar(){
   const limpio = {};
   Object.keys(c.corte).forEach(id=>{ const x = c.corte[id]; limpio[id] = {piezas:(x.piezas||[]).filter(r=>r.q>0), puertasOtroDia:Number(x.puertasOtroDia)||0, sobrante:x.sobrante||'desperdicio'}; });
   const ret = {}; Object.keys(c.retazo).forEach(id=>{ const l = (c.retazo[id]||[]).filter(r=>r.q>0); if(l.length) ret[id] = l; });
-  const otros = {}; Object.keys(c.otros).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0)}; });
-  const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
+  const otros = {}; Object.keys(c.otros).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio'}; });
+  const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
+  const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc);
     toast('✅ Prueba guardada (no cambia tu inventario)');
