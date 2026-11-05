@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v242';
+const APP_VERSION = 'v243';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4213,11 +4213,13 @@ function audMovidoBadge(id){
 }
 // Si al recontar sale el mismo número (el material ya se había ido antes de contarlo), se confirma así.
 // Lista "antes de guardar" (confirmado por el usuario, v178): lo que todavía no está en el inventario.
-function audPendAprobMod(){ return new Set(movs.filter(m=>m.estado==='pendiente' && (!m.modulo || m.modulo===modulo())).map(m=>m.loteId||m.id)).size; }
+// v243: las instalaciones pendientes YA cuentan en el inventario (se descuentan al capturarlas), así que
+// no se avisan aquí; solo lo pendiente que de verdad todavía no cuenta (entradas, salidas, regresos…).
+function audPendAprobMod(){ return new Set(movs.filter(m=>m.estado==='pendiente' && !cuentaEnInventario(m) && (!m.modulo || m.modulo===modulo())).map(m=>m.loteId||m.id)).size; }
 function audAntesDeGuardar(){
   const out = [], mov = audMovidosDespues().length, nP = audPendAprobMod(), dom = new Date().getDay()===0;
   out.push(mov ? {ok:false, t:`${mov} artículo${mov===1?'':'s'} para recontar`, d:'Se movieron después de que los contaste (arriba te dice cuáles).'} : {ok:true, t:'Nada se movió después de contarlo'});
-  out.push(nP ? {ok:false, t:`${nP} captura${nP===1?'':'s'} de ${modulo()} esperando tu aprobación`, d:'Lo que no está aprobado (entradas, salidas, instalaciones…) todavía no cuenta en el inventario.', btn:`<button class="btn small" onclick="irA('apr')">Ir a aprobar</button>`} : {ok:true, t:'No hay capturas esperando aprobación'});
+  out.push(nP ? {ok:false, t:`${nP} captura${nP===1?'':'s'} de ${modulo()} esperando tu aprobación`, d:'Lo que no está aprobado (entradas, salidas, regresos…) todavía no cuenta en el inventario. Las instalaciones sin verificar NO entran aquí: esas ya se descontaron.', btn:`<button class="btn small" onclick="irA('apr')">Ir a aprobar</button>`} : {ok:true, t:'No hay capturas esperando aprobación'});
   if(!dom) out.push(cierreHechoHoy() ? {ok:true, t:`${modulo()} ya hizo su cierre del turno de hoy`} : {ok:false, t:`${modulo()} todavía no hace su cierre del turno de hoy`, d:'Si ya se trabajó hoy, lo que se usó de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta. Lo mejor es guardar después de su cierre.'});
   return out;
 }
