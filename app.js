@@ -145,6 +145,9 @@ const CATALOGO = [];
     const i = CATALOGO.findIndex(x=>x.nombre===juego);
     CATALOGO.splice(i+1, 0, ...sueltas.map(n=>({cat:'Herrajes',nombre:n,unidad:'pza'})));
   });
+  // v251 (confirmado por el usuario): los taquetes se cuentan por CAJA y cada caja trae 100. Los
+  // coordinadores ya los venían contando en cajas; solo se corrige la unidad para que no se confunda.
+  const tq = CATALOGO.find(x=>x.nombre==='Taquetes'); if(tq) tq.unidad = 'cajas de 100';
   CATALOGO.forEach(it=>it.id = slug(it.nombre));
 })();
 function slug(s){return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_');}
@@ -230,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v250';
+const APP_VERSION = 'v251';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3214,6 +3217,7 @@ function ferQtyHtml(k, i, o, N){
   return `<input id="fer${k}-${i.id}" type="number" min="0" inputmode="decimal" placeholder="0" value="${o.cant[i.id]||''}" style="width:86px;margin:0;text-align:center;font-weight:800;font-size:16px" oninput="${ob}.cant['${i.id}']=this.value;ferResumen('${k}')">`;
 }
 async function ferGuardarCaja(id){
+  { const it0 = CATALOGO.find(i=>i.id===id); if(it0 && /^cajas/.test(it0.unidad||'')) return alert(it0.nombre+' ya se cuenta por caja en los módulos (1 caja = 100). Captúralo en cajas, no en piezas.'); }
   const el = document.getElementById('fercfg-'+id), N = Math.max(0, Math.round(Number(el && el.value)||0));
   const D = await herrCargar(true), doc = (D.fer||[]).find(x=>x.tipo==='ferConfig') || {id:'ferConfig', tipo:'ferConfig', modulo:ALM, estado:'aprobado', siempre:true, datos:{cajas:{}}};
   doc.datos = doc.datos||{}; doc.datos.cajas = Object.assign({}, doc.datos.cajas||{}); if(N>0) doc.datos.cajas[id] = N; else delete doc.datos.cajas[id]; doc.fecha = new Date().toISOString();
