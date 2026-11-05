@@ -3337,6 +3337,7 @@ const ferSel = (o, D) => ferItems().map(i=>{ const N = ferCaja(D, i.id); return 
 async function ferGuardarEntrada(){
   const f = ferForm; if(!f) return; if(!String(f.prov).trim()) return alert('Elige de qué proveedor llegó.');
   const items = ferSel(f, await herrCargar()); if(!items.length) return alert('Escribe cuántas llegaron de al menos un artículo.');
+  for(const x of items){ const v = ajustarCajas(x.nombre, x.unidad, x.q); if(v===null) return; x.q = v; }
   if(!confirm(`¿Guardar entrada de ${f.prov.trim()}?\n\n${items.map(ferTxtItem).join('\n')}`)) return;
   const id = cryptoId();
   try{ await db.collection('herrMovs').doc(id).set({id, tipo:'ferEntrada', modulo:ALM, fecha:new Date().toISOString(), estado:'aprobado', siempre:true, creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{proveedor:f.prov.trim(), items, nota:String(f.nota||'').trim()}}); }
@@ -3351,6 +3352,7 @@ async function ferRevisar(){
 }
 async function ferGuardarEnvio(){
   const e = ferEnv; if(!e) return; const items = ferSel(e, await herrCargar()); const id = cryptoId();
+  for(const x of items){ const v = ajustarCajas(x.nombre, x.unidad, x.q); if(v===null) return; x.q = v; }
   try{ await db.collection('herrMovs').doc(id).set({id, tipo:'ferEnvio', modulo:e.mod, fecha:new Date().toISOString(), estado:'encamino', creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{items}}); }
   catch(er){ return alert('Error: '+er.message); }
   ferEnv = null; ferTab = 'camino'; herrCache = null; toast('🚚 Enviado a '+e.mod); renderAlmacen();
@@ -3690,6 +3692,16 @@ function badgeEstado(estado){
 }
 
 let movGuardando = false;
+// v251: artículos que se cuentan por CAJA (taquetes, 1 caja = 100). Si escriben 100 o más, casi seguro
+// escribieron piezas: se pregunta cuántas CAJAS son (con la conversión ya escrita). null = no guardar.
+function ajustarCajas(nombre, unidad, q){
+  q = Number(q)||0; if(!/^cajas/.test(unidad||'') || q < 100) return q;
+  const sug = fmtNum(q/100);
+  const r = prompt(`Escribiste ${fmtNum(q)} en ${nombre}.\n\n${nombre} se cuentan en CAJAS (1 caja = 100).\nSi fueron ${fmtNum(q)} piezas, son ${sug} cajas.\n\n¿Cuántas CAJAS son? (Cancelar = no guardar)`, sug);
+  if(r===null) return null;
+  const v = Number(String(r).replace(',','.')); if(!(v>=0)) { alert('Cantidad no válida. No se guardó nada.'); return null; }
+  return v;
+}
 async function registrarMovLote(){
   if(movGuardando) return; // evita guardar dos veces la misma captura con un doble toque
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
@@ -3697,6 +3709,7 @@ async function registrarMovLote(){
   const nota = ($('#mv-nota').value||'').trim();
   const lado = (tipo==='merma' && esHoja(CATALOGO.find(i=>i.cat===movCat))) ? (movLado==='cortado'?'cortado':'completas') : 'completas';
   const items = CATALOGO.filter(i=>Number(movVals[i.id])>0 && (tipo!=='corte' || esHoja(i)));
+  for(const it of items){ const v = ajustarCajas(it.nombre, it.unidad, movVals[it.id]); if(v===null) return; movVals[it.id] = v; }
   const decrece = tipo!=='entrada';
   const mod = modulo();
   const aplicar = [];
@@ -4749,6 +4762,7 @@ async function saveAudit(){
   const eq = piezasAuditAHojas();
   const resultados=[]; let totalDiff=0;
   const capturados = Object.keys(auditCapturas).filter(k=>auditCapturas[k]!==undefined);
+  for(const k of capturados){ const it = CATALOGO.find(i=>i.id===k); if(!it) continue; const v = ajustarCajas(it.nombre, it.unidad, auditCapturas[k]); if(v===null) return; auditCapturas[k] = v; }
   if(!capturados.length && !Object.keys(eq).length) return alert('No has capturado ningún artículo, pieza ni armado todavía.');
   audMarcarCambios(); _audMovCache = null;
   if(!modoConteoCoord() && !audEdit){
@@ -11640,6 +11654,7 @@ async function guardarCierre(){
   const hojasDeMas = conteoHojas.filter(x=>x.deMas>0);
   const contados = CATALOGO.filter(i=>esConsumibleCierre(i) && !vacioCierre(cierreVals[i.id]));
   for(const it of contados){ const v=Number(cierreVals[it.id]); if(!(v>=0)) return alert(`Revisa lo que escribiste en ${it.nombre}.`); }
+  for(const it of contados){ const v = ajustarCajas(it.nombre, it.unidad, cierreVals[it.id]); if(v===null) return; cierreVals[it.id] = v; }
   const salidas = [], deMas = [], iguales = [];
   contados.forEach(it=>{ const esp = stockEsperadoCierre(it.id), hay = Number(cierreVals[it.id]); const d = fmtNum(esp - hay);
     if(d>0) salidas.push({it, q:d, esp, hay}); else if(d<0) deMas.push({it, esp, hay}); else iguales.push(it); });
@@ -13365,6 +13380,7 @@ async function guardarPedido(){
   const f = pedForm;
   const items = Object.keys(f.items).filter(id=>f.items[id]>0).map(id=>{ const it=CATALOGO.find(i=>i.id===id); return {itemId:id, itemNombre:it.nombre, unidad:it.unidad, cantidad:f.items[id]}; });
   if(!items.length) return alert('Escribe la cantidad de al menos un artículo.');
+  for(const i of items){ const v = ajustarCajas(i.itemNombre, i.unidad, i.cantidad); if(v===null) return; i.cantidad = v; f.items[i.itemId] = v; }
   if(!confirm(`Pedido para ${f.modulo}:\n\n${items.map(i=>`• ${fmtNum(i.cantidad)} ${i.unidad} ${i.itemNombre}`).join('\n')}\n\n¿Guardar como "en camino"?`)) return;
   try{
     await db.collection('pedidos').doc(cryptoId()).set({modulo:f.modulo, items, proveedor:f.proveedor.trim(), nota:f.nota.trim(), fechaEstimada:f.fechaEstimada||'', estado:'enCamino', fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''});
@@ -13397,6 +13413,7 @@ async function confirmarRecepcion(id){
   const r0 = resumenPedido(p);
   const items = r0.filas.filter(f=>f.cantidad>0).map(f=>({itemId:f.itemId, itemNombre:f.itemNombre, unidad:f.unidad, cantidad:Math.max(0, Number(document.getElementById('rec-'+f.itemId).value)||0)}));
   const nota = (document.getElementById('rec-nota').value||'').trim();
+  for(const i of items){ const v = ajustarCajas(i.itemNombre, i.unidad, i.cantidad); if(v===null) return; i.cantidad = v; }
   const llegan = items.filter(i=>i.cantidad>0);
   if(!llegan.length) return alert('No escribiste ninguna cantidad. Si no llegó nada, toca Cancelar.');
   const quedan = r0.filas.filter(f=>f.cantidad>0).map(f=>({f, falta: fmtNum(f.falta - ((items.find(i=>i.itemId===f.itemId)||{}).cantidad||0))})).filter(x=>x.falta>0);
