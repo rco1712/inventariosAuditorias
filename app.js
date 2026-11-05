@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v245';
+const APP_VERSION = 'v246';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -696,6 +696,7 @@ function setView(v){
   if(v==='bridas') renderBridasPend();
   if(v==='revherr') renderRevHerr();
   if(v==='pendsync') renderPendSync();
+  if(v==='repmod') renderRepMod();
   if(v==='consumo'){ conDatosCache=null; renderConsumo(); }
   if(v==='admrep'){ admCache=null; if(!MODULOS.some(m=>m.nombre===admMod) && admMod!=='__todos') admMod=modulo(); renderAdmRep(); }
   if(v==='ped') renderPed();
@@ -9752,6 +9753,7 @@ function repGrupos(){
     {t:'Instalaciones del día (PDF)', s:'modelo, calle y estado', k:'instalaciones dia pdf calle', js:"repInstDia=fechaHoyLocal();repInstCache=null;repAbrir('instDia')"},
     {t:'Instalaciones de la semana', s:modulo(), k:'instalaciones semana closet puertas', js:"repAbrir('inst')"},
     ...(A ? [{t:'🚪🗄️ Instalaciones y sus herrajes', s:'puertas o clósets · verificadas o no', k:'puertas closets clóset instaladas calles herrajes rieles sistemas bastidores jaladeras tubos bridas correderas bisagras rechazadas regreso', js:"rpCache=null;repAbrir('puertas')"}] : []),
+    ...(A ? [{t:'📑 Reporte completo del módulo', s:'desde el stock inicial · instalaciones, regresos, garantías y material', k:'reporte completo modulo instalaciones calles regresos regresadas garantias material melamina herrajes gasto sin verificar auditoria', js:"repModAud='';irA('repmod')"}] : []),
     ...(A ? [{t:'🔎 Revisión de un herraje', s:'desde el conteo inicial · ¿se descontó todo?', k:'revision herraje jaladeras jaladera bisagras correderas tubos instalaciones descontadas faltan error', js:"irA('revherr')"}] : []),
     ...(A ? [{t:'🔩 Bridas sin descontar (tubos extra)', s:'después de la última auditoría', k:'bridas tubos extra piezas sueltas faltan descontar', js:"irA('bridas')"}] : []),
     {t:'Consumo por instalaciones', s:'acumulado', k:'consumo instalaciones acumulado', js:"repAbrir('consInst')"},
@@ -9829,6 +9831,7 @@ async function repCambiarMod(n){
   const t0 = Date.now(); while((_snapMovsN===m0 || _snapIniN===i0) && Date.now()-t0<6000) await new Promise(r=>setTimeout(r,80));
   if(current==='repver') renderRepVer();
   else if(current==='revherr') renderRevHerr();
+  else if(current==='repmod'){ repModAud = ''; renderRepMod(); }
 }
 // ===== v212 (pedido por el usuario, solo Dirección): 🚪 Puertas instaladas y sus herrajes =====
 // Todas las puertas que capturaron los coordinadores (verificadas o no), con calle y fecha, si se
@@ -15191,3 +15194,104 @@ async function reabrirAuditoria(id){
 
 // v244: guardar la auditoría una sola vez aunque se toque dos veces (en corrección no debe crear otra).
 saveAudit = unaSolaVez('saveAudit', saveAudit);
+
+
+// ===== v246 (pedido por el usuario): 📑 Reporte completo del módulo =====
+// Desde el stock inicial hasta una auditoría (o hasta hoy): instalaciones con su calle (verificadas y sin
+// verificar), las que se regresaron, las rechazadas, las garantías, y cómo se movió cada material hasta lo
+// que debería haber ese día (y, si se eligió una auditoría, lo que se contó). Solo lectura.
+let repModAud = '', _repModD = null;
+const REG_MOTIVOS = ['regresoInstalacion','regresoParcial','regresoPiezasInst','regresoMerma','regresoSobrante','cambioModelo'];
+async function repModDatos(){
+  const mod = modulo();
+  const [sl, sg] = await Promise.all([db.collection('instalacionesLog').where('modulo','==',mod).get(), db.collection('garantiasLog').where('modulo','==',mod).get()]);
+  const logs = sl.docs.map(d=>({id:d.id, ...d.data()})).filter(l=>l.modulo===mod);
+  const gars = sg.docs.map(d=>({id:d.id, ...d.data()})).filter(g=>g.modulo===mod);
+  const fechasIni = Object.values(inicialFechaMap||{}).filter(Boolean).sort();
+  const desde = fechasIni.length ? fechasIni[0] : '';
+  const auds = (auditorias||[]).filter(a=>a.modulo===mod && !a.complemento && (!desde || (a.fecha||'') > desde)).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  if(!repModAud && auds.length) repModAud = auds[0].id;
+  const aud = auds.find(a=>a.id===repModAud) || null;
+  const hasta = aud ? aud.fecha : new Date().toISOString();
+  const enRango = f => (!desde || (f||'') > desde) && (f||'') <= hasta;
+  const estadoInst = l => l.estado==='rechazado' ? 'rechazada' : (l.verif && l.verif.estado==='no') ? 'noinst' : (l.verif && l.verif.estado) ? 'ok' : 'sinverif';
+  const vivos = logs.filter(l=>enRango(l.fecha) && !l.cambiadaPor && !l.duplicadoAnulado);
+  const mvs = movs.filter(m=>m.modulo===mod && enRango(m.fecha) && cuentaEnInventario(m));
+  const regDe = id => mvs.filter(m=>m.tipo==='devolucion' && (m.instalacionId===id || (REG_MOTIVOS.includes(m.motivo) && m.loteId===id)));
+  const inst = vivos.filter(l=>['ok','sinverif'].includes(estadoInst(l)));
+  const noInst = vivos.filter(l=>estadoInst(l)==='noinst');
+  const rech = vivos.filter(l=>estadoInst(l)==='rechazada');
+  const conReg = inst.filter(l=>regDe(l.id).length);
+  const garsR = gars.filter(g=>enRango(g.fecha) && g.estado!=='rechazado');
+  // Material: fórmula hasta "hasta", separando regresos de entradas
+  const ids = [...new Set(mvs.map(m=>m.itemId).concat(Object.keys(inicialMap||{})))];
+  const mat = ids.map(id=>{ const it = CATALOGO.find(i=>i.id===id); if(!it) return null;
+    const ms = mvs.filter(m=>m.itemId===id), q = t => ms.filter(t).reduce((s,m)=>s+(Number(m.cantidad)||0),0);
+    const ini = Number(inicialMap[id])||0;
+    const reg = q(m=>m.tipo==='devolucion'), ent = q(m=>m.tipo==='entrada'), sal = q(m=>m.tipo==='salida'||m.tipo==='sobrante'), ins = q(m=>m.tipo==='instalacion'), gar = q(m=>m.tipo==='garantia'), mer = q(m=>m.tipo==='merma'), aj = q(m=>m.tipo==='ajuste');
+    const debe = fmtNum(ini + ent + reg - sal - ins - gar - mer + aj);
+    const r = aud ? (aud.resultados||[]).find(x=>x.itemId===id) : null;
+    return {it, ini, ent, reg, sal, ins, gar, mer, aj, debe, fis: r ? Number(r.fisico) : null, mov: ent||reg||sal||ins||gar||mer||aj};
+  }).filter(x=>x && (x.mov || x.ini));
+  return {mod, desde, hasta, aud, auds, inst, noInst, rech, conReg, regDe, garsR, mat, estadoInst};
+}
+const repModMel = l => (l.consumo||[]).filter(c=>esHojaId(c.itemId)).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre.replace('Melamina ',''):c.itemId)+' '+fmtNum(c.cantidad); }).join(', ');
+const repModHerr = l => (l.consumo||[]).filter(c=>!esHojaId(c.itemId)).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+fmtNum(c.cantidad); }).join(', ');
+async function renderRepMod(){
+  current = 'repmod';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  const head = repVolverHtml('📑 Reporte completo del módulo', 'Desde el stock inicial hasta la auditoría que elijas. No cambia nada.', true);
+  $('#main').innerHTML = head + '<div class="card hint">Cargando…</div>';
+  let D; try{ D = await repModDatos(); }catch(e){ $('#main').innerHTML = head + '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
+  if(current!=='repmod') return; _repModD = D;
+  const fT = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+  const dia = l => l.fechaDia || (l.fecha||'').slice(0,10);
+  const esc = t => String(t||'').replace(/</g,'&lt;');
+  const n = x => fmtNum(Math.round((Number(x)||0)*1000)/1000);
+  const sinV = D.inst.filter(l=>D.estadoInst(l)==='sinverif');
+  const kpi = (v,t,c) => `<div style="flex:1;min-width:92px;background:rgba(127,127,127,.1);border-radius:12px;padding:8px;text-align:center"><div style="font-size:22px;font-weight:900;color:${c}">${v}</div><div class="hint" style="margin:0;font-size:11px">${t}</div></div>`;
+  let h = head;
+  h += `<div class="card"><label class="hint">Hasta</label><select style="margin-top:4px" onchange="repModAud=this.value;renderRepMod()">${D.auds.map(a=>`<option value="${a.id}" ${D.aud&&a.id===D.aud.id?'selected':''}>Auditoría del ${fT(a.fecha)}${a.aplicada?' · aplicada':' · sin aplicar'}</option>`).join('')}<option value="_hoy" ${!D.aud?'selected':''}>Hoy (sin auditoría)</option></select>
+    <p class="hint" style="margin:8px 0 0">📅 Del <strong>${fT(D.desde)}</strong> (stock inicial) al <strong>${fT(D.hasta)}</strong>.</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${kpi(D.inst.length,'instaladas','var(--brand)')}${kpi(sinV.length,'sin verificar','#d97706')}${kpi(D.noInst.length,'no se instalaron (regresaron)','var(--bad)')}${kpi(D.conReg.length,'con material regresado','#7c3aed')}${kpi(D.rech.length,'capturas rechazadas','#6b7280')}${kpi(D.garsR.length,'garantías','#0d7468')}</div>
+    <button class="btn" style="width:100%;margin-top:10px" onclick="repModPDF()">📄 Descargar todo en PDF</button></div>`;
+  const tablaInst = (xs, extra) => xs.length ? `<div class="wrap-x"><table><tr><th>Día</th><th>Calle</th><th>Qué</th><th>Melamina (hojas)</th><th>Herrajes</th>${extra?'<th>'+extra.t+'</th>':''}</tr>${xs.map(l=>`<tr><td>${dia(l)}</td><td><strong>${esc(l.calle||'—')}</strong></td><td>${esc(l.descripcion)}${D.estadoInst(l)==='sinverif'?'<div style="color:#d97706;font-weight:700;font-size:12px">⏳ sin verificar</div>':''}</td><td>${esc(repModMel(l))||'—'}</td><td style="font-size:12px">${esc(repModHerr(l))||'—'}</td>${extra?'<td style="font-size:12px">'+extra.f(l)+'</td>':''}</tr>`).join('')}</table></div>` : '<p class="hint">Ninguna.</p>';
+  h += `<div class="card"><strong>🏠 Instalaciones que se instalaron (${D.inst.length})</strong><p class="hint" style="margin:2px 0 6px">Su material ya se descontó al capturarlas. Las <span style="color:#d97706;font-weight:700">sin verificar</span> (${sinV.length}) también están descontadas; si alguna no se instaló, al marcarla regresa el material.</p>${tablaInst(D.inst)}</div>`;
+  h += `<div class="card" style="border:2px solid var(--bad)"><strong>↩️ No se instalaron y regresaron (${D.noInst.length})</strong><p class="hint" style="margin:2px 0 6px">Las marcaste como "no se instaló": su material regresa al inventario.</p>${tablaInst(D.noInst, {t:'Qué regresó', f:l=>{ const r = D.regDe(l.id); return r.length ? esc(r.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', ')) : 'pendiente de regresar'; }})}</div>`;
+  if(D.conReg.length) h += `<div class="card" style="border:2px solid #7c3aed"><strong>🔁 Instaladas con material que regresó (${D.conReg.length})</strong><p class="hint" style="margin:2px 0 6px">Se instalaron, pero sobró o se cambió algo y ese material regresó.</p>${tablaInst(D.conReg, {t:'Qué regresó', f:l=>esc(D.regDe(l.id).map(m=>m.itemNombre+' '+n(m.cantidad)).join(', '))})}</div>`;
+  if(D.rech.length) h += `<div class="card"><strong>✖️ Capturas rechazadas (${D.rech.length})</strong><p class="hint" style="margin:2px 0 6px">No cuentan: nunca se descontó su material (o se devolvió al rechazarlas).</p>${tablaInst(D.rech)}</div>`;
+  h += `<div class="card" style="border:2px solid #0d7468"><strong>🛡️ Garantías (${D.garsR.length})</strong>${D.garsR.length?`<div class="wrap-x"><table><tr><th>Día</th><th>Cliente</th><th>Motivo</th><th>Material</th></tr>${D.garsR.map(g=>`<tr><td>${g.fechaDia||(g.fecha||'').slice(0,10)}</td><td><strong>${esc(g.cliente||'—')}</strong>${g.estado==='pendiente'?'<div style="color:#d97706;font-size:12px;font-weight:700">⏳ sin aprobar</div>':''}</td><td>${esc(g.motivo||'')}</td><td style="font-size:12px">${esc((g.consumo||[]).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+n(c.cantidad); }).join(', '))}${g.retorno?'<div class="hint" style="margin:0">Regresó: '+esc((g.retorno.lineas||[]).join(', '))+'</div>':''}</td></tr>`).join('')}</table></div>`:'<p class="hint">Ninguna.</p>'}</div>`;
+  const tablaMat = (xs, t) => xs.length ? `<div class="card"><strong>${t}</strong><div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>+ Entró</th><th>+ Regresó</th><th>− Salió</th><th>− Instalado</th><th>− Garantía</th><th>− Merma</th><th>± Ajuste</th><th>= Debería haber</th>${D.aud?'<th>Contado</th><th>Dif.</th>':''}</tr>${xs.map(x=>{ const d = x.fis===null ? null : fmtNum(x.fis - x.debe); return `<tr><td><strong>${esc(x.it.nombre)}</strong></td><td>${n(x.ini)}</td><td>${n(x.ent)}</td><td>${n(x.reg)}</td><td>${n(x.sal)}</td><td>${n(x.ins)}</td><td>${n(x.gar)}</td><td>${n(x.mer)}</td><td>${x.aj?(x.aj>0?'+':'')+n(x.aj):'0'}</td><td style="font-weight:900">${n(x.debe)}</td>${D.aud?`<td>${x.fis===null?'—':n(x.fis)}</td><td style="font-weight:800;color:${d===null||Math.abs(d)<0.005?'var(--ok)':(d<0?'var(--bad)':'#16a34a')}">${d===null?'—':(d>0?'+':'')+n(d)}</td>`:''}</tr>`; }).join('')}</table></div></div>` : '';
+  const mel = D.mat.filter(x=>x.it.cat==='Melamina'||x.it.cat==='MDF'), her = D.mat.filter(x=>x.it.cat==='Herrajes'), otros = D.mat.filter(x=>!['Melamina','MDF','Herrajes'].includes(x.it.cat));
+  h += `<div class="card"><strong>📦 Cómo se movió el material</strong><p class="hint" style="margin:2px 0 0">Inicial + lo que entró + lo que regresó − lo que salió − lo instalado − garantías − merma ± ajustes = lo que <strong>debería haber</strong> ${D.aud?'el día de la auditoría, junto a lo que se contó':'hoy'}. Solo cuenta lo aprobado (y las instalaciones sin verificar, que ya se descontaron).</p></div>`;
+  h += tablaMat(mel, '🟫 Melamina y MDF (hojas)') + tablaMat(her, '🔩 Herrajes') + tablaMat(otros, '🧻 Cintilla, PVC, pegamento, stickers y otros');
+  $('#main').innerHTML = h;
+}
+async function repModPDF(){
+  const D = _repModD; if(!D) return;
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  const a = t => String(t===undefined||t===null?'':t).replace(/[−–]/g,'-').replace(/[→]/g,'a').replace(/[^\x00-\xFF]/g,'').trim();
+  const n = x => String(fmtNum(Math.round((Number(x)||0)*1000)/1000));
+  const fT = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
+  const dia = l => l.fechaDia || (l.fecha||'').slice(0,10);
+  const S = herrPdfBase('Closets Vera · Reporte completo · '+D.mod, a(`Del ${fT(D.desde)} (stock inicial) al ${fT(D.hasta)}${D.aud?' (auditoria)':''}`), [35,72,181]);
+  const sinV = D.inst.filter(l=>D.estadoInst(l)==='sinverif');
+  S.kpis([[D.inst.length,'instaladas'],[sinV.length,'sin verificar',[217,119,6]],[D.noInst.length,'no se instalaron',[192,57,43]],[D.rech.length,'rechazadas',[107,114,128]],[D.garsR.length,'garantias',[13,116,104]]]);
+  const cols = [{t:'Dia',w:20},{t:'Calle',w:32},{t:'Que',w:50},{t:'Melamina (hojas)',w:36},{t:'Herrajes',w:44}];
+  const fila = l => [dia(l), {t:a(l.calle||'-'), b:true}, a(l.descripcion)+(D.estadoInst(l)==='sinverif'?' (SIN VERIFICAR)':''), a(repModMel(l))||'-', a(repModHerr(l))||'-'];
+  S.banda('Instalaciones que se instalaron', String(D.inst.length));
+  if(D.inst.length) S.tabla(cols, D.inst.map(fila)); else S.vacio('Ninguna.');
+  S.banda('No se instalaron y regresaron', String(D.noInst.length), [192,57,43]);
+  if(D.noInst.length) S.tabla([{t:'Dia',w:20},{t:'Calle',w:34},{t:'Que',w:58},{t:'Que regreso',w:70}], D.noInst.map(l=>{ const r = D.regDe(l.id); return [dia(l), {t:a(l.calle||'-'), b:true}, a(l.descripcion), r.length ? a(r.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', ')) : 'pendiente de regresar']; }), [192,57,43]); else S.vacio('Ninguna.');
+  if(D.conReg.length){ S.banda('Instaladas con material que regreso', String(D.conReg.length), [124,58,237]); S.tabla([{t:'Dia',w:20},{t:'Calle',w:34},{t:'Que',w:58},{t:'Que regreso',w:70}], D.conReg.map(l=>[dia(l), {t:a(l.calle||'-'), b:true}, a(l.descripcion), a(D.regDe(l.id).map(m=>m.itemNombre+' '+n(m.cantidad)).join(', '))]), [124,58,237]); }
+  if(D.rech.length){ S.banda('Capturas rechazadas (no cuentan)', String(D.rech.length), [107,114,128]); S.tabla(cols, D.rech.map(fila), [107,114,128]); }
+  S.banda('Garantias', String(D.garsR.length), [13,116,104]);
+  if(D.garsR.length) S.tabla([{t:'Dia',w:20},{t:'Cliente',w:36},{t:'Motivo',w:46},{t:'Material',w:80}], D.garsR.map(g=>[g.fechaDia||(g.fecha||'').slice(0,10), {t:a(g.cliente||'-'), b:true}, a(g.motivo||'')+(g.estado==='pendiente'?' (sin aprobar)':''), a((g.consumo||[]).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+n(c.cantidad); }).join(', '))]), [13,116,104]); else S.vacio('Ninguna.');
+  const mcols = [{t:'Articulo',w:34},{t:'Inicial',w:14},{t:'+ Entro',w:14},{t:'+ Regreso',w:15},{t:'- Salio',w:13},{t:'- Instal.',w:15},{t:'- Garant.',w:15},{t:'- Merma',w:14},{t:'Ajuste',w:13},{t:'Deberia\nhaber',w:16}].concat(D.aud?[{t:'Contado',w:0},{t:'Dif.',w:0}]:[]);
+  if(D.aud){ mcols[0].w = 26; mcols.find(c=>c.t==='Contado').w = 12; mcols.find(c=>c.t==='Dif.').w = 12; }
+  const mfila = x => { const d = x.fis===null ? null : fmtNum(x.fis - x.debe); return [{t:a(x.it.nombre), b:true}, n(x.ini), n(x.ent), n(x.reg), n(x.sal), n(x.ins), n(x.gar), n(x.mer), (x.aj>0?'+':'')+n(x.aj), {t:n(x.debe), b:true}].concat(D.aud?[x.fis===null?'-':n(x.fis), {t:d===null?'-':(d>0?'+':'')+String(d), b:true, col: d===null||Math.abs(d)<0.005?[22,128,74]:(d<0?[192,57,43]:[22,128,74])}]:[]); };
+  const grupos = [['Melamina y MDF (hojas)', D.mat.filter(x=>x.it.cat==='Melamina'||x.it.cat==='MDF')], ['Herrajes', D.mat.filter(x=>x.it.cat==='Herrajes')], ['Cintilla, PVC, pegamento, stickers y otros', D.mat.filter(x=>!['Melamina','MDF','Herrajes'].includes(x.it.cat))]];
+  S.seccion('Como se movio el material', a('Inicial + entro + regreso - salio - instalado - garantias - merma +/- ajustes = deberia haber'+(D.aud?' el dia de la auditoria':' hoy')), [35,72,181], true);
+  grupos.forEach(([t, xs])=>{ if(!xs.length) return; S.banda(t, String(xs.length)); S.tabla(mcols, xs.map(mfila)); });
+  await S.fin(`reporte-completo-${String(D.mod).replace(/\s+/g,'_')}-${(D.hasta||'').slice(0,10)}.pdf`, 'Closets Vera · Reporte completo · '+D.mod);
+}
