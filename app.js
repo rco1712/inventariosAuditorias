@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v247';
+const APP_VERSION = 'v248';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5792,9 +5792,13 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
     // Frente del espejo (confirmado por el usuario): 1 zóclo 16×52 + 1 zóclo 18×52 + 2 marcos
     // 10×160 + 2 marcos 10×35, todo del COLOR DEL FRENTE; se descuenta de esa melamina.
     piezasFrenteEspejo(add, espejos, color, maxOn);
-  } else if(!maxOn){
-    // Confirmado por el usuario: los modelos Max NO llevan zóclos de 10×52 (solo sus zóclos Max).
-    add('Zóclo normal',2,'10×52 cm',colorZoclo,'ok', 'Color del frente (confirmado por el usuario)');
+  }
+  // v248 (confirmado por el usuario): 2 zóclos de 10×52 POR CADA MUEBLE (entrepañera o cajonera);
+  // el mueble de espejo lleva sus zóclos especiales en vez de estos. Antes eran 2 fijos por modelo.
+  // Los modelos Max NO llevan zóclos de 10×52 (solo sus zóclos Max).
+  if(!maxOn){
+    const nZ = 2 * Math.max(0, (NUM_MUEBLES_FAM[fam]||1) - (Number(espejos)||0));
+    if(nZ>0) add('Zóclo normal',nZ,'10×52 cm',colorZoclo,'ok', '2 por cada mueble (sin contar el de espejo) · color del frente (confirmado por el usuario)');
   }
 
   // Fondo de cajonera: confirmado por el usuario — "cada mueble que sea cajonera de 1, de 3,
