@@ -13964,13 +13964,13 @@ window.exportarRespaldo = exportarRespaldo;
 // ===== 🏭 Maquinaria por módulo (pedido por el usuario, v195) — solo Dirección =====
 // Cada máquina guarda su historial de mantenimientos y reparaciones: cuándo, quién lo hizo, cuánto
 // cobró y qué piezas se compraron (con su costo). No toca el inventario de material.
-const MAQ_TIPOS = [['Enchapadora','🎞️'],['Escuadradora','🪚'],['Aspiradora','🌀'],['Compresor','💨']];
+const MAQ_TIPOS = [['Enchapadora','🎞️'],['Escuadradora','🪚'],['Aspiradora','🌀'],['Compresor','💨'],['Montacargas','🚜'],['Apilador semieléctrico','🏗️']];
 const MAQ_MARCAS_BASE = [{n:'Felder', bg:'#0f766e', fg:'#fff'}, {n:'Trimaq', bg:'#1d4ed8', fg:'#fff'}];
 const MAQ_ESTADOS = {funciona:['✅ Funciona','#16a34a'], reparacion:['🛠️ En reparación','#d97706'], baja:['⛔ Fuera de servicio','#dc2626']};
 let maqCache = null, maqMod = '', maqAbierta = '', maqForm = null, maqServ = null;
 const maqEsc = t => String(t==null?'':t).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const maqPesos = n => '$'+(Number(n)||0).toLocaleString('es-MX',{minimumFractionDigits:0, maximumFractionDigits:2});
-const maqModNombre = m => m===ALM ? 'Taller / Almacén general' : m;
+const maqModNombre = m => m===ALM ? 'Almacén general' : m;
 const maqMods = () => [...MODULOS.map(m=>m.nombre), ALM];
 function maqModColor(m){ const mm = MODULOS.find(x=>x.nombre===m); return mm ? mm.color : '#9a3412'; }
 function maqModRgb(m){ const h = maqModColor(m); return [1,3,5].map(k=>parseInt(h.slice(k,k+2),16)); }
@@ -13998,7 +13998,7 @@ async function renderMaq(){
   if(maqAbierta) return maqFichaPintar();
   const xs = maqCache.filter(x=>!maqMod || x.modulo===maqMod).sort((a,b)=>(a.modulo||'').localeCompare(b.modulo||'')||(a.tipo||'').localeCompare(b.tipo||''));
   const chip = (k, txt, c, n) => `<button onclick="maqMod='${k}';renderMaq()" style="border-radius:12px;padding:8px 12px;border:2px solid ${c};background:${maqMod===k?c:'transparent'};color:${maqMod===k?'#fff':'var(--ink)'};font:inherit;font-weight:800;font-size:14px;cursor:pointer">${txt}${n?` · ${n}`:''}</button>`;
-  const chips = chip('', 'Todos', '#7c3aed', maqCache.length) + maqMods().map(m=>{ const mm = MODULOS.find(x=>x.nombre===m); return chip(m, m===ALM?'Taller':m, mm?mm.color:'#9a3412', maqCache.filter(x=>x.modulo===m).length); }).join('');
+  const chips = chip('', 'Todos', '#7c3aed', maqCache.length) + maqMods().map(m=>{ const mm = MODULOS.find(x=>x.nombre===m); return chip(m, m===ALM?'🏢 Almacén general':m, mm?mm.color:'#9a3412', maqCache.filter(x=>x.modulo===m).length); }).join('');
   const card = x => { const u = maqUltimo(x), e = MAQ_ESTADOS[x.estado||'funciona'], dias = u ? Math.round((new Date(fechaHoyLocal()+'T12:00:00')-new Date(u.fecha+'T12:00:00'))/864e5) : null;
     return `<div class="card" onclick="maqAbierta='${x.id}';renderMaq();window.scrollTo(0,0)" style="cursor:pointer;border-left:8px solid ${maqModColor(x.modulo)};padding:12px 14px">
       <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><div style="min-width:0"><div style="font-size:17px;font-weight:900">${maqIcono(x.tipo)} ${maqEsc(x.tipo)}</div>
@@ -14012,14 +14012,14 @@ async function renderMaq(){
   const gastos = !maqMod && maqCache.length ? `<div class="card" style="padding:12px"><strong>💰 Gastos por módulo</strong>
     ${maqMods().filter(m=>maqCache.some(x=>x.modulo===m)).map(m=>{ const g = maqGastoMod(maqCache.filter(x=>x.modulo===m)), c = maqModColor(m);
       return `<div onclick="maqMod='${m}';renderMaq()" style="cursor:pointer;display:flex;align-items:center;gap:10px;margin-top:8px;padding:9px 12px;border-radius:12px;border:2px solid ${c};background:${c}22">
-        <strong style="flex:1;color:${c};filter:brightness(1.35)">${maqEsc(m===ALM?'Taller':m)}</strong>
+        <strong style="flex:1;color:${c};filter:brightness(1.35)">${maqEsc(m===ALM?'🏢 Almacén general':m)}</strong>
         <span class="hint" style="margin:0;text-align:right;font-size:12.5px">🔧 ${maqPesos(g.mant)}<br>🛠️ ${maqPesos(g.rep)}</span>
         <strong style="min-width:84px;text-align:right">${maqPesos(g.total)}</strong></div>`; }).join('')}
     <div style="display:flex;justify-content:space-between;margin-top:10px;font-weight:900"><span>Total</span><span>${maqPesos(tot)}</span></div></div>` : '';
   $('#main').innerHTML = `
     <div class="card" style="padding:12px;border:2px solid #7c3aed">
       <div style="font-size:18px;font-weight:900">🏭 Maquinaria</div>
-      <p class="hint" style="margin:2px 0 0">Enchapadoras, escuadradoras, aspiradoras y compresores de cada módulo, con sus mantenimientos y reparaciones. Solo Dirección.</p>
+      <p class="hint" style="margin:2px 0 0">Enchapadoras, escuadradoras, aspiradoras, compresores, montacargas y apiladores de cada módulo y del almacén general, con sus mantenimientos, reparaciones y piezas. Solo Dirección.</p>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${chips}</div>
       <div class="row" style="gap:8px;margin-top:10px;flex-wrap:nowrap"><button class="btn" style="flex:1;background:#7c3aed" onclick="maqNueva()">➕ Agregar máquina</button><button class="btn" style="background:#b91c1c;white-space:nowrap" onclick="generarMaqPDF(${maqMod?`['${maqMod}']`:'null'})">📄 PDF${maqMod?'':' de todo'}</button></div>
     </div>
@@ -14035,8 +14035,8 @@ function maqFormPintar(){
   const chipOn = (on, txt, js, st) => `<button class="chip ${on?'on':''}" style="${on&&st?st:''}" onclick="${js}">${txt}</button>`;
   $('#main').innerHTML = `<div class="card" style="border:2px solid #7c3aed">
     <div style="font-size:17px;font-weight:900">${f.id?'✏️ Editar máquina':'➕ Agregar máquina'}</div>
-    <label class="hint" style="display:block;margin-top:10px">¿En qué módulo está? <span style="color:var(--bad)">*</span></label>
-    <div class="chips" style="margin-top:6px">${maqMods().map(m=>chipOn(f.modulo===m, m===ALM?'Taller / Almacén':m, set('modulo',`'${m}'`))).join('')}</div>
+    <label class="hint" style="display:block;margin-top:10px">¿Dónde está? (módulo o almacén general) <span style="color:var(--bad)">*</span></label>
+    <div class="chips" style="margin-top:6px">${maqMods().map(m=>chipOn(f.modulo===m, m===ALM?'🏢 Almacén general':m, set('modulo',`'${m}'`))).join('')}</div>
     <label class="hint" style="display:block;margin-top:10px">¿Qué máquina es? <span style="color:var(--bad)">*</span></label>
     <div class="chips" style="margin-top:6px">${MAQ_TIPOS.map(([t,ic])=>chipOn(!f.otroTipo&&f.tipo===t, ic+' '+t, `maqForm.otroTipo=false;${set('tipo',`'${t}'`)}`)).join('')}${chipOn(f.otroTipo,'✏️ Otra',`maqForm.otroTipo=true;${set('tipo',"''")}`)}</div>
     ${f.otroTipo?`<input placeholder="¿Qué máquina? (ej. Sierra cinta)" value="${maqEsc(f.tipo)}" oninput="maqForm.tipo=this.value" style="margin-top:8px">`:''}
