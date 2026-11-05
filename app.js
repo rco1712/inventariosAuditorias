@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v248';
+const APP_VERSION = 'v249';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4479,7 +4479,7 @@ function renderAudArmadosHtml(){
   const esCajonera = f.tipo==='cajonera';
   const esCorr = f.tipo==='corredera';
   const esEsp = ARMADO_ES_ESPEJO(f.tipo);
-  const variantes = esCajonera ? ARMADO_CAJONERAS : (esCorr ? ARMADO_CORREDERA : (ARMADO_SIN_VARIANTE(f.tipo) ? {normal:'Normal'} : {normal:'Normal', max:'Max'}));
+  const variantes = esCorr ? ARMADO_CORREDERA : armadoVariantes(f.tipo);
   if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
   const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
   const labelColor = (esCajonera||f.tipo==='cajonera_espejo') ? 'Color de la cajonera' : ((f.tipo==='cajon'||f.tipo==='puerta_espejo') ? 'Color del frente' : (f.tipo==='puerta_zapatera' ? 'Color de la puerta' : 'Color del cuadro'));
@@ -5929,6 +5929,14 @@ const ARMADO_TIPOS = {
 };
 const ARMADO_ES_ESPEJO = t => t==='cajonera_espejo' || t==='puerta_espejo' || t==='puerta_zapatera';
 const ARMADO_SIN_VARIANTE = t => t==='puerta_zapatera'; // espejo sí tiene Normal/Max
+// v249 (pedido por el usuario): el cajón completo también puede ser Emma: igual que el normal pero SIN
+// jaladera, con corredera normal o de extensión.
+function armadoVariantes(tipo){
+  if(tipo==='cajonera') return ARMADO_CAJONERAS;
+  if(ARMADO_SIN_VARIANTE(tipo)) return {normal:'Normal'};
+  if(tipo==='cajon') return {normal:'Normal', emma:'Emma', max:'Max'};
+  return {normal:'Normal', max:'Max'};
+}
 const ARMADO_CORREDERA = {hembra:'Hembra (la que va en la cajonera)', macho:'Macho (la que va en el cajón)'};
 const ARMADO_CAJONERAS = {'1':'De 1 cajón','2':'De 2 cajones','3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
 const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
@@ -5989,7 +5997,7 @@ function piezasDeArmado(a){
       add('Pieza chica de cajón', 2, '33×16.5 cm', a.colorCuadro);
       add('Pieza grande de cajón', 2, '46.4×16.5 cm', a.colorCuadro);
       add('Fondo de cajón (MDF 3mm)', 1, '49.4×33 cm', '—');
-      add('Jaladera (por cajón)', 1, '—', a.color);
+      if(a.variante!=='emma') add('Jaladera (por cajón)', 1, '—', a.color); // v249: el cajón Emma no lleva jaladera
     }
     add('Corredera macho'+sufCorr, 1, '—', '—');
   } else if(a.tipo==='cuadro_fondo' || a.tipo==='cuadro_sin'){
@@ -6009,7 +6017,7 @@ function describirArmado(a){
   else if(a.tipo==='cajonera_espejo') d = 'Cajonera de espejo'+(a.variante==='max'?' Max':'')+' (sin puerta) · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (zóclos '+a.colorFrente+')':'')+(a.sinFondo?' · sin fondo':'');
   else if(a.tipo==='puerta_zapatera') d = 'Puerta de zapatera · '+a.color+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':' · con bisagras y jaladera')));
   else if(a.tipo==='puerta_espejo') d = 'Puerta de espejo'+(a.variante==='max'?' Max':'')+' · '+a.color+(a.sinEspejo?' · sin espejo':'')+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':'')));
-  else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro;
+  else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max':(a.variante==='emma'?' Emma':''))+' · frente '+a.color+' / cuadro '+a.colorCuadro;
   else d = ARMADO_TIPOS[a.tipo]+(a.variante==='max'?' Max':'')+' · '+a.color;
   if(a.sinHerrajes) d += ' · sin herrajes';
   else if(armadoUsaCorredera(a)) d += a.ext ? ' · corredera de extensión' : ' · corredera normal';
@@ -8247,7 +8255,7 @@ function renderGar(){
       <p class="hint">Se descuenta la parte de la hoja que usa; si la pieza ocupa la hoja entera (como una puerta), se descuenta 1 hoja.</p>`;
   } else if(garTipo==='armado'){
     const esCaj = f.armTipo==='cajonera';
-    const vars = esCaj ? ARMADO_CAJONERAS : {normal:'Normal', max:'Max'};
+    const vars = armadoVariantes(f.armTipo);
     if(!vars[f.armVar]) f.armVar = Object.keys(vars)[0];
     const tipos = {cajonera:'Cajonera (sin cajones)', cajon:'Cajón completo', cuadro_fondo:'Cuadro de cajón con fondo', cuadro_sin:'Cuadro de cajón sin fondo'};
     campos = `<label class="hint">¿Qué mueble?</label>
@@ -12521,7 +12529,7 @@ function renderMermaArm(){
   current = 'mermaarm';
   if(!maf) maf = mafNuevo();
   const f = maf, esCaj = f.tipo==='cajonera';
-  const variantes = esCaj ? ARMADO_CAJONERAS : (ARMADO_SIN_VARIANTE(f.tipo) ? {normal:'Normal'} : {normal:'Normal', max:'Max'});
+  const variantes = armadoVariantes(f.tipo);
   if(!variantes[f.variante]) f.variante = Object.keys(variantes)[0];
   const colorOpts = sel => MEL_COLORES.map(c=>`<option value="${c}" ${c===sel?'selected':''}>${c}</option>`).join('');
   const labelColor = (esCaj||f.tipo==='cajonera_espejo') ? 'Color de la cajonera' : ((f.tipo==='cajon'||f.tipo==='puerta_espejo') ? (f.tipo==='puerta_espejo'?'Color de los marcos':'Color del frente') : (f.tipo==='puerta_zapatera' ? 'Color de la puerta' : 'Color del cuadro'));
@@ -14881,7 +14889,7 @@ function pzpCapturaHtml(){
 function pzpArmFormHtml(){
   const f = pzpArmForm, opts = (o, v) => Object.keys(o).map(k=>`<option value="${k}" ${k===v?'selected':''}>${o[k]}</option>`).join('');
   const col = (campo, label) => `<div><label class="hint">${label}</label><select style="margin-top:4px" onchange="pzpArmSet('${campo}',this.value)">${MEL_COLORES.map(c=>`<option ${c===f[campo]?'selected':''}>${c}</option>`).join('')}</select></div>`;
-  const variantes = f.tipo==='cajonera' ? ARMADO_CAJONERAS : (f.tipo==='puerta_zapatera' ? {normal:'Normal'} : {normal:'Normal', max:'Max'});
+  const variantes = armadoVariantes(f.tipo);
   return `<div style="border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px">
     <div class="grid2"><div><label class="hint">¿Qué es?</label><select style="margin-top:4px" onchange="pzpArmSet('tipo',this.value)">${opts(PZP_ARM_TIPOS, f.tipo)}</select></div>
     <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="pzpArmSet('variante',this.value)">${opts(variantes, f.variante)}</select></div></div>
