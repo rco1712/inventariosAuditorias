@@ -15289,6 +15289,35 @@ function repModDias(D){
     return {d, insts, regresos, gars, otros, inv, estadoTxt};
   });
 }
+// v247: totales ordenados y fáciles de leer (pedido por el usuario): melamina aparte de MDF, por color, y
+// en hojas se separa completas de cortado para que se vea de dónde sale la diferencia.
+function repModTotales(D){
+  const r2 = x => Math.round((Number(x)||0)*100)/100;
+  const fila = x => {
+    const hoja = !!esHojaId(x.it.id), r = D.aud ? (D.aud.resultados||[]).find(y=>y.itemId===x.it.id) : null;
+    const o = {nom: x.it.nombre.replace(/^Melamina /,''), ini:x.ini, ent:x.ent+x.reg, uso:x.ins+x.gar, sal:x.sal+x.mer, aj:x.aj, debe:x.debe, fis:x.fis, sig:'—', tono:''};
+    if(hoja && r && r.teoricoCompletas!==undefined){
+      o.debeTxt = `${fmtNum(r.teoricoCompletas)} completas + ${fmtNum(r.teoricoCortado)} en piezas`;
+      o.fisTxt = `${fmtNum(r.fisicoCompletas)} completas + ${fmtNum(r.fisicoCortado)} en piezas`;
+      const dC = r2((Number(r.fisicoCompletas)||0)-(Number(r.teoricoCompletas)||0)), dK = r2((Number(r.fisicoCortado)||0)-(Number(r.teoricoCortado)||0));
+      const t = (d, q) => d<0 ? `${q}: faltan ${fmtNum(-d)}` : (d>0 ? `${q}: sobran ${fmtNum(d)}` : `${q}: cuadran`);
+      o.sig = (Math.abs(dC)<0.005 && Math.abs(dK)<0.005) ? 'Cuadra' : t(dC,'Completas')+'\n'+t(dK,'Piezas');
+      o.tono = (dC<0||dK<0) ? 'mal' : ((dC>0||dK>0) ? 'mas' : 'ok');
+    } else if(D.aud && x.fis!==null){
+      const d = r2(x.fis - x.debe); o.sig = d<0 ? `Faltan ${fmtNum(-d)}` : (d>0 ? `Sobran ${fmtNum(d)}` : 'Cuadra'); o.tono = d<0 ? 'mal' : (d>0 ? 'mas' : 'ok');
+    }
+    return o;
+  };
+  const porNom = (a,b) => a.nom.localeCompare(b.nom);
+  const difPrimero = (a,b) => ((b.tono==='mal'||b.tono==='mas')-(a.tono==='mal'||a.tono==='mas')) || porNom(a,b);
+  const de = f => D.mat.filter(x=>f(x.it)).map(fila);
+  return [
+    {ic:'🟫', t:'Melamina (hojas) · por color', hoja:true, rgb:[120,72,32], rows:de(it=>it.cat==='Melamina').sort(porNom), sub:'"En piezas" = lo que ya está cortado: piezas sueltas y armados.'},
+    {ic:'🟦', t:'MDF (hojas)', hoja:true, rgb:[90,110,130], rows:de(it=>it.cat==='MDF').sort(porNom), sub:'MDF 3 mm: fondos de cajón y cajonera · MDF 5 mm: fondos de cajón Max.'},
+    {ic:'🔩', t:'Herrajes', rgb:[35,72,181], rows:de(it=>it.cat==='Herrajes').sort(D.aud?difPrimero:porNom), sub:D.aud?'Primero los que no cuadran.':''},
+    {ic:'🧻', t:'Cintilla, PVC, pegamento y stickers', rgb:[13,116,104], rows:de(it=>!['Melamina','MDF','Herrajes'].includes(it.cat)).sort(D.aud?difPrimero:porNom), sub:D.aud?'Primero los que no cuadran.':''}
+  ];
+}
 const repModDiaTitulo = d => { const t = new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long', year:'numeric'}); return t.charAt(0).toUpperCase()+t.slice(1); };
 const repModHay = (x, f) => f.esHoja ? `${fmtNum(f.final)} (${fmtNum(f.completas)} completas + ${fmtNum(f.cortado)} cortado)` : fmtNum(f.final);
 async function renderRepMod(){
@@ -15323,10 +15352,9 @@ async function renderRepMod(){
       ${tInv?`<div style="margin-top:12px"><strong>🧮 Cómo empezó y cómo cerró el inventario</strong><p class="hint" style="margin:2px 0 4px">Solo los artículos que se movieron este día.</p>${tInv}</div>`:''}
     </details>`;
   });
-  const tablaMat = (xs, t) => xs.length ? `<div class="card"><strong>${t}</strong><div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>+ Entró</th><th>+ Regresó</th><th>− Salió</th><th>− Instalado</th><th>− Garantía</th><th>− Merma</th><th>± Ajuste</th><th>= Debería haber</th>${D.aud?'<th>Contado</th><th>Dif.</th>':''}</tr>${xs.map(x=>{ const d = x.fis===null ? null : fmtNum(x.fis - x.debe); return `<tr><td><strong>${esc(x.it.nombre)}</strong></td><td>${n(x.ini)}</td><td>${n(x.ent)}</td><td>${n(x.reg)}</td><td>${n(x.sal)}</td><td>${n(x.ins)}</td><td>${n(x.gar)}</td><td>${n(x.mer)}</td><td>${x.aj?(x.aj>0?'+':'')+n(x.aj):'0'}</td><td style="font-weight:900">${n(x.debe)}</td>${D.aud?`<td>${x.fis===null?'—':n(x.fis)}</td><td style="font-weight:800;color:${d===null||Math.abs(d)<0.005?'var(--ok)':(d<0?'var(--bad)':'#16a34a')}">${d===null?'—':(d>0?'+':'')+n(d)}</td>`:''}</tr>`; }).join('')}</table></div></div>` : '';
-  const mel = D.mat.filter(x=>x.it.cat==='Melamina'||x.it.cat==='MDF'), her = D.mat.filter(x=>x.it.cat==='Herrajes'), otros = D.mat.filter(x=>!['Melamina','MDF','Herrajes'].includes(x.it.cat));
-  h += `<div class="card" style="border:2px solid var(--brand)"><strong>📦 Total del periodo${D.aud?' y lo que se contó en la auditoría':''}</strong><p class="hint" style="margin:2px 0 0">Inicial + lo que entró + lo que regresó − lo que salió − lo instalado − garantías − merma ± ajustes = lo que <strong>debería haber</strong>.</p></div>`;
-  h += tablaMat(mel, '🟫 Melamina y MDF (hojas)') + tablaMat(her, '🔩 Herrajes') + tablaMat(otros, '🧻 Cintilla, PVC, pegamento, stickers y otros');
+  h += `<div class="card" style="border:2px solid var(--brand)"><strong>📦 Total del periodo${D.aud?' y lo que se contó en la auditoría':''}</strong><p class="hint" style="margin:2px 0 0">Lo que había al inicio, lo que entró, lo que se usó y lo que salió = lo que <strong>debería haber</strong>${D.aud?'. Al lado, lo que se <strong>contó</strong> y qué significa la diferencia':''}.</p></div>`;
+  repModTotales(D).forEach(g=>{ if(!g.rows.length) return;
+    h += `<div class="card"><strong>${g.ic} ${g.t}</strong>${g.sub?`<p class="hint" style="margin:2px 0 6px">${g.sub}</p>`:''}<div class="wrap-x"><table><tr><th>${g.hoja?'Color':'Artículo'}</th><th>Al inicio</th><th>+ Entró y regresó</th><th>− Instalado y garantías</th><th>− Salió y merma</th><th>± Ajuste</th><th>Debería haber</th>${D.aud?'<th>Se contó</th><th>Qué significa</th>':''}</tr>${g.rows.map(r=>`<tr${r.tono==='mal'?' style="background:rgba(224,69,63,.08)"':(r.tono==='mas'?' style="background:rgba(37,99,235,.07)"':'')}><td><strong>${esc(r.nom)}</strong></td><td>${n(r.ini)}</td><td>${n(r.ent)}</td><td>${n(r.uso)}</td><td>${n(r.sal)}</td><td>${r.aj?(r.aj>0?'+':'')+n(r.aj):'0'}</td><td style="font-weight:900">${n(r.debe)}${r.debeTxt?`<div class="hint" style="margin:0;font-weight:400">${r.debeTxt}</div>`:''}</td>${D.aud?`<td style="font-weight:900">${r.fis===null?'—':n(r.fis)}${r.fisTxt?`<div class="hint" style="margin:0;font-weight:400">${r.fisTxt}</div>`:''}</td><td style="font-weight:800;color:${r.tono==='mal'?'var(--bad)':(r.tono==='mas'?'#2563eb':'var(--ok)')}">${esc(r.sig).replace(/\n/g,'<br>')}</td>`:''}</tr>`).join('')}</table></div></div>`; });
   $('#main').innerHTML = h;
 }
 async function repModPDF(){
@@ -15353,11 +15381,16 @@ async function repModPDF(){
       S.tabla([{t:'Articulo',w:30},{t:'Habia',w:26},{t:'+ Entro',w:11},{t:'+ Reg.',w:11},{t:'- Salio',w:11},{t:'- Instal.',w:13},{t:'- Garant.',w:13},{t:'- Merma',w:12},{t:'Ajuste',w:11},{t:'Corte',w:11},{t:'Cerro',w:33}],
         x.inv.map(r=>[{t:a(r.it.nombre), b:true}, hay(r.a), n(r.ent), n(r.reg), n(r.sal), n(r.ins), n(r.gar), n(r.mer), (r.aj>0?'+':'')+n(r.aj), r.cor?n(r.cor):'', {t:hay(r.c), b:true}])); }
   });
-  const mcols = [{t:'Articulo',w:34},{t:'Inicial',w:14},{t:'+ Entro',w:14},{t:'+ Regreso',w:15},{t:'- Salio',w:13},{t:'- Instal.',w:15},{t:'- Garant.',w:15},{t:'- Merma',w:14},{t:'Ajuste',w:13},{t:'Deberia\nhaber',w:16}].concat(D.aud?[{t:'Contado',w:0},{t:'Dif.',w:0}]:[]);
-  if(D.aud){ mcols[0].w = 26; mcols.find(c=>c.t==='Contado').w = 12; mcols.find(c=>c.t==='Dif.').w = 12; }
-  const mfila = x => { const d = x.fis===null ? null : fmtNum(x.fis - x.debe); return [{t:a(x.it.nombre), b:true}, n(x.ini), n(x.ent), n(x.reg), n(x.sal), n(x.ins), n(x.gar), n(x.mer), (x.aj>0?'+':'')+n(x.aj), {t:n(x.debe), b:true}].concat(D.aud?[x.fis===null?'-':n(x.fis), {t:d===null?'-':(d>0?'+':'')+String(d), b:true, col: d===null||Math.abs(d)<0.005?[22,128,74]:(d<0?[192,57,43]:[22,128,74])}]:[]); };
-  const grupos = [['Melamina y MDF (hojas)', D.mat.filter(x=>x.it.cat==='Melamina'||x.it.cat==='MDF')], ['Herrajes', D.mat.filter(x=>x.it.cat==='Herrajes')], ['Cintilla, PVC, pegamento, stickers y otros', D.mat.filter(x=>!['Melamina','MDF','Herrajes'].includes(x.it.cat))]];
-  S.seccion('Total del periodo'+(D.aud?' y lo contado en la auditoria':''), a('Inicial + entro + regreso - salio - instalado - garantias - merma +/- ajustes = deberia haber'), [35,72,181], true);
-  grupos.forEach(([t, xs])=>{ if(!xs.length) return; S.banda(t, String(xs.length)); S.tabla(mcols, xs.map(mfila)); });
+  S.seccion('Total del periodo'+(D.aud?' y lo contado en la auditoria':''), a('Al inicio + entro y regreso - instalado y garantias - salio y merma +/- ajuste = deberia haber'+(D.aud?'. Al lado lo que se conto y que significa.':'')), [35,72,181], true);
+  const col = r => r.tono==='mal' ? [192,57,43] : (r.tono==='mas' ? [37,99,235] : [22,128,74]);
+  repModTotales(D).forEach(g=>{ if(!g.rows.length) return;
+    if(S.y > S.pageH-70){ S.doc.addPage(); S.y = 15; } // que el título no quede solo al final de la hoja
+    S.banda(a(g.t), String(g.rows.length), g.rgb);
+    const cols = g.hoja
+      ? [{t:'Color',w:24},{t:'Al inicio',w:14},{t:'+ Entro\ny regreso',w:15},{t:'- Instalado\ny garantias',w:18},{t:'- Salio\ny merma',w:14},{t:'Ajuste',w:11},{t:'Deberia haber',w:29},{t:'Se conto',w:29},{t:'Que significa',w:28}]
+      : [{t:'Articulo',w:34},{t:'Al inicio',w:15},{t:'+ Entro\ny regreso',w:16},{t:'- Instalado\ny garantias',w:18},{t:'- Salio\ny merma',w:15},{t:'Ajuste',w:12},{t:'Deberia\nhaber',w:17},{t:'Se conto',w:17},{t:'Que significa',w:38}];
+    if(!D.aud){ cols.splice(-2, 2); cols[0].w += g.hoja ? 57 : 55; }
+    S.tabla(cols, g.rows.map(r=>[{t:a(r.nom), b:true}, n(r.ini), n(r.ent), n(r.uso), n(r.sal), (r.aj>0?'+':'')+n(r.aj), {t:n(r.debe)+(r.debeTxt?'\n'+a(r.debeTxt):''), b:true}].concat(D.aud?[{t:(r.fis===null?'-':n(r.fis))+(r.fisTxt?'\n'+a(r.fisTxt):''), b:true}, {t:a(r.sig), b:true, col:col(r)}]:[])), g.rgb, 4);
+  });
   await S.fin(`reporte-completo-${String(D.mod).replace(/\s+/g,'_')}-${(D.hasta||'').slice(0,10)}.pdf`, 'Closets Vera · Reporte completo · '+D.mod);
 }
