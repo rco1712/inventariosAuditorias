@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v244';
+const APP_VERSION = 'v245';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -15146,6 +15146,7 @@ function audEditCancelar(){
 }
 async function reabrirAuditoria(id){
   if(!esAdmin()) return alert('Solo Dirección.');
+  try{ toast('Abriendo la auditoría…'); }catch(e){}
   const a = (auditorias||[]).find(x=>x.id===id); if(!a) return;
   if(a.aplicada) return alert('Esta auditoría ya se aplicó al inventario: ya no se puede corregir así.');
   if(a.complemento || a.tipo==='simulacion') return alert('Este tipo de conteo no se puede corregir así.');
@@ -15167,15 +15168,16 @@ async function reabrirAuditoria(id){
     if(nh && h>0) auditCapturas[nh.id] = h; if(nm && m>0) auditCapturas[nm.id] = m; });
   const eq = piezasAuditAHojas();
   (a.resultados||[]).forEach(r=>{ if(!r.capturado) return; const it = CATALOGO.find(i=>i.id===r.itemId); if(!it || esCorrSuelta(it)) return;
-    const raw = r.fisicoCompletas!==undefined ? Number(r.fisicoCompletas)||0 : fmtNum((Number(r.fisico)||0) - (eq[r.itemId]||0));
+    const raw = r.fisicoCompletas!==undefined ? Number(r.fisicoCompletas)||0 : (r.hojasCompletas!==undefined && !r.corregido ? Number(r.hojasCompletas)||0 : fmtNum((Number(r.fisico)||0) - fmtNum(eq[r.itemId]||0)));
     if(r.fisicoCompletas!==undefined && r.cortadoNoContado && !(raw>0)) return;
     auditCapturas[r.itemId] = Math.max(0, raw); });
   // Revisión: lo reconstruido debe dar exactamente lo que se guardó; si no, no se abre (para no inventar).
   const eq2 = piezasAuditAHojas(), malos = [];
   (a.resultados||[]).forEach(r=>{ const it = CATALOGO.find(i=>i.id===r.itemId); if(!it || esCorrSuelta(it)) return;
     const raw = auditCapturas[r.itemId]!==undefined ? Number(auditCapturas[r.itemId]) : 0;
-    const fis = r.cortadoNoContado ? raw + (Number(r.teoricoCortado)||0) : raw + (eq2[r.itemId]||0);
-    if(Math.abs(fis - (Number(r.fisico)||0)) > 0.002) malos.push(r.nombre+': guardado '+fmtNum(r.fisico)+', se reconstruye '+fmtNum(fis)); });
+    // Igual que al guardar: lo de piezas se redondea antes de sumarlo.
+    const fis = fmtNum(r.cortadoNoContado ? raw + (Number(r.teoricoCortado)||0) : raw + fmtNum(eq2[r.itemId]||0));
+    if(Math.abs(fis - (Number(r.fisico)||0)) > 0.011) malos.push(r.nombre+': guardado '+fmtNum(r.fisico)+', se reconstruye '+fmtNum(fis)); });
   if(malos.length){ auditPiezas = prevP; auditArmados = prevA; auditCapturas = prevC;
     return alert('No se pudo volver a abrir sin cambiar números:\n\n'+malos.slice(0,8).join('\n')+'\n\nNo se cambió nada. Usa "Volver a contar un material" o "Corregir un artículo".'); }
   if(!confirm(`✏️ ¿Volver a abrir la auditoría del ${new Date(a.fecha).toLocaleString('es-MX')} para corregirla?\n\nSe cargan sus conteos en Auditoría. Al guardar se reemplaza esa misma auditoría. No toca el inventario.`)){ auditPiezas = prevP; auditArmados = prevA; auditCapturas = prevC; return; }
