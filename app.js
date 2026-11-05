@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v249';
+const APP_VERSION = 'v250';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14586,8 +14586,9 @@ function pzpCalcular(D, hasta, borrador){
         else if(resto > 0){ if(rc.resto==='retazo') addA(ret, id, resto); else addA(des, id, resto); } });
     }
     info.otros.forEach(m=>{
-      const s = pzpEsOtro(m), q = pzpOtroQ(m), o = c && (c.otros||{})[m.id];
+      const s = pzpEsOtro(m), q = pzpOtroQ(m), o = (c && (c.otros||{})[m.id]) || pzpOtroAuto(D, m);
       if(!o){ addA(sinCap, m.itemId, s*q*PZP_A); return; }
+      if(o.extraRet) addA(ret, m.itemId, s*o.extraRet); // v250: piezas a la medida (puertas) que regresaron o se apartaron
       let aBase = 0;
       if(o.modo==='retazo'){ addA(ret, m.itemId, s*q*PZP_A); aBase = q*PZP_A; }
       else (o.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0){ add(m.itemId, P.dim, s*r.q, P.nombre); aBase += r.q*pzpArea(P.dim); } });
@@ -14601,7 +14602,7 @@ function pzpCalcular(D, hasta, borrador){
       }
     });
     if(c && Array.isArray(c.armados)) arm = c.armados.map(a=>Object.assign({}, a));
-    if(!c && (Object.keys(cutH).length || info.otros.length)) avisos.push({dia, falta:true, t:'Falta capturar la prueba de este día.'});
+    if(!c && (Object.keys(cutH).length || info.otros.some(m=>!pzpOtroAuto(D, m)))) avisos.push({dia, falta:true, t:'Falta capturar la prueba de este día.'});
     porDia[dia] = info;
   });
   const AC = {};
@@ -14748,6 +14749,33 @@ function pzpRecQuitar(i){ pzpRecs().splice(i, 1); pzpRender(); }
 function pzpChips(opc, actual, fn){ return `<div class="row" style="gap:6px;margin-top:4px">${opc.map(([k,t])=>`<button class="btn small" style="flex:1;${actual===k?'':'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="${fn}('${k}')">${t}</button>`).join('')}</div>`; }
 function pzpOtro(mid){ if(!pzpCap.otros[mid]) pzpCap.otros[mid] = {modo:'piezas', piezas:[]}; return pzpCap.otros[mid]; }
 function pzpOtroModo(mid, modo){ pzpOtro(mid).modo = modo; pzpRender(); }
+// v250 (pedido por el usuario): lo que regresó de una instalación o se mandó a sobrantes ya lo decidió el
+// coordinador; las piezas son las de esa instalación, así que se llenan solas. Solo cuando es la
+// instalación COMPLETA de ese color (si fue parcial o una parte se fue a merma, se pregunta).
+function pzpOtroAuto(D, m){
+  if(!m || !m.instalacionId) return null;
+  const okMot = (m.tipo==='devolucion' && m.motivo==='regresoInstalacion') || (m.tipo==='sobrante' && (m.motivo==='regresoSobrante' || m.motivo==='cambioSobrante'));
+  if(!okMot) return null;
+  const l = ((D && D.logs) || []).find(x=>x.id===m.instalacionId); if(!l) return null;
+  const cons = (l.consumo||[]).filter(c=>c.itemId===m.itemId).reduce((t,c)=>t+(Number(c.cantidad)||0),0);
+  if(!(cons>0) || Math.abs(cons - (Number(m.cantidad)||0)) > 0.011) return null;
+  const pz = (pzpInstPiezas(l)||[]).filter(p=>p.itemId===m.itemId && Number(p.q)>0); if(!pz.length) return null;
+  const piezas = [], nd = d => pzpNorm(d); let extraRet = 0;
+  pz.forEach(p=>{ const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && nd(x.dim)===nd(p.dim));
+    if(P && !PZP_A_LA_MEDIDA.includes(p.n)){ const r = piezas.find(x=>x.k===P.key); if(r) r.q += Number(p.q); else piezas.push({k:P.key, q:Number(p.q)}); }
+    else extraRet += Number(p.q)*pzpArea(p.dim); });
+  return {modo:'piezas', piezas, extraRet, auto:true, calle:l.calle||''};
+}
+function pzpAutoTxt(a){
+  const t = (a.piezas||[]).map(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return fmtNum(r.q)+' '+(P?P.label:r.k); });
+  if(a.extraRet>0) t.push(pzpH(a.extraRet)+' hojas de puerta (a la medida)');
+  return t.join(' · ') || '—';
+}
+function pzpOtroCorregir(mid){
+  const m = ((pzpD && pzpD.movs) || []).find(x=>x.id===mid), a = m && pzpOtroAuto(pzpD, m);
+  pzpCap.otros[mid] = a ? {modo:'piezas', piezas:a.piezas.map(r=>Object.assign({}, r)), extraRet:a.extraRet} : {modo:'piezas', piezas:[]};
+  pzpRender();
+}
 function pzpOtroQ2(mid, k, d){ pzpQ(pzpOtro(mid).piezas, k, d); pzpRender(); }
 function pzpOtroAdd(mid, k){ pzpOtroQ2(mid, k, 1); }
 function pzpArmados(){ if(!pzpCap.armados){ const R0 = pzpCalcular(pzpD, pzpDiaAntes(pzpFecha)); pzpCap.armados = (R0 ? R0.arm : []).map(a=>Object.assign({}, a)); } return pzpCap.armados; }
@@ -14847,8 +14875,16 @@ function pzpCapturaHtml(){
   h += `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--brand);border:1px dashed var(--brand);box-shadow:none" onclick="pzpRecNuevo()">+ Recortar una pieza</button></div>`;
   // 5. Otros movimientos del cortado
   if(info.otros.length){
-    h += `<div class="card"><div style="font-size:15px;font-weight:800">5 · Otros movimientos de hoy: ¿qué piezas fueron?</div><p class="hint">El coordinador ya los capturó en la app; aquí solo dices qué piezas eran.</p>`;
+    h += `<div class="card"><div style="font-size:15px;font-weight:800">5 · Otros movimientos de hoy: ¿qué piezas fueron?</div><p class="hint">El coordinador ya los capturó en la app. Lo que sale en <strong style="color:#16a34a">verde</strong> se llenó solo; solo tienes que decir qué piezas eran en los que no.</p>`;
     info.otros.forEach(m=>{
+      const auto = !(pzpCap.otros||{})[m.id] && pzpOtroAuto(pzpD, m);
+      if(auto){ const s0 = pzpEsOtro(m);
+        h += `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
+          <strong>${s0>0?'↓':'↑'} ${pzpOtroTxt(m)} · ${pzpColor(m.itemId)} · ${fmtNum(pzpOtroQ(m))} hojas</strong>
+          <div class="hint" style="margin:2px 0 6px">${String(m.nota||'').slice(0,160)}</div>
+          <div style="padding:8px 10px;border-radius:10px;background:rgba(22,163,74,.12);border:1px solid rgba(22,163,74,.5)"><strong style="color:#16a34a">✅ Se llenó solo</strong> con lo que capturó el coordinador${auto.calle?' ('+herrEsc(auto.calle)+')':''}:<div style="margin-top:2px">${pzpAutoTxt(auto)}</div></div>
+          <button class="btn small" style="margin-top:6px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="pzpOtroCorregir('${m.id}')">✏️ No fue así, corregir</button></div>`;
+        return; }
       const o = pzpOtro(m.id), s = pzpEsOtro(m);
       h += `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
         <strong>${s>0?'↓':'↑'} ${pzpOtroTxt(m)} · ${pzpColor(m.itemId)} · ${fmtNum(pzpOtroQ(m))} hojas</strong>
@@ -14913,7 +14949,7 @@ async function pzpGuardar(){
   const limpio = {};
   Object.keys(c.corte).forEach(id=>{ const x = c.corte[id]; limpio[id] = {piezas:(x.piezas||[]).filter(r=>r.q>0), puertasOtroDia:Number(x.puertasOtroDia)||0, sobrante:x.sobrante||'desperdicio'}; });
   const ret = {}; Object.keys(c.retazo).forEach(id=>{ const l = (c.retazo[id]||[]).filter(r=>r.q>0); if(l.length) ret[id] = l; });
-  const otros = {}; Object.keys(c.otros).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio'}; });
+  const otros = {}; Object.keys(c.otros).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio', extraRet:Number(o.extraRet)||0}; });
   const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
   const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
