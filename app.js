@@ -230,7 +230,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v246';
+const APP_VERSION = 'v247';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3471,10 +3471,10 @@ function herrPdfBase(titulo, sub, rgb){
   const S = {doc, L, W, pageH, y:33};
   S.kpis = (arr) => { const kw = (W - (arr.length-1)*3)/arr.length; arr.forEach((k,i)=>{ const x = L + i*(kw+3), c = k[2]||rgb; doc.setFillColor(...pdfTinte(c,.9)); doc.rect(x,S.y,kw,15,'F'); doc.setFillColor(...c); doc.rect(x,S.y,1.4,15,'F'); doc.setFont(undefined,'bold'); doc.setFontSize(13); doc.setTextColor(...c); doc.text(String(k[0]), x+3.5, S.y+7); doc.setFont(undefined,'normal'); doc.setFontSize(7.5); doc.setTextColor(90,96,112); doc.text(k[1], x+3.5, S.y+12); }); doc.setTextColor(0,0,0); S.y += 19; };
   S.banda = (t, der, c) => { c = c||rgb; if(S.y > pageH-35){ doc.addPage(); S.y = 15; } doc.setFillColor(...pdfTinte(c,.85)); doc.rect(L,S.y,W,8,'F'); doc.setFillColor(...c); doc.rect(L,S.y,1.6,8,'F'); doc.setFont(undefined,'bold'); doc.setFontSize(10.5); doc.setTextColor(...c); doc.text(t, L+4, S.y+5.6); if(der) doc.text(der, L+W-2, S.y+5.6, {align:'right'}); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); S.y += 8; };
-  S.tabla = (cols, filas, c) => { c = c||rgb; const x0 = i => L + cols.slice(0,i).reduce((s,k)=>s+k.w,0);
+  S.tabla = (cols, filas, c, maxL) => { c = c||rgb; const x0 = i => L + cols.slice(0,i).reduce((s,k)=>s+k.w,0);
     const head = () => { const dos = cols.some(k=>k.t.includes('\n')), hh = dos ? 9 : 6; doc.setFillColor(...c); doc.rect(L,S.y,W,hh,'F'); doc.setTextColor(255,255,255); doc.setFontSize(7.5); doc.setFont(undefined,'bold'); cols.forEach((k,i)=>k.t.split('\n').forEach((ln,j)=>doc.text(ln, x0(i)+1.5, S.y+(dos?3.6+j*3.3:4.2)))); doc.setFont(undefined,'normal'); doc.setTextColor(0,0,0); S.y += hh; };
     head();
-    filas.forEach((f,idx)=>{ doc.setFontSize(8.3); const lines = f.map((v,i)=>doc.splitTextToSize(String(v.t!==undefined?v.t:v), cols[i].w-3).slice(0,3)); const h = Math.max(5.5, 1.8+Math.max(...lines.map(l=>l.length))*3.6);
+    filas.forEach((f,idx)=>{ doc.setFontSize(8.3); const lines = f.map((v,i)=>doc.splitTextToSize(String(v.t!==undefined?v.t:v), cols[i].w-3).slice(0,maxL||3)); const h = Math.max(5.5, 1.8+Math.max(...lines.map(l=>l.length))*3.6);
       if(S.y + h > pageH-14){ doc.addPage(); S.y = 15; head(); }
       if(idx%2){ doc.setFillColor(...pdfTinte(c,.95)); doc.rect(L,S.y,W,h,'F'); }
       f.forEach((v,i)=>{ const o = (v && typeof v==='object') ? v : {};
@@ -15236,38 +15236,125 @@ async function repModDatos(){
     const r = aud ? (aud.resultados||[]).find(x=>x.itemId===id) : null;
     return {it, ini, ent, reg, sal, ins, gar, mer, aj, debe, fis: r ? Number(r.fisico) : null, mov: ent||reg||sal||ins||gar||mer||aj};
   }).filter(x=>x && (x.mov || x.ini));
-  return {mod, desde, hasta, aud, auds, inst, noInst, rech, conReg, regDe, garsR, mat, estadoInst};
+  const logsR = logs.filter(l=>enRango(l.fecha));
+  return {mod, desde, hasta, aud, auds, inst, noInst, rech, conReg, regDe, garsR, mat, estadoInst, mvs, logsR, logsAll:logs};
 }
 const repModMel = l => (l.consumo||[]).filter(c=>esHojaId(c.itemId)).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre.replace('Melamina ',''):c.itemId)+' '+fmtNum(c.cantidad); }).join(', ');
 const repModHerr = l => (l.consumo||[]).filter(c=>!esHojaId(c.itemId)).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+fmtNum(c.cantidad); }).join(', ');
+// v247 (pedido por el usuario): el reporte va DÍA POR DÍA. El día es cuando el material se movió en el
+// inventario (cuando se capturó). Para cada día: instalaciones (con su calle y si están verificadas o sin
+// verificar = ya descontadas), lo que regresó al inventario, garantías, entradas/salidas, y cómo estaba el
+// inventario al empezar el día y cómo cerró.
+const fCortaRep = f => new Date(f).toLocaleDateString('es-MX',{day:'numeric', month:'short'});
+function repModDias(D){
+  const dia = f => diaLocal(f);
+  const dias = [...new Set([].concat(D.mvs.map(m=>dia(m.fecha)), D.logsR.map(l=>dia(l.fecha)), D.garsR.map(g=>dia(g.fecha))))].filter(Boolean).sort();
+  // Fórmula por artículo hasta un momento (mismas reglas que el inventario)
+  const base = id => { const doc = inicialMap[id]!==undefined ? {cantidad:inicialMap[id], cortado:inicialCortadoMap[id], fecha:inicialFechaMap[id]} : null; return lineaBase(resetMap[D.mod], doc); };
+  const formulaHasta = (id, finDia) => { const b = base(id); return calcularFormula(id, b.inicial, b.inicialCortado, D.mvs.filter(m=>m.itemId===id && (!b.desde || m.fecha>b.desde) && dia(m.fecha) <= finDia)); };
+  const logPorId = id => D.logsAll.find(x=>x.id===id);
+  const estadoTxt = l => {
+    if(l.estado==='rechazado') return {t:'Rechazada · no se descontó', c:'#6b7280'};
+    if(l.duplicadoAnulado) return {t:'Repetida · anulada', c:'#6b7280'};
+    if(l.cambiadaPor){ const n = logPorId(l.cambiadaPor); return {t:'Se cambió'+(n?' (nueva captura del '+fCortaRep(n.fecha)+')':'')+' · el descuento se queda aquí', c:'#7c3aed'}; }
+    const de = D.logsAll.find(x=>x.cambiadaPor===l.id);
+    if(l.verif && l.verif.estado==='no'){ const r = D.regDe(l.id); return r.length ? {t:'No se instaló · REGRESÓ AL INVENTARIO el '+fCortaRep(r[0].fecha), c:'#dc2626'} : {t:'No se instaló · pendiente de regresar', c:'#dc2626'}; }
+    if(l.verif && l.verif.estado) return {t:'Verificada · descontada'+(de?' (ya se había descontado el '+fCortaRep(de.fecha)+')':''), c:'#16a34a'};
+    return {t:'Sin verificar (descontada del inventario)'+(de?' · se descontó el '+fCortaRep(de.fecha):''), c:'#d97706'};
+  };
+  const tipoGrupo = m => {
+    const n = String(m.nota||'');
+    if(m.tipo==='corte') return 'Corte de hojas (pasan de completas a cortado)';
+    if(m.tipo==='ajuste') return 'Ajuste'+(n?' · '+n.split(':')[0]:'');
+    if(m.tipo==='merma') return 'Merma'+(n?' · '+n.slice(0,40):'');
+    if(m.tipo==='sobrante') return 'Apartado como sobrante'+(n?' · '+n.split(' · ')[0]:'');
+    if(/^Cierre del turno/.test(n)) return (m.tipo==='salida'?'Salida':'Entrada')+' · cierre del turno';
+    return (m.tipo==='entrada'?'Entrada':'Salida')+(n?' · '+n.split(' · ')[0].slice(0,50):'');
+  };
+  return dias.map(d=>{
+    const ms = D.mvs.filter(m=>dia(m.fecha)===d);
+    const insts = D.logsR.filter(l=>dia(l.fecha)===d).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+    const regs = ms.filter(m=>m.tipo==='devolucion');
+    const regGr = {}; regs.forEach(m=>{ const k = m.instalacionId || m.loteId || m.id; (regGr[k] = regGr[k]||[]).push(m); });
+    const regresos = Object.keys(regGr).map(k=>{ const l = logPorId(k); return {l, ms:regGr[k]}; });
+    const gars = D.garsR.filter(g=>dia(g.fecha)===d);
+    const otrosGr = {}; ms.filter(m=>['entrada','salida','corte','merma','ajuste','sobrante'].includes(m.tipo)).forEach(m=>{ const k = tipoGrupo(m); (otrosGr[k] = otrosGr[k]||[]).push(m); });
+    const otros = Object.keys(otrosGr).map(k=>({t:k, ms:otrosGr[k]}));
+    const ayer = (()=>{ const x = new Date(d+'T12:00:00'); x.setDate(x.getDate()-1); return x.toISOString().slice(0,10); })();
+    const ids = [...new Set(ms.map(m=>m.itemId))];
+    const inv = ids.map(id=>{ const it = CATALOGO.find(i=>i.id===id); if(!it) return null;
+      const a = formulaHasta(id, ayer), c = formulaHasta(id, d), mi = ms.filter(m=>m.itemId===id), q = f => mi.filter(f).reduce((s,m)=>s+(Number(m.cantidad)||0),0);
+      return {it, a, c, ent:q(m=>m.tipo==='entrada'), reg:q(m=>m.tipo==='devolucion'), sal:q(m=>m.tipo==='salida'||m.tipo==='sobrante'), ins:q(m=>m.tipo==='instalacion'), gar:q(m=>m.tipo==='garantia'), mer:q(m=>m.tipo==='merma'), aj:q(m=>m.tipo==='ajuste'), cor:q(m=>m.tipo==='corte')};
+    }).filter(Boolean).sort((x,y)=>{ const o = c => ({Melamina:0, MDF:1, Herrajes:2})[c] ?? 3; return o(x.it.cat)-o(y.it.cat) || x.it.nombre.localeCompare(y.it.nombre); });
+    return {d, insts, regresos, gars, otros, inv, estadoTxt};
+  });
+}
+// v247: totales ordenados y fáciles de leer (pedido por el usuario): melamina aparte de MDF, por color, y
+// en hojas se separa completas de cortado para que se vea de dónde sale la diferencia.
+function repModTotales(D){
+  const r2 = x => Math.round((Number(x)||0)*100)/100;
+  const fila = x => {
+    const hoja = !!esHojaId(x.it.id), r = D.aud ? (D.aud.resultados||[]).find(y=>y.itemId===x.it.id) : null;
+    const o = {nom: x.it.nombre.replace(/^Melamina /,''), ini:x.ini, ent:x.ent+x.reg, uso:x.ins+x.gar, sal:x.sal+x.mer, aj:x.aj, debe:x.debe, fis:x.fis, sig:'—', tono:''};
+    if(hoja && r && r.teoricoCompletas!==undefined){
+      o.debeTxt = `${fmtNum(r.teoricoCompletas)} completas + ${fmtNum(r.teoricoCortado)} en piezas`;
+      o.fisTxt = `${fmtNum(r.fisicoCompletas)} completas + ${fmtNum(r.fisicoCortado)} en piezas`;
+      const dC = r2((Number(r.fisicoCompletas)||0)-(Number(r.teoricoCompletas)||0)), dK = r2((Number(r.fisicoCortado)||0)-(Number(r.teoricoCortado)||0));
+      const t = (d, q) => d<0 ? `${q}: faltan ${fmtNum(-d)}` : (d>0 ? `${q}: sobran ${fmtNum(d)}` : `${q}: cuadran`);
+      o.sig = (Math.abs(dC)<0.005 && Math.abs(dK)<0.005) ? 'Cuadra' : t(dC,'Completas')+'\n'+t(dK,'Piezas');
+      o.tono = (dC<0||dK<0) ? 'mal' : ((dC>0||dK>0) ? 'mas' : 'ok');
+    } else if(D.aud && x.fis!==null){
+      const d = r2(x.fis - x.debe); o.sig = d<0 ? `Faltan ${fmtNum(-d)}` : (d>0 ? `Sobran ${fmtNum(d)}` : 'Cuadra'); o.tono = d<0 ? 'mal' : (d>0 ? 'mas' : 'ok');
+    }
+    return o;
+  };
+  const porNom = (a,b) => a.nom.localeCompare(b.nom);
+  const difPrimero = (a,b) => ((b.tono==='mal'||b.tono==='mas')-(a.tono==='mal'||a.tono==='mas')) || porNom(a,b);
+  const de = f => D.mat.filter(x=>f(x.it)).map(fila);
+  return [
+    {ic:'🟫', t:'Melamina (hojas) · por color', hoja:true, rgb:[120,72,32], rows:de(it=>it.cat==='Melamina').sort(porNom), sub:'"En piezas" = lo que ya está cortado: piezas sueltas y armados.'},
+    {ic:'🟦', t:'MDF (hojas)', hoja:true, rgb:[90,110,130], rows:de(it=>it.cat==='MDF').sort(porNom), sub:'MDF 3 mm: fondos de cajón y cajonera · MDF 5 mm: fondos de cajón Max.'},
+    {ic:'🔩', t:'Herrajes', rgb:[35,72,181], rows:de(it=>it.cat==='Herrajes').sort(D.aud?difPrimero:porNom), sub:D.aud?'Primero los que no cuadran.':''},
+    {ic:'🧻', t:'Cintilla, PVC, pegamento y stickers', rgb:[13,116,104], rows:de(it=>!['Melamina','MDF','Herrajes'].includes(it.cat)).sort(D.aud?difPrimero:porNom), sub:D.aud?'Primero los que no cuadran.':''}
+  ];
+}
+const repModDiaTitulo = d => { const t = new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long', year:'numeric'}); return t.charAt(0).toUpperCase()+t.slice(1); };
+const repModHay = (x, f) => f.esHoja ? `${fmtNum(f.final)} (${fmtNum(f.completas)} completas + ${fmtNum(f.cortado)} cortado)` : fmtNum(f.final);
 async function renderRepMod(){
   current = 'repmod';
   if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
-  const head = repVolverHtml('📑 Reporte completo del módulo', 'Desde el stock inicial hasta la auditoría que elijas. No cambia nada.', true);
+  const head = repVolverHtml('📑 Reporte completo del módulo', 'Día por día, desde el stock inicial hasta la auditoría que elijas. No cambia nada.', true);
   $('#main').innerHTML = head + '<div class="card hint">Cargando…</div>';
   let D; try{ D = await repModDatos(); }catch(e){ $('#main').innerHTML = head + '<div class="card">No se pudo cargar: '+e.message+'</div>'; return; }
   if(current!=='repmod') return; _repModD = D;
   const fT = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
-  const dia = l => l.fechaDia || (l.fecha||'').slice(0,10);
   const esc = t => String(t||'').replace(/</g,'&lt;');
   const n = x => fmtNum(Math.round((Number(x)||0)*1000)/1000);
   const sinV = D.inst.filter(l=>D.estadoInst(l)==='sinverif');
   const kpi = (v,t,c) => `<div style="flex:1;min-width:92px;background:rgba(127,127,127,.1);border-radius:12px;padding:8px;text-align:center"><div style="font-size:22px;font-weight:900;color:${c}">${v}</div><div class="hint" style="margin:0;font-size:11px">${t}</div></div>`;
   let h = head;
   h += `<div class="card"><label class="hint">Hasta</label><select style="margin-top:4px" onchange="repModAud=this.value;renderRepMod()">${D.auds.map(a=>`<option value="${a.id}" ${D.aud&&a.id===D.aud.id?'selected':''}>Auditoría del ${fT(a.fecha)}${a.aplicada?' · aplicada':' · sin aplicar'}</option>`).join('')}<option value="_hoy" ${!D.aud?'selected':''}>Hoy (sin auditoría)</option></select>
-    <p class="hint" style="margin:8px 0 0">📅 Del <strong>${fT(D.desde)}</strong> (stock inicial) al <strong>${fT(D.hasta)}</strong>.</p>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${kpi(D.inst.length,'instaladas','var(--brand)')}${kpi(sinV.length,'sin verificar','#d97706')}${kpi(D.noInst.length,'no se instalaron (regresaron)','var(--bad)')}${kpi(D.conReg.length,'con material regresado','#7c3aed')}${kpi(D.rech.length,'capturas rechazadas','#6b7280')}${kpi(D.garsR.length,'garantías','#0d7468')}</div>
+    <p class="hint" style="margin:8px 0 0">📅 Del <strong>${fT(D.desde)}</strong> (stock inicial) al <strong>${fT(D.hasta)}</strong>. Cada día es cuando el material se movió en el inventario (cuando se capturó).</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${kpi(D.inst.length,'instaladas','var(--brand)')}${kpi(sinV.length,'sin verificar (descontadas)','#d97706')}${kpi(D.noInst.length,'no se instalaron (regresaron)','var(--bad)')}${kpi(D.rech.length,'capturas rechazadas','#6b7280')}${kpi(D.garsR.length,'garantías','#0d7468')}</div>
     <button class="btn" style="width:100%;margin-top:10px" onclick="repModPDF()">📄 Descargar todo en PDF</button></div>`;
-  const tablaInst = (xs, extra) => xs.length ? `<div class="wrap-x"><table><tr><th>Día</th><th>Calle</th><th>Qué</th><th>Melamina (hojas)</th><th>Herrajes</th>${extra?'<th>'+extra.t+'</th>':''}</tr>${xs.map(l=>`<tr><td>${dia(l)}</td><td><strong>${esc(l.calle||'—')}</strong></td><td>${esc(l.descripcion)}${D.estadoInst(l)==='sinverif'?'<div style="color:#d97706;font-weight:700;font-size:12px">⏳ sin verificar</div>':''}</td><td>${esc(repModMel(l))||'—'}</td><td style="font-size:12px">${esc(repModHerr(l))||'—'}</td>${extra?'<td style="font-size:12px">'+extra.f(l)+'</td>':''}</tr>`).join('')}</table></div>` : '<p class="hint">Ninguna.</p>';
-  h += `<div class="card"><strong>🏠 Instalaciones que se instalaron (${D.inst.length})</strong><p class="hint" style="margin:2px 0 6px">Su material ya se descontó al capturarlas. Las <span style="color:#d97706;font-weight:700">sin verificar</span> (${sinV.length}) también están descontadas; si alguna no se instaló, al marcarla regresa el material.</p>${tablaInst(D.inst)}</div>`;
-  h += `<div class="card" style="border:2px solid var(--bad)"><strong>↩️ No se instalaron y regresaron (${D.noInst.length})</strong><p class="hint" style="margin:2px 0 6px">Las marcaste como "no se instaló": su material regresa al inventario.</p>${tablaInst(D.noInst, {t:'Qué regresó', f:l=>{ const r = D.regDe(l.id); return r.length ? esc(r.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', ')) : 'pendiente de regresar'; }})}</div>`;
-  if(D.conReg.length) h += `<div class="card" style="border:2px solid #7c3aed"><strong>🔁 Instaladas con material que regresó (${D.conReg.length})</strong><p class="hint" style="margin:2px 0 6px">Se instalaron, pero sobró o se cambió algo y ese material regresó.</p>${tablaInst(D.conReg, {t:'Qué regresó', f:l=>esc(D.regDe(l.id).map(m=>m.itemNombre+' '+n(m.cantidad)).join(', '))})}</div>`;
-  if(D.rech.length) h += `<div class="card"><strong>✖️ Capturas rechazadas (${D.rech.length})</strong><p class="hint" style="margin:2px 0 6px">No cuentan: nunca se descontó su material (o se devolvió al rechazarlas).</p>${tablaInst(D.rech)}</div>`;
-  h += `<div class="card" style="border:2px solid #0d7468"><strong>🛡️ Garantías (${D.garsR.length})</strong>${D.garsR.length?`<div class="wrap-x"><table><tr><th>Día</th><th>Cliente</th><th>Motivo</th><th>Material</th></tr>${D.garsR.map(g=>`<tr><td>${g.fechaDia||(g.fecha||'').slice(0,10)}</td><td><strong>${esc(g.cliente||'—')}</strong>${g._pend?'<div style="color:#d97706;font-size:12px;font-weight:700">⏳ sin aprobar</div>':''}</td><td>${esc(g.motivo||'')}</td><td style="font-size:12px">${esc((g.consumo||[]).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+n(c.cantidad); }).join(', '))}${g.retorno?'<div class="hint" style="margin:0">Regresó: '+esc((g.retorno.lineas||[]).join(', '))+'</div>':''}</td></tr>`).join('')}</table></div>`:'<p class="hint">Ninguna.</p>'}</div>`;
-  const tablaMat = (xs, t) => xs.length ? `<div class="card"><strong>${t}</strong><div class="wrap-x"><table><tr><th>Artículo</th><th>Inicial</th><th>+ Entró</th><th>+ Regresó</th><th>− Salió</th><th>− Instalado</th><th>− Garantía</th><th>− Merma</th><th>± Ajuste</th><th>= Debería haber</th>${D.aud?'<th>Contado</th><th>Dif.</th>':''}</tr>${xs.map(x=>{ const d = x.fis===null ? null : fmtNum(x.fis - x.debe); return `<tr><td><strong>${esc(x.it.nombre)}</strong></td><td>${n(x.ini)}</td><td>${n(x.ent)}</td><td>${n(x.reg)}</td><td>${n(x.sal)}</td><td>${n(x.ins)}</td><td>${n(x.gar)}</td><td>${n(x.mer)}</td><td>${x.aj?(x.aj>0?'+':'')+n(x.aj):'0'}</td><td style="font-weight:900">${n(x.debe)}</td>${D.aud?`<td>${x.fis===null?'—':n(x.fis)}</td><td style="font-weight:800;color:${d===null||Math.abs(d)<0.005?'var(--ok)':(d<0?'var(--bad)':'#16a34a')}">${d===null?'—':(d>0?'+':'')+n(d)}</td>`:''}</tr>`; }).join('')}</table></div></div>` : '';
-  const mel = D.mat.filter(x=>x.it.cat==='Melamina'||x.it.cat==='MDF'), her = D.mat.filter(x=>x.it.cat==='Herrajes'), otros = D.mat.filter(x=>!['Melamina','MDF','Herrajes'].includes(x.it.cat));
-  h += `<div class="card"><strong>📦 Cómo se movió el material</strong><p class="hint" style="margin:2px 0 0">Inicial + lo que entró + lo que regresó − lo que salió − lo instalado − garantías − merma ± ajustes = lo que <strong>debería haber</strong> ${D.aud?'el día de la auditoría, junto a lo que se contó':'hoy'}. Solo cuenta lo aprobado (y las instalaciones sin verificar, que ya se descontaron).</p></div>`;
-  h += tablaMat(mel, '🟫 Melamina y MDF (hojas)') + tablaMat(her, '🔩 Herrajes') + tablaMat(otros, '🧻 Cintilla, PVC, pegamento, stickers y otros');
+  const dias = repModDias(D);
+  dias.forEach((x, k)=>{
+    const tIns = x.insts.length ? `<div class="wrap-x"><table><tr><th>Calle</th><th>Qué</th><th>Estado</th><th>Melamina (hojas)</th><th>Herrajes</th></tr>${x.insts.map(l=>{ const e = x.estadoTxt(l); return `<tr><td><strong>${esc(l.calle||'—')}</strong>${l.fechaDia && l.fechaDia!==x.d?`<div class="hint" style="margin:0;color:#7c3aed">se instala ${l.fechaDia}</div>`:''}</td><td>${esc(l.descripcion)}</td><td style="font-weight:800;color:${e.c};font-size:12px">${esc(e.t)}</td><td>${esc(repModMel(l))||'—'}</td><td style="font-size:12px">${esc(repModHerr(l))||'—'}</td></tr>`; }).join('')}</table></div>` : '<p class="hint" style="margin:0">Ninguna.</p>';
+    const tReg = x.regresos.length ? x.regresos.map(r=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>${esc(r.l?(r.l.calle||'—'):'—')}</strong> <span class="hint">${esc(r.l?r.l.descripcion:'')}</span><div style="color:#16a34a;font-weight:800;font-size:13px">↩️ Regresó al inventario: ${esc(r.ms.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', '))}</div></div>`).join('') : '';
+    const tGar = x.gars.length ? x.gars.map(g=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>${esc(g.cliente||'—')}</strong> · ${esc(g.motivo||'')}${g._pend?' <span style="color:#d97706;font-weight:700">⏳ sin aprobar</span>':''}<div class="hint" style="margin:0">${esc((g.consumo||[]).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+n(c.cantidad); }).join(', '))}</div></div>`).join('') : '';
+    const tOtros = x.otros.length ? x.otros.map(o=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>${esc(o.t)}</strong><div class="hint" style="margin:0">${esc(o.ms.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', '))}</div></div>`).join('') : '';
+    const tInv = x.inv.length ? `<div class="wrap-x"><table><tr><th>Artículo</th><th>Había</th><th>+ Entró</th><th>+ Regresó</th><th>− Salió</th><th>− Instalado</th><th>− Garantía</th><th>− Merma</th><th>± Ajuste</th><th>Corte</th><th>Cerró</th></tr>${x.inv.map(r=>`<tr><td><strong>${esc(r.it.nombre)}</strong></td><td style="font-size:12px">${repModHay(r, r.a)}</td><td>${n(r.ent)}</td><td>${n(r.reg)}</td><td>${n(r.sal)}</td><td>${n(r.ins)}</td><td>${n(r.gar)}</td><td>${n(r.mer)}</td><td>${r.aj?(r.aj>0?'+':'')+n(r.aj):'0'}</td><td>${r.cor?n(r.cor):''}</td><td style="font-weight:900;font-size:12px">${repModHay(r, r.c)}</td></tr>`).join('')}</table></div>` : '';
+    h += `<details class="card" ${k===dias.length-1?'open':''}><summary style="cursor:pointer"><strong style="font-size:16px">📅 ${repModDiaTitulo(x.d)}</strong><div class="hint" style="margin:2px 0 0">${x.insts.length} instalación(es)${x.regresos.length?' · '+x.regresos.length+' regreso(s)':''}${x.gars.length?' · '+x.gars.length+' garantía(s)':''} · ${x.inv.length} artículo(s) se movieron</div></summary>
+      <div style="margin-top:10px"><strong>🏠 Instalaciones capturadas</strong>${tIns}</div>
+      ${tReg?`<div style="margin-top:12px"><strong>↩️ Regresó al inventario</strong>${tReg}</div>`:''}
+      ${tGar?`<div style="margin-top:12px"><strong>🛡️ Garantías</strong>${tGar}</div>`:''}
+      ${tOtros?`<div style="margin-top:12px"><strong>📦 Entradas, salidas, cortes y ajustes</strong>${tOtros}</div>`:''}
+      ${tInv?`<div style="margin-top:12px"><strong>🧮 Cómo empezó y cómo cerró el inventario</strong><p class="hint" style="margin:2px 0 4px">Solo los artículos que se movieron este día.</p>${tInv}</div>`:''}
+    </details>`;
+  });
+  h += `<div class="card" style="border:2px solid var(--brand)"><strong>📦 Total del periodo${D.aud?' y lo que se contó en la auditoría':''}</strong><p class="hint" style="margin:2px 0 0">Lo que había al inicio, lo que entró, lo que se usó y lo que salió = lo que <strong>debería haber</strong>${D.aud?'. Al lado, lo que se <strong>contó</strong> y qué significa la diferencia':''}.</p></div>`;
+  repModTotales(D).forEach(g=>{ if(!g.rows.length) return;
+    h += `<div class="card"><strong>${g.ic} ${g.t}</strong>${g.sub?`<p class="hint" style="margin:2px 0 6px">${g.sub}</p>`:''}<div class="wrap-x"><table><tr><th>${g.hoja?'Color':'Artículo'}</th><th>Al inicio</th><th>+ Entró y regresó</th><th>− Instalado y garantías</th><th>− Salió y merma</th><th>± Ajuste</th><th>Debería haber</th>${D.aud?'<th>Se contó</th><th>Qué significa</th>':''}</tr>${g.rows.map(r=>`<tr${r.tono==='mal'?' style="background:rgba(224,69,63,.08)"':(r.tono==='mas'?' style="background:rgba(37,99,235,.07)"':'')}><td><strong>${esc(r.nom)}</strong></td><td>${n(r.ini)}</td><td>${n(r.ent)}</td><td>${n(r.uso)}</td><td>${n(r.sal)}</td><td>${r.aj?(r.aj>0?'+':'')+n(r.aj):'0'}</td><td style="font-weight:900">${n(r.debe)}${r.debeTxt?`<div class="hint" style="margin:0;font-weight:400">${r.debeTxt}</div>`:''}</td>${D.aud?`<td style="font-weight:900">${r.fis===null?'—':n(r.fis)}${r.fisTxt?`<div class="hint" style="margin:0;font-weight:400">${r.fisTxt}</div>`:''}</td><td style="font-weight:800;color:${r.tono==='mal'?'var(--bad)':(r.tono==='mas'?'#2563eb':'var(--ok)')}">${esc(r.sig).replace(/\n/g,'<br>')}</td>`:''}</tr>`).join('')}</table></div></div>`; });
   $('#main').innerHTML = h;
 }
 async function repModPDF(){
@@ -15276,25 +15363,34 @@ async function repModPDF(){
   const a = t => String(t===undefined||t===null?'':t).replace(/[−–]/g,'-').replace(/[→]/g,'a').replace(/[^\x00-\xFF]/g,'').trim();
   const n = x => String(fmtNum(Math.round((Number(x)||0)*1000)/1000));
   const fT = f => f ? new Date(f).toLocaleString('es-MX',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
-  const dia = l => l.fechaDia || (l.fecha||'').slice(0,10);
   const S = herrPdfBase('Closets Vera · Reporte completo · '+D.mod, a(`Del ${fT(D.desde)} (stock inicial) al ${fT(D.hasta)}${D.aud?' (auditoria)':''}`), [35,72,181]);
   const sinV = D.inst.filter(l=>D.estadoInst(l)==='sinverif');
   S.kpis([[D.inst.length,'instaladas'],[sinV.length,'sin verificar',[217,119,6]],[D.noInst.length,'no se instalaron',[192,57,43]],[D.rech.length,'rechazadas',[107,114,128]],[D.garsR.length,'garantias',[13,116,104]]]);
-  const cols = [{t:'Dia',w:20},{t:'Calle',w:32},{t:'Que',w:50},{t:'Melamina (hojas)',w:36},{t:'Herrajes',w:44}];
-  const fila = l => [dia(l), {t:a(l.calle||'-'), b:true}, a(l.descripcion)+(D.estadoInst(l)==='sinverif'?' (SIN VERIFICAR)':''), a(repModMel(l))||'-', a(repModHerr(l))||'-'];
-  S.banda('Instalaciones que se instalaron', String(D.inst.length));
-  if(D.inst.length) S.tabla(cols, D.inst.map(fila)); else S.vacio('Ninguna.');
-  S.banda('No se instalaron y regresaron', String(D.noInst.length), [192,57,43]);
-  if(D.noInst.length) S.tabla([{t:'Dia',w:20},{t:'Calle',w:34},{t:'Que',w:58},{t:'Que regreso',w:70}], D.noInst.map(l=>{ const r = D.regDe(l.id); return [dia(l), {t:a(l.calle||'-'), b:true}, a(l.descripcion), r.length ? a(r.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', ')) : 'pendiente de regresar']; }), [192,57,43]); else S.vacio('Ninguna.');
-  if(D.conReg.length){ S.banda('Instaladas con material que regreso', String(D.conReg.length), [124,58,237]); S.tabla([{t:'Dia',w:20},{t:'Calle',w:34},{t:'Que',w:58},{t:'Que regreso',w:70}], D.conReg.map(l=>[dia(l), {t:a(l.calle||'-'), b:true}, a(l.descripcion), a(D.regDe(l.id).map(m=>m.itemNombre+' '+n(m.cantidad)).join(', '))]), [124,58,237]); }
-  if(D.rech.length){ S.banda('Capturas rechazadas (no cuentan)', String(D.rech.length), [107,114,128]); S.tabla(cols, D.rech.map(fila), [107,114,128]); }
-  S.banda('Garantias', String(D.garsR.length), [13,116,104]);
-  if(D.garsR.length) S.tabla([{t:'Dia',w:20},{t:'Cliente',w:36},{t:'Motivo',w:46},{t:'Material',w:80}], D.garsR.map(g=>[g.fechaDia||(g.fecha||'').slice(0,10), {t:a(g.cliente||'-'), b:true}, a(g.motivo||'')+(g._pend?' (sin aprobar)':''), a((g.consumo||[]).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+n(c.cantidad); }).join(', '))]), [13,116,104]); else S.vacio('Ninguna.');
-  const mcols = [{t:'Articulo',w:34},{t:'Inicial',w:14},{t:'+ Entro',w:14},{t:'+ Regreso',w:15},{t:'- Salio',w:13},{t:'- Instal.',w:15},{t:'- Garant.',w:15},{t:'- Merma',w:14},{t:'Ajuste',w:13},{t:'Deberia\nhaber',w:16}].concat(D.aud?[{t:'Contado',w:0},{t:'Dif.',w:0}]:[]);
-  if(D.aud){ mcols[0].w = 26; mcols.find(c=>c.t==='Contado').w = 12; mcols.find(c=>c.t==='Dif.').w = 12; }
-  const mfila = x => { const d = x.fis===null ? null : fmtNum(x.fis - x.debe); return [{t:a(x.it.nombre), b:true}, n(x.ini), n(x.ent), n(x.reg), n(x.sal), n(x.ins), n(x.gar), n(x.mer), (x.aj>0?'+':'')+n(x.aj), {t:n(x.debe), b:true}].concat(D.aud?[x.fis===null?'-':n(x.fis), {t:d===null?'-':(d>0?'+':'')+String(d), b:true, col: d===null||Math.abs(d)<0.005?[22,128,74]:(d<0?[192,57,43]:[22,128,74])}]:[]); };
-  const grupos = [['Melamina y MDF (hojas)', D.mat.filter(x=>x.it.cat==='Melamina'||x.it.cat==='MDF')], ['Herrajes', D.mat.filter(x=>x.it.cat==='Herrajes')], ['Cintilla, PVC, pegamento, stickers y otros', D.mat.filter(x=>!['Melamina','MDF','Herrajes'].includes(x.it.cat))]];
-  S.seccion('Como se movio el material', a('Inicial + entro + regreso - salio - instalado - garantias - merma +/- ajustes = deberia haber'+(D.aud?' el dia de la auditoria':' hoy')), [35,72,181], true);
-  grupos.forEach(([t, xs])=>{ if(!xs.length) return; S.banda(t, String(xs.length)); S.tabla(mcols, xs.map(mfila)); });
+  const hex = h => [1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+  const dias = repModDias(D);
+  dias.forEach((x, k)=>{
+    S.seccion(a(repModDiaTitulo(x.d)), a(`${x.insts.length} instalacion(es)${x.regresos.length?' · '+x.regresos.length+' regreso(s)':''}${x.gars.length?' · '+x.gars.length+' garantia(s)':''} · ${x.inv.length} articulo(s) se movieron`), [35,72,181], k>0);
+    S.banda('Instalaciones capturadas', String(x.insts.length));
+    if(x.insts.length) S.tabla([{t:'Calle',w:30},{t:'Que',w:44},{t:'Estado',w:36},{t:'Melamina (hojas)',w:32},{t:'Herrajes',w:40}], x.insts.map(l=>{ const e = x.estadoTxt(l); return [{t:a(l.calle||'-')+(l.fechaDia && l.fechaDia!==x.d?' (se instala '+l.fechaDia+')':''), b:true}, a(l.descripcion), {t:a(e.t), b:true, col:hex(e.c)}, a(repModMel(l))||'-', a(repModHerr(l))||'-']; }), undefined, 8);
+    else S.vacio('Ninguna.');
+    if(x.regresos.length){ S.banda('Regreso al inventario', String(x.regresos.length), [22,128,74]); S.tabla([{t:'Calle',w:34},{t:'Que se habia capturado',w:60},{t:'Regreso al inventario',w:88}], x.regresos.map(r=>[{t:a(r.l?(r.l.calle||'-'):'-'), b:true}, a(r.l?r.l.descripcion:''), {t:a(r.ms.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', ')), col:[22,128,74], b:true}]), [22,128,74], 8); }
+    if(x.gars.length){ S.banda('Garantias', String(x.gars.length), [13,116,104]); S.tabla([{t:'Cliente',w:36},{t:'Motivo',w:56},{t:'Material',w:90}], x.gars.map(g=>[{t:a(g.cliente||'-'), b:true}, a(g.motivo||'')+(g._pend?' (sin aprobar)':''), a((g.consumo||[]).map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); return (it?it.nombre:c.itemId)+' '+n(c.cantidad); }).join(', '))]), [13,116,104], 8); }
+    if(x.otros.length){ S.banda('Entradas, salidas, cortes y ajustes', String(x.otros.length), [71,85,105]); S.tabla([{t:'Movimiento',w:60},{t:'Articulos',w:122}], x.otros.map(o=>[{t:a(o.t), b:true}, a(o.ms.map(m=>m.itemNombre+' '+n(m.cantidad)).join(', '))]), [71,85,105], 12); }
+    if(x.inv.length){ S.banda('Como empezo y como cerro el inventario', String(x.inv.length));
+      const hay = f => f.esHoja ? `${n(f.final)} (${n(f.completas)} c + ${n(f.cortado)} cort.)` : n(f.final);
+      S.tabla([{t:'Articulo',w:30},{t:'Habia',w:26},{t:'+ Entro',w:11},{t:'+ Reg.',w:11},{t:'- Salio',w:11},{t:'- Instal.',w:13},{t:'- Garant.',w:13},{t:'- Merma',w:12},{t:'Ajuste',w:11},{t:'Corte',w:11},{t:'Cerro',w:33}],
+        x.inv.map(r=>[{t:a(r.it.nombre), b:true}, hay(r.a), n(r.ent), n(r.reg), n(r.sal), n(r.ins), n(r.gar), n(r.mer), (r.aj>0?'+':'')+n(r.aj), r.cor?n(r.cor):'', {t:hay(r.c), b:true}])); }
+  });
+  S.seccion('Total del periodo'+(D.aud?' y lo contado en la auditoria':''), a('Al inicio + entro y regreso - instalado y garantias - salio y merma +/- ajuste = deberia haber'+(D.aud?'. Al lado lo que se conto y que significa.':'')), [35,72,181], true);
+  const col = r => r.tono==='mal' ? [192,57,43] : (r.tono==='mas' ? [37,99,235] : [22,128,74]);
+  repModTotales(D).forEach(g=>{ if(!g.rows.length) return;
+    if(S.y > S.pageH-70){ S.doc.addPage(); S.y = 15; } // que el título no quede solo al final de la hoja
+    S.banda(a(g.t), String(g.rows.length), g.rgb);
+    const cols = g.hoja
+      ? [{t:'Color',w:24},{t:'Al inicio',w:14},{t:'+ Entro\ny regreso',w:15},{t:'- Instalado\ny garantias',w:18},{t:'- Salio\ny merma',w:14},{t:'Ajuste',w:11},{t:'Deberia haber',w:29},{t:'Se conto',w:29},{t:'Que significa',w:28}]
+      : [{t:'Articulo',w:34},{t:'Al inicio',w:15},{t:'+ Entro\ny regreso',w:16},{t:'- Instalado\ny garantias',w:18},{t:'- Salio\ny merma',w:15},{t:'Ajuste',w:12},{t:'Deberia\nhaber',w:17},{t:'Se conto',w:17},{t:'Que significa',w:38}];
+    if(!D.aud){ cols.splice(-2, 2); cols[0].w += g.hoja ? 57 : 55; }
+    S.tabla(cols, g.rows.map(r=>[{t:a(r.nom), b:true}, n(r.ini), n(r.ent), n(r.uso), n(r.sal), (r.aj>0?'+':'')+n(r.aj), {t:n(r.debe)+(r.debeTxt?'\n'+a(r.debeTxt):''), b:true}].concat(D.aud?[{t:(r.fis===null?'-':n(r.fis))+(r.fisTxt?'\n'+a(r.fisTxt):''), b:true}, {t:a(r.sig), b:true, col:col(r)}]:[])), g.rgb, 4);
+  });
   await S.fin(`reporte-completo-${String(D.mod).replace(/\s+/g,'_')}-${(D.hasta||'').slice(0,10)}.pdf`, 'Closets Vera · Reporte completo · '+D.mod);
 }
