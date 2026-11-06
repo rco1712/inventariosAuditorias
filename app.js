@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v253';
+const APP_VERSION = 'v254';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3610,6 +3610,24 @@ async function generarAlmacenPDF(){
   await S.fin(`almacen-general-herramienta-${fechaHoyLocal()}.pdf`, 'Closets Vera · Almacén general de herramienta');
 }
 
+// v254 (pedido por el usuario): Dirección puede anotar un corte de otro día que el coordinador no capturó,
+// para que salga en ese día (también en la prueba de piezas). '' = hoy.
+let movCorteDia = '';
+function movDiaAntes(n){ const d = new Date(); d.setDate(d.getDate()-n); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function movCorteDiaHtml(){
+  if(movTipo!=='corte' || !esAdmin()) return '';
+  const ayer = movDiaAntes(1), d = movCorteDia;
+  const fTxt = x => { try{ return new Date(x+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'short'}); }catch(e){ return x; } };
+  return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;border:1px solid #7c3aed;background:rgba(124,58,237,.07)">
+    <div style="font-weight:800">📅 ¿De qué día es el corte? <span class="hint" style="margin:0;font-weight:500">(solo Dirección)</span></div>
+    <div class="chips" style="margin-top:6px">
+      <button class="chip ${!d?'on':''}" onclick="movCorteDia='';renderMov()">Hoy</button>
+      <button class="chip ${d===ayer?'on':''}" onclick="movCorteDia='${ayer}';renderMov()">Ayer (${fTxt(ayer)})</button>
+      <input type="date" value="${d}" max="${movDiaAntes(1)}" style="width:auto;min-height:38px" onchange="movCorteDia=this.value||'';renderMov()">
+    </div>
+    ${d?`<p class="hint" style="margin:6px 0 0;color:#7c3aed"><strong>Se guarda como corte del ${fTxt(d)}.</strong> Úsalo solo para un corte que el coordinador no capturó ese día. Si en un cierre de después ya se contó esa hoja como cortada, saldría doble: la app te avisa.</p>`:''}
+  </div>`;
+}
 function renderMov(){
   if(!TIPO_INFO[movTipo]) movTipo='entrada';
   const todasCats = [...new Set(CATALOGO.map(i=>i.cat))];
@@ -3649,6 +3667,7 @@ function renderMov(){
   <div class="card">
     <div class="paso">3</div><strong>${info.ic} ${pregunta}</strong>
     ${ayuda?`<p class="hint">${ayuda}</p>`:''}
+    ${movCorteDiaHtml()}
     ${movCat==='Herrajes'||movBuscar?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint" style="font-weight:800">¿Qué se dañó?</label>
       <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes…','#e0791a'],['armado','📦','Mueble armado','Cajonera, cajón, espejo…','#7c3aed']].map(([k,ic,t,sub,c])=>`<button onclick="${k==='armado'?`maf=null;irA('mermaarm')`:`movLado='${k}';renderMov()`}" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
@@ -3761,7 +3780,19 @@ async function registrarMovLote(){
     if(av.length && !confirm('⚠️ Revisa antes de guardar:\n\n'+av.join('\n\n')+'\n\n¿De todos modos es una entrada NUEVA y quieres guardarla?')) return;
   }
   if(!confirm(`¿Todo está bien?\n\n${origenTxt?'📍 '+origenTxt+'\n\n':''}${destinoTxt?'📍 '+destinoTxt+'\n\n':''}${verbo}:\n${resumen}${tipo==='merma'&&lado==='cortado'?'\n(material ya cortado)':''}${nota?'\n\nNota: '+nota:''}\n\nToca Aceptar para guardar.`)) return;
-  if(avisosAuto.length && !confirm('Todavía no se anota el corte de hoy:\n\n'+avisosAuto.join('\n')+'\n\nNo pasa nada: cuando se registre el corte del día se ajusta solo. ¿Continuar?')) return;
+  const diaCorte = (tipo==='corte' && esAdmin() && movCorteDia && movCorteDia < fechaHoyLocal()) ? movCorteDia : '';
+  if(diaCorte){
+    const fT = new Date(diaCorte+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'short'});
+    const desp = (cierresCache||[]).filter(c=>c.modulo===mod && (c.dia||'') > diaCorte).map(c=>c.dia);
+    const cortesDesp = (movs||[]).filter(m=>m.tipo==='corte' && m.modulo===mod && m.estado!=='rechazado' && !m.anulado && aplicar.some(a=>a.itemId===m.itemId) && m.fecha && diaLocal(m.fecha) > diaCorte);
+    const audDesp = (auditorias||[]).filter(x=>(!x.modulo || x.modulo===mod) && x.fecha && x.fecha > new Date(diaCorte+'T23:58:00').toISOString());
+    if(audDesp.length) return alert(`No se puede: el ${diaLocal(audDesp[0].fecha)} ya se hizo una auditoría de ${mod}, y ese conteo ya incluye cómo estaban las hojas. Un corte de antes ya no cambiaría nada. No se guardó.`);
+    let av = `📅 Este corte se va a guardar como del ${fT} (no de hoy).`;
+    if(cortesDesp.length) av += `\n\n⚠️ OJO: después de ese día ya se registró corte de:\n${[...new Set(cortesDesp.map(m=>`• ${fmtNum(m.cantidad)} ${m.itemNombre} (${diaLocal(m.fecha)})`))].join('\n')}\n\nSi alguno de esos ya es esta misma hoja, NO lo guardes: saldría doble.`;
+    else if(desp.length) av += `\n\nDespués de ese día ya hubo cierre (${[...new Set(desp)].join(', ')}), pero no se registró corte de este material: no se duplica.`;
+    if(!confirm(av+'\n\n¿Guardar?')) return;
+  }
+  if(!diaCorte && avisosAuto.length && !confirm('Todavía no se anota el corte de hoy:\n\n'+avisosAuto.join('\n')+'\n\nNo pasa nada: cuando se registre el corte del día se ajusta solo. ¿Continuar?')) return;
   movGuardando = true; setTimeout(()=>{ movGuardando = false; }, 4000);
   try{
     // Confirmado por el usuario: el Corte del día NO requiere aprobación (se aplica directo,
@@ -3770,7 +3801,8 @@ async function registrarMovLote(){
     const loteId = cryptoId();
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     for(const a of aplicar){
-      const doc = {modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:new Date().toISOString(),estado,loteId,creadoPor};
+      const doc = {modulo:mod,itemId:a.itemId,itemNombre:a.itemNombre,tipo,cantidad:a.cantidad,nota,fecha:diaCorte ? new Date(diaCorte+'T23:58:00').toISOString() : new Date().toISOString(),estado,loteId,creadoPor};
+      if(diaCorte){ doc.corteDeOtroDia = diaCorte; doc.capturadoEn = new Date().toISOString(); doc.nota = (nota?nota+' · ':'')+'Corte de otro día anotado por Dirección'; }
       if(tipo==='salida'){ doc.destinoTipo = movDestino; if(movDestino==='modulo') doc.destinoModulo = movDestMod; else if(movDestino==='proveedor') doc.proveedor = movDestProv.trim(); else doc.destinoTxt = movDestOtro.trim(); }
       if(tipo==='entrada'){ doc.origenTipo = movOrigen; if(movOrigen==='proveedor') doc.proveedor = movProveedor.trim(); else doc.origenModulo = movOrigenMod; }
       if(tipo==='merma' && (fotosTmp.merma||[]).length){ doc.fotos = fotosTmp.merma.length; doc.fotosRef = loteId; }
@@ -3781,7 +3813,7 @@ async function registrarMovLote(){
       ? '✅ Guardado. <br><small>Dirección lo tiene que aprobar para que cuente en el inventario.</small>'
       : '✅ Guardado: '+aplicar.length+' artículo(s).');
     if(tipo==='merma') await guardarFotos('merma', 'merma', loteId, mod);
-    movVals={}; movBuscar=''; movOrigen=''; movProveedor=''; movOrigenMod=''; movProvOtra=false; entrCache=null; movDestino=''; movDestMod=''; movDestProv=''; movDestProvOtra=false; movDestOtro=''; salCache=null;
+    movVals={}; movBuscar=''; movCorteDia=''; movOrigen=''; movProveedor=''; movOrigenMod=''; movProvOtra=false; entrCache=null; movDestino=''; movDestMod=''; movDestProv=''; movDestProvOtra=false; movDestOtro=''; salCache=null;
     renderMov();
   }catch(e){ alert('Error: '+e.message); }
 }
