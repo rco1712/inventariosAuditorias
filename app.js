@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v254';
+const APP_VERSION = 'v255';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14657,7 +14657,7 @@ function pzpCalcular(D, hasta, borrador){
   const base = D.cfg && D.auds.find(a=>a.id===D.cfg.auditoriaId); if(!base) return null;
   // v231: `hasta` puede ser una hora exacta (conteo final entre semana): solo cuenta lo capturado ANTES de esa hora.
   const hastaT = (hasta && hasta.length>10) ? hasta : null; if(hastaT) hasta = diaLocal(hastaT);
-  const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, avisos = [];
+  const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, vie = {}, avisos = [];
   const addA = (o, id, v) => { o[id] = (o[id]||0) + v; };
   const add = (itemId, dim, q, n) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNorm(dim), n:pzpNombre(dim, n), area:pzpArea(dim)}; };
   (base.piezasContadas||[]).forEach(pc=>{
@@ -14718,6 +14718,8 @@ function pzpCalcular(D, hasta, borrador){
     });
     if(c){
       Object.keys(c.retazo||{}).forEach(id=>{ (c.retazo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(ret, id, -r.q*pzpArea(P.dim)); }); });
+      // v255 (pedido por el usuario): piezas sacadas de retazo que ya había antes de la prueba (no se midió): suben, sin restar de nada.
+      Object.keys(c.retViejo||{}).forEach(id=>{ (c.retViejo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(vie, id, r.q*pzpArea(P.dim)); }); });
       (c.liberar||[]).forEach(id=>{ if((pend[id]||0)>0){ addA(ret, id, pend[id]); pend[id] = 0; } });
       // Recortar una pieza (pedido por el usuario): una pieza buena se corta en otras más chicas. La pieza baja,
       // las nuevas suben y lo que sobra es retazo o desperdicio (nunca puede salir más área de la que tenía).
@@ -14752,7 +14754,7 @@ function pzpCalcular(D, hasta, borrador){
   arm.forEach(a=>pzpContArmado(a).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); AC[k] = (AC[k]||0) + p.q; if(!N[k]) N[k] = {itemId:p.itemId, dim:pzpNorm(p.dim), n:pzpNombre(p.dim, p.n), area:pzpArea(p.dim)}; }));
   Object.keys(N).forEach(k=>{ const su = fmtNum((T[k]||0) - (AC[k]||0)); if(su < 0) avisos.push({id:N[k].itemId, t:pzpColor(N[k].itemId)+': faltan '+fmtNum(-su)+' '+N[k].n+' sueltas (se usó o armó más de lo anotado en el corte).'}); });
   Object.keys(ret).forEach(id=>{ if(ret[id] < -PZP_A*0.02) avisos.push({id, t:pzpColor(id)+': el retazo quedó en negativo ('+pzpH(ret[id])+' hojas). Se usó material que no estaba anotado.'}); });
-  return {base, T, N, AC, ret, des, pend, sinCap, arm, avisos, dias:lista, capt, porDia};
+  return {base, T, N, AC, ret, des, pend, sinCap, vie, arm, avisos, dias:lista, capt, porDia};
 }
 // Resumen por material (hojas por área).
 function pzpResumen(R){
@@ -14762,7 +14764,7 @@ function pzpResumen(R){
     Object.keys(R.N).forEach(k=>{ const n = R.N[k]; if(n.itemId!==id) return; const su = (R.T[k]||0) - (R.AC[k]||0); pzs += su*n.area; arm += (R.AC[k]||0)*n.area; });
     const it = CATALOGO.find(i=>i.id===id);
     let of = null; try{ if(pzpD && pzpD.mod===modulo()) of = calcFormula(id).cortado; }catch(e){}
-    return {id, nombre:it?it.nombre:id, sueltas:pzs/PZP_A, armados:arm/PZP_A, retazo:(R.ret[id]||0)/PZP_A, apartado:(R.pend[id]||0)/PZP_A, sinCap:(R.sinCap[id]||0)/PZP_A, desperdicio:(R.des[id]||0)/PZP_A, oficial:of};
+    return {id, viejo:((R.vie||{})[id]||0)/PZP_A, nombre:it?it.nombre:id, sueltas:pzs/PZP_A, armados:arm/PZP_A, retazo:(R.ret[id]||0)/PZP_A, apartado:(R.pend[id]||0)/PZP_A, sinCap:(R.sinCap[id]||0)/PZP_A, desperdicio:(R.des[id]||0)/PZP_A, oficial:of};
   }).filter(x=>Math.abs(x.sueltas)+Math.abs(x.armados)+Math.abs(x.retazo)+x.apartado+Math.abs(x.sinCap)+x.desperdicio > 0.0005)
     .sort((a,b)=>a.nombre.localeCompare(b.nombre));
 }
@@ -14779,8 +14781,8 @@ async function pzpAbrir(){
 }
 function pzpCapturaDe(fecha){
   const c = pzpD.dias.find(x=>x.fecha===fecha);
-  if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, recortes:c.recortes||[], liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
-  return {fecha, corte:{}, retazo:{}, recortes:[], liberar:[], otros:{}, armados:null};
+  if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, retViejo:c.retViejo||{}, recortes:c.recortes||[], liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
+  return {fecha, corte:{}, retazo:{}, retViejo:{}, recortes:[], liberar:[], otros:{}, armados:null};
 }
 // v253 (pedido por el usuario): lo que llevas capturado en la prueba se guarda solo en este equipo
 // mientras no le des Guardar, para que no se pierda si cierras, recargas o te sales de la pantalla.
@@ -14897,9 +14899,24 @@ function pzpCorte(id){ const c = pzpCap.corte; if(!c[id]) c[id] = {piezas:[], pu
 function pzpCorteQ(id, k, d){ pzpQ(pzpCorte(id).piezas, k, d); pzpRender(); }
 function pzpCorteAdd(id, k){ pzpQ(pzpCorte(id).piezas, k, 1); pzpRender(); }
 function pzpPuertasOtro(id, d){ const c = pzpCorte(id); c.puertasOtroDia = Math.max(0, (Number(c.puertasOtroDia)||0) + d); pzpRender(); }
-function pzpSobrante(id, v){ pzpCorte(id).sobrante = v; pzpRender(); }
+function pzpSobrante(id, v){ pzpCorte(id).sobrante = v; pzpRender(); toast(v==='retazo' ? '♻️ Marcado como retazo útil · falta Guardar' : '🗑️ Marcado como desperdicio · falta Guardar'); }
 function pzpRetQ(id, k, d){ (pzpCap.retazo[id] = pzpCap.retazo[id]||[]); pzpQ(pzpCap.retazo[id], k, d); pzpRender(); }
 function pzpRetAdd(id, k){ pzpRetQ(id, k, 1); }
+let pzpVieColor = null;
+function pzpVieHtml(){
+  const v = pzpCap.retViejo||{}, con = Object.keys(v).filter(id=>(v[id]||[]).length);
+  if(pzpVieColor && !con.includes(pzpVieColor)) con.push(pzpVieColor);
+  const hojas = CATALOGO.filter(i=>esHoja(i) && /^Melamina|^MDF/.test(i.nombre));
+  let h = `<div style="margin-top:14px;padding:10px 12px;border-radius:12px;border:2px dashed #16a34a">
+    <div style="font-weight:800;color:#16a34a">♻️ Retazo de antes de la prueba</div>
+    <p class="hint" style="margin:2px 0 0">Para piezas que sacaron de un retazo que <strong>ya estaba</strong> antes de empezar la prueba (nunca se midió). Solo anotas las piezas; no te pide cuánto retazo había.</p>`;
+  con.forEach(id=>{ h += `<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:6px"><strong>${pzpColor(id)}</strong> <span class="hint">· retazo de antes</span>${pzpListaPiezasHtml(id, v[id]||[], 'pzpVieQ', 'pzpVieAdd', `'${id}'`)}</div>`; });
+  h += `<select style="margin-top:8px" onchange="pzpVieColorSel(this.value)"><option value="">+ Elegir color del retazo de antes…</option>${hojas.filter(i=>!con.includes(i.id)).map(i=>`<option value="${i.id}">${pzpColor(i.id)}</option>`).join('')}</select></div>`;
+  return h;
+}
+function pzpVieQ(id, k, d){ pzpCap.retViejo = pzpCap.retViejo||{}; (pzpCap.retViejo[id] = pzpCap.retViejo[id]||[]); pzpQ(pzpCap.retViejo[id], k, d); pzpRender(); }
+function pzpVieAdd(id, k){ pzpVieQ(id, k, 1); }
+function pzpVieColorSel(id){ pzpVieColor = id || null; if(id){ pzpCap.retViejo = pzpCap.retViejo||{}; pzpCap.retViejo[id] = pzpCap.retViejo[id]||[]; } pzpRender(); }
 function pzpRetColorSel(id){ pzpRetColor = id || null; if(id) pzpCap.retazo[id] = pzpCap.retazo[id]||[]; pzpRender(); }
 function pzpLiberar(id){ const l = pzpCap.liberar; const i = l.indexOf(id); if(i>=0) l.splice(i,1); else l.push(id); pzpRender(); }
 function pzpMermaDest(mid, v){ const o = pzpOtro(mid); o.dest = v; if(v==='aprov' && !o.aprov) o.aprov = []; pzpRender(); }
@@ -14968,7 +14985,7 @@ function pzpCapturaHtml(){
   let h = `<div class="card">
     <div class="hint" style="margin:0 0 6px">📷 Con la foto de la Hoja de corte del cortador de ${D.mod}.</div>
     <div class="row" style="justify-content:space-between"><h3 style="margin:0">${pzpFmtDia(pzpFecha)}</h3><input type="date" value="${pzpFecha}" max="${fechaHoyLocal()}" min="${diaLocal(R.base.fecha)}" style="width:auto;min-height:40px" onchange="pzpFecha=this.value;pzpRender()"></div>
-    ${guardada?'<div class="hint" style="color:var(--ok);font-weight:700">✅ Este día ya se guardó (puedes corregirlo y volver a guardar).</div>':''}
+    <div style="margin-top:8px">${pzpEstadoHtml()}</div>
     ${faltan.length?`<div class="warn">Falta capturar: ${faltan.map(d=>`<button class="btn small" style="margin:4px 4px 0 0;min-height:32px;padding:4px 10px" onclick="pzpFecha='${d}';pzpRender()">${pzpFmtDia(d)}</button>`).join('')}</div>`:''}
   </div>`;
   // 1. Corte
@@ -14994,7 +15011,8 @@ function pzpCapturaHtml(){
       ${pzpBarra([{t:'Piezas', v:aPz, c:'#3E5CDE'}, {t:'Puertas de hoy', v:aPu, c:'#8a5a2b'}, {t:'Apartado', v:aPend, c:'#a78bfa'}, {t:resto<0?'No cabe':'Sin anotar', v:Math.abs(resto), c:resto<0?'#e0453f':'#cfd6e6'}])}
       ${resto < -1 ? `<div class="warn" style="background:#fdecec;border-color:#f0a9a6;border-left-color:#e0453f;color:#8a1f1b"><strong>⛔ Eso no cabe en ${fmtNum(H)} hoja${H===1?'':'s'}.</strong> Lo anotado ocupa ${pzpH(A-resto)} hojas. Revisa la Hoja de corte o vuelve a contar las completas.</div>`
         : resto > 0.005*PZP_A ? `<div class="hint" style="margin-top:8px"><strong>Te sobraron ${pzpH(resto)} hojas sin anotar.</strong> ¿Qué es?</div>
-          <div class="row" style="gap:6px;margin-top:4px">${[['retazo','Retazo útil'],['desperdicio','Desperdicio']].map(([k,t])=>`<button class="btn small" style="flex:1;${cc.sobrante===k?'':'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="pzpSobrante('${id}','${k}')">${t}</button>`).join('')}</div>`
+          <div class="row" style="gap:6px;margin-top:4px">${[['retazo','♻️ Retazo útil','#16a34a'],['desperdicio','🗑️ Desperdicio','#64748b']].map(([k,t,col])=>`<button class="btn small" style="flex:1;${(cc.sobrante||'desperdicio')===k?`background:${col};color:#fff;border:3px solid ${col};font-weight:900`:'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none;opacity:.75'}" onclick="pzpSobrante('${id}','${k}')">${(cc.sobrante||'desperdicio')===k?'✓ ':''}${t}</button>`).join('')}</div>
+          <div style="margin-top:6px;font-size:13px;font-weight:700;color:${cc.sobrante==='retazo'?'#16a34a':'#64748b'}">${cc.sobrante==='retazo'?`✓ Elegiste: las ${pzpH(resto)} hojas son <u>retazo útil</u>. Desde el día siguiente te salen en "¿Sacaste piezas de un retazo?".`:`✓ Elegiste: las ${pzpH(resto)} hojas son <u>desperdicio</u>.${!cc.sobrante||cc.sobrante==='desperdicio'?' (Si no eliges nada, se toma como desperdicio.)':''}`}</div>`
         : `<div class="hint" style="color:var(--ok);font-weight:700;margin-top:6px">✅ Se aprovechó toda la hoja.</div>`}
     </div>`;
   });
@@ -15018,7 +15036,7 @@ function pzpCapturaHtml(){
       ${pzpListaPiezasHtml(id, pzpCap.retazo[id]||[], 'pzpRetQ', 'pzpRetAdd', `'${id}'`)}
       ${usado > disp + 1 ? `<div class="warn" style="background:#fdecec;border-color:#f0a9a6;border-left-color:#e0453f;color:#8a1f1b"><strong>⛔ No hay tanto retazo de ${pzpColor(id)}.</strong> Anotaste ${pzpH(usado)} hojas y hay ${pzpH(disp)}.</div>` : ''}</div>`;
   });
-  h += `<select style="margin-top:8px" onchange="pzpRetColorSel(this.value)"><option value="">${retIds.length?'+ Elegir color del retazo…':'No hay retazo anotado todavía'}</option>${retIds.filter(id=>!conRet.includes(id)).map(id=>`<option value="${id}">${pzpColor(id)} · ${pzpH(R0.ret[id])} hojas</option>`).join('')}</select></div>`;
+  h += `<select style="margin-top:8px" onchange="pzpRetColorSel(this.value)"><option value="">${retIds.length?'+ Elegir color del retazo…':'No hay retazo anotado todavía'}</option>${retIds.filter(id=>!conRet.includes(id)).map(id=>`<option value="${id}">${pzpColor(id)} · ${pzpH(R0.ret[id])} hojas</option>`).join('')}</select>${pzpVieHtml()}</div>`;
   // 4. Recortar una pieza (pedido por el usuario)
   h += `<div class="card"><div style="font-size:15px;font-weight:800">4 · ✂️ Recortar una pieza</div>
     <p class="hint">Una pieza que se cortó en otras más chicas para aprovecharla (ej. 1 pared → 3 entrepaños). No es merma: la pieza se transforma.</p>`;
@@ -15086,8 +15104,11 @@ function pzpCapturaHtml(){
   </div>`;
   const avHoy = R.avisos.filter(a=>!a.falta && (!a.dia || a.dia===pzpFecha));
   if(avHoy.length) h += `<div class="card" style="border:2px solid #e0453f"><strong style="color:#8a1f1b">⚠️ Revisar</strong>${avHoy.map(a=>`<div class="hint" style="color:#8a1f1b">• ${a.t}</div>`).join('')}<p class="hint">Revisa la Hoja de corte o pregúntale al cortador antes de guardar.</p></div>`;
-  h += `<p class="hint" style="margin:0 0 6px">💡 Puedes guardar aunque te falten datos. Para completarlos otro día, elige esta misma fecha arriba: te aparece lo que guardaste, lo completas y vuelves a guardar.${pzpRecuperado?' <strong>📝 Esto todavía no está guardado</strong> (se recuperó lo que llevabas en este equipo).':''}</p>`;
-  h += `<button class="btn" style="width:100%;min-height:52px;margin-bottom:24px" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':'Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button>`;
+  h += `<p class="hint" style="margin:0 0 6px">💡 Puedes guardar aunque te falten datos. Para completarlos otro día, elige esta misma fecha arriba: te aparece lo que guardaste, lo completas y vuelves a guardar.${pzpRecuperado && pzpEstado().t!=='ok'?' <strong>📝 Esto todavía no está guardado</strong> (se recuperó lo que llevabas en este equipo).':''}</p>`;
+  const est = pzpEstado();
+  h += `<div style="position:sticky;bottom:0;z-index:5;background:var(--bg);padding:8px 0 16px;margin-bottom:8px">
+    ${est.t==='ok'?`<div style="text-align:center;font-weight:800;color:#16a34a;margin-bottom:6px">✅ Todo guardado</div>`:est.t==='cambios'?`<div style="text-align:center;font-weight:800;color:#d97706;margin-bottom:6px">📝 Hay cambios sin guardar</div>`:`<div style="text-align:center;font-weight:800;color:#dc2626;margin-bottom:6px">📝 Todavía no está guardado</div>`}
+    <button class="btn" style="width:100%;min-height:52px;${est.t==='ok'?'background:#16a34a':est.t==='cambios'?'background:#d97706':''}" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':est.t==='ok'?'✅ Guardado · volver a guardar':est.t==='cambios'?'💾 Guardar cambios del '+pzpFmtDia(pzpFecha):'💾 Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button></div>`;
   return h;
 }
 function pzpArmFormHtml(){
@@ -15112,6 +15133,36 @@ function pzpArmCambioHtml(ayer, hoy){
     ${mas.length?`<strong>Pasaron de sueltas a armadas:</strong> ${mas.join(', ')}<br>`:''}${menos.length?`<strong>Salieron de armados</strong> (se instalaron o se desarmaron): ${menos.join(', ')}<br>`:''}
     <span style="font-size:12px">Esto <strong>no cambia el total</strong> de piezas.</span></div>`;
 }
+// v255: lo que se guarda de un día (sin fecha de guardado), para guardar y para saber si hay cambios sin guardar.
+function pzpDatosDe(c, arm){
+  const limpio = {};
+  Object.keys(c.corte||{}).forEach(id=>{ const x = c.corte[id]; limpio[id] = {piezas:(x.piezas||[]).filter(r=>r.q>0), puertasOtroDia:Number(x.puertasOtroDia)||0, sobrante:x.sobrante||'desperdicio'}; });
+  const ret = {}; Object.keys(c.retazo||{}).forEach(id=>{ const l = (c.retazo[id]||[]).filter(r=>r.q>0); if(l.length) ret[id] = l; });
+  const otros = {}; Object.keys(c.otros||{}).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio', extraRet:Number(o.extraRet)||0}; });
+  const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
+  const vie = {}; Object.keys(c.retViejo||{}).forEach(id=>{ const l = (c.retViejo[id]||[]).filter(r=>r.q>0); if(l.length) vie[id] = l; });
+  return {corte:limpio, retazo:ret, retViejo:vie, recortes, liberar:c.liberar||[], otros, armados:(arm||[]).filter(a=>Number(a.cantidad)>0)};
+}
+// Comparación que no se fija en renglones vacíos ni en el orden.
+function pzpHuella(d){
+  const corte = {}; Object.keys(d.corte).sort().forEach(id=>{ const x = d.corte[id]; if(x.piezas.length || x.puertasOtroDia || x.sobrante!=='desperdicio') corte[id] = {p:x.piezas.map(r=>r.k+':'+r.q).sort(), u:x.puertasOtroDia, s:x.sobrante}; });
+  const otros = {}; Object.keys(d.otros).sort().forEach(m=>{ const o = d.otros[m]; if(o.piezas.length || o.aprov.length || o.extraRet || o.dest) otros[m] = {m:o.modo, p:o.piezas.map(r=>r.k+':'+r.q).sort(), d:o.dest, a:o.aprov.map(r=>r.k+':'+r.q).sort(), r:o.restoAprov, e:o.extraRet}; });
+  const ret = {}; Object.keys(d.retazo).sort().forEach(id=>{ ret[id] = d.retazo[id].map(r=>r.k+':'+r.q).sort(); });
+  const vie = {}; Object.keys(d.retViejo||{}).sort().forEach(id=>{ vie[id] = d.retViejo[id].map(r=>r.k+':'+r.q).sort(); });
+  return JSON.stringify({corte, otros, ret, vie, rc:d.recortes, l:[...d.liberar].sort(), a:d.armados.map(a=>JSON.stringify(Object.keys(a).sort().reduce((o,k)=>(o[k]=a[k],o),{}))).sort()});
+}
+function pzpEstado(){
+  const g = pzpD && pzpD.dias.find(x=>x.fecha===pzpFecha);
+  if(!g) return {t:'nuevo'};
+  const sucio = pzpHuella(pzpDatosDe(pzpCap, pzpArmados())) !== pzpHuella(pzpDatosDe(g, g.armados||[]));
+  return {t: sucio ? 'cambios' : 'ok', g};
+}
+function pzpEstadoHtml(){
+  const e = pzpEstado(), hora = e.g && e.g.guardado ? new Date(e.g.guardado).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'}) : '';
+  if(e.t==='ok') return `<div style="padding:10px 12px;border-radius:12px;background:rgba(22,163,74,.14);border:2px solid #16a34a;color:#16a34a;font-weight:800">✅ Guardado${hora?' · '+hora:''}<div style="font-weight:500;font-size:13px">No hay cambios sin guardar.</div></div>`;
+  if(e.t==='cambios') return `<div style="padding:10px 12px;border-radius:12px;background:rgba(217,119,6,.14);border:2px solid #d97706;color:#d97706;font-weight:800">📝 Tienes cambios SIN GUARDAR<div style="font-weight:500;font-size:13px">Ya estaba guardado${hora?' ('+hora+')':''}, pero corregiste algo. Dale "Guardar cambios" abajo.</div></div>`;
+  return `<div style="padding:10px 12px;border-radius:12px;background:rgba(220,38,38,.10);border:2px solid #dc2626;color:#dc2626;font-weight:800">📝 Este día todavía NO está guardado<div style="font-weight:500;font-size:13px">Cuando termines (o aunque te falten datos), dale "Guardar" abajo.</div></div>`;
+}
 async function pzpGuardar(){
   const mod = pzpD.mod, c = pzpCap;
   const limpio = {};
@@ -15119,10 +15170,11 @@ async function pzpGuardar(){
   const ret = {}; Object.keys(c.retazo).forEach(id=>{ const l = (c.retazo[id]||[]).filter(r=>r.q>0); if(l.length) ret[id] = l; });
   const otros = {}; Object.keys(c.otros).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio', extraRet:Number(o.extraRet)||0}; });
   const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
-  const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
+  const vie = pzpDatosDe(c).retViejo;
+  const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, retViejo:vie, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
-    toast('✅ Prueba guardada (no cambia tu inventario)');
+    toast('✅ Guardado: prueba del '+pzpFmtDia(pzpFecha)+' (no cambia tu inventario)');
     await pzpCargar(mod); pzpCap = null; pzpRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
@@ -15155,6 +15207,7 @@ function pzpResultadoHtml(){
     const malas = pc.filas.filter(f=>okPieza(f)===false); if(!okC || malas.length) todoBien = false;
     return `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
       <div class="row" style="justify-content:space-between"><strong style="font-size:15px">${pzpColor(id)}</strong><span style="font-weight:800;color:${okC?'var(--ok)':'var(--bad)'}">${okC?'✅':'⚠️'} ${dH>0?'+':''}${fmtNum(dH)} hojas</span></div>
+      ${((R.vie||{})[id]||0)>0.005*PZP_A?`<div class="hint" style="margin:2px 0;color:#16a34a">♻️ ${fmtNum(R.vie[id]/PZP_A)} hojas en piezas salieron de retazo de antes de la prueba (ya van en "Prueba").</div>`:''}
       ${Math.abs(ret)>0.005?`<div class="hint" style="margin:2px 0">Retazo según la prueba: ${fmtNum(ret)} hojas (la auditoría no cuenta retazo)</div>`:''}
       <div class="wrap-x"><table><tr><th>Pieza</th><th style="text-align:right">Prueba</th><th style="text-align:right">Contado</th><th style="text-align:right">Dif.</th></tr>
       ${pc.filas.sort((a,b)=>b.n.area-a.n.area).map(f=>{ const ok = okPieza(f); return `<tr><td>${f.n.n}</td><td style="text-align:right">${f.p}</td><td style="text-align:right">${f.c}</td><td style="text-align:right;font-weight:800;color:${f.d===0?'var(--ok)':(ok===false?'var(--bad)':'var(--ink)')}">${f.d>0?'+':''}${f.d}</td></tr>`; }).join('')}
@@ -15172,7 +15225,7 @@ function pzpResumenHtml(){
   return `<div class="card"><h3>¿Cuadran las piezas con las hojas?</h3>
     <p class="hint" style="margin-top:0">Desde el conteo del ${new Date(R.base.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})} · ${R.dias.length} día(s) · ${faltan?`<span class="neg">${faltan} sin capturar</span>`:'todos capturados'}. Todo en hojas, medido por área real. "Oficial" es el cortado de la app (por rendimiento), solo de referencia: la prueba de verdad es el conteo final.</p>
     <div class="wrap-x"><table><tr><th>Material</th><th style="text-align:right">Piezas</th><th style="text-align:right">Retazo</th><th style="text-align:right">Desp.</th><th style="text-align:right">Oficial</th></tr>
-    ${rs.map(x=>`<tr><td><strong>${x.nombre.replace('Melamina ','')}</strong>${x.apartado>0.005?`<div class="hint" style="margin:0">apartado puertas ${fmtNum(x.apartado)}</div>`:''}${Math.abs(x.sinCap)>0.005?`<div class="hint" style="margin:0;color:var(--bad)">sin capturar ${fmtNum(x.sinCap)}</div>`:''}</td><td style="text-align:right">${fmtNum(x.sueltas+x.armados)}<div class="hint" style="margin:0">${fmtNum(x.armados)} armadas</div></td><td style="text-align:right" class="${x.retazo<-0.01?'neg':''}">${fmtNum(x.retazo)}</td><td style="text-align:right">${fmtNum(x.desperdicio)}</td><td style="text-align:right">${x.oficial===null?'—':fmtNum(x.oficial)}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Sin datos todavía.</td></tr>'}
+    ${rs.map(x=>`<tr><td><strong>${x.nombre.replace('Melamina ','')}</strong>${x.apartado>0.005?`<div class="hint" style="margin:0">apartado puertas ${fmtNum(x.apartado)}</div>`:''}${x.viejo>0.005?`<div class="hint" style="margin:0;color:#16a34a">♻️ ${fmtNum(x.viejo)} de retazo de antes</div>`:''}${Math.abs(x.sinCap)>0.005?`<div class="hint" style="margin:0;color:var(--bad)">sin capturar ${fmtNum(x.sinCap)}</div>`:''}</td><td style="text-align:right">${fmtNum(x.sueltas+x.armados)}<div class="hint" style="margin:0">${fmtNum(x.armados)} armadas</div></td><td style="text-align:right" class="${x.retazo<-0.01?'neg':''}">${fmtNum(x.retazo)}</td><td style="text-align:right">${fmtNum(x.desperdicio)}</td><td style="text-align:right">${x.oficial===null?'—':fmtNum(x.oficial)}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Sin datos todavía.</td></tr>'}
     </table></div></div>`;
 }
 function pzpPiezasHtml(){
