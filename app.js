@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v255';
+const APP_VERSION = 'v256';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14684,6 +14684,7 @@ function pzpCalcular(D, hasta, borrador){
   const lista = [...dias].sort();
   const porDia = {};
   lista.forEach(dia=>{
+    const ret0 = Object.assign({}, ret);
     const c = capt[dia], cutH = cortes[dia]||{}, libre = {}, pendHoy = {}, info = {cortes:cutH, puertas:{}, otros:otros[dia]||[], insts:insts.filter(x=>x.dia===dia).map(x=>x.l)};
     Object.keys(cutH).forEach(id=>{
       const H = cutH[id]*PZP_A;
@@ -14717,7 +14718,11 @@ function pzpCalcular(D, hasta, borrador){
       else if(r > 0){ if(cc.sobrante==='retazo') addA(ret, id, r); else addA(des, id, r); }
     });
     if(c){
-      Object.keys(c.retazo||{}).forEach(id=>{ (c.retazo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(ret, id, -r.q*pzpArea(P.dim)); }); });
+      const usoRet = {};
+      Object.keys(c.retazo||{}).forEach(id=>{ (c.retazo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(ret, id, -r.q*pzpArea(P.dim)); addA(usoRet, id, r.q*pzpArea(P.dim)); }); });
+      // v256 (pedido por el usuario): lo que queda del retazo que había (de días anteriores) se marca como desperdicio.
+      // Solo el retazo de antes de este día; el retazo nuevo que dejó el corte de hoy no se toca.
+      (c.retTirar||[]).forEach(id=>{ const q = Math.min(Math.max(0, (ret0[id]||0) - (usoRet[id]||0)), Math.max(0, ret[id]||0)); if(q>0){ addA(ret, id, -q); addA(des, id, q); } });
       // v255 (pedido por el usuario): piezas sacadas de retazo que ya había antes de la prueba (no se midió): suben, sin restar de nada.
       Object.keys(c.retViejo||{}).forEach(id=>{ (c.retViejo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(vie, id, r.q*pzpArea(P.dim)); }); });
       (c.liberar||[]).forEach(id=>{ if((pend[id]||0)>0){ addA(ret, id, pend[id]); pend[id] = 0; } });
@@ -14781,8 +14786,8 @@ async function pzpAbrir(){
 }
 function pzpCapturaDe(fecha){
   const c = pzpD.dias.find(x=>x.fecha===fecha);
-  if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, retViejo:c.retViejo||{}, recortes:c.recortes||[], liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
-  return {fecha, corte:{}, retazo:{}, retViejo:{}, recortes:[], liberar:[], otros:{}, armados:null};
+  if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, retViejo:c.retViejo||{}, retTirar:c.retTirar||[], recortes:c.recortes||[], liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
+  return {fecha, corte:{}, retazo:{}, retViejo:{}, retTirar:[], recortes:[], liberar:[], otros:{}, armados:null};
 }
 // v253 (pedido por el usuario): lo que llevas capturado en la prueba se guarda solo en este equipo
 // mientras no le des Guardar, para que no se pierda si cierras, recargas o te sales de la pantalla.
@@ -14917,6 +14922,7 @@ function pzpVieHtml(){
 function pzpVieQ(id, k, d){ pzpCap.retViejo = pzpCap.retViejo||{}; (pzpCap.retViejo[id] = pzpCap.retViejo[id]||[]); pzpQ(pzpCap.retViejo[id], k, d); pzpRender(); }
 function pzpVieAdd(id, k){ pzpVieQ(id, k, 1); }
 function pzpVieColorSel(id){ pzpVieColor = id || null; if(id){ pzpCap.retViejo = pzpCap.retViejo||{}; pzpCap.retViejo[id] = pzpCap.retViejo[id]||[]; } pzpRender(); }
+function pzpRetTirar(id, v){ const l = pzpCap.retTirar = (pzpCap.retTirar||[]).filter(x=>x!==id); if(v) l.push(id); pzpRender(); toast(v ? '🗑️ Lo que queda del retazo = desperdicio · falta Guardar' : '♻️ Lo que queda sigue como retazo · falta Guardar'); }
 function pzpRetColorSel(id){ pzpRetColor = id || null; if(id) pzpCap.retazo[id] = pzpCap.retazo[id]||[]; pzpRender(); }
 function pzpLiberar(id){ const l = pzpCap.liberar; const i = l.indexOf(id); if(i>=0) l.splice(i,1); else l.push(id); pzpRender(); }
 function pzpMermaDest(mid, v){ const o = pzpOtro(mid); o.dest = v; if(v==='aprov' && !o.aprov) o.aprov = []; pzpRender(); }
@@ -15026,7 +15032,7 @@ function pzpCapturaHtml(){
   // 3. Cortado de retazo
   const retIds = Object.keys(R0 ? R0.ret : {}).filter(id=>R0.ret[id] > 0.01*PZP_A);
   h += `<div class="card"><div style="font-size:15px;font-weight:800">3 · ¿Sacaste piezas de un retazo?</div>`;
-  const conRet = Object.keys(pzpCap.retazo).filter(id=>(pzpCap.retazo[id]||[]).length);
+  const conRet = Object.keys(pzpCap.retazo).filter(id=>(pzpCap.retazo[id]||[]).length || (pzpCap.retTirar||[]).includes(id));
   if(pzpRetColor && !conRet.includes(pzpRetColor)) conRet.push(pzpRetColor);
   conRet.forEach(id=>{
     const disp = R0 ? (R0.ret[id]||0) : 0;
@@ -15034,6 +15040,10 @@ function pzpCapturaHtml(){
     if(usado > disp + 1) noCabe = true;
     h += `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px"><strong>${pzpColor(id)}</strong> <span class="hint">· retazo disponible: ${pzpH(disp)} hojas</span>
       ${pzpListaPiezasHtml(id, pzpCap.retazo[id]||[], 'pzpRetQ', 'pzpRetAdd', `'${id}'`)}
+      ${(()=>{ const queda = Math.max(0, disp - usado), tir = (pzpCap.retTirar||[]).includes(id); if(queda < 0.005*PZP_A) return `<div class="hint" style="color:var(--ok);font-weight:700;margin-top:6px">✅ Se usó todo el retazo.</div>`;
+        return `<div class="hint" style="margin-top:8px"><strong>Quedan ${pzpH(queda)} hojas de este retazo.</strong> ¿Qué pasa con lo que queda?</div>
+        <div class="row" style="gap:6px;margin-top:4px">${[[false,'♻️ Se guarda (sigue como retazo)','#16a34a'],[true,'🗑️ Ya es desperdicio','#64748b']].map(([v,t,col])=>`<button class="btn small" style="flex:1;${tir===v?`background:${col};color:#fff;border:3px solid ${col};font-weight:900`:'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none;opacity:.75'}" onclick="pzpRetTirar('${id}',${v})">${tir===v?'✓ ':''}${t}</button>`).join('')}</div>
+        <div style="margin-top:6px;font-size:13px;font-weight:700;color:${tir?'#64748b':'#16a34a'}">${tir?`✓ Elegiste: las ${pzpH(queda)} hojas que quedan son <u>desperdicio</u>. Ya no salen mañana.`:`✓ Elegiste: las ${pzpH(queda)} hojas siguen como <u>retazo</u> y te salen mañana otra vez.`}</div>`; })()}
       ${usado > disp + 1 ? `<div class="warn" style="background:#fdecec;border-color:#f0a9a6;border-left-color:#e0453f;color:#8a1f1b"><strong>⛔ No hay tanto retazo de ${pzpColor(id)}.</strong> Anotaste ${pzpH(usado)} hojas y hay ${pzpH(disp)}.</div>` : ''}</div>`;
   });
   h += `<select style="margin-top:8px" onchange="pzpRetColorSel(this.value)"><option value="">${retIds.length?'+ Elegir color del retazo…':'No hay retazo anotado todavía'}</option>${retIds.filter(id=>!conRet.includes(id)).map(id=>`<option value="${id}">${pzpColor(id)} · ${pzpH(R0.ret[id])} hojas</option>`).join('')}</select>${pzpVieHtml()}</div>`;
@@ -15141,7 +15151,7 @@ function pzpDatosDe(c, arm){
   const otros = {}; Object.keys(c.otros||{}).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio', extraRet:Number(o.extraRet)||0}; });
   const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
   const vie = {}; Object.keys(c.retViejo||{}).forEach(id=>{ const l = (c.retViejo[id]||[]).filter(r=>r.q>0); if(l.length) vie[id] = l; });
-  return {corte:limpio, retazo:ret, retViejo:vie, recortes, liberar:c.liberar||[], otros, armados:(arm||[]).filter(a=>Number(a.cantidad)>0)};
+  return {corte:limpio, retazo:ret, retViejo:vie, retTirar:[...(c.retTirar||[])], recortes, liberar:c.liberar||[], otros, armados:(arm||[]).filter(a=>Number(a.cantidad)>0)};
 }
 // Comparación que no se fija en renglones vacíos ni en el orden.
 function pzpHuella(d){
@@ -15149,7 +15159,7 @@ function pzpHuella(d){
   const otros = {}; Object.keys(d.otros).sort().forEach(m=>{ const o = d.otros[m]; if(o.piezas.length || o.aprov.length || o.extraRet || o.dest) otros[m] = {m:o.modo, p:o.piezas.map(r=>r.k+':'+r.q).sort(), d:o.dest, a:o.aprov.map(r=>r.k+':'+r.q).sort(), r:o.restoAprov, e:o.extraRet}; });
   const ret = {}; Object.keys(d.retazo).sort().forEach(id=>{ ret[id] = d.retazo[id].map(r=>r.k+':'+r.q).sort(); });
   const vie = {}; Object.keys(d.retViejo||{}).sort().forEach(id=>{ vie[id] = d.retViejo[id].map(r=>r.k+':'+r.q).sort(); });
-  return JSON.stringify({corte, otros, ret, vie, rc:d.recortes, l:[...d.liberar].sort(), a:d.armados.map(a=>JSON.stringify(Object.keys(a).sort().reduce((o,k)=>(o[k]=a[k],o),{}))).sort()});
+  return JSON.stringify({corte, otros, ret, vie, tir:[...(d.retTirar||[])].sort(), rc:d.recortes, l:[...d.liberar].sort(), a:d.armados.map(a=>JSON.stringify(Object.keys(a).sort().reduce((o,k)=>(o[k]=a[k],o),{}))).sort()});
 }
 function pzpEstado(){
   const g = pzpD && pzpD.dias.find(x=>x.fecha===pzpFecha);
@@ -15171,7 +15181,7 @@ async function pzpGuardar(){
   const otros = {}; Object.keys(c.otros).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio', extraRet:Number(o.extraRet)||0}; });
   const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
   const vie = pzpDatosDe(c).retViejo;
-  const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, retViejo:vie, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
+  const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, retViejo:vie, retTirar:[...(c.retTirar||[])], recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
     toast('✅ Guardado: prueba del '+pzpFmtDia(pzpFecha)+' (no cambia tu inventario)');
