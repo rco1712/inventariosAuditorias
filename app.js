@@ -14750,9 +14750,20 @@ function pzpCapturaDe(fecha){
   if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, recortes:c.recortes||[], liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
   return {fecha, corte:{}, retazo:{}, recortes:[], liberar:[], otros:{}, armados:null};
 }
+// v253 (pedido por el usuario): lo que llevas capturado en la prueba se guarda solo en este equipo
+// mientras no le des Guardar, para que no se pierda si cierras, recargas o te sales de la pantalla.
+const pzpBorrKey = (mod, f) => 'pzpBorr_'+mod+'_'+f;
+function pzpBorrGuardar(){ try{ if(pzpCap && pzpD) localStorage.setItem(pzpBorrKey(pzpD.mod, pzpCap.fecha), JSON.stringify({ts:new Date().toISOString(), cap:pzpCap})); }catch(e){} }
+function pzpBorrLeer(mod, f){ try{ const x = JSON.parse(localStorage.getItem(pzpBorrKey(mod, f))||'null'); return x && x.cap ? x : null; }catch(e){ return null; } }
+function pzpBorrBorrar(mod, f){ try{ localStorage.removeItem(pzpBorrKey(mod, f)); }catch(e){} }
+let pzpRecuperado = false;
 function pzpRender(){
   const D = pzpD, mod = D.mod;
-  if(pzpCapFecha!==pzpFecha || !pzpCap){ pzpCap = pzpCapturaDe(pzpFecha); pzpCapFecha = pzpFecha; }
+  if(pzpCapFecha!==pzpFecha || !pzpCap){
+    pzpCap = pzpCapturaDe(pzpFecha); pzpCapFecha = pzpFecha; pzpRecuperado = false;
+    const b = pzpBorrLeer(mod, pzpFecha), g = D.dias.find(x=>x.fecha===pzpFecha);
+    if(b && (!g || !g.guardado || b.ts > g.guardado)){ pzpCap = b.cap; pzpCap.fecha = pzpFecha; pzpRecuperado = true; }
+  } else pzpBorrGuardar();
   const activo = !!(D.cfg && D.cfg.activo);
   let h = `<div class="card" style="border:2px solid #7c3aed">
     <div style="font-size:17px;font-weight:800">🧪 Piezas (prueba) · solo Dirección</div>
@@ -14829,12 +14840,25 @@ function pzpBarra(partes){
   return `<div style="display:flex;height:18px;border-radius:9px;overflow:hidden;margin:10px 0 4px;border:1px solid var(--line)">${partes.filter(p=>p.v>0).map(p=>`<i style="display:block;width:${(p.v/tot*100).toFixed(1)}%;background:${p.c}"></i>`).join('')}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--sub)">${partes.filter(p=>p.v>0.0005*PZP_A).map(p=>`<span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${p.c};margin-right:4px;vertical-align:-1px"></span>${p.t} ${Math.round(p.v/tot*100)}%</span>`).join('')}</div>`;
 }
+// v253 (pedido por el usuario): las piezas que no están arriba van por secciones que se despliegan
+// (Max, Zapatera, Espejo…), con su − / + igual que las de arriba, en vez de una lista para buscar.
+const pzpFamAbiertas = new Set();
+function pzpFamTog(k, open){ if(open) pzpFamAbiertas.add(k); else pzpFamAbiertas.delete(k); }
 function pzpListaPiezasHtml(itemId, lista, fnQ, fnAdd, ctx){
   const piezas = pzpPiezasDe(itemId);
-  const vis = piezas.filter(P=>PZP_TOP.includes(P.key) || lista.some(r=>r.k===P.key));
+  const fila = P => { const q = (lista.find(r=>r.k===P.key)||{}).q||0; return pzpFilaPieza(P, q, `${fnQ}(${ctx},'${P.key}',-1)`, `${fnQ}(${ctx},'${P.key}',1)`); };
+  if(piezas.length <= 4) return piezas.map(fila).join('');
+  const vis = piezas.filter(P=>PZP_TOP.includes(P.key));
   const resto = piezas.filter(P=>!vis.includes(P));
-  return vis.map(P=>{ const q = (lista.find(r=>r.k===P.key)||{}).q||0; return pzpFilaPieza(P, q, `${fnQ}(${ctx},'${P.key}',-1)`, `${fnQ}(${ctx},'${P.key}',1)`); }).join('')
-    + (resto.length ? `<select style="margin-top:8px" onchange="if(this.value){${fnAdd}(${ctx},this.value)}"><option value="">+ Otra pieza…</option>${resto.map(P=>`<option value="${P.key}">${P.label} · ${P.dim}</option>`).join('')}</select>` : '');
+  const fams = [];
+  resto.forEach(P=>{ const f = familiaDePieza(P.key); let g = fams.find(x=>x.f===f); if(!g){ g = {f, ps:[]}; fams.push(g); } g.ps.push(P); });
+  return vis.map(fila).join('') + fams.map(({f, ps})=>{
+    const k = String(ctx).replace(/\W/g,'')+'_'+f.k, n = ps.filter(P=>((lista.find(r=>r.k===P.key)||{}).q||0)>0).length;
+    const open = pzpFamAbiertas.has(k) || n>0;
+    return `<details ${open?'open':''} ontoggle="pzpFamTog('${k}',this.open)" style="margin-top:8px;border:1px solid ${f.c};border-radius:12px;padding:0 10px">
+      <summary style="cursor:pointer;padding:10px 0;font-weight:800;color:${f.c}">${f.ic} ${f.t} <span class="hint" style="margin:0;font-weight:600">· ${ps.length} pieza${ps.length===1?'':'s'}${n?` · <strong style="color:${f.c}">${n} con cantidad</strong>`:''}</span></summary>
+      ${ps.map(fila).join('')}</details>`;
+  }).join('');
 }
 function pzpQ(lista, k, d){ let r = lista.find(x=>x.k===k); if(!r){ r = {k, q:0}; lista.push(r); } r.q = Math.max(0, (Number(r.q)||0) + d); }
 function pzpCorte(id){ const c = pzpCap.corte; if(!c[id]) c[id] = {piezas:[], puertasOtroDia:0, sobrante:'desperdicio'}; return c[id]; }
@@ -15030,6 +15054,7 @@ function pzpCapturaHtml(){
   </div>`;
   const avHoy = R.avisos.filter(a=>!a.falta && (!a.dia || a.dia===pzpFecha));
   if(avHoy.length) h += `<div class="card" style="border:2px solid #e0453f"><strong style="color:#8a1f1b">⚠️ Revisar</strong>${avHoy.map(a=>`<div class="hint" style="color:#8a1f1b">• ${a.t}</div>`).join('')}<p class="hint">Revisa la Hoja de corte o pregúntale al cortador antes de guardar.</p></div>`;
+  h += `<p class="hint" style="margin:0 0 6px">💡 Puedes guardar aunque te falten datos. Para completarlos otro día, elige esta misma fecha arriba: te aparece lo que guardaste, lo completas y vuelves a guardar.${pzpRecuperado?' <strong>📝 Esto todavía no está guardado</strong> (se recuperó lo que llevabas en este equipo).':''}</p>`;
   h += `<button class="btn" style="width:100%;min-height:52px;margin-bottom:24px" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':'Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button>`;
   return h;
 }
@@ -15064,7 +15089,7 @@ async function pzpGuardar(){
   const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
   const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
-    await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc);
+    await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
     toast('✅ Prueba guardada (no cambia tu inventario)');
     await pzpCargar(mod); pzpCap = null; pzpRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
