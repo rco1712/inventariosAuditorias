@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v252';
+const APP_VERSION = 'v253';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4585,7 +4585,8 @@ const FAMILIAS_PIEZA = [
   {k:'max', t:'MAX', ic:'⭐', c:'#b07cf2', keys:['paredmax','entmaxlargo','entmaxcorto','respaldomax','frentemax','puertitamax','pgrandemax','pchicamax','zoclomax','espzoclo18max','espzoclo16max','espmarco160max','fondomax']},
   {k:'zap', t:'Zapatera', ic:'👟', c:'#3fbf74', keys:['puertazap','entzap','zoclozap12','zoclozap','entzapg','tapazapg','zoclozapg']},
   {k:'esp', t:'Espejo', ic:'🪞', c:'#35c2d0', keys:['espmarco160','espzoclo18','espzoclo16','espmarco35']},
-  {k:'pta', t:'Puertitas', ic:'🚪', c:'#f08a3c', keys:['puertita5','puertita3']}
+  {k:'pta', t:'Puertitas', ic:'🚪', c:'#f08a3c', keys:['puertita5','puertita3']},
+  {k:'mpu', t:'Marcos de puerta', ic:'🖼️', c:'#e25555', keys:['marcotira','marcocort']}
 ];
 // Color de un armado según su familia (mismos colores que las piezas).
 function familiaArmado(a){
@@ -4643,7 +4644,7 @@ function filaPiezaHtml(ctx, p, f, v){
   const tot = Number(v)||0, on = tot>0, k = ctx+'|'+p.key, u = piezaUlt[k], corr = piezaCorr[k];
   return `<div class="pz-fila" data-txt="${(p.label+' '+p.dim+' '+f.t).toLowerCase().replace(/"/g,'')}" id="pzf-${ctx}-${p.key}" style="display:flex;flex-direction:column;padding:10px 8px;margin-top:8px;border-radius:12px;${on?`background:${f.c}22;`:''}border:2px solid ${u?'#16a34a':'transparent'}">
     <div style="display:flex;align-items:center;gap:8px">${dibujoPiezaSvg(p.dim, f.c)}
-      <div style="flex:1;min-width:0"><div class="pz-nombre" style="color:${f.c};font-weight:800;line-height:1.2;font-size:15px">${on?'✓ ':''}${p.label}</div><span class="tag" style="color:#fff">${p.dim}</span></div>
+      <div style="flex:1;min-width:0"><div class="pz-nombre" style="color:${f.c};font-weight:800;line-height:1.2;font-size:15px">${on?'✓ ':''}${p.label}</div><span class="tag" style="color:#fff">${p.dimTxt||p.dim}</span></div>
       <div style="text-align:center;min-width:60px"><div style="font-size:11px;color:var(--sub)">Llevas</div><div style="font-size:24px;font-weight:900;color:${u?'#4ade80':on?f.c:'var(--sub)'}">${tot}</div></div></div>
     ${u?`<div style="margin-top:8px;padding:7px 10px;border-radius:10px;background:rgba(22,163,74,.22);color:#bbf7d0;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>✅ ${u.n>=0?'Sumaste '+u.n:'Corregiste'} (${u.antes} → ${u.despues})</span><button onclick="piezaDeshacer('${ctx}','${p.key}')" style="border:1px solid #86efac;background:transparent;color:#bbf7d0;border-radius:8px;padding:4px 10px;font-weight:800;cursor:pointer">↩️ Deshacer</button></div>`:''}
     ${corr?`<div style="display:flex;gap:6px;margin-top:8px;align-items:center"><span style="font-size:13px;color:var(--sub);flex:none">✏️ Total</span><input id="pzcor-${ctx}-${p.key}" type="number" min="0" inputmode="numeric" value="${tot}" style="flex:1;min-width:0;text-align:center;font-size:16px;font-weight:800;margin:0"><button class="btn small" style="margin:0;background:linear-gradient(135deg,#2563eb,#1d4ed8)" onclick="piezaPedirCorregir('${ctx}','${p.key}')">Guardar</button><button class="btn small" style="margin:0;background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--sub)" onclick="delete piezaCorr['${k}'];piezaRefrescar('${ctx}','${p.key}')">✕</button></div>`
@@ -4663,7 +4664,7 @@ function piezaConfirmar(ctx, key, antes, despues, titulo, onOk){
   ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
   ov.innerHTML = `<div style="width:100%;max-width:420px;background:var(--card);color:var(--ink);border:2px solid ${f.c};border-radius:18px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)">
     <div style="font-size:18px;font-weight:900">${titulo}</div>
-    <div style="display:flex;gap:10px;align-items:center;margin-top:10px">${dibujoPiezaSvg(p.dim, f.c)}<div><strong style="color:${f.c};font-size:16px">${p.label}</strong><br><span class="tag" style="color:#fff">${p.dim}</span> <span class="hint" style="margin:0">${grupo===AUD_GRUPO_MDF?'MDF':'Melamina '+grupo}</span></div></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:10px">${dibujoPiezaSvg(p.dim, f.c)}<div><strong style="color:${f.c};font-size:16px">${p.label}</strong><br><span class="tag" style="color:#fff">${p.dimTxt||p.dim}</span> <span class="hint" style="margin:0">${grupo===AUD_GRUPO_MDF?'MDF':'Melamina '+grupo}</span></div></div>
     <div style="display:flex;gap:6px;margin-top:14px;text-align:center">
       <div style="flex:1;background:rgba(127,127,127,.12);border-radius:12px;padding:8px"><div class="hint" style="margin:0">Llevabas</div><div style="font-size:24px;font-weight:900">${antes}</div></div>
       <div style="flex:1;background:${d>=0?'rgba(22,163,74,.25)':'rgba(220,38,38,.25)'};border-radius:12px;padding:8px"><div class="hint" style="margin:0">${d>=0?'Encontraste':'Quitas'}</div><div style="font-size:24px;font-weight:900;color:${d>=0?'#4ade80':'#f87171'}">${d>=0?'+ '+d:'− '+(-d)}</div></div>
@@ -5919,6 +5920,10 @@ const PIEZAS_AUDIT = [
   {key:'espzoclo16max',tipo:'mel', nombre:'Pieza de frente de espejo',dim:'16×58 cm',    label:'Zóclo de espejo Max 16×58',  rinde:'Parte del frente de espejo Max (por área)'},
   {key:'espzoclo18max',tipo:'mel', nombre:'Pieza de frente de espejo',dim:'18×58 cm',    label:'Zóclo de espejo Max 18×58',  rinde:'Parte del frente de espejo Max (por área)'},
   {key:'espmarco160max',tipo:'mel',nombre:'Pieza de frente de espejo',dim:'13×160 cm',   label:'Marco de espejo Max largo 13×160', rinde:'Parte del frente de espejo Max (por área)'},
+  // v253 (pedido por el usuario): marcos de puerta. Hay tiras completas y marcos ya cortados; un marco
+  // cortado ocupa una tira de 10 cm (lo que sobra del largo es retazo), así que vale lo mismo: 11 por hoja.
+  {key:'marcotira',   tipo:'mel', nombre:'Marco 10×244',             dim:'10×244 cm',   label:'Marco de puerta (tira completa)', rinde:'11 por hoja'},
+  {key:'marcocort',   tipo:'mel', nombre:'Marco 10×244',             dim:'10×244 cm',   dimTxt:'10 × cualquier largo', label:'Marco de puerta ya cortado', rinde:'Vale lo mismo que una tira (11 por hoja)'},
   {key:'fondocajon',  tipo:'mdf', nombre:'Fondo de cajón (MDF 3mm)',     dim:'49.4×33 cm',  label:'Fondo de cajón (MDF 3mm)',     rinde:'14 por hoja de MDF 3mm'},
   {key:'fondocajonera',tipo:'mdf',nombre:'Fondo de cajonera (MDF 3mm)',  dim:'55×122 cm',   label:'Fondo de cajonera (MDF 3mm)',  rinde:'4 por hoja de MDF 3mm'},
   {key:'fondomax',    tipo:'mdf', nombre:'Fondo de cajón (MDF 5mm, Max)',dim:'55.5×37.9 cm',label:'Fondo de cajón Max (MDF 5mm)', rinde:'12 por hoja de MDF 5mm'}
@@ -12182,7 +12187,7 @@ function transformacionHtml(){
       <p class="hint">Anota las piezas <strong>exactas</strong> que se sacaron. Regresan al inventario como material cortado.</p>
       ${colores.length>1?`<label class="hint">Color</label><select style="margin-top:4px" onchange="sobTransf.color=this.value;renderSob()">${colores.map(c=>`<option ${c===t.color?'selected':''}>${c}</option>`).join('')}</select>`:`<p class="hint" style="margin:0">Color: <strong>${t.color}</strong></p>`}
       <div class="wrap-x" style="margin-top:10px"><table><tr><th>Pieza</th><th>Cantidad</th></tr>
-        ${lista.map(p=>`<tr><td>${p.label}<div class="tag">${p.dim}</div></td><td><input type="number" min="0" inputmode="numeric" style="min-width:70px" value="${t.piezas[p.key]||''}" onchange="sobTransf.piezas['${p.key}']=Number(this.value)||0;renderSob()"></td></tr>`).join('')}
+        ${lista.map(p=>`<tr><td>${p.label}<div class="tag">${p.dimTxt||p.dim}</div></td><td><input type="number" min="0" inputmode="numeric" style="min-width:70px" value="${t.piezas[p.key]||''}" onchange="sobTransf.piezas['${p.key}']=Number(this.value)||0;renderSob()"></td></tr>`).join('')}
       </table></div>
       <details style="margin-top:10px"><summary class="hint"><strong>+ Otra pieza a medida (ancho × alto)</strong></summary>
         <div class="grid2" style="margin-top:8px">
@@ -14745,9 +14750,20 @@ function pzpCapturaDe(fecha){
   if(c) return JSON.parse(JSON.stringify({fecha, corte:c.corte||{}, retazo:c.retazo||{}, recortes:c.recortes||[], liberar:c.liberar||[], otros:c.otros||{}, armados:c.armados||null}));
   return {fecha, corte:{}, retazo:{}, recortes:[], liberar:[], otros:{}, armados:null};
 }
+// v253 (pedido por el usuario): lo que llevas capturado en la prueba se guarda solo en este equipo
+// mientras no le des Guardar, para que no se pierda si cierras, recargas o te sales de la pantalla.
+const pzpBorrKey = (mod, f) => 'pzpBorr_'+mod+'_'+f;
+function pzpBorrGuardar(){ try{ if(pzpCap && pzpD) localStorage.setItem(pzpBorrKey(pzpD.mod, pzpCap.fecha), JSON.stringify({ts:new Date().toISOString(), cap:pzpCap})); }catch(e){} }
+function pzpBorrLeer(mod, f){ try{ const x = JSON.parse(localStorage.getItem(pzpBorrKey(mod, f))||'null'); return x && x.cap ? x : null; }catch(e){ return null; } }
+function pzpBorrBorrar(mod, f){ try{ localStorage.removeItem(pzpBorrKey(mod, f)); }catch(e){} }
+let pzpRecuperado = false;
 function pzpRender(){
   const D = pzpD, mod = D.mod;
-  if(pzpCapFecha!==pzpFecha || !pzpCap){ pzpCap = pzpCapturaDe(pzpFecha); pzpCapFecha = pzpFecha; }
+  if(pzpCapFecha!==pzpFecha || !pzpCap){
+    pzpCap = pzpCapturaDe(pzpFecha); pzpCapFecha = pzpFecha; pzpRecuperado = false;
+    const b = pzpBorrLeer(mod, pzpFecha), g = D.dias.find(x=>x.fecha===pzpFecha);
+    if(b && (!g || !g.guardado || b.ts > g.guardado)){ pzpCap = b.cap; pzpCap.fecha = pzpFecha; pzpRecuperado = true; }
+  } else pzpBorrGuardar();
   const activo = !!(D.cfg && D.cfg.activo);
   let h = `<div class="card" style="border:2px solid #7c3aed">
     <div style="font-size:17px;font-weight:800">🧪 Piezas (prueba) · solo Dirección</div>
@@ -14824,12 +14840,25 @@ function pzpBarra(partes){
   return `<div style="display:flex;height:18px;border-radius:9px;overflow:hidden;margin:10px 0 4px;border:1px solid var(--line)">${partes.filter(p=>p.v>0).map(p=>`<i style="display:block;width:${(p.v/tot*100).toFixed(1)}%;background:${p.c}"></i>`).join('')}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--sub)">${partes.filter(p=>p.v>0.0005*PZP_A).map(p=>`<span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${p.c};margin-right:4px;vertical-align:-1px"></span>${p.t} ${Math.round(p.v/tot*100)}%</span>`).join('')}</div>`;
 }
+// v253 (pedido por el usuario): las piezas que no están arriba van por secciones que se despliegan
+// (Max, Zapatera, Espejo…), con su − / + igual que las de arriba, en vez de una lista para buscar.
+const pzpFamAbiertas = new Set();
+function pzpFamTog(k, open){ if(open) pzpFamAbiertas.add(k); else pzpFamAbiertas.delete(k); }
 function pzpListaPiezasHtml(itemId, lista, fnQ, fnAdd, ctx){
   const piezas = pzpPiezasDe(itemId);
-  const vis = piezas.filter(P=>PZP_TOP.includes(P.key) || lista.some(r=>r.k===P.key));
+  const fila = P => { const q = (lista.find(r=>r.k===P.key)||{}).q||0; return pzpFilaPieza(P, q, `${fnQ}(${ctx},'${P.key}',-1)`, `${fnQ}(${ctx},'${P.key}',1)`); };
+  if(piezas.length <= 4) return piezas.map(fila).join('');
+  const vis = piezas.filter(P=>PZP_TOP.includes(P.key));
   const resto = piezas.filter(P=>!vis.includes(P));
-  return vis.map(P=>{ const q = (lista.find(r=>r.k===P.key)||{}).q||0; return pzpFilaPieza(P, q, `${fnQ}(${ctx},'${P.key}',-1)`, `${fnQ}(${ctx},'${P.key}',1)`); }).join('')
-    + (resto.length ? `<select style="margin-top:8px" onchange="if(this.value){${fnAdd}(${ctx},this.value)}"><option value="">+ Otra pieza…</option>${resto.map(P=>`<option value="${P.key}">${P.label} · ${P.dim}</option>`).join('')}</select>` : '');
+  const fams = [];
+  resto.forEach(P=>{ const f = familiaDePieza(P.key); let g = fams.find(x=>x.f===f); if(!g){ g = {f, ps:[]}; fams.push(g); } g.ps.push(P); });
+  return vis.map(fila).join('') + fams.map(({f, ps})=>{
+    const k = String(ctx).replace(/\W/g,'')+'_'+f.k, n = ps.filter(P=>((lista.find(r=>r.k===P.key)||{}).q||0)>0).length;
+    const open = pzpFamAbiertas.has(k) || n>0;
+    return `<details ${open?'open':''} ontoggle="pzpFamTog('${k}',this.open)" style="margin-top:8px;border:1px solid ${f.c};border-radius:12px;padding:0 10px">
+      <summary style="cursor:pointer;padding:10px 0;font-weight:800;color:${f.c}">${f.ic} ${f.t} <span class="hint" style="margin:0;font-weight:600">· ${ps.length} pieza${ps.length===1?'':'s'}${n?` · <strong style="color:${f.c}">${n} con cantidad</strong>`:''}</span></summary>
+      ${ps.map(fila).join('')}</details>`;
+  }).join('');
 }
 function pzpQ(lista, k, d){ let r = lista.find(x=>x.k===k); if(!r){ r = {k, q:0}; lista.push(r); } r.q = Math.max(0, (Number(r.q)||0) + d); }
 function pzpCorte(id){ const c = pzpCap.corte; if(!c[id]) c[id] = {piezas:[], puertasOtroDia:0, sobrante:'desperdicio'}; return c[id]; }
@@ -15025,6 +15054,7 @@ function pzpCapturaHtml(){
   </div>`;
   const avHoy = R.avisos.filter(a=>!a.falta && (!a.dia || a.dia===pzpFecha));
   if(avHoy.length) h += `<div class="card" style="border:2px solid #e0453f"><strong style="color:#8a1f1b">⚠️ Revisar</strong>${avHoy.map(a=>`<div class="hint" style="color:#8a1f1b">• ${a.t}</div>`).join('')}<p class="hint">Revisa la Hoja de corte o pregúntale al cortador antes de guardar.</p></div>`;
+  h += `<p class="hint" style="margin:0 0 6px">💡 Puedes guardar aunque te falten datos. Para completarlos otro día, elige esta misma fecha arriba: te aparece lo que guardaste, lo completas y vuelves a guardar.${pzpRecuperado?' <strong>📝 Esto todavía no está guardado</strong> (se recuperó lo que llevabas en este equipo).':''}</p>`;
   h += `<button class="btn" style="width:100%;min-height:52px;margin-bottom:24px" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':'Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button>`;
   return h;
 }
@@ -15059,7 +15089,7 @@ async function pzpGuardar(){
   const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
   const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
-    await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc);
+    await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
     toast('✅ Prueba guardada (no cambia tu inventario)');
     await pzpCargar(mod); pzpCap = null; pzpRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
