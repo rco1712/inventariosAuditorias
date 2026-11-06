@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v254';
+const APP_VERSION = 'v255';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14897,7 +14897,7 @@ function pzpCorte(id){ const c = pzpCap.corte; if(!c[id]) c[id] = {piezas:[], pu
 function pzpCorteQ(id, k, d){ pzpQ(pzpCorte(id).piezas, k, d); pzpRender(); }
 function pzpCorteAdd(id, k){ pzpQ(pzpCorte(id).piezas, k, 1); pzpRender(); }
 function pzpPuertasOtro(id, d){ const c = pzpCorte(id); c.puertasOtroDia = Math.max(0, (Number(c.puertasOtroDia)||0) + d); pzpRender(); }
-function pzpSobrante(id, v){ pzpCorte(id).sobrante = v; pzpRender(); }
+function pzpSobrante(id, v){ pzpCorte(id).sobrante = v; pzpRender(); toast(v==='retazo' ? '♻️ Marcado como retazo útil · falta Guardar' : '🗑️ Marcado como desperdicio · falta Guardar'); }
 function pzpRetQ(id, k, d){ (pzpCap.retazo[id] = pzpCap.retazo[id]||[]); pzpQ(pzpCap.retazo[id], k, d); pzpRender(); }
 function pzpRetAdd(id, k){ pzpRetQ(id, k, 1); }
 function pzpRetColorSel(id){ pzpRetColor = id || null; if(id) pzpCap.retazo[id] = pzpCap.retazo[id]||[]; pzpRender(); }
@@ -14968,7 +14968,7 @@ function pzpCapturaHtml(){
   let h = `<div class="card">
     <div class="hint" style="margin:0 0 6px">📷 Con la foto de la Hoja de corte del cortador de ${D.mod}.</div>
     <div class="row" style="justify-content:space-between"><h3 style="margin:0">${pzpFmtDia(pzpFecha)}</h3><input type="date" value="${pzpFecha}" max="${fechaHoyLocal()}" min="${diaLocal(R.base.fecha)}" style="width:auto;min-height:40px" onchange="pzpFecha=this.value;pzpRender()"></div>
-    ${guardada?'<div class="hint" style="color:var(--ok);font-weight:700">✅ Este día ya se guardó (puedes corregirlo y volver a guardar).</div>':''}
+    <div style="margin-top:8px">${pzpEstadoHtml()}</div>
     ${faltan.length?`<div class="warn">Falta capturar: ${faltan.map(d=>`<button class="btn small" style="margin:4px 4px 0 0;min-height:32px;padding:4px 10px" onclick="pzpFecha='${d}';pzpRender()">${pzpFmtDia(d)}</button>`).join('')}</div>`:''}
   </div>`;
   // 1. Corte
@@ -14994,7 +14994,8 @@ function pzpCapturaHtml(){
       ${pzpBarra([{t:'Piezas', v:aPz, c:'#3E5CDE'}, {t:'Puertas de hoy', v:aPu, c:'#8a5a2b'}, {t:'Apartado', v:aPend, c:'#a78bfa'}, {t:resto<0?'No cabe':'Sin anotar', v:Math.abs(resto), c:resto<0?'#e0453f':'#cfd6e6'}])}
       ${resto < -1 ? `<div class="warn" style="background:#fdecec;border-color:#f0a9a6;border-left-color:#e0453f;color:#8a1f1b"><strong>⛔ Eso no cabe en ${fmtNum(H)} hoja${H===1?'':'s'}.</strong> Lo anotado ocupa ${pzpH(A-resto)} hojas. Revisa la Hoja de corte o vuelve a contar las completas.</div>`
         : resto > 0.005*PZP_A ? `<div class="hint" style="margin-top:8px"><strong>Te sobraron ${pzpH(resto)} hojas sin anotar.</strong> ¿Qué es?</div>
-          <div class="row" style="gap:6px;margin-top:4px">${[['retazo','Retazo útil'],['desperdicio','Desperdicio']].map(([k,t])=>`<button class="btn small" style="flex:1;${cc.sobrante===k?'':'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="pzpSobrante('${id}','${k}')">${t}</button>`).join('')}</div>`
+          <div class="row" style="gap:6px;margin-top:4px">${[['retazo','♻️ Retazo útil','#16a34a'],['desperdicio','🗑️ Desperdicio','#64748b']].map(([k,t,col])=>`<button class="btn small" style="flex:1;${(cc.sobrante||'desperdicio')===k?`background:${col};color:#fff;border:3px solid ${col};font-weight:900`:'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none;opacity:.75'}" onclick="pzpSobrante('${id}','${k}')">${(cc.sobrante||'desperdicio')===k?'✓ ':''}${t}</button>`).join('')}</div>
+          <div style="margin-top:6px;font-size:13px;font-weight:700;color:${cc.sobrante==='retazo'?'#16a34a':'#64748b'}">${cc.sobrante==='retazo'?`✓ Elegiste: las ${pzpH(resto)} hojas son <u>retazo útil</u>. Desde el día siguiente te salen en "¿Sacaste piezas de un retazo?".`:`✓ Elegiste: las ${pzpH(resto)} hojas son <u>desperdicio</u>.${!cc.sobrante||cc.sobrante==='desperdicio'?' (Si no eliges nada, se toma como desperdicio.)':''}`}</div>`
         : `<div class="hint" style="color:var(--ok);font-weight:700;margin-top:6px">✅ Se aprovechó toda la hoja.</div>`}
     </div>`;
   });
@@ -15086,8 +15087,11 @@ function pzpCapturaHtml(){
   </div>`;
   const avHoy = R.avisos.filter(a=>!a.falta && (!a.dia || a.dia===pzpFecha));
   if(avHoy.length) h += `<div class="card" style="border:2px solid #e0453f"><strong style="color:#8a1f1b">⚠️ Revisar</strong>${avHoy.map(a=>`<div class="hint" style="color:#8a1f1b">• ${a.t}</div>`).join('')}<p class="hint">Revisa la Hoja de corte o pregúntale al cortador antes de guardar.</p></div>`;
-  h += `<p class="hint" style="margin:0 0 6px">💡 Puedes guardar aunque te falten datos. Para completarlos otro día, elige esta misma fecha arriba: te aparece lo que guardaste, lo completas y vuelves a guardar.${pzpRecuperado?' <strong>📝 Esto todavía no está guardado</strong> (se recuperó lo que llevabas en este equipo).':''}</p>`;
-  h += `<button class="btn" style="width:100%;min-height:52px;margin-bottom:24px" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':'Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button>`;
+  h += `<p class="hint" style="margin:0 0 6px">💡 Puedes guardar aunque te falten datos. Para completarlos otro día, elige esta misma fecha arriba: te aparece lo que guardaste, lo completas y vuelves a guardar.${pzpRecuperado && pzpEstado().t!=='ok'?' <strong>📝 Esto todavía no está guardado</strong> (se recuperó lo que llevabas en este equipo).':''}</p>`;
+  const est = pzpEstado();
+  h += `<div style="position:sticky;bottom:0;z-index:5;background:var(--bg);padding:8px 0 16px;margin-bottom:8px">
+    ${est.t==='ok'?`<div style="text-align:center;font-weight:800;color:#16a34a;margin-bottom:6px">✅ Todo guardado</div>`:est.t==='cambios'?`<div style="text-align:center;font-weight:800;color:#d97706;margin-bottom:6px">📝 Hay cambios sin guardar</div>`:`<div style="text-align:center;font-weight:800;color:#dc2626;margin-bottom:6px">📝 Todavía no está guardado</div>`}
+    <button class="btn" style="width:100%;min-height:52px;${est.t==='ok'?'background:#16a34a':est.t==='cambios'?'background:#d97706':''}" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':est.t==='ok'?'✅ Guardado · volver a guardar':est.t==='cambios'?'💾 Guardar cambios del '+pzpFmtDia(pzpFecha):'💾 Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button></div>`;
   return h;
 }
 function pzpArmFormHtml(){
@@ -15112,6 +15116,34 @@ function pzpArmCambioHtml(ayer, hoy){
     ${mas.length?`<strong>Pasaron de sueltas a armadas:</strong> ${mas.join(', ')}<br>`:''}${menos.length?`<strong>Salieron de armados</strong> (se instalaron o se desarmaron): ${menos.join(', ')}<br>`:''}
     <span style="font-size:12px">Esto <strong>no cambia el total</strong> de piezas.</span></div>`;
 }
+// v255: lo que se guarda de un día (sin fecha de guardado), para guardar y para saber si hay cambios sin guardar.
+function pzpDatosDe(c, arm){
+  const limpio = {};
+  Object.keys(c.corte||{}).forEach(id=>{ const x = c.corte[id]; limpio[id] = {piezas:(x.piezas||[]).filter(r=>r.q>0), puertasOtroDia:Number(x.puertasOtroDia)||0, sobrante:x.sobrante||'desperdicio'}; });
+  const ret = {}; Object.keys(c.retazo||{}).forEach(id=>{ const l = (c.retazo[id]||[]).filter(r=>r.q>0); if(l.length) ret[id] = l; });
+  const otros = {}; Object.keys(c.otros||{}).forEach(mid=>{ const o = c.otros[mid]; otros[mid] = {modo:o.modo, piezas:(o.piezas||[]).filter(r=>r.q>0), dest:o.dest||null, aprov:(o.aprov||[]).filter(r=>r.q>0), restoAprov:o.restoAprov||'desperdicio', extraRet:Number(o.extraRet)||0}; });
+  const recortes = (c.recortes||[]).filter(rc=>rc.itemId && rc.k && rc.q>0).map(rc=>({itemId:rc.itemId, k:rc.k, q:rc.q, salio:(rc.salio||[]).filter(r=>r.q>0), resto:rc.resto||'desperdicio'}));
+  return {corte:limpio, retazo:ret, recortes, liberar:c.liberar||[], otros, armados:(arm||[]).filter(a=>Number(a.cantidad)>0)};
+}
+// Comparación que no se fija en renglones vacíos ni en el orden.
+function pzpHuella(d){
+  const corte = {}; Object.keys(d.corte).sort().forEach(id=>{ const x = d.corte[id]; if(x.piezas.length || x.puertasOtroDia || x.sobrante!=='desperdicio') corte[id] = {p:x.piezas.map(r=>r.k+':'+r.q).sort(), u:x.puertasOtroDia, s:x.sobrante}; });
+  const otros = {}; Object.keys(d.otros).sort().forEach(m=>{ const o = d.otros[m]; if(o.piezas.length || o.aprov.length || o.extraRet || o.dest) otros[m] = {m:o.modo, p:o.piezas.map(r=>r.k+':'+r.q).sort(), d:o.dest, a:o.aprov.map(r=>r.k+':'+r.q).sort(), r:o.restoAprov, e:o.extraRet}; });
+  const ret = {}; Object.keys(d.retazo).sort().forEach(id=>{ ret[id] = d.retazo[id].map(r=>r.k+':'+r.q).sort(); });
+  return JSON.stringify({corte, otros, ret, rc:d.recortes, l:[...d.liberar].sort(), a:d.armados.map(a=>JSON.stringify(Object.keys(a).sort().reduce((o,k)=>(o[k]=a[k],o),{}))).sort()});
+}
+function pzpEstado(){
+  const g = pzpD && pzpD.dias.find(x=>x.fecha===pzpFecha);
+  if(!g) return {t:'nuevo'};
+  const sucio = pzpHuella(pzpDatosDe(pzpCap, pzpArmados())) !== pzpHuella(pzpDatosDe(g, g.armados||[]));
+  return {t: sucio ? 'cambios' : 'ok', g};
+}
+function pzpEstadoHtml(){
+  const e = pzpEstado(), hora = e.g && e.g.guardado ? new Date(e.g.guardado).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'}) : '';
+  if(e.t==='ok') return `<div style="padding:10px 12px;border-radius:12px;background:rgba(22,163,74,.14);border:2px solid #16a34a;color:#16a34a;font-weight:800">✅ Guardado${hora?' · '+hora:''}<div style="font-weight:500;font-size:13px">No hay cambios sin guardar.</div></div>`;
+  if(e.t==='cambios') return `<div style="padding:10px 12px;border-radius:12px;background:rgba(217,119,6,.14);border:2px solid #d97706;color:#d97706;font-weight:800">📝 Tienes cambios SIN GUARDAR<div style="font-weight:500;font-size:13px">Ya estaba guardado${hora?' ('+hora+')':''}, pero corregiste algo. Dale "Guardar cambios" abajo.</div></div>`;
+  return `<div style="padding:10px 12px;border-radius:12px;background:rgba(220,38,38,.10);border:2px solid #dc2626;color:#dc2626;font-weight:800">📝 Este día todavía NO está guardado<div style="font-weight:500;font-size:13px">Cuando termines (o aunque te falten datos), dale "Guardar" abajo.</div></div>`;
+}
 async function pzpGuardar(){
   const mod = pzpD.mod, c = pzpCap;
   const limpio = {};
@@ -15122,7 +15154,7 @@ async function pzpGuardar(){
   const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
-    toast('✅ Prueba guardada (no cambia tu inventario)');
+    toast('✅ Guardado: prueba del '+pzpFmtDia(pzpFecha)+' (no cambia tu inventario)');
     await pzpCargar(mod); pzpCap = null; pzpRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
