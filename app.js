@@ -184,6 +184,7 @@ function renderModBar(){
       : `<button class="modpill" style="background:${m.color}" onclick="setView('home')">📍 ${m.nombre}</button><button class="modpill" style="background:#fff;color:#4c1d95;margin-left:6px" onclick="volverDireccion()">‹ Volver a Dirección</button>`;
     return;
   }
+  if(esSoloReportes()){ $('#modbar').innerHTML = ''; return; } // v262: el módulo se elige dentro del reporte
   const puedeCambiar = !miPerfil || miPerfil.rol!=='coordinador';
   $('#modbar').innerHTML = m
     ? `<button class="modpill" style="background:${m.color}" ${puedeCambiar?'onclick="showPicker()"':'disabled'}>📍 ${m.nombre}${puedeCambiar?' · cambiar módulo':' (tu módulo asignado)'}</button>`
@@ -237,7 +238,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v261';
+const APP_VERSION = 'v262';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -263,7 +264,7 @@ async function actualizarApp(){
 }
 async function registrarVersionUsuario(){
   try{
-    const email = getCurrentUserEmail ? getCurrentUserEmail() : ''; if(!email || esSoloLectura()) return;
+    const email = getCurrentUserEmail ? getCurrentUserEmail() : ''; if(!email || esSoloLectura() || esSoloReportes()) return; // v262: 'Solo reportes' no escribe nada
     await db.collection('versiones').doc(email).set({email, modulo: (miPerfil&&miPerfil.modulo) || modulo() || '', rol:(miPerfil&&miPerfil.rol)||'', version:APP_VERSION, fecha:new Date().toISOString()});
   }catch(e){}
 }
