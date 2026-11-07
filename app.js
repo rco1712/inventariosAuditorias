@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v256';
+const APP_VERSION = 'v257';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -13631,7 +13631,7 @@ async function borrarDatosModulo(mods){
 
 async function exportarRespaldo(){
   // Todo lo que guarda la app (las fotos no, porque pesan mucho: se quedan en Supabase).
-  const COLLECTIONS = ['inicial','inicialHist','movimientos','resets','auditorias','deudasAuditoria','conteoAbierto','instalacionesLog','instalacionesPuertas','garantiasLog','prestamos','pedidos','sobrantes','cierres','gasolina','herramientas','herrMovs','herrInstaladores','config','versiones','reportesInst'];
+  const COLLECTIONS = ['inicial','inicialHist','movimientos','resets','auditorias','deudasAuditoria','conteoAbierto','instalacionesLog','instalacionesPuertas','garantiasLog','prestamos','pedidos','sobrantes','cierres','gasolina','herramientas','herrMovs','herrInstaladores','config','versiones','reportesInst','maquinas','piezasPrueba'];
   const data = {};
   for(const c of COLLECTIONS){
     const snap = await db.collection(c).get();
@@ -14676,7 +14676,9 @@ function pzpCalcular(D, hasta, borrador){
     else if(pzpEsOtro(m)){ (otros[dia] = otros[dia]||[]).push(m); dias.add(dia); }
   });
   const insts = D.logs.filter(l=>!l.cambiadaPor && l.estado!=='rechazado' && (l.fecha||'') > t0 && (!hastaT || (l.fecha||'') <= hastaT))
-    .map(l=>({l, dia:l.fechaDia || diaLocal(l.fecha)})).filter(x=>!hasta || x.dia <= hasta);
+    // v257 (revisado con el usuario): si la instalación se pasó a otro día (no se instaló y el coordinador
+    // la reprogramó), el material se cortó el día ORIGINAL; para la prueba cuenta ese día, no el nuevo.
+    .map(l=>({l, dia:(l.pospuesta && l.pospuesta.primero) || l.fechaDia || diaLocal(l.fecha)})).filter(x=>!hasta || x.dia <= hasta);
   insts.forEach(x=>dias.add(x.dia));
   const capt = {};
   D.dias.forEach(c=>{ if(c.fecha >= d0 && (!hasta || c.fecha <= hasta)){ capt[c.fecha] = c; dias.add(c.fecha); } });
