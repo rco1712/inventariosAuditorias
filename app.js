@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v257';
+const APP_VERSION = 'v258';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14643,7 +14643,7 @@ async function pzpCargar(mod){
     db.collection('piezasPrueba').where('modulo','==',mod).get()]);
   const d = s => s.docs.map(x=>Object.assign({id:x.id}, x.data()));
   const pp = d(sP);
-  pzpD = {mod, auds:d(sA), movs:d(sM), logs:d(sL), cfg:pp.find(x=>x.id==='cfg_'+mod)||null, dias:pp.filter(x=>x.tipo==='dia')};
+  pzpD = {mod, auds:d(sA), movs:d(sM), logs:d(sL), cfg:pp.find(x=>x.id==='cfg_'+mod)||null, dias:pp.filter(x=>x.tipo==='dia'), chks:pp.filter(x=>x.tipo==='chk')};
   return pzpD;
 }
 function pzpAudsBase(D){ return D.auds.filter(a=>(a.piezasContadas&&a.piezasContadas.length) || (a.armadosContados&&a.armadosContados.length)).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }
@@ -14659,13 +14659,16 @@ function pzpCalcular(D, hasta, borrador){
   const hastaT = (hasta && hasta.length>10) ? hasta : null; if(hastaT) hasta = diaLocal(hastaT);
   const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, vie = {}, avisos = [];
   const addA = (o, id, v) => { o[id] = (o[id]||0) + v; };
-  const add = (itemId, dim, q, n) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNorm(dim), n:pzpNombre(dim, n), area:pzpArea(dim)}; };
+  // v258 (pedido por el usuario): F lleva de dónde vino cada movimiento de piezas, para el reporte
+  // "iniciaste con tantas, cortaste tantas, se fueron tantas en instalaciones, debe haber tantas".
+  const F = {};
+  const add = (itemId, dim, q, n, src) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNorm(dim), n:pzpNombre(dim, n), area:pzpArea(dim)}; const f = F[k] = F[k]||{}; f[src||'otro'] = (f[src||'otro']||0) + q; };
   (base.piezasContadas||[]).forEach(pc=>{
     const P = PIEZAS_AUDIT.find(x=>x.label===pc.pieza && x.dim===pc.dim) || PIEZAS_AUDIT.find(x=>x.label===pc.pieza);
-    const it = pzpItemDeGrupo(pc.grupo, P ? P.nombre : ''); if(it) add(it.id, pc.dim, Number(pc.cantidad)||0, P ? P.nombre : pc.pieza);
+    const it = pzpItemDeGrupo(pc.grupo, P ? P.nombre : ''); if(it) add(it.id, pc.dim, Number(pc.cantidad)||0, P ? P.nombre : pc.pieza, 'ini');
   });
   let arm = (base.armadosContados||[]).map(a=>Object.assign({}, a));
-  arm.forEach(a=>pzpContArmado(a).forEach(p=>add(p.itemId, p.dim, p.q, p.n)));
+  arm.forEach(a=>pzpContArmado(a).forEach(p=>add(p.itemId, p.dim, p.q, p.n, 'ini')));
   const t0 = base.fecha, d0 = diaLocal(base.fecha);
   const dias = new Set(), cortes = {}, otros = {};
   D.movs.forEach(m=>{
@@ -14692,7 +14695,7 @@ function pzpCalcular(D, hasta, borrador){
       const H = cutH[id]*PZP_A;
       if(!c){ addA(sinCap, id, H); return; }
       const cc = (c.corte||{})[id] || {}; let usado = 0;
-      (cc.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); usado += r.q*pzpArea(P.dim); });
+      (cc.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre, 'corte'); usado += r.q*pzpArea(P.dim); });
       const ph = Number(cc.puertasOtroDia)||0; if(ph>0){ addA(pend, id, ph*PZP_A); pendHoy[id] = ph*PZP_A; usado += ph*PZP_A; }
       libre[id] = H - usado;
     });
@@ -14705,7 +14708,7 @@ function pzpCalcular(D, hasta, borrador){
       }
       pz.forEach(p=>{
         const q = Number(p.q)||0; if(!(q>0) || !p.itemId) return;
-        if(!PZP_A_LA_MEDIDA.includes(p.n)){ add(p.itemId, p.dim, -q, p.n); return; }
+        if(!PZP_A_LA_MEDIDA.includes(p.n)){ add(p.itemId, p.dim, -q, p.n, 'inst'); return; }
         let a = q*pzpArea(p.dim); const id = p.itemId;
         info.puertas[id] = (info.puertas[id]||0) + a;
         // v234: lo apartado HOY es para puertas de otro día; las puertas de hoy solo toman lo apartado antes.
@@ -14721,18 +14724,18 @@ function pzpCalcular(D, hasta, borrador){
     });
     if(c){
       const usoRet = {};
-      Object.keys(c.retazo||{}).forEach(id=>{ (c.retazo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(ret, id, -r.q*pzpArea(P.dim)); addA(usoRet, id, r.q*pzpArea(P.dim)); }); });
+      Object.keys(c.retazo||{}).forEach(id=>{ (c.retazo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre, 'ret'); addA(ret, id, -r.q*pzpArea(P.dim)); addA(usoRet, id, r.q*pzpArea(P.dim)); }); });
       // v256 (pedido por el usuario): lo que queda del retazo que había (de días anteriores) se marca como desperdicio.
       // Solo el retazo de antes de este día; el retazo nuevo que dejó el corte de hoy no se toca.
       (c.retTirar||[]).forEach(id=>{ const q = Math.min(Math.max(0, (ret0[id]||0) - (usoRet[id]||0)), Math.max(0, ret[id]||0)); if(q>0){ addA(ret, id, -q); addA(des, id, q); } });
       // v255 (pedido por el usuario): piezas sacadas de retazo que ya había antes de la prueba (no se midió): suben, sin restar de nada.
-      Object.keys(c.retViejo||{}).forEach(id=>{ (c.retViejo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre); addA(vie, id, r.q*pzpArea(P.dim)); }); });
+      Object.keys(c.retViejo||{}).forEach(id=>{ (c.retViejo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre, 'ret'); addA(vie, id, r.q*pzpArea(P.dim)); }); });
       (c.liberar||[]).forEach(id=>{ if((pend[id]||0)>0){ addA(ret, id, pend[id]); pend[id] = 0; } });
       // Recortar una pieza (pedido por el usuario): una pieza buena se corta en otras más chicas. La pieza baja,
       // las nuevas suben y lo que sobra es retazo o desperdicio (nunca puede salir más área de la que tenía).
       (c.recortes||[]).forEach(rc=>{ const id = rc.itemId, P = PIEZAS_AUDIT.find(x=>x.key===rc.k); if(!id || !P || !(rc.q>0)) return;
-        add(id, P.dim, -rc.q, P.nombre); const aO = rc.q*pzpArea(P.dim); let aS = 0;
-        (rc.salio||[]).forEach(r=>{ const Q = PIEZAS_AUDIT.find(x=>x.key===r.k); if(Q && r.q>0){ add(id, Q.dim, r.q, Q.nombre); aS += r.q*pzpArea(Q.dim); } });
+        add(id, P.dim, -rc.q, P.nombre, 'recorte'); const aO = rc.q*pzpArea(P.dim); let aS = 0;
+        (rc.salio||[]).forEach(r=>{ const Q = PIEZAS_AUDIT.find(x=>x.key===r.k); if(Q && r.q>0){ add(id, Q.dim, r.q, Q.nombre, 'recorte'); aS += r.q*pzpArea(Q.dim); } });
         const resto = aO - aS;
         if(resto < -1) avisos.push({dia, id, t:pzpColor(id)+': de '+rc.q+' '+P.label+' no caben las piezas anotadas.'});
         else if(resto > 0){ if(rc.resto==='retazo') addA(ret, id, resto); else addA(des, id, resto); } });
@@ -14743,11 +14746,11 @@ function pzpCalcular(D, hasta, borrador){
       if(o.extraRet) addA(ret, m.itemId, s*o.extraRet); // v250: piezas a la medida (puertas) que regresaron o se apartaron
       let aBase = 0;
       if(o.modo==='retazo'){ addA(ret, m.itemId, s*q*PZP_A); aBase = q*PZP_A; }
-      else (o.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0){ add(m.itemId, P.dim, s*r.q, P.nombre); aBase += r.q*pzpArea(P.dim); } });
+      else (o.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0){ add(m.itemId, P.dim, s*r.q, P.nombre, s>0?'regreso':'salida'); aBase += r.q*pzpArea(P.dim); } });
       // Merma (pedido por el usuario): "Se tiró completa" = sale y ya; "Se aprovechó lo bueno" = de esa merma
       // salieron piezas nuevas (suben) y lo que sobra es retazo o desperdicio.
       if(s<0 && m.tipo==='merma' && o.dest==='aprov'){
-        let aAp = 0; (o.aprov||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0){ add(m.itemId, P.dim, r.q, P.nombre); aAp += r.q*pzpArea(P.dim); } });
+        let aAp = 0; (o.aprov||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P && r.q>0){ add(m.itemId, P.dim, r.q, P.nombre, 'recorte'); aAp += r.q*pzpArea(P.dim); } });
         const resto = aBase - aAp;
         if(resto < -1) avisos.push({dia, id:m.itemId, t:pzpColor(m.itemId)+': lo aprovechado de la merma no cabe en lo que se mermó.'});
         else if(resto > 0){ if(o.restoAprov==='retazo') addA(ret, m.itemId, resto); else addA(des, m.itemId, resto); }
@@ -14761,7 +14764,7 @@ function pzpCalcular(D, hasta, borrador){
   arm.forEach(a=>pzpContArmado(a).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); AC[k] = (AC[k]||0) + p.q; if(!N[k]) N[k] = {itemId:p.itemId, dim:pzpNorm(p.dim), n:pzpNombre(p.dim, p.n), area:pzpArea(p.dim)}; }));
   Object.keys(N).forEach(k=>{ const su = fmtNum((T[k]||0) - (AC[k]||0)); if(su < 0) avisos.push({id:N[k].itemId, t:pzpColor(N[k].itemId)+': faltan '+fmtNum(-su)+' '+N[k].n+' sueltas (se usó o armó más de lo anotado en el corte).'}); });
   Object.keys(ret).forEach(id=>{ if(ret[id] < -PZP_A*0.02) avisos.push({id, t:pzpColor(id)+': el retazo quedó en negativo ('+pzpH(ret[id])+' hojas). Se usó material que no estaba anotado.'}); });
-  return {base, T, N, AC, ret, des, pend, sinCap, vie, arm, avisos, dias:lista, capt, porDia};
+  return {base, T, N, F, AC, ret, des, pend, sinCap, vie, arm, avisos, dias:lista, capt, porDia};
 }
 // Resumen por material (hojas por área).
 function pzpResumen(R){
@@ -14812,8 +14815,10 @@ function pzpRender(){
   </div>`;
   h += pzpModulosHtml();
   if(!activo || !D.cfg.auditoriaId){ $('#main').innerHTML = h; return; }
-  h += `<div class="subtabs">${[['captura','Captura'],['resultado','Resultado'],['resumen','Comparar'],['avisos','Avisos']].map(([k,t])=>`<button class="${pzpTab===k?'active':''}" onclick="pzpTab='${k}';pzpRender()">${t}</button>`).join('')}</div>`;
+  h += `<div class="subtabs">${[['captura','Captura'],['debe','📋 Debe haber'],['chk','🎯 Conteo rápido'],['resultado','Resultado'],['resumen','Comparar'],['avisos','Avisos']].map(([k,t])=>`<button class="${pzpTab===k?'active':''}" onclick="pzpTab='${k}';pzpRender()">${t}</button>`).join('')}</div>`;
   if(pzpTab==='captura') h += pzpCapturaHtml();
+  if(pzpTab==='debe') h += pzpDebeHtml();
+  if(pzpTab==='chk') h += pzpChkHtml();
   if(pzpTab==='resultado') h += pzpResultadoHtml();
   if(pzpTab==='resumen') h += pzpResumenHtml() + pzpPiezasHtml();
   if(pzpTab==='avisos') h += pzpAvisosHtml();
@@ -15252,6 +15257,126 @@ function pzpPiezasHtml(){
     </table></div>
     <p class="hint">Retazo: ${pzpH(R.ret[pzpColorDet]||0)} hojas · Desperdicio acumulado: ${pzpH(R.des[pzpColorDet]||0)} hojas</p></div>`;
 }
+// ===== v258 (pedido por el usuario): "Debe haber" y conteo rápido diario =====
+// Por pieza y color: con cuántas iniciaste (conteo), cuántas se cortaron, cuántas se fueron en instalaciones,
+// otros movimientos, y cuántas debe haber hoy (sueltas + en armados).
+function pzpFlujo(R, k){
+  const f = (R.F||{})[k] || {}, g = x => f[x]||0;
+  return {ini:g('ini'), cort:g('corte')+g('ret'), inst:g('inst'), otros:g('regreso')+g('salida')+g('recorte')+g('otro'), debe:R.T[k]||0, arm:R.AC[k]||0};
+}
+function pzpDebeHtml(){
+  const R = pzpCalcular(pzpD); if(!R) return '';
+  const ids = [...new Set(Object.values(R.N).map(n=>n.itemId))].sort((a,b)=>pzpColor(a).localeCompare(pzpColor(b)));
+  if(!pzpColorDet || !ids.includes(pzpColorDet)) pzpColorDet = ids[0] || null;
+  const ks = Object.keys(R.N).filter(k=>R.N[k].itemId===pzpColorDet && Object.keys(R.F[k]||{}).length).sort((a,b)=>R.N[b].area-R.N[a].area);
+  const faltan = R.avisos.filter(a=>a.falta).length, ult = R.dias[R.dias.length-1];
+  const n = v => { const x = fmtNum(v); return x ? x : '<span class="hint" style="margin:0">·</span>'; };
+  return `<div class="card"><h3>📋 ¿Cuántas piezas debe haber?</h3>
+    <p class="hint" style="margin-top:0">Desde el conteo del <strong>${new Date(R.base.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})}</strong> hasta el <strong>${ult?pzpFmtDia(ult):'—'}</strong>. <strong>Debe haber = Inició + Cortadas − Instaladas ± Otros</strong> (regresos, garantías, mermas y recortes).${faltan?` <span class="neg">Faltan ${faltan} día(s) por capturar: el número todavía no está completo.</span>`:''}</p>
+    <div class="row" style="gap:6px"><select onchange="pzpColorDet=this.value;pzpRender()" style="flex:1">${ids.map(id=>`<option value="${id}" ${id===pzpColorDet?'selected':''}>${pzpColor(id)}</option>`).join('')}</select>
+      <button class="btn small" style="background:#7c3aed" onclick="pzpDebePDF()">📄 PDF de todos</button></div>
+    <div class="wrap-x" style="margin-top:8px"><table><tr><th>Pieza</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Inició</th><th style="text-align:right">+ Cort.</th><th style="text-align:right">− Inst.</th><th style="text-align:right">± Otros</th></tr>
+    ${ks.map(k=>{ const x = pzpFlujo(R, k), su = fmtNum(x.debe - x.arm);
+      return `<tr><td>${R.N[k].n}<div class="hint" style="margin:0">${R.N[k].dim}</div></td>
+        <td style="text-align:right;background:rgba(124,58,237,.08)"><strong style="font-size:17px">${fmtNum(x.debe)}</strong><div class="hint ${su<0?'neg':''}" style="margin:0;white-space:nowrap">${su} sueltas${x.arm?'<br>+ '+fmtNum(x.arm)+' armadas':''}</div></td>
+        <td style="text-align:right">${n(x.ini)}</td><td style="text-align:right;color:#16a34a">${x.cort?'+'+fmtNum(x.cort):n(0)}</td><td style="text-align:right;color:#dc2626">${x.inst?'−'+fmtNum(-x.inst):n(0)}</td><td style="text-align:right">${x.otros?(x.otros>0?'+':'−')+fmtNum(Math.abs(x.otros)):n(0)}</td></tr>`; }).join('') || '<tr><td colspan="6" class="hint">Sin piezas en este color.</td></tr>'}
+    </table></div>
+    <p class="hint">"Armadas" son las piezas que ya están dentro de muebles armados (cajones, cajoneras…). Si "sueltas" sale en negativo, se usaron o armaron más de las que se anotaron en el corte.</p></div>`;
+}
+async function pzpDebePDF(){
+  const R = pzpCalcular(pzpD); if(!R) return;
+  const MOR=[109,40,217], VER=[22,128,74], ROJ=[185,28,28];
+  const ult = R.dias[R.dias.length-1];
+  const S = herrPdfBase('Closets Vera · Piezas: cuantas debe haber · '+pzpD.mod, `Desde el conteo del ${new Date(R.base.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})} hasta el ${ult?pzpFmtDia(ult):'-'}  ·  Debe haber = Inicio + Cortadas - Instaladas +/- Otros`, MOR);
+  const ids = [...new Set(Object.values(R.N).map(n=>n.itemId))].sort((a,b)=>pzpColor(a).localeCompare(pzpColor(b)));
+  const fm = v => v ? String(fmtNum(v)) : '-';
+  ids.forEach(id=>{
+    const ks = Object.keys(R.N).filter(k=>R.N[k].itemId===id && Object.keys(R.F[k]||{}).length).sort((a,b)=>R.N[b].area-R.N[a].area);
+    if(!ks.length) return;
+    S.banda(String(pzpColor(id)), '', MOR);
+    S.tabla([{t:'Pieza',w:54},{t:'Inicio',w:16},{t:'Cortadas',w:19},{t:'Instaladas',w:21},{t:'Otros',w:16},{t:'Debe haber',w:22},{t:'Sueltas / armadas',w:30}],
+      ks.map(k=>{ const x = pzpFlujo(R, k), su = fmtNum(x.debe - x.arm);
+        return [String(R.N[k].n)+' '+String(R.N[k].dim), fm(x.ini), {t:x.cort?'+'+fmtNum(x.cort):'-', col:VER}, {t:x.inst?String(fmtNum(x.inst)):'-', col:ROJ}, x.otros?(x.otros>0?'+':'')+String(fmtNum(x.otros)):'-', {t:String(fmtNum(x.debe)), b:true}, {t:String(su)+' / '+String(fmtNum(x.arm)), col:su<0?ROJ:undefined}]; }), MOR);
+  });
+  await S.fin(`Piezas_debe_haber_${pzpD.mod}.pdf`, 'Closets Vera · Prueba de piezas (no cambia el inventario oficial)');
+}
+
+// Conteo rápido: cada día se cuentan pocas piezas (rotando) y TODOS los armados; de los armados contados
+// se sacan sus piezas. Se cuenta a ciegas y al guardar se compara con lo que debe haber.
+let pzpChk = null, pzpChkFecha = null;
+function pzpChkN(){ try{ return Number(localStorage.getItem('pzpChkN'))||5; }catch(e){ return 5; } }
+function pzpChkDoc(f){ return (pzpD.chks||[]).find(x=>x.fecha===f) || null; }
+function pzpChkElegir(R, f){
+  const ult = {}; (pzpD.chks||[]).filter(c=>c.fecha < f).forEach(c=>(c.piezas||[]).forEach(p=>{ if(!ult[p.k] || c.fecha > ult[p.k]) ult[p.k] = c.fecha; }));
+  const ks = Object.keys(R.N).filter(k=>(R.T[k]||0) - (R.AC[k]||0) > 0.5);
+  ks.sort((a,b)=>(ult[a]||'').localeCompare(ult[b]||'') || ((R.T[b]-R.AC[b])*R.N[b].area) - ((R.T[a]-R.AC[a])*R.N[a].area));
+  return ks.slice(0, pzpChkN());
+}
+function pzpChkIniciar(f){
+  const doc = pzpChkDoc(f), R = pzpCalcular(pzpD, f); if(!R) return;
+  if(doc) pzpChk = {fecha:f, keys:(doc.piezas||[]).map(p=>p.k), q:Object.fromEntries((doc.piezas||[]).map(p=>[p.k, p.q])), arm:(doc.armados||[]).map(a=>({a:a.a, q:a.q})), guardado:true};
+  else {
+    const vistos = new Set(), arm = [];
+    (R.arm||[]).filter(a=>(Number(a.cantidad)||0)>0).forEach(a=>{ const key = pzpArmKey(a); if(vistos.has(key)) return; vistos.add(key); const c = Object.assign({}, a); delete c.cantidad; arm.push({a:c, q:''}); });
+    pzpChk = {fecha:f, keys:pzpChkElegir(R, f), q:{}, arm, guardado:false};
+  }
+  pzpChkFecha = f;
+}
+function pzpChkHtml(){
+  const f = pzpFecha || fechaHoyLocal();
+  if(!pzpChk || pzpChkFecha!==f) pzpChkIniciar(f);
+  const R = pzpCalcular(pzpD, f); if(!R || !pzpChk) return '';
+  const c = pzpChk, ok = c.guardado, capt = !!pzpD.dias.find(x=>x.fecha===f);
+  let h = `<div class="card" style="border:2px solid #0e7490"><h3>🎯 Conteo rápido · ${pzpFmtDia(f)}</h3>
+    <p class="hint" style="margin-top:0">Cuenta <strong>a ciegas</strong> (sin ver cuántas debe haber) estas piezas sueltas y <strong>todos los armados</strong>. De los armados la app saca sus piezas. Al guardar te dice si cuadra. Mejor contar <strong>al final del día</strong>, después del cierre.</p>
+    <label class="hint">Día</label> <input type="date" value="${f}" max="${fechaHoyLocal()}" onchange="pzpFecha=this.value;pzpChk=null;pzpRender()" style="width:auto">
+    ${!ok?`<div class="chips" style="margin-top:6px">${[3,5,10].map(n=>`<button class="chip ${pzpChkN()===n?'on':''}" onclick="try{localStorage.setItem('pzpChkN','${n}')}catch(e){};pzpChk=null;pzpRender()">${n} piezas</button>`).join('')}</div>`:''}
+  </div>`;
+  if(!ok){
+    h += `<div class="card"><strong>1 · Piezas sueltas para contar hoy</strong>
+      ${c.keys.map(k=>{ const N = R.N[k]; if(!N) return ''; return `<div class="row" style="justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap"><div style="flex:1;min-width:0"><strong>${pzpColor(N.itemId)} · ${N.n}</strong><div class="hint" style="margin:0">${N.dim} · solo las sueltas</div></div><input type="number" min="0" inputmode="numeric" placeholder="cuántas" value="${c.q[k]??''}" oninput="pzpChk.q['${k}']=this.value" style="width:100px;flex:none"></div>`; }).join('')}
+      <select style="margin-top:8px" onchange="if(this.value){pzpChk.keys.push(this.value);pzpRender()}"><option value="">+ Agregar otra pieza a contar…</option>${Object.keys(R.N).filter(k=>!c.keys.includes(k) && (R.T[k]||0)>0).sort((a,b)=>(pzpColor(R.N[a].itemId)+R.N[a].n).localeCompare(pzpColor(R.N[b].itemId)+R.N[b].n)).map(k=>`<option value="${k}">${pzpColor(R.N[k].itemId)} · ${R.N[k].n} ${R.N[k].dim}</option>`).join('')}</select></div>
+    <div class="card"><strong>2 · Armados (cuenta todos)</strong>
+      ${c.arm.length ? c.arm.map((x,i)=>`<div class="row" style="justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap"><div style="flex:1;min-width:0"><strong>${pzpArmTxt(Object.assign({cantidad:1}, x.a))}</strong></div><input type="number" min="0" inputmode="numeric" placeholder="cuántos" value="${x.q??''}" oninput="pzpChk.arm[${i}].q=this.value" style="width:100px;flex:none"></div>`).join('') : '<p class="hint">Según la prueba no hay armados.</p>'}
+      <p class="hint">Si hay un armado que no está en la lista, anótalo en la prueba del día (sección de armados) y vuelve aquí.</p></div>
+    <button class="btn" style="width:100%;min-height:52px;background:#0e7490;margin-bottom:24px" onclick="pzpChkGuardar()">💾 Guardar conteo y comparar</button>`;
+    return h;
+  }
+  // Resultado
+  const armCont = {}; c.arm.forEach(x=>{ const q = Number(x.q)||0; if(q>0) pzpContArmado(Object.assign({}, x.a, {cantidad:q})).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); armCont[k] = (armCont[k]||0) + p.q; }); });
+  const ant = (pzpD.chks||[]).filter(x=>x.fecha < f).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+  const difAnt = k => { if(!ant) return null; const p = (ant.piezas||[]).find(x=>x.k===k); return p && p.dif!==undefined ? p.dif : null; };
+  h += `${!capt?`<div class="warn">⚠️ La prueba del ${pzpFmtDia(f)} todavía no está guardada: "debe haber" puede no estar completo. Guárdala y regresa aquí.</div>`:''}
+    <div class="card"><strong>Piezas</strong><div class="wrap-x"><table><tr><th>Pieza</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contadas</th><th style="text-align:right">Dif.</th></tr>
+    ${c.keys.map(k=>{ const N = R.N[k]; if(!N) return ''; const debe = R.T[k]||0, su = Number(c.q[k])||0, ea = armCont[k]||0, tot = su + ea, d = fmtNum(tot - debe), da = difAnt(k);
+      return `<tr><td><strong>${pzpColor(N.itemId)} · ${N.n}</strong><div class="hint" style="margin:0">${N.dim}</div></td><td style="text-align:right">${fmtNum(debe)}<div class="hint" style="margin:0">${fmtNum(debe-(R.AC[k]||0))} sueltas${R.AC[k]?' + '+fmtNum(R.AC[k])+' arm.':''}</div></td><td style="text-align:right">${fmtNum(tot)}<div class="hint" style="margin:0">${fmtNum(su)} sueltas${ea?' + '+fmtNum(ea)+' arm.':''}</div></td>
+        <td style="text-align:right;font-weight:900;color:${Math.abs(d)<=1?'#16a34a':d<0?'#dc2626':'#d97706'}">${Math.abs(d)<=1?'✅ '+(d?(d>0?'+':'')+d:''):(d>0?'+':'')+d}${d<-1 && da!==null && da<-1?'<div style="font-size:11px;color:#dc2626">⚠️ falta otra vez</div>':''}</td></tr>`; }).join('')}
+    </table></div><p class="hint">✅ = cuadra (o difiere en 1). <span style="color:#dc2626">Rojo</span> = faltan. <span style="color:#d97706">Naranja</span> = hay de más (revisa si se anotó todo el corte).</p></div>`;
+  const armDebe = {}; (R.arm||[]).forEach(a=>{ const key = pzpArmKey(a); armDebe[key] = (armDebe[key]||0) + (Number(a.cantidad)||0); });
+  h += `<div class="card"><strong>Armados</strong><div class="wrap-x"><table><tr><th>Armado</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contados</th><th style="text-align:right">Dif.</th></tr>
+    ${c.arm.map(x=>{ const key = pzpArmKey(x.a), debe = armDebe[key]||0, q = Number(x.q)||0, d = q - debe; return `<tr><td>${pzpArmTxt(Object.assign({cantidad:1}, x.a))}</td><td style="text-align:right">${fmtNum(debe)}</td><td style="text-align:right">${fmtNum(q)}</td><td style="text-align:right;font-weight:900;color:${d===0?'#16a34a':d<0?'#dc2626':'#d97706'}">${d===0?'✅':(d>0?'+':'')+fmtNum(d)}</td></tr>`; }).join('') || '<tr><td colspan="4" class="hint">Sin armados.</td></tr>'}
+    </table></div><p class="hint">Que falten armados no siempre es faltante: puede que se desarmaran o se usaran en una instalación. Las piezas de arriba ya cuentan las de los armados.</p></div>
+    <button class="btn small" style="margin-bottom:10px;background:transparent;color:#0e7490;border:1px solid #0e7490;box-shadow:none" onclick="pzpChk.guardado=false;pzpRender()">✏️ Corregir el conteo</button>`;
+  h += pzpChkHistHtml();
+  return h;
+}
+function pzpChkHistHtml(){
+  const cs = (pzpD.chks||[]).slice().sort((a,b)=>b.fecha.localeCompare(a.fecha)).slice(0, 10);
+  if(!cs.length) return '';
+  return `<div class="card"><strong>Conteos anteriores</strong>${cs.map(c=>{ const mal = (c.piezas||[]).filter(p=>p.dif < -1), mas = (c.piezas||[]).filter(p=>p.dif > 1);
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>${pzpFmtDia(c.fecha)}</strong> · ${(c.piezas||[]).length} piezas · ${mal.length?`<span class="neg">⚠️ faltan en ${mal.length}: ${mal.map(p=>p.txt+' ('+p.dif+')').join(', ')}</span>`:'<span style="color:#16a34a">✅ sin faltantes</span>'}${mas.length?` · <span style="color:#d97706">de más en ${mas.length}</span>`:''}</div>`; }).join('')}
+    <p class="hint">La diferencia guardada es la del día que se contó. Si después corriges la prueba de ese día, abre el conteo para ver la comparación al día.</p></div>`;
+}
+async function pzpChkGuardar(){
+  const c = pzpChk, f = c.fecha, mod = pzpD.mod, R = pzpCalcular(pzpD, f); if(!R) return;
+  const faltan = c.keys.filter(k=>c.q[k]===undefined || c.q[k]==='').length + c.arm.filter(x=>x.q===undefined || x.q==='').length;
+  if(faltan && !confirm(`Hay ${faltan} renglón(es) sin número. Se van a guardar como 0. ¿Seguir?`)) return;
+  const armCont = {}; c.arm.forEach(x=>{ const q = Number(x.q)||0; if(q>0) pzpContArmado(Object.assign({}, x.a, {cantidad:q})).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); armCont[k] = (armCont[k]||0) + p.q; }); });
+  const doc = {tipo:'chk', modulo:mod, fecha:f,
+    piezas:c.keys.filter(k=>R.N[k]).map(k=>{ const q = Number(c.q[k])||0; return {k, itemId:R.N[k].itemId, dim:R.N[k].dim, txt:pzpColor(R.N[k].itemId)+' '+R.N[k].n, q, debe:fmtNum(R.T[k]||0), dif:fmtNum(q + (armCont[k]||0) - (R.T[k]||0))}; }),
+    armados:c.arm.map(x=>({a:x.a, q:Number(x.q)||0})), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
+  try{ await db.collection('piezasPrueba').doc('chk_'+mod+'_'+f).set(doc); await pzpCargar(mod); pzpChk = null; toast('✅ Conteo guardado'); pzpRender(); window.scrollTo(0,0); }catch(e){ alert('Error al guardar: '+e.message); }
+}
 function pzpAvisosHtml(){
   const R = pzpCalcular(pzpD); if(!R) return '';
   const av = R.avisos.slice().sort((a,b)=>(b.dia||'9').localeCompare(a.dia||'9'));
@@ -15678,3 +15803,5 @@ async function repModPDF(){
 
 // v252: guardar una sola vez aunque se toque dos veces.
 maqRepGuardar = unaSolaVez('maqRepGuardar', maqRepGuardar); maqRepEstado = unaSolaVez('maqRepEstado', maqRepEstado); maqRepBorrar = unaSolaVez('maqRepBorrar', maqRepBorrar);
+// v258: guardar el conteo rápido una sola vez aunque se toque dos veces.
+pzpChkGuardar = unaSolaVez('pzpChkGuardar', pzpChkGuardar);
