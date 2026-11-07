@@ -27,11 +27,14 @@ let moduloActual = localStorage.getItem('am_modulo') || null;
 // para no decir "dueño"); el valor guardado en la base no cambia. Sin Supabase configurado,
 // miPerfil queda null y la app se comporta como antes (un solo usuario local, sin restricciones).
 let miPerfil = null;
-const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente', administracion:'Administración', auditor:'Auditor' };
+const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente', administracion:'Administración', auditor:'Auditor', reportes:'Solo reportes' };
 // 'administracion' (confirmado por el usuario): la persona que surte el material. Sube los pedidos
 // que van a llegar, aprueba lo que llegó, ve lo que falta por entregar y el inventario de los 5
 // módulos. NO aprueba instalaciones ni captura entradas/salidas/instalaciones.
 function esAdministracion(){ return !!miPerfil && miPerfil.rol==='administracion'; }
+// v261 (pedido por el usuario): 'reportes' = solo ve los reportes de instalaciones de los 5 módulos. Nada más.
+// La protección real está en Supabase (regla que solo le deja leer 'reportesInst'); aquí solo se acomoda la pantalla.
+function esSoloReportes(){ return !!miPerfil && miPerfil.rol==='reportes'; }
 function puedePedidos(){ return esAdmin() || esAdministracion(); }
 function puedeEscribir(){ return !miPerfil || miPerfil.rol==='admin' || miPerfil.rol==='coordinador'; }
 function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
@@ -190,6 +193,7 @@ function renderModBar(){
 // Muestra/oculta pestañas de navegación y acciones según el rol de quien inició sesión.
 function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
+  if(esSoloReportes()){ document.querySelectorAll('#nav button[data-v]').forEach(b=>{ b.style.display = 'none'; }); return; }
   // Coordinadores: solo lo que usan en el día (se ocultan Catálogo e Historial, que son de consulta avanzada).
   // Coordinador: menú corto (confirmado por el usuario) con lo del día; lo demás queda en "☰ Más".
   // Dirección (confirmado por el usuario, v178): menú corto — Inicio, Inventario, Auditoría, Aprobaciones,
@@ -233,7 +237,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v259';
+const APP_VERSION = 'v261';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -678,6 +682,7 @@ async function editInicial(itemId){
 }
 
 function setView(v){
+  if(esSoloReportes() && !(v==='repver' && repSec==='rinstDir')){ repSec = 'rinstDir'; if(!repRiDia) repRiDia = fechaHoyLocal(); v = 'repver'; }
   if(enDirModo() && VISTAS_MODULO.includes(v)) return renderElegirModulo(v); // Dirección: primero ¿de qué módulo?
   current=v;
   if(esSoloLectura() && ['mov','inst','trasp','pend','mas','pzenc','gas'].includes(v)){
@@ -1357,6 +1362,7 @@ function renderHome(){
   }
   if(esSoloLectura()) t('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'dir');
   if(esSoloLectura() && !esAdministracion()) t('reloj','Historial','Auditorías y faltantes',"irA('hist')",'dir');
+  if(esSoloLectura() && !esAdministracion()) t('lista','Reportes de instalaciones','Salida y cierre de cada módulo, aquí mismo',"repRiDia=fechaHoyLocal();repRiCache=null;repAbrir('rinstDir')",'dir');
   t('barras','Reportes', esAdmin() ? 'Del día, material, módulos…' : 'Reporte del día en PDF',"irA('rep')", (esAdmin()||esSoloLectura()) ? 'dir' : 'dia');
   if(esAdmin()) t('engrane','Configuración','Usuarios, catálogo, PIN y respaldo',"irA('conf')",'dir');
   if(puedeCapturarHerr() || miPerfil && (miPerfil.rol==='supervisor'||miPerfil.rol==='gerente')){
@@ -9793,7 +9799,7 @@ let repDiaSel = '';
 // casi no se usa (usuarios, PIN, stock inicial, borrar datos, respaldo) pasó a ⚙️ Configuración.
 let repBuscar = '', repSec = '', repDiaModo = 'completo', repCierresDia = '', repCierreAbierto = '', repCierresCache = null;
 let _snapMovsN = 0, _snapIniN = 0;
-function repEsDir(){ return esAdmin() || esSoloLectura(); } // ven y eligen cualquiera de los 5 módulos
+function repEsDir(){ return esAdmin() || esSoloLectura() || esSoloReportes(); } // ven y eligen cualquiera de los 5 módulos
 function repAyer(){ const d = new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-1); return ymdLocal(d); }
 function ymdLocal(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function repAbrir(sec){ repSec = sec; irA('repver'); }
@@ -9879,7 +9885,7 @@ function repListaRender(){
 // Encabezado de cada reporte: regresar + título + (Dirección) elegir módulo.
 function repVolverHtml(t, sub, conModulo){
   return `<div class="card" style="padding:12px">
-    <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('rep')">‹ Reportes</button>
+    ${esSoloReportes() ? `<div class="hint" style="margin:0">👋 ${riEsc(getCurrentUserEmail?getCurrentUserEmail():'')} · Solo reportes</div>` : `<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('rep')">‹ Reportes</button>`}
     <div style="font-size:18px;font-weight:900;margin-top:10px">${t}</div>${sub?`<p class="hint" style="margin:2px 0 0">${sub}</p>`:''}
     ${conModulo ? repModHtml() : ''}</div>`;
 }
@@ -10518,7 +10524,46 @@ function renderRepRInst(){
         : `<p class="hint" style="margin:12px 0 0">${mod} no tiene reporte de instalaciones ese día.</p>`}
       ${conDocs.length>1 ? `<button class="btn" style="width:100%;margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="repRiPdf('cierre',true)">📄 Cierre de todos los módulos en un PDF (${conDocs.map(x=>x.modulo).join(', ')})</button>` : ''}
       ${esAdmin() ? `<button class="btn small" style="margin-top:10px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="riDia=repRiDia;riCargadoDe='';entrarModulo('${mod}','rinst')">✏️ Abrir el reporte de ${mod}</button>` : ''}
-    </div>`;
+    </div>` + repRiListaHtml(conDocs, D);
+}
+// v260 (pedido por el usuario): el reporte se lee directo en la app, sin abrir el PDF (al abrirlo desde
+// WhatsApp a quien lo revisa le salían anuncios). Es lo mismo que el PDF: salida o cierre, por módulo o los 5.
+let repRiVista = '', repRiTodos = false;
+function repRiListaHtml(conDocs, D){
+  const docs = repRiTodos ? MODULOS.map(m=>conDocs.find(x=>x.modulo===m.nombre)).filter(Boolean) : (D && (D.direcciones||[]).length ? [D] : []);
+  if(!docs.length && !conDocs.length) return '';
+  if(!repRiVista) repRiVista = docs.some(x=>x.enviadoCierre) ? 'cierre' : 'salida';
+  const sal = repRiVista==='salida', hora = iso => iso ? new Date(iso).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
+  const chip = (on, txt, js) => `<button class="chip ${on?'on':''}" onclick="${js}">${txt}</button>`;
+  const ori = d => d.origen==='tarde' ? ' <span class="hint" style="margin:0">(llegó en la tarde)</span>' : d.origen==='reagendada' ? ' <span class="hint" style="margin:0">(reagendada)</span>' : '';
+  const fila = (n, d, der, col, extra) => `<div style="display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:flex-start"><span style="flex:none;width:22px;font-weight:800;color:var(--sub)">${n}</span>
+    <div style="flex:1;min-width:0"><strong>${riEsc(riCalleNum(d))}</strong>${ori(d)}${d.colonia?`<div class="hint" style="margin:0">${riEsc(d.colonia)}</div>`:''}${d.cliente?`<div class="hint" style="margin:0">👤 ${riEsc(d.cliente)}</div>`:''}${extra||''}</div>
+    ${der?`<span style="flex:none;font-weight:800;font-size:13px;color:${col};text-align:right;max-width:45%">${der}</span>`:''}</div>`;
+  const grupo = (t, n, col, html) => `<div style="margin-top:12px;padding:8px 12px;border-radius:12px;background:${col}14;border-left:5px solid ${col}"><div style="font-weight:900;color:${col}">${t} · ${n}</div>${html || '<div class="hint" style="margin:6px 0">Ninguna.</div>'}</div>`;
+  const cuerpo = docs.map(D=>{
+    const ds = D.direcciones||[];
+    let h = `<div style="margin-top:14px"><div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:17px">📍 ${D.modulo}</strong><span class="hint" style="margin:0">${sal?(D.enviadoSalida?'🌅 enviado '+hora(D.enviadoSalida):'🌅 sin mandar'):(D.enviadoCierre?'🌇 enviado '+hora(D.enviadoCierre):'🌇 sin mandar')}</span></div>`;
+    if(sal){
+      const si = ds.filter(d=>d.salida==='sale'), no = ds.filter(d=>d.salida==='nosale'), sin = ds.filter(d=>!d.salida);
+      h += grupo('✅ Salen hoy', si.length, '#16a34a', si.map((d,k)=>fila(k+1, d)).join(''));
+      h += grupo('🚫 No salen', no.length, '#dc2626', no.map((d,k)=>fila(k+1, d, riMotIc(d.mot)+' '+riEsc(riMotTxt(d.mot, d.motTxt, d.motFecha)), '#dc2626', d.nota?`<div class="hint" style="margin:0">📝 ${riEsc(d.nota)}</div>`:'')).join(''));
+      if(sin.length) h += grupo('⏳ Sin marcar', sin.length, '#b45309', sin.map((d,k)=>fila(k+1, d)).join(''));
+    } else {
+      const ok = ds.filter(d=>d.salida==='sale' && d.cierre==='ok'), ruta = ds.filter(d=>d.salida==='sale' && d.cierre==='ruta'), sinM = ds.filter(d=>d.salida==='sale' && !d.cierre), noHoy = ds.filter(d=>d.salida==='nosale' || d.cierre==='nohizo');
+      const hr = d => { const mv = (D.movimientos||[]).filter(m=>m.calle===riCalleNum(d) && /Instalada|En ruta/.test(m.t)).pop(); return mv ? ' · '+hora(mv.f) : ''; };
+      h += grupo('✅ Instaladas', ok.length, '#16a34a', ok.map((d,k)=>fila(k+1, d, 'Instalada'+hr(d), '#16a34a')).join(''));
+      h += grupo('🚚 En ruta', ruta.length, '#2563eb', ruta.map((d,k)=>fila(k+1, d, 'En ruta'+hr(d), '#2563eb')).join(''));
+      if(sinM.length) h += grupo('⏳ Salieron, sin marcar', sinM.length, '#b45309', sinM.map((d,k)=>fila(k+1, d)).join(''));
+      h += grupo('🚫 No se instalaron hoy', noHoy.length, '#dc2626', noHoy.map((d,k)=>fila(k+1, d, d.salida==='nosale' ? riMotIc(d.mot)+' '+riEsc(riMotTxt(d.mot, d.motTxt, d.motFecha)) : riMotIc(d.motC||d.mot)+' '+riEsc(riMotTxt(d.motC||d.mot, d.motCTxt||d.motTxt, d.motCFecha||d.motFecha)||'Salió pero no se hizo'), '#dc2626', `<div class="hint" style="margin:0">${d.salida==='nosale'?'No salió':'Salió pero no se hizo'}</div>${d.nota?`<div class="hint" style="margin:0">📝 ${riEsc(d.nota)}</div>`:''}`)).join(''));
+      if(D.confirmoTodas) h += `<p class="hint" style="margin:8px 0 0">✔️ El coordinador confirmó que no le mandaron más instalaciones.</p>`;
+    }
+    return h + '</div>';
+  }).join('');
+  return `<div class="card"><div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:17px">👀 Ver el reporte aquí</strong><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="repRiCache=null;renderRepRInst()">🔄 Actualizar</button></div>
+    <div class="chips" style="margin-top:8px">${chip(sal,'🌅 Salida (mañana)',"repRiVista='salida';renderRepRInst()")}${chip(!sal,'🌇 Cierre (tarde)',"repRiVista='cierre';renderRepRInst()")}</div>
+    <div class="chips" style="margin-top:6px">${chip(!repRiTodos,'📍 '+modulo(),"repRiTodos=false;renderRepRInst()")}${chip(repRiTodos,'🌎 Los 5 módulos',"repRiTodos=true;renderRepRInst()")}</div>
+    ${cuerpo || `<p class="hint" style="margin:10px 0 0">${repRiTodos?'Ningún módulo tiene reporte ese día.':modulo()+' no tiene reporte ese día.'}</p>`}
+    <p class="hint" style="margin:12px 0 0">Es lo mismo que el PDF que mandan al grupo. Solo es un reporte: no mueve inventario.</p></div>`;
 }
 async function repRiPdf(tipo, todos){
   if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
@@ -13519,7 +13564,7 @@ async function renderUsuarios(){
   try{ usuariosCache = (await listarUsuarios()).perfiles || []; }
   catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar la lista de usuarios: ${e.message}<p class="hint">Si el error dice "Failed to fetch" o "404", probablemente la función 'admin-usuarios' todavía no está pegada en tu proyecto de Supabase — dile a Claude que te pase esa parte del README.</p></div>`; return; }
 
-  const rolOpts = (sel)=>['admin','administracion','coordinador','supervisor','gerente','auditor'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
+  const rolOpts = (sel)=>['admin','administracion','coordinador','supervisor','gerente','auditor','reportes'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
   const moduloOpts = (sel)=>`<option value="">(sin módulo)</option>`+MODULOS.map(m=>`<option value="${m.nombre}" ${m.nombre===sel?'selected':''}>${m.nombre}</option>`).join('');
 
   let html = `<div class="card">
