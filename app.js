@@ -27,11 +27,14 @@ let moduloActual = localStorage.getItem('am_modulo') || null;
 // para no decir "dueño"); el valor guardado en la base no cambia. Sin Supabase configurado,
 // miPerfil queda null y la app se comporta como antes (un solo usuario local, sin restricciones).
 let miPerfil = null;
-const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente', administracion:'Administración', auditor:'Auditor' };
+const ROL_LABELS = { admin:'Dirección', coordinador:'Coordinador', supervisor:'Supervisor', gerente:'Gerente', administracion:'Administración', auditor:'Auditor', reportes:'Solo reportes' };
 // 'administracion' (confirmado por el usuario): la persona que surte el material. Sube los pedidos
 // que van a llegar, aprueba lo que llegó, ve lo que falta por entregar y el inventario de los 5
 // módulos. NO aprueba instalaciones ni captura entradas/salidas/instalaciones.
 function esAdministracion(){ return !!miPerfil && miPerfil.rol==='administracion'; }
+// v261 (pedido por el usuario): 'reportes' = solo ve los reportes de instalaciones de los 5 módulos. Nada más.
+// La protección real está en Supabase (regla que solo le deja leer 'reportesInst'); aquí solo se acomoda la pantalla.
+function esSoloReportes(){ return !!miPerfil && miPerfil.rol==='reportes'; }
 function puedePedidos(){ return esAdmin() || esAdministracion(); }
 function puedeEscribir(){ return !miPerfil || miPerfil.rol==='admin' || miPerfil.rol==='coordinador'; }
 function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
@@ -190,6 +193,7 @@ function renderModBar(){
 // Muestra/oculta pestañas de navegación y acciones según el rol de quien inició sesión.
 function aplicarPermisosUI(){
   if(!miPerfil) return; // sin Supabase configurado: modo local, sin restricciones
+  if(esSoloReportes()){ document.querySelectorAll('#nav button[data-v]').forEach(b=>{ b.style.display = 'none'; }); return; }
   // Coordinadores: solo lo que usan en el día (se ocultan Catálogo e Historial, que son de consulta avanzada).
   // Coordinador: menú corto (confirmado por el usuario) con lo del día; lo demás queda en "☰ Más".
   // Dirección (confirmado por el usuario, v178): menú corto — Inicio, Inventario, Auditoría, Aprobaciones,
@@ -233,7 +237,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v260';
+const APP_VERSION = 'v261';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -678,6 +682,7 @@ async function editInicial(itemId){
 }
 
 function setView(v){
+  if(esSoloReportes() && !(v==='repver' && repSec==='rinstDir')){ repSec = 'rinstDir'; if(!repRiDia) repRiDia = fechaHoyLocal(); v = 'repver'; }
   if(enDirModo() && VISTAS_MODULO.includes(v)) return renderElegirModulo(v); // Dirección: primero ¿de qué módulo?
   current=v;
   if(esSoloLectura() && ['mov','inst','trasp','pend','mas','pzenc','gas'].includes(v)){
@@ -9794,7 +9799,7 @@ let repDiaSel = '';
 // casi no se usa (usuarios, PIN, stock inicial, borrar datos, respaldo) pasó a ⚙️ Configuración.
 let repBuscar = '', repSec = '', repDiaModo = 'completo', repCierresDia = '', repCierreAbierto = '', repCierresCache = null;
 let _snapMovsN = 0, _snapIniN = 0;
-function repEsDir(){ return esAdmin() || esSoloLectura(); } // ven y eligen cualquiera de los 5 módulos
+function repEsDir(){ return esAdmin() || esSoloLectura() || esSoloReportes(); } // ven y eligen cualquiera de los 5 módulos
 function repAyer(){ const d = new Date(fechaHoyLocal()+'T12:00:00'); d.setDate(d.getDate()-1); return ymdLocal(d); }
 function ymdLocal(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function repAbrir(sec){ repSec = sec; irA('repver'); }
@@ -9880,7 +9885,7 @@ function repListaRender(){
 // Encabezado de cada reporte: regresar + título + (Dirección) elegir módulo.
 function repVolverHtml(t, sub, conModulo){
   return `<div class="card" style="padding:12px">
-    <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('rep')">‹ Reportes</button>
+    ${esSoloReportes() ? `<div class="hint" style="margin:0">👋 ${riEsc(getCurrentUserEmail?getCurrentUserEmail():'')} · Solo reportes</div>` : `<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="irA('rep')">‹ Reportes</button>`}
     <div style="font-size:18px;font-weight:900;margin-top:10px">${t}</div>${sub?`<p class="hint" style="margin:2px 0 0">${sub}</p>`:''}
     ${conModulo ? repModHtml() : ''}</div>`;
 }
@@ -13559,7 +13564,7 @@ async function renderUsuarios(){
   try{ usuariosCache = (await listarUsuarios()).perfiles || []; }
   catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar la lista de usuarios: ${e.message}<p class="hint">Si el error dice "Failed to fetch" o "404", probablemente la función 'admin-usuarios' todavía no está pegada en tu proyecto de Supabase — dile a Claude que te pase esa parte del README.</p></div>`; return; }
 
-  const rolOpts = (sel)=>['admin','administracion','coordinador','supervisor','gerente','auditor'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
+  const rolOpts = (sel)=>['admin','administracion','coordinador','supervisor','gerente','auditor','reportes'].map(r=>`<option value="${r}" ${r===sel?'selected':''}>${ROL_LABELS[r]}</option>`).join('');
   const moduloOpts = (sel)=>`<option value="">(sin módulo)</option>`+MODULOS.map(m=>`<option value="${m.nombre}" ${m.nombre===sel?'selected':''}>${m.nombre}</option>`).join('');
 
   let html = `<div class="card">
