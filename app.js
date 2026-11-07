@@ -233,7 +233,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v258';
+const APP_VERSION = 'v259';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14614,7 +14614,7 @@ function pzpContArmado(a){
   let pz = [];
   try{ pz = piezasDeArmado(Object.assign({}, a)).filter(p=>typeof p.cantidad==='number').map(p=>Object.assign({}, p, {estado:'ok'})); }catch(e){ return []; }
   let out = []; try{ out = piezasMelMueble(pz, a.color); }catch(e){}
-  return out.map(p=>({itemId:p.itemId, dim:p.dim, q:p.q, n:p.n}));
+  return out.filter(p=>!pzpEsRenglonMax(p.n)).map(p=>({itemId:p.itemId, dim:p.dim, q:p.q, n:p.n}));
 }
 function pzpArmKey(a){ return JSON.stringify([a.tipo, a.variante||'', a.color||'', a.colorFrente||'', a.colorCuadro||'', !!a.sinFondo, !!a.puertitas, !!a.ext]); }
 function pzpArmTxt(a){ try{ return describirArmado(a).replace(/ · corredera (normal|de extensión)$/,''); }catch(e){ return a.descripcion||a.tipo; } }
@@ -14647,9 +14647,12 @@ async function pzpCargar(mod){
   return pzpD;
 }
 function pzpAudsBase(D){ return D.auds.filter(a=>(a.piezasContadas&&a.piezasContadas.length) || (a.armadosContados&&a.armadosContados.length)).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }
+// v259: "Melamina (cajonera Max)" y similares son el renglón de "1 hoja por mueble Max" del inventario oficial,
+// no una pieza: sus piezas reales (pared Max, entrepaños Max, respaldo, zóclos) ya vienen aparte. La prueba las ignora.
+const pzpEsRenglonMax = n => /^Melamina \((cajonera|entrepañera|espejo) Max\)/.test(String(n||''));
 function pzpInstPiezas(l){
-  if(Array.isArray(l.piezasMel) && l.piezasMel.length) return l.piezasMel;
-  try{ return piezasMelDeInstalacion(l); }catch(e){ return null; }
+  if(Array.isArray(l.piezasMel) && l.piezasMel.length) return l.piezasMel.filter(p=>!pzpEsRenglonMax(p.n));
+  try{ const r = piezasMelDeInstalacion(l); return r ? r.filter(p=>!pzpEsRenglonMax(p.n)) : r; }catch(e){ return null; }
 }
 
 // Motor de la prueba. `hasta` (YYYY-MM-DD) corta la cuenta en ese día; `borrador` reemplaza la captura de su día.
