@@ -4553,8 +4553,8 @@ function renderAudArmadosHtml(){
     <div class="grid2" style="margin-top:10px">
       ${ARMADO_SIN_VARIANTE(f.tipo)?'':`<div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="${set('variante')}">${Object.keys(variantes).map(k=>`<option value="${k}" ${k===f.variante?'selected':''}>${variantes[k]}</option>`).join('')}</select></div>`}
       ${esCorr?'':`<div><label class="hint">${labelColor}</label><select style="margin-top:4px" onchange="${set('color')}">${colorOpts(f.color)}</select></div>`}
-      ${(esCajonera||f.tipo==='cajonera_espejo')?`<div><label class="hint">Color de ${f.tipo==='cajonera_espejo'?'los zóclos':'frentes y zóclos'}</label><select style="margin-top:4px" onchange="${set('colorFrente')}">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
-      ${f.tipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
+      ${(esCajonera||f.tipo==='cajonera_espejo') && f.variante!=='max'?`<div><label class="hint">Color de ${f.tipo==='cajonera_espejo'?'los zóclos':'frentes y zóclos'}</label><select style="margin-top:4px" onchange="${set('colorFrente')}">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
+      ${f.tipo==='cajon' && f.variante!=='max'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="${set('colorCuadro')}">${colorOpts(f.colorCuadro)}</select></div>`:''}
       <div><label class="hint">Cantidad</label><input type="number" min="0" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="auditArmadoForm.cantidad=this.value"></div>
     </div>
     ${(esCajonera||f.tipo==='cajon')?`<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinHerrajes?'checked':''} onchange="${set('sinHerrajes')}"> Sin herrajes (sin correderas${f.tipo==='cajon'?' ni jaladera':', bisagras ni jaladeras'})</label>`:''}
@@ -5778,7 +5778,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
 
     if(cajones===0 && espejos===0){
       if(maxOn){
-        piezasEntrepaneraMax(add, estructuraColor, numMuebles);
+        piezasEntrepaneraMax(add, color, numMuebles); // v264: Max de un solo color
       } else {
         const notaBase = fam==='Central'
           ? 'Asumido igual que Lateral (1 mueble = 1 entrepañera); no confirmado explícitamente para Central'
@@ -5798,13 +5798,13 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
         // cajonera(s) como la(s) entrepañera(s) restante(s) de este modelo usan piezas Max
         // (no se puede mezclar cajonera Max con entrepañera normal en el mismo modelo).
         if(cajones>0){
-          if(maxOn) piezasCajoneraMax(add, colorCaj, mueblesCajonera);
+          if(maxOn) piezasCajoneraMax(add, color, mueblesCajonera); // v264: Max siempre de un solo color (confirmado por el usuario)
           else add('Entrepaño', CAJONERA_ENTREPANOS[cajones], '40×52 cm', colorCaj, 'ok', 'Cajonera de '+cajones+' cajones ('+mueblesCajonera+' mueble(s)). Color de cajonera independiente del frente.');
         }
-        if(espejos>0 && maxOn) piezasEspejoMax(add, colorCaj, espejos);
+        if(espejos>0 && maxOn) piezasEspejoMax(add, color, espejos);
         else if(espejos>0) add('Entrepaño', espejos*5, '52×40 cm', colorCaj, 'ok', espejos+' espejo(s) = '+espejos+' mueble(s) tipo "cajonera de espejo" (5 entrepaños cada uno, confirmado por el usuario)');
         if(restantes>0){
-          if(maxOn) piezasEntrepaneraMax(add, estructuraColor, restantes);
+          if(maxOn) piezasEntrepaneraMax(add, color, restantes);
           else add('Entrepaño', restantes*5, '52×40 cm', estructuraColor, 'ok', restantes+' mueble(s) restante(s) = entrepañera(s) (confirmado: los muebles no usados por cajonera/espejo son entrepañeras)');
         }
       }
@@ -5817,7 +5817,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
       // Confirmado por el usuario: la Cajonera Max SIEMPRE lleva 4 cajones por cada mueble/unidad
       // de cajonera Max (medida fija, no depende de si el modelo original era de 3/5/6/8/10
       // cajones). Para King 6/10 Cajones Max (2 muebles), son 4 cajones × 2 muebles = 8 cajones.
-      piezasCajonesMax(add, 4*mueblesCajonera, color, estructuraColor);
+      piezasCajonesMax(add, 4*mueblesCajonera, color, color); // v264: cuadros del mismo color
     } else {
       add('Frente',cajones,'18×54 cm',color,'ok');
       add('Pieza chica de cajón',cajones*2,'33×16.5 cm',estructuraColor,'ok','Medida tomada del despiece confirmado de Doble 5 Cajones (única con medida documentada; aplicada como regla general de pieza de cajón)');
@@ -6019,6 +6019,8 @@ function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon' 
 // Herrajes de un armado (para la opción "sin herrajes" del conteo, confirmada por el usuario).
 function esPiezaHerraje(nombre){ return /^(Bisagra|Jaladera|Push|Juego de corredera|Correderas de extensión|Corredera )/.test(nombre); }
 function piezasDeArmado(a){
+  // v264 (confirmado por el usuario): lo Max va siempre de un solo color (cajonera, frentes y cajones).
+  if(a && a.variante==='max') a = Object.assign({}, a, {colorCuadro:a.color, colorFrente:a.color});
   const n = Number(a.cantidad)||0;
   const piezas = [];
   const add = (nombre,cantidad,dim,colorDestino,estado)=>((a.sinHerrajes && esPiezaHerraje(nombre)) || (a.puertitasSinJal && /^(Jaladera \(puertita|Push \(puertita)/.test(nombre))) ? null : piezas.push({nombre, cantidad: typeof cantidad==='number'? cantidad*n : cantidad, dim, colorDestino, estado:estado||'ok'});
@@ -6262,10 +6264,10 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
   // puertitas y el frente del espejo van del color del FRENTE; la estructura (paredes, entrepaños)
   // y el cuadro del cajón se quedan del color de la cajonera.
   const colorFrente = extra && extra.colorFrente;
-  if(colorFrente && colorFrente!==color && String(tipo).startsWith('cajonera'))
+  if(colorFrente && colorFrente!==color && String(tipo).startsWith('cajonera') && !/_max$/.test(tipo))
     piezas.forEach(p=>{ if(PIEZAS_COLOR_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
   // Zapatera (confirmado por el usuario): los zóclos y la puerta van del color del frente.
-  if(colorFrente && colorFrente!==color && String(tipo).startsWith('entrepanera'))
+  if(colorFrente && colorFrente!==color && String(tipo).startsWith('entrepanera') && !/_max$/.test(tipo))
     piezas.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = colorFrente; });
   if(colorFrente && colorFrente!==color && (tipo==='zapatera' || tipo==='zapatera_grande'))
     piezas.forEach(p=>{ if(PIEZAS_ZAPATERA_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
@@ -6334,7 +6336,8 @@ function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, 
   const numMueblesMax = muebles.filter(m=>m.value==='cajonera_max' || m.value==='entrepanera_max' || m.value==='cajonera_espejo_max').length;
   if(numMueblesMax>0 || maxOn) piezasFijas = sustituirMaleteroPorMax(piezasFijas);
 
-  const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, colorCaj, correderaExt));
+  // v264 (confirmado por el usuario): los muebles Max van siempre de un solo color (el elegido).
+  const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, /_max$/.test(m.value) ? color : colorCaj, correderaExt));
   // Confirmado por el usuario: los zóclos de una cajonera dependen del color del FRENTE, no
   // del color de la cajonera. Se corrige aquí (una sola vez, sobre lo que aportó cada mueble)
   // en vez de duplicar esta regla dentro de cada tipo de mueble en buildAdicionalPiezas.
@@ -6605,7 +6608,7 @@ function toggleAdicionalCajones(prefix){
         <input type="number" min="0" inputmode="numeric" id="${prefix}-pz-${d.k}" placeholder="0" style="width:64px;min-width:64px;text-align:center">
         <select id="${prefix}-pzc-${d.k}" style="width:auto;min-width:110px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select></div>`).join('')}</div>`;
   }
-  if(String(sel.value).startsWith('cajonera') || sel.value==='zapatera' || sel.value==='zapatera_grande' || String(sel.value).startsWith('entrepanera')){
+  if((String(sel.value).startsWith('cajonera') || sel.value==='zapatera' || sel.value==='zapatera_grande' || String(sel.value).startsWith('entrepanera')) && !/_max$/.test(sel.value)){
     const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
     html += `<label class="hint" style="display:block;margin-top:8px">${sel.value==='zapatera'?'Color del frente (zóclos y puerta)':sel.value==='zapatera_grande'?'Color de los zóclos':(String(sel.value).startsWith('entrepanera')?'Color de los zóclos':'Color de frentes y zóclos')}</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
   }
@@ -8371,8 +8374,8 @@ function renderGar(){
       <div class="grid2" style="margin-top:10px">
         <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="garForm.armVar=this.value;renderGar()">${Object.keys(vars).map(k=>`<option value="${k}" ${k===f.armVar?'selected':''}>${vars[k]}</option>`).join('')}</select></div>
         <div><label class="hint">${esCaj?'Color de la cajonera':(f.armTipo==='cajon'?'Color del frente':'Color del cuadro')}</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select></div>
-        ${f.armTipo==='cajon'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="garForm.colorCuadro=this.value">${colorOpts(f.colorCuadro)}</select></div>`:''}
-        ${esCaj?`<div><label class="hint">Color de frentes y zóclos</label><select style="margin-top:4px" onchange="garForm.colorFrente=this.value">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
+        ${f.armTipo==='cajon' && f.armVar!=='max'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="garForm.colorCuadro=this.value">${colorOpts(f.colorCuadro)}</select></div>`:''}
+        ${esCaj && f.armVar!=='max'?`<div><label class="hint">Color de frentes y zóclos</label><select style="margin-top:4px" onchange="garForm.colorFrente=this.value">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
         <div><label class="hint">¿Cuántos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1"></div>
       </div>
       ${(f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" style="width:22px;min-height:22px;flex:0 0 22px" ${f.ext?'checked':''} onchange="garForm.ext=this.checked"> Lleva corredera de extensión</label>`:''}
