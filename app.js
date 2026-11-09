@@ -66,7 +66,7 @@ const TIPOS_ADICIONAL = {
   repisa: 'Repisa',
   piso_zoclo: 'Piso y zóclo',
   piezas_sueltas: 'Piezas sueltas (tubos, maleteros, cargadores, zóclos, entrepaños)',
-  cajon: 'Cajón suelto (normal, Emma o Max)' // v264 (pedido por el usuario)
+  cajon: 'Cajón suelto' // v264 (pedido por el usuario)
 };
 // Piso y zóclo (confirmado por el usuario): el coordinador elige cuánto de cada pieza y de qué color.
 const PISO_ZOCLO_PIEZAS = [
@@ -12791,11 +12791,11 @@ function instCuenta(log, regresadas){
 }
 // Texto de los extras de una instalación (confirmado por el usuario: que se vea qué extra sumó).
 function describirExtra(a){
+  if(a.tipo==='cajon') return 'Cajón suelto '+({normal:'normal',emma:'Emma',max:'Max'}[a.variante]||'')+' ×'+(Number(a.cantidad)||1)+' · frente '+a.color+(a.colorCuadro&&a.colorCuadro!==a.color?' · cuadro '+a.colorCuadro:'')+(a.ext?' · extensión':'')+' (no suma)';
   if(a.tipo==='piezas_sueltas') return 'Piezas sueltas: '+(a.ps||[]).map(r=>{ const d=PIEZAS_SUELTAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+(r.color?' '+r.color:''); }).join(', ')+' (no suma)';
   return (TIPOS_ADICIONAL[a.tipo]||a.tipo).replace(' (cantidad libre)','')
     + (a.tipo==='cajonera'?' de '+a.cajones+' cajones':'')
     + (a.tipo==='repisa'?' ×'+(Number(a.cantidad)||1):'')
-    + (a.tipo==='cajon'?' '+({normal:'normal',emma:'Emma',max:'Max'}[a.variante]||'')+' ×'+(Number(a.cantidad)||1)+(a.colorCuadro&&a.colorCuadro!==a.color?' · cuadro '+a.colorCuadro:'')+(a.ext?' · extensión':'')+' (no suma)':'')
     + (a.conPuerta?(a.tipo==='zapatera'?' con puerta':' con puertitas'):'')
     + (a.tipo!=='piso_zoclo' && a.color ? ' '+a.color : '');
 }
