@@ -56,10 +56,10 @@ const TIPOS_ADICIONAL = {
   entrepanera: 'Entrepañera',
   cajonera_2: 'Cajonera de 2 cajones',
   cajonera: 'Cajonera (cantidad libre)',
-  cajonera_emma: 'Cajonera Emma (4 cajones)',
+  cajonera_emma: 'Cajonera Emma',
   cajonera_espejo: 'Cajonera de espejo',
   cajonera_espejo_max: 'Espejo Max',
-  cajonera_max: 'Cajonera Max (4 cajones)',
+  cajonera_max: 'Cajonera Max',
   entrepanera_max: 'Entrepañera Max',
   zapatera: 'Zapatera',
   zapatera_grande: 'Zapatera grande',
@@ -5752,6 +5752,8 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
 
     // Confirmado por el usuario: si el modelo lleva muebles Max (cajonera o entrepañera Max), TODO
     // maletero chico (191×40) se cambia por maletero grande (40×244). Ej.: chico + grande → 2 grandes.
+    // v264 (confirmado por el usuario): en Max, maleteros y cargadores van del mismo color que la cajonera (todo el Max es de un color).
+    if(maxOn) piezas.forEach(p=>{ if(/^Maletero|^Cargador/.test(p.nombre)) p.colorDestino = color; });
     if(maxOn) piezas.forEach(p=>{ if(p.nombre==='Maletero chico'){ p.nombre='Maletero grande'; p.dim='40×244 cm'; p.nota='Modelo Max: el maletero chico se cambia por maletero grande (confirmado por el usuario)'; } });
 
     // Cargadores 10×40 (confirmado por el usuario): Lateral 1, Doble 0, Doble Especial 1 (2 si es a
@@ -5886,6 +5888,7 @@ function buildDespiece(fam, cajones, espejos, color, todoColor, maxOn, colorCajo
 
   // Igual que los zóclos normales: si el modelo lleva cajonera, los zóclos Max van del color del frente.
   piezas.forEach(p=>{ if(p.nombre==='Zóclo Max') p.colorDestino = color; });
+  if(maxOn) piezas.forEach(p=>{ if(/^Maletero|^Cargador/.test(p.nombre)) p.colorDestino = color; }); // v264: en Max, maleteros y cargadores del color de la cajonera
   return {piezas, maxNota};
 }
 
@@ -6271,6 +6274,9 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     piezas.forEach(p=>{ if(p.nombre==='Zóclo normal' || p.nombre==='Zóclo Max') p.colorDestino = colorFrente; });
   if(colorFrente && colorFrente!==color && (tipo==='zapatera' || tipo==='zapatera_grande'))
     piezas.forEach(p=>{ if(PIEZAS_ZAPATERA_FRENTE.includes(p.nombre)) p.colorDestino = colorFrente; });
+  // v264 (pedido por el usuario): en extras se puede poner la pura cajonera (sin cajones). Los cajones
+  // van aparte como "Cajón suelto". Completa = sin cajones + sus cajones.
+  if(extra && extra.sinCajones && /^cajonera(_emma|_max)?$/.test(tipo)) return piezas.filter(p=>!PIEZAS_DE_CAJON.includes(p.nombre));
   return piezas;
 }
 const PIEZAS_ZAPATERA_FRENTE = ['Zóclo zapatera','Zóclo zapatera grande','Puerta de zapatera','Jaladera (zapatera)'];
@@ -6335,6 +6341,7 @@ function buildComposicion(fam, muebles, color, todoColor, maxOn, colorCajonera, 
 
   const numMueblesMax = muebles.filter(m=>m.value==='cajonera_max' || m.value==='entrepanera_max' || m.value==='cajonera_espejo_max').length;
   if(numMueblesMax>0 || maxOn) piezasFijas = sustituirMaleteroPorMax(piezasFijas);
+  if(numMueblesMax>0 || maxOn) piezasFijas.forEach(p=>{ if(/^Maletero|^Cargador/.test(p.nombre)) p.colorDestino = color; }); // v264
 
   // v264 (confirmado por el usuario): los muebles Max van siempre de un solo color (el elegido).
   const piezasMuebles = muebles.flatMap(m=>buildMueblePiezasComp(m.value, m.cajones, /_max$/.test(m.value) ? color : colorCaj, correderaExt));
@@ -6549,7 +6556,7 @@ function renderAdicBox(prefix){
   if(!box) return;
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
-      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${a.tipo==='cajon'?(' · '+({normal:'Normal',emma:'Emma',max:'Max'}[a.variante]||'')+' ×'+a.cantidad+(a.colorCuadro?' · cuadro '+a.colorCuadro:'')):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.tipo==='piezas_sueltas'?'<div class="hint" style="margin:2px 0 0">'+(a.ps||[]).map(r=>{ const d=PIEZAS_SUELTAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+(r.color?' '+r.color:''); }).join('<br>')+'</div>':''}${a.tipo==='piso_zoclo'?'<div class="hint" style="margin:2px 0 0">'+(a.pz||[]).map(r=>{ const d=PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+' '+r.color; }).join('<br>')+'</div>':''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
+      <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${/^cajonera(_emma|_max)?$/.test(a.tipo)?(a.sinCajones?' · <strong>sin cajones</strong>':' · completa'):''}${a.tipo==='cajon'?(' · '+({normal:'Normal',emma:'Emma',max:'Max'}[a.variante]||'')+' ×'+a.cantidad+(a.colorCuadro?' · cuadro '+a.colorCuadro:'')):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.tipo==='piezas_sueltas'?'<div class="hint" style="margin:2px 0 0">'+(a.ps||[]).map(r=>{ const d=PIEZAS_SUELTAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+(r.color?' '+r.color:''); }).join('<br>')+'</div>':''}${a.tipo==='piso_zoclo'?'<div class="hint" style="margin:2px 0 0">'+(a.pz||[]).map(r=>{ const d=PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+' '+r.color; }).join('<br>')+'</div>':''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
       <td>${a.tipo==='piso_zoclo'||a.tipo==='piezas_sueltas'?'—':a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
@@ -6612,6 +6619,10 @@ function toggleAdicionalCajones(prefix){
     const base = (document.getElementById(prefix+'-adic-color')||{}).value || 'Blanco';
     html += `<label class="hint" style="display:block;margin-top:8px">${sel.value==='zapatera'?'Color del frente (zóclos y puerta)':sel.value==='zapatera_grande'?'Color de los zóclos':(String(sel.value).startsWith('entrepanera')?'Color de los zóclos':'Color de frentes y zóclos')}</label><select id="${prefix}-adic-colorfrente" style="margin-top:4px" onchange="this.dataset.tocado='1'">${MEL_COLORES.map(c=>`<option ${c===base?'selected':''}>${c}</option>`).join('')}</select>`;
   }
+  if(['cajonera','cajonera_2','cajonera_emma','cajonera_max'].includes(sel.value)){
+    html = `<label class="hint" style="display:block;margin-top:8px">¿Con sus cajones?</label><select id="${prefix}-adic-concaj" style="margin-top:4px"><option value="con">Cajonera completa (con sus cajones)</option><option value="sin">Solo la cajonera (sin cajones)</option></select>
+      <p class="hint" style="margin:4px 0 0">Si los cajones van aparte, agrégalos con <strong>Cajón suelto</strong>.</p>` + html;
+  }
   const labelPuerta = ADIC_CON_PUERTA_LABEL[sel.value];
   if(labelPuerta){
     html += `<label class="hint" style="display:flex;align-items:center;gap:6px;margin-top:8px">
@@ -6637,6 +6648,7 @@ function agregarAdicional(prefix){
   const puertaEl = document.getElementById(prefix+'-adic-puerta');
   const conPuerta = !!(puertaEl && puertaEl.checked);
   const nuevo = {tipo, cajones, color, conPuerta};
+  if(((document.getElementById(prefix+'-adic-concaj')||{}).value)==='sin') nuevo.sinCajones = true;
   const extEl = document.getElementById(prefix+'-adic-ext'); if((tipo==='cajonera' || tipo==='cajonera_emma' || tipo==='cajon') && extEl && extEl.checked) nuevo.ext = true;
   if(tipo==='cajon'){
     nuevo.variante = (document.getElementById(prefix+'-cj-var')||{}).value || 'normal';
@@ -12812,6 +12824,7 @@ function describirExtra(a){
   if(a.tipo==='piezas_sueltas') return 'Piezas sueltas: '+(a.ps||[]).map(r=>{ const d=PIEZAS_SUELTAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+(r.color?' '+r.color:''); }).join(', ')+' (no suma)';
   return (TIPOS_ADICIONAL[a.tipo]||a.tipo).replace(' (cantidad libre)','')
     + (a.tipo==='cajonera'?' de '+a.cajones+' cajones':'')
+    + (/^cajonera(_emma|_max)?$/.test(a.tipo) ? (a.sinCajones?' · solo la cajonera, sin cajones':' · completa con '+(a.tipo==='cajonera'?'sus':'sus 4')+' cajones') : '')
     + (a.tipo==='repisa'?' ×'+(Number(a.cantidad)||1):'')
     + (a.conPuerta?(a.tipo==='zapatera'?' con puerta':' con puertitas'):'')
     + (a.tipo!=='piso_zoclo' && a.color ? ' '+a.color : '');
