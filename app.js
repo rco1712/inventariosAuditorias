@@ -5675,13 +5675,13 @@ function piezasCajoneraMax(add, colorCaj, unidades){
   add('Respaldo Max', 1*unidades, '20×58 cm', colorCaj, 'ok', 'Cajonera Max');
   add('Zóclo Max', 4*unidades, '12×58 cm', colorCaj, 'ok', 'Cajonera Max: 4 zóclos de 12×58 (confirmado por el usuario; la entrepañera Max lleva 2)');
   add('Fondo de cajonera (MDF 3mm)', unidades, '55×122 cm', '—', 'ok', '1 por cajonera Max (misma regla que cualquier cajonera)');
-  add('Melamina (cajonera Max)', unidades, '—', colorCaj, 'ok', 'Confirmado: 1 hoja de melamina por cajonera Max, misma melamina que el resto de los muebles (no es un artículo de catálogo aparte)');
+  // v264 (confirmado por el usuario): la estructura sale de 1 hoja, pero se descuenta POR PIEZA (ver fraccionPiezaMax).
 }
 function piezasEntrepaneraMax(add, color, unidades){
   add('Pared Max', 2*unidades, '40×185 cm', color, 'ok', 'Entrepañera Max (confirmado por el usuario)');
   add('Entrepaño Max largo', 5*unidades, '40×58 cm', color, 'ok', 'Entrepañera Max');
   add('Zóclo Max', 2*unidades, '12×58 cm', color, 'ok', 'Entrepañera Max');
-  add('Melamina (entrepañera Max)', unidades, '—', color, 'ok', 'Confirmado: 1 hoja de melamina por entrepañera Max, misma melamina que el resto de los muebles (no es un artículo de catálogo aparte)');
+  // v264: se descuenta por pieza (ver fraccionPiezaMax).
 }
 // Piezas de los cajones de una Cajonera Max (confirmado por el usuario): distintas a las de un
 // cajón normal. Sin jaladera (los cajones Max no llevan) y siempre con corredera de extensión.
@@ -5919,8 +5919,15 @@ const CARGADORES_POR_HOJA = 69;
 const FRENTE_ESPEJO_PIEZAS = {'10×160 cm':2, '10×35 cm':2, '16×52 cm':1, '18×52 cm':1};
 // Piezas sueltas de muebles Max (paredes, entrepaños y respaldo): la entrepañera Max completa
 // (2 paredes 40×185 + 5 entrepaños 40×58) sale de 1 hoja; cada pieza suelta vale su parte por área.
-const AREA_ENTREPANERA_MAX = 2*40*185 + 5*40*58;
-function fraccionPiezaMax(dim){ const m=String(dim).match(/([\d.]+)\s*×\s*([\d.]+)/); return m ? Number(m[1])*Number(m[2])/AREA_ENTREPANERA_MAX : 0; }
+// v264 (confirmado por el usuario): la estructura de la cajonera Max (2 paredes 40×185, 2 entrepaños
+// 27×58, 2 de 40×58, 1 respaldo 20×58 y 4 zóclos 12×58) sale de 1 hoja. Se descuenta POR PIEZA: cada
+// pieza Max vale su área entre el área de esa estructura completa, así la cajonera Max completa = 1 hoja
+// exacta y cada pieza suelta (auditoría, garantía, zóclos de otro color) vale su parte. Los cajones Max
+// (frentes y piezas de cajón) salen de otras hojas y se descuentan aparte por su rendimiento.
+const AREA_CAJONERA_MAX = 2*40*185 + 2*27*58 + 2*40*58 + 20*58 + 4*12*58;
+const AREA_ENTREPANERA_MAX = AREA_CAJONERA_MAX;
+const PIEZAS_MAX_AREA = ['Pared Max','Entrepaño Max corto','Entrepaño Max largo','Respaldo Max','Zóclo Max'];
+function fraccionPiezaMax(dim){ const m=String(dim).match(/([\d.]+)\s*×\s*([\d.]+)/); return m ? Number(m[1])*Number(m[2])/AREA_CAJONERA_MAX : 0; }
 function fraccionPiezaFrenteEspejo(dim){
   const area = d => { const m=String(d).match(/([\d.]+)\s*×\s*([\d.]+)/); return m ? Number(m[1])*Number(m[2]) : 0; };
   const total = Object.keys(FRENTE_ESPEJO_PIEZAS).reduce((s,d)=>s+area(d)*FRENTE_ESPEJO_PIEZAS[d],0);
@@ -5945,11 +5952,11 @@ const PIEZAS_AUDIT = [
   {key:'zoclozapg',   tipo:'mel', nombre:'Zóclo zapatera grande',    dim:'57×10 cm',    label:'Zóclo de zapatera grande 57×10', rinde:'48 por hoja'},
   {key:'puertazap',   tipo:'mel', nombre:'Puerta de zapatera',       dim:'172×30 cm',   label:'Puerta de zapatera',       rinde:'Corte combinado (igual que en despiece)'},
   {key:'zoclo',       tipo:'mel', nombre:'Zóclo normal',             dim:'10×52 cm',    label:'Zóclo 10×52',              rinde:'48 por hoja'},
-  {key:'zoclomax',    tipo:'mel', nombre:'Zóclo Max',                dim:'12×58 cm',    label:'Zóclo Max 12×58',          rinde:'39 por hoja'},
-  {key:'paredmax',    tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×185 cm',   label:'Pared Max 40×185',         rinde:'Por área: 1 entrepañera Max = 1 hoja'},
-  {key:'entmaxlargo', tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×58 cm',    label:'Entrepaño Max largo 40×58',rinde:'Por área: 1 entrepañera Max = 1 hoja'},
-  {key:'entmaxcorto', tipo:'mel', nombre:'Pieza Max suelta',         dim:'27×58 cm',    label:'Entrepaño Max corto 27×58',rinde:'Por área: 1 entrepañera Max = 1 hoja'},
-  {key:'respaldomax', tipo:'mel', nombre:'Pieza Max suelta',         dim:'20×58 cm',    label:'Respaldo Max 20×58',       rinde:'Por área: 1 entrepañera Max = 1 hoja'},
+  {key:'zoclomax',    tipo:'mel', nombre:'Zóclo Max',                dim:'12×58 cm',    label:'Zóclo Max 12×58',          rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
+  {key:'paredmax',    tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×185 cm',   label:'Pared Max 40×185',         rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
+  {key:'entmaxlargo', tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×58 cm',    label:'Entrepaño Max largo 40×58',rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
+  {key:'entmaxcorto', tipo:'mel', nombre:'Pieza Max suelta',         dim:'27×58 cm',    label:'Entrepaño Max corto 27×58',rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
+  {key:'respaldomax', tipo:'mel', nombre:'Pieza Max suelta',         dim:'20×58 cm',    label:'Respaldo Max 20×58',       rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
   {key:'zoclozap12',  tipo:'mel', nombre:'Zóclo zapatera',           dim:'12×27 cm',    label:'Zóclo de zapatera 12×27 (con puerta)', rinde:'84 por hoja'},
   {key:'zoclozap',    tipo:'mel', nombre:'Zóclo zapatera',           dim:'10×27 cm',    label:'Zóclo de zapatera 10×27',  rinde:'100 por hoja'},
   {key:'cargador',    tipo:'mel', nombre:'Cargador',                 dim:'10×40 cm',    label:'Cargador 10×40',           rinde:CARGADORES_POR_HOJA+' por hoja (sierra de 5 mm)'},
@@ -6032,7 +6039,7 @@ function piezasDeArmado(a){
     // Confirmado por el usuario: la cajonera de espejo lleva los zóclos de espejo (16×52 y 18×52).
     // Cada pieza del frente de espejo vale su parte de 1/5 de hoja (ver fraccionPiezaFrenteEspejo).
     const cz = a.colorFrente || a.color;
-    if(esMax){ add('Pared Max', 2, '40×185 cm', a.color); add('Entrepaño Max largo', 5, '40×58 cm', a.color); add('Melamina (espejo Max)', 1, '—', a.color);
+    if(esMax){ add('Pared Max', 2, '40×185 cm', a.color); add('Entrepaño Max largo', 5, '40×58 cm', a.color);
       add('Pieza de frente de espejo', 1, '16×58 cm', cz); add('Pieza de frente de espejo', 1, '18×58 cm', cz); }
     else { add('Pared', 2, '191×40 cm', a.color); add('Entrepaño', 5, '52×40 cm', a.color);
       add('Pieza de frente de espejo', 1, '16×52 cm', cz); add('Pieza de frente de espejo', 1, '18×52 cm', cz); }
@@ -6134,7 +6141,7 @@ function piezasFrenteEspejo(add, n, colorFrente, max){
 function piezasEspejoMax(add, color, n){
   add('Pared Max', 2*n, '40×185 cm', color, 'ok', 'Espejo Max (confirmado por el usuario)');
   add('Entrepaño Max largo', 5*n, '40×58 cm', color, 'ok', 'Espejo Max');
-  add('Melamina (espejo Max)', n, '—', color, 'ok', '1 hoja por mueble de espejo Max, igual que la entrepañera Max');
+  // v264: se descuenta por pieza (ver fraccionPiezaMax).
 }
 function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, extra){
   const piezas = [];
@@ -6390,20 +6397,22 @@ function piezasAConsumo(piezas, color){
   Object.keys(maleterosPorColor).forEach(c=>addConsumo('Melamina '+c, maleterosPorColor[c]/3));
 
   // Frentes: 24 por hoja, color solicitado por el cliente (Frente Max usa el mismo rendimiento)
-  const frentes = piezas.filter(p=>p.nombre==='Frente' && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
-  const frentesMax = piezas.filter(p=>p.nombre==='Frente Max' && p.estado==='ok').reduce((s,p)=>s+(typeof p.cantidad==='number'?p.cantidad:0),0);
-  if(frentes+frentesMax>0) addConsumo('Melamina '+color, frentes/24 + frentesMax/FRENTES_MAX_POR_HOJA);
+  // v264: cada frente se descuenta en SU color (antes todos iban al color del modelo; un extra con
+  // frentes de otro color se descontaba en el color equivocado).
+  const frentesPorColor = {};
+  piezas.forEach(p=>{ if(p.estado!=='ok' || typeof p.cantidad!=='number' || (p.nombre!=='Frente' && p.nombre!=='Frente Max')) return;
+    const c = (p.colorDestino && p.colorDestino!=='—') ? p.colorDestino : color;
+    frentesPorColor[c] = (frentesPorColor[c]||0) + (p.nombre==='Frente' ? p.cantidad/24 : p.cantidad/FRENTES_MAX_POR_HOJA); });
+  Object.keys(frentesPorColor).forEach(c=>addConsumo('Melamina '+c, frentesPorColor[c]));
 
   // Melamina de Cajonera Max / Entrepañera Max: 1 hoja por unidad, ya expresada en hojas (no se divide),
   // y es la misma melamina por color que usa el resto de los muebles (confirmado por el usuario).
-  const melaminaMaxPorColor = {};
+  // v264: estructura Max por pieza (la cajonera Max completa = 1 hoja exacta).
   piezas.forEach(p=>{
-    if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
-    if(p.nombre==='Melamina (cajonera Max)' || p.nombre==='Melamina (entrepañera Max)' || p.nombre==='Melamina (espejo Max)'){
-      melaminaMaxPorColor[p.colorDestino] = (melaminaMaxPorColor[p.colorDestino]||0) + p.cantidad;
-    }
+    if(p.estado!=='ok' || typeof p.cantidad!=='number' || !PIEZAS_MAX_AREA.includes(p.nombre)) return;
+    if(!p.colorDestino || p.colorDestino==='—') return;
+    addConsumo('Melamina '+p.colorDestino, p.cantidad*fraccionPiezaMax(p.dim));
   });
-  Object.keys(melaminaMaxPorColor).forEach(c=>addConsumo('Melamina '+c, melaminaMaxPorColor[c]));
 
   // Piezas de cajón: cortas 49/hoja, largas 35/hoja
   const cortasPorColor = {}, largasPorColor = {};
@@ -6461,7 +6470,7 @@ function piezasAConsumo(piezas, color){
   // Zóclos (todos: normal, Max, zapatera, de espejo) y marcos de espejo (confirmado por el usuario):
   // proporcional según cuántas piezas de esa medida salen de una hoja de 122×244, en la melamina
   // de su color (p. ej. zóclo 10×52 → 48 por hoja → cada uno = 1/48 de hoja).
-  const PIEZAS_PROPORCIONALES = ['Zóclo normal','Zóclo Max','Zóclo zapatera','Marco 10×244','Entrepaño zapatera grande','Tapa zapatera grande','Zóclo zapatera grande']; // v231: zapatera grande, por cuántas salen de una hoja
+  const PIEZAS_PROPORCIONALES = ['Zóclo normal','Zóclo zapatera','Marco 10×244','Entrepaño zapatera grande','Tapa zapatera grande','Zóclo zapatera grande']; // v231: zapatera grande, por cuántas salen de una hoja
   // Frente de espejo completo (2 marcos 10×160 + 2 marcos 10×35 + zóclos 16×52 y 18×52): se cortan
   // juntos; con sierra de 5 mm, 1 hoja da para los frentes de 5 espejos (confirmado por el usuario)
   // → 0.20 hojas por espejo, en el color del frente. Se cuenta un espejo por cada 2 marcos largos.
