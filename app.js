@@ -5995,7 +5995,9 @@ const ARMADO_SIN_VARIANTE = t => t==='puerta_zapatera'; // espejo sí tiene Norm
 // v249 (pedido por el usuario): el cajón completo también puede ser Emma: igual que el normal pero SIN
 // jaladera, con corredera normal o de extensión.
 function armadoVariantes(tipo){
-  if(tipo==='cajonera') return ARMADO_CAJONERAS;
+  // v264 (confirmado por el usuario): la cajonera de 6, 8 o 10 cajones no existe sola, son 2 cajoneras;
+  // ya no se ofrece para contar/capturar (lo viejo guardado se sigue leyendo igual).
+  if(tipo==='cajonera'){ const o = Object.assign({}, ARMADO_CAJONERAS); ['6','8','10'].forEach(k=>delete o[k]); return o; }
   if(ARMADO_SIN_VARIANTE(tipo)) return {normal:'Normal'};
   if(tipo==='cajon') return {normal:'Normal', emma:'Emma', max:'Max'};
   return {normal:'Normal', max:'Max'};
@@ -6616,6 +6618,7 @@ function agregarAdicional(prefix){
     const el = document.getElementById(prefix+'-adic-cajones');
     cajones = Number(el && el.value);
     if(!cajones || cajones<=0) return alert('Captura la cantidad de cajones del adicional.');
+    if(cajones>5) return alert('Una cajonera de 6, 8 o 10 cajones en realidad son 2 cajoneras (6 = 3+3, 8 = 3+5, 10 = 5+5). Agrégalas por separado para que se descuenten bien las paredes y los zóclos de cada una.'); // v264 (confirmado por el usuario): 6/8/10 no existen solas
   } else if(tipo==='cajonera_max'){
     cajones = 4; // Confirmado por el usuario: la Cajonera Max siempre lleva 4 cajones, fijo.
   }
@@ -6729,6 +6732,7 @@ function calcDespiece(){
     const especial3m = dFamiliaComp==='Doble Especial' && document.getElementById('d-especial3m-comp') ? document.getElementById('d-especial3m-comp').checked : false;
     const incompletos = dMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length) return alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".');
+    if(dMueblesComp.some(m=>m.value==='cajonera_otra' && Number(m.cajones)>5)) return alert('Una cajonera de 6, 8 o 10 cajones en realidad son 2 cajoneras (6 = 3+3, 8 = 3+5, 10 = 5+5). Agrégalas por separado para que se descuenten bien las paredes y los zóclos de cada una.');
     const r = buildComposicion(dFamiliaComp, dMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
     titulo = dFamiliaComp+' — combinación: '+dMueblesComp.map(m=>MUEBLE_TIPO_OPCIONES.find(o=>o.value===m.value).label).join(' + ')+(especial3m?' · a 3 metros':'');
@@ -8087,6 +8091,7 @@ function previewInst(){
     const especial3m = iFamiliaComp==='Doble Especial' && document.getElementById('i-especial3m-comp') ? document.getElementById('i-especial3m-comp').checked : false;
     const incompletos = iMueblesComp.filter(m=>m.value==='cajonera_otra' && !m.cajones);
     if(incompletos.length){ alert('Captura la cantidad de cajones en los muebles "Cajonera (otra cantidad)".'); return; }
+    if(iMueblesComp.some(m=>m.value==='cajonera_otra' && Number(m.cajones)>5)){ alert('Una cajonera de 6, 8 o 10 cajones en realidad son 2 cajoneras (6 = 3+3, 8 = 3+5, 10 = 5+5). Agrégalas por separado para que se descuenten bien las paredes y los zóclos de cada una.'); return; }
     colorCajonera = document.getElementById('i-color-cajonera-comp') ? document.getElementById('i-color-cajonera-comp').value : null;
     const r = buildComposicion(iFamiliaComp, iMueblesComp, color, todoColor, maxOn, colorCajonera, especial3m, correderaExt);
     piezasModelo = r.piezas; maxNota = r.maxNota;
