@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v265';
+const APP_VERSION = 'v266';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -7020,7 +7020,7 @@ async function guardarCambioModelo(n){
       const viejos = movs.filter(m=>m.loteId===L.id);
       for(const x of n.consumo) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad);
       await apartarSobrante();
-      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor, cambioDeDesc:L.descripcion, calle:L.calle||'', correccion, ...verifNuevo});
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, piezasMel:n.piezasMel||null, fecha, estado, creadoPor, cambioDeDesc:L.descripcion, calle:L.calle||'', correccion, ...verifNuevo});
       for(const m of viejos) await db.collection('movimientos').doc(m.id).delete();
       await db.collection('instalacionesLog').doc(L.id).delete();
       movs = movs.filter(m=>!viejos.includes(m));
@@ -7029,7 +7029,7 @@ async function guardarCambioModelo(n){
       for(const x of d.regresa) await mov(CATALOGO.find(i=>i.id===x.itemId), 'devolucion', x.cantidad, {motivo:'cambioModelo', instalacionId:L.id, cambioModelo:true});
       for(const x of d.descuenta) await mov(CATALOGO.find(i=>i.id===x.itemId), 'instalacion', x.cantidad, {cambioModelo:true});
       await apartarSobrante();
-      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, fecha, estado, creadoPor,
+      await db.collection('instalacionesLog').doc(newId).set({modulo:mod, categoria:n.categoria, descripcion:n.desc, nota, fechaDia:L.fechaDia, modeloKey:n.modeloKey, esMax:!!n.esMax, extras:n.extras||0, extrasDetalle:n.extrasDetalle||[], consumo:n.consumo, piezasMel:n.piezasMel||null, fecha, estado, creadoPor,
         cambioDe:L.id, calle:L.calle||'', cambio:{deDesc:L.descripcion, deExtras:L.extrasDetalle||[], regresa:d.regresa, descuenta:d.descuenta, destinos}, correccion, ...verifNuevo});
       if(estado==='aprobado') await db.collection('instalacionesLog').doc(L.id).update({cambiadaPor:newId});
     }
@@ -7865,8 +7865,10 @@ function piezasMelDeInstalacion(l){
     // Muebles capturados antes de v209: solo si es un modelo de la lista sin extras (si no, se decide en general).
     if((Number(l.extras)||0) || (l.extrasDetalle||[]).length) return null;
     const nom = partes[0], maxOn = / Max$/.test(nom), md = MODELOS.find(x=>x.nombre===nom.replace(/ Max$/,'')); if(!md) return null;
-    const color = partes[1], cc = (partes.find(t=>/^Cajonera /.test(t))||'').replace(/^Cajonera /,'') || null;
-    const r = buildDespiece(md.fam, md.cajones, md.espejos, color, false, maxOn, cc, false, false); const pz = piezasMelMueble(r.piezas, color);
+    // v266: "a 3 metros", "sin tubos" y "cajoneras con puertitas" van entre el modelo y el color.
+    const MARCAS = ['a 3 metros','sin tubos','cajoneras con puertitas'], resto = partes.slice(1).filter(t=>!MARCAS.includes(t));
+    const color = resto[0], cc = (resto.find(t=>/^Cajonera /.test(t))||'').replace(/^Cajonera /,'') || null, esp3 = partes.includes('a 3 metros');
+    const r = buildDespiece(md.fam, md.cajones, md.espejos, color, false, maxOn, cc, esp3, false); const pz = piezasMelMueble(r.piezas, color);
     // Revisión: lo recalculado tiene que coincidir con lo que se descontó (si no, se decide en general).
     const okC = (l.consumo||[]).filter(c=>esHojaId(c.itemId)).every(c=>{ const s = pz.filter(x=>x.itemId===c.itemId).reduce((a,x)=>a+x.q*x.w,0); return s>0 && Math.abs(s-Number(c.cantidad))/Number(c.cantidad) < 0.35; });
     return okC ? pz : null;
@@ -8783,7 +8785,7 @@ async function confirmarInst(){
   if(!instPreview || instPreview.bloqueado) return;
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const nota = ($('#i-nota').value||'').trim();
-  if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[], consumo:instPreview.consumo});
+  if(instCambio) return guardarCambioModelo({categoria:'Mueble', desc:`${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`, nota, modeloKey:instPreview.modeloKey||null, esMax:!!instPreview.esMax, extras:instPreview.extras||0, extrasDetalle:instPreview.extrasDetalle||[], consumo:instPreview.consumo, piezasMel:(()=>{ try{ return piezasMelMueble(instPreview.piezas, instPreview.color); }catch(e){ return null; } })()});
   const calle = exigirCalle('i'); if(!calle) return; // v182
   if(!(await avisoPospuesta(calle))) return; // v210
   if(!(await verifAvisoRecaptura('Mueble', instPreview.modeloKey||null))) return; // v181
@@ -9327,7 +9329,7 @@ async function registrarPuerta(tipo, alto, ancho){
   const nota = ($('#p-nota').value||'').trim();
   const fechaDia = $('#p-fecha').value || new Date().toISOString().slice(0,10);
   const desc = `Puerta ${tipo} · ${puertaPreview.color} · ${puertaPreview.medidasTxt||(ancho+'×'+alto+' cm (ancho×alto)')}`;
-  if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo});
+  if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo, piezasMel:puertaPreview.piezasMel||null});
   const calle = exigirCalle('p'); if(!calle) return; // v182
   if(!(await avisoPospuesta(calle))) return; // v210
   if(!(await verifAvisoRecaptura('Puerta'))) return; // v181
