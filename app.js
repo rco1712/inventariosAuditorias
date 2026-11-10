@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v267';
+const APP_VERSION = 'v268';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3839,6 +3839,17 @@ const AUD_SECCIONES = [
   {k:'__armados', t:'Armados', s:'Cajoneras, cajones y cuadros armados'},
   {k:'__revisar', t:'Revisar y enviar'}
 ];
+// v268 (pedido por el usuario): "Auditoría de Melamina y MDF": igual que la auditoría normal pero solo con
+// Melamina, MDF, piezas cortadas y armados. Al aplicarla solo se mueve Melamina y MDF; herrajes y lo demás no.
+const AUD_SECCIONES_TODAS = AUD_SECCIONES.slice();
+const AUD_CATS_MEL = ['Melamina','MDF'];
+function esMelAud(){ return audTipo==='melamina' && !modoConteoCoord(); }
+function audSeccionesSync(){
+  const want = esMelAud() ? AUD_SECCIONES_TODAS.filter(x=>AUD_CATS_MEL.includes(x.k) || ['__piezas','__armados','__revisar'].includes(x.k)) : AUD_SECCIONES_TODAS;
+  if(AUD_SECCIONES.length===want.length && AUD_SECCIONES.every((x,i)=>x===want[i])) return;
+  const cat = auditCat; AUD_SECCIONES.splice(0, AUD_SECCIONES.length, ...want);
+  const i = AUD_SECCIONES.findIndex(x=>x.k===cat); audPaso = i<0 ? 0 : i; auditCat = AUD_SECCIONES[audPaso].k;
+}
 const AUD_ICONO = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩', __piezas:'✂️', __armados:'📦', __revisar:'✅'};
 function itemsSeccionAud(k){ return CATALOGO.filter(i=>i.cat===k); }
 // Correderas sueltas contadas en Herrajes (hembra / macho sin su pareja): entran al mismo "pool"
@@ -3869,6 +3880,7 @@ function setAudTipo(v){
     audTipo = v;
     _borradorRevisado[modulo()+(seraSim?'_sim':'')] = false;
   } else audTipo = v;
+  audSeccionesSync();
   renderAud();
 }
 function simResultados(){
@@ -3983,7 +3995,7 @@ function sumarPiezaAud(grupo, key){
   setAuditPieza(grupo, key, String(actual+n)); guardarBorradorAud(); renderAud();
   toast(`${p.label}: ahora ${actual+n}`);
 }
-function etiquetaTipoAud(t){ if(t==='simulacion') return '🧪 Simulador de auditoría'; return t==='conteo' ? 'Conteo inicial' : (t==='complemento' ? '➕ Complemento del conteo inicial' : (t==='parcial' ? '🎯 Auditoría de un material' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'))); }
+function etiquetaTipoAud(t){ if(t==='simulacion') return '🧪 Simulador de auditoría'; return t==='conteo' ? 'Conteo inicial' : (t==='complemento' ? '➕ Complemento del conteo inicial' : (t==='parcial' ? '🎯 Auditoría de un material' : t==='melamina' ? '🟫 Auditoría de Melamina y MDF' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'))); }
 function renderAud(){
   const ciego = modoConteoCoord();
   if(esCoordinador() && !ciego){ $('#main').innerHTML = '<div class="card">📋 El conteo del almacén solo se abre cuando Dirección lo activa, y solo ese día.</div>'; return; }
@@ -3994,6 +4006,7 @@ function renderAud(){
   audMarcarCambios(); _audMovCache = null;
   if(ciego){ audTipo='conteo'; if(!audAuditor) audAuditor=(getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0]; }
   if(audTipo==='inicial') audTipo='seguimiento';
+  audSeccionesSync();
   // auditCat puede venir de fuera (selectAuditCat); se alinea con el paso.
   const idxCat = AUD_SECCIONES.findIndex(x=>x.k===auditCat);
   if(idxCat>=0) audPaso = idxCat; else { audPaso = Math.min(audPaso, AUD_SECCIONES.length-1); auditCat = AUD_SECCIONES[audPaso].k; }
@@ -4092,11 +4105,11 @@ function renderAud(){
   <div class="card">
     <strong>${ciego?'Conteo paso a paso':etiquetaTipoAud(audTipo)+' · '+modulo()}</strong>
     <div class="grid2" style="margin-top:8px">
-      <select id="aud-tipo" onchange="setAudTipo(this.value)" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option><option value="parcial" ${audTipo==='parcial'?'selected':''}>🎯 Auditoría de un material (solo lo que cuentes)</option><option value="simulacion" ${audTipo==='simulacion'?'selected':''}>🧪 Simulador (solo para checar, no guarda nada)</option></select>
+      <select id="aud-tipo" onchange="setAudTipo(this.value)" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option><option value="melamina" ${audTipo==='melamina'?'selected':''}>🟫 Auditoría de Melamina y MDF (sin herrajes)</option><option value="parcial" ${audTipo==='parcial'?'selected':''}>🎯 Auditoría de un material (solo lo que cuentes)</option><option value="simulacion" ${audTipo==='simulacion'?'selected':''}>🧪 Simulador (solo para checar, no guarda nada)</option></select>
       <input id="aud-auditor" placeholder="Nombre de quien cuenta" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
     ${ciego||audTipo==='conteo'?'':`<button class="btn small" style="margin-top:8px;width:100%;${audOcultarTeo?'background:linear-gradient(135deg,#6b4bd6,#5338b8)':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="audOcultarTeo=!audOcultarTeo;guardarBorradorAud();renderAud()">${audOcultarTeo?'🙈 Contando a ciegas · toca para ver el teórico':'👁️ Viendo el teórico · toca para contar a ciegas'}</button>`}
-    ${ciego?'':`<p class="hint" style="margin-top:6px">${esSimAud()?'<strong>Simulador:</strong> ve a cualquier sección, cuenta lo que quieras y revisa en ✅ Revisar si cuadra. Nada se guarda.':parcial?'<strong>Auditoría de un material:</strong> cuenta solo lo que quieres corregir (por ejemplo, la Melamina Blanco). Se compara contra lo que dice la app y, al aplicarla, solo eso se corrige; lo que no cuentes se queda igual.':comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
+    ${ciego?'':`<p class="hint" style="margin-top:6px">${esSimAud()?'<strong>Simulador:</strong> ve a cualquier sección, cuenta lo que quieras y revisa en ✅ Revisar si cuadra. Nada se guarda.':esMelAud()?'<strong>Auditoría de Melamina y MDF:</strong> igual que la auditoría normal, pero solo cuentas hojas completas, piezas cortadas y armados de Melamina y MDF. Al aplicarla <strong>solo se corrigen Melamina y MDF</strong>; herrajes, cintilla, PVC, pegamento, stickers y todo lo demás se quedan exactamente como están.':parcial?'<strong>Auditoría de un material:</strong> cuenta solo lo que quieres corregir (por ejemplo, la Melamina Blanco). Se compara contra lo que dice la app y, al aplicarla, solo eso se corrige; lo que no cuentes se queda igual.':comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
     ${libre?'':`<div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>`}
     <p class="hint" style="margin:4px 0 0;${libre?'display:none':''}">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas. Puedes pasar a cualquier sección; lo pendiente se marca con ⏳.</p>
     <div class="chips" style="margin-top:8px">${chips}</div>
@@ -4398,6 +4411,7 @@ function audCargarBorrador(b){
   audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
   auditCapTs = b.auditCapTs||{}; _audValPrev = Object.assign({}, auditCapturas); audEdit = b.audEdit || null;
   const m = modulo(); _audContenido[m] = JSON.stringify(audDatosBorrador()); _audCambioT[m] = b.cambio || b.fecha || new Date().toISOString();
+  if(b.audTipo && typeof b.audPaso==='number' && !modoConteoCoord()){ audSeccionesSync(); audPaso = Math.min(b.audPaso, AUD_SECCIONES.length-1); auditCat = AUD_SECCIONES[audPaso].k; }
 }
 // Si en otro aparato se avanzó el conteo de este módulo, se trae (si aquí no hay nada más nuevo).
 function audRevisarNube(){
@@ -4811,7 +4825,7 @@ async function saveAudit(){
     if(movidos.length) av.push(`⚠️ ${movidos.length} artículo(s) se movieron DESPUÉS de que los contaste:\n${movidos.slice(0,8).map(x=>'• '+x.it.nombre+': '+x.ms.slice(0,2).map(movDescCorta).join(', ')).join('\n')}${movidos.length>8?'\n…':''}`);
     if(tipo!=='conteo' && tipo!=='complemento'){
       const nP = audPendAprobMod(); if(nP) av.push(`⏳ ${nP} captura(s) de ${modulo()} esperan tu aprobación: todavía no cuentan en el inventario.`);
-      if(new Date().getDay()!==0 && !cierreHechoHoy()) av.push(`📝 ${modulo()} todavía no hace su cierre del turno de hoy: lo que se usó hoy de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta.`);
+      if(tipo!=='melamina' && new Date().getDay()!==0 && !cierreHechoHoy()) av.push(`📝 ${modulo()} todavía no hace su cierre del turno de hoy: lo que se usó hoy de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta.`);
     }
     if(av.length && !confirm(`Antes de guardar, revisa:\n\n${av.join('\n\n')}\n\n¿Guardar la auditoría así de todos modos?`)) return;
   }
@@ -4819,12 +4833,13 @@ async function saveAudit(){
   // cero. Lo que no se capturó se toma como 0 físico; antes se avisa de los que sí tenían existencia.
   const ciego = modoConteoCoord();
   if(ciego && !confirm('¿Ya contaste TODO el almacén?\n\nLo que no escribiste se toma como 0.\n\nAl enviar, el conteo le llega a Dirección y esta opción se cierra.')) return;
-  const comp = tipo==='complemento', parcial = tipo==='parcial';
+  const comp = tipo==='complemento', parcial = tipo==='parcial', melA = tipo==='melamina';
   if(comp && !confirm('¿Guardar este COMPLEMENTO del conteo inicial de '+modulo()+'?\n\nSolo lleva lo que acabas de capturar; se va a SUMAR al stock inicial sin tocar lo que ya estaba contado.')) return;
-  const noContados = (ciego||comp||parcial||audEdit) ? [] : CATALOGO.filter(it=>auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
+  const noContados = (ciego||comp||parcial||audEdit) ? [] : CATALOGO.filter(it=>(!melA || AUD_CATS_MEL.includes(it.cat)) && auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
   if(noContados.length && !confirm(`Hay ${noContados.length} artículo(s) que según el inventario SÍ hay, pero no los contaste:\n\n${noContados.slice(0,15).map(it=>'• '+it.nombre+' (debería haber '+fmtNum(calcFormula(it.id).final)+')').join('\n')}${noContados.length>15?'\n… y '+(noContados.length-15)+' más':''}\n\nSi guardas así, se toman como 0 (faltante). ¿Guardar de todos modos?\n\n(Cancelar = regresar a contarlos)`)) return;
   CATALOGO.forEach(it=>{
     const itemId = it.id;
+    if(melA && !AUD_CATS_MEL.includes(it.cat)) return; // v268: solo Melamina y MDF; herrajes y lo demás ni se comparan ni se tocan
     const f = audEdit ? audEditTeo(itemId) : calcFormula(itemId);
     // Las correderas sueltas ya entraron al balance de juegos (eq), no se suman dos veces.
     const hojasCompletas = (auditCapturas[itemId]!==undefined && !esCorrSuelta(it)) ? auditCapturas[itemId] : 0;
@@ -4859,13 +4874,13 @@ async function saveAudit(){
   });
   try{
     if(parcial) totalDiff = resultados.filter(r=>Math.abs(Number(r.diff)||0)>0.005).length;
-    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:!parcial,creadoPor:getCurrentUserEmail?getCurrentUserEmail():''};
+    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:!parcial && !melA,...(melA?{soloMelamina:true}:{}),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''};
     if(tipo==='conteo') doc.conteoInicial = true;
     if(comp){ doc.complemento = true; doc.totalDiff = 0; }
     if(piezasContadas.length) doc.piezasContadas = piezasContadas;
     if(auditMelFuera.length) doc.melaminasFuera = auditMelFuera.map(x=>({nombre:x.nombre, hojas:Number(x.hojas)||0}));
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
-    const bc = balanceCorrederas();
+    const bc = melA ? [] : balanceCorrederas();
     if(bc.length) doc.correderas = bc;
     let audId = cryptoId();
     if(audEdit){
@@ -5496,7 +5511,7 @@ async function aplicarAuditoria(id, a){
   const {ajustes, faltantes} = calcularAjustesAuditoria(a, ajustarCortado);
   const reales = ajustes.filter(x=>x.total || x.completasDelta || x.cortadoDelta);
   const resumen = reales.slice(0,12).map(x=>`• ${x.it.nombre}: ${x.total>0?'+':''}${fmtNum(x.total)}${(x.completasDelta&&x.cortadoDelta)?` (compl. ${fmtNum(x.completasDelta)}, cort. ${fmtNum(x.cortadoDelta)})`:(x.cortadoDelta?' (cortado)':'')}`).join('\n') + (reales.length>12?`\n… y ${reales.length-12} más`:'');
-  if(!confirm(`Aplicar auditoría del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?`)) return;
+  if(!confirm(`Aplicar ${a.tipo==='melamina'?'auditoría de MELAMINA Y MDF':'auditoría'} del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:${a.tipo==='melamina'?'\n(Solo se mueven Melamina y MDF. Herrajes y lo demás NO se tocan.)':''}\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?`)) return;
   const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
   const fechaAjuste = new Date(new Date(a.fecha).getTime()+1).toISOString();
   const fechaStr = new Date(a.fecha).toLocaleDateString('es-MX');
@@ -15864,7 +15879,7 @@ async function reabrirAuditoria(id){
   if(!confirm(`✏️ ¿Volver a abrir la auditoría del ${new Date(a.fecha).toLocaleString('es-MX')} para corregirla?\n\nSe cargan sus conteos en Auditoría. Al guardar se reemplaza esa misma auditoría. No toca el inventario.`)){ auditPiezas = prevP; auditArmados = prevA; auditCapturas = prevC; return; }
   if(a.modulo!==modulo()){ moduloActual = a.modulo; localStorage.setItem('am_modulo', a.modulo); if(typeof renderModBar==='function') renderModBar(); await loadStock(); }
   audEdit = {id:a.id, fecha:a.fecha};
-  audTipo = a.tipo==='parcial' ? 'parcial' : (a.conteoInicial ? 'conteo' : 'seguimiento'); audAuditor = a.auditor||'';
+  audTipo = a.tipo==='parcial' ? 'parcial' : a.tipo==='melamina' ? 'melamina' : (a.conteoInicial ? 'conteo' : 'seguimiento'); audSeccionesSync(); audAuditor = a.auditor||'';
   auditMelFuera = (a.melaminasFuera||[]).map(x=>({nombre:x.nombre, hojas:x.hojas})); auditDesglose = {}; audHechas = {}; audPaso = 0; auditCat = AUD_SECCIONES[0].k;
   try{ localStorage.setItem(claveBorradorAud(), JSON.stringify(Object.assign({}, audDatosBorrador(), {fecha:new Date().toISOString()}))); }catch(e){}
   setView('aud'); window.scrollTo(0,0);
