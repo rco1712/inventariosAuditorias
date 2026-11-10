@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v266';
+const APP_VERSION = 'v267';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -15506,15 +15506,68 @@ function pzpChkElegir(R, f){
   ks.sort((a,b)=>(ult[a]||'').localeCompare(ult[b]||'') || ((R.T[b]-R.AC[b])*R.N[b].area) - ((R.T[a]-R.AC[a])*R.N[a].area));
   return ks.slice(0, pzpChkN());
 }
+// v267 (pedido por el usuario): contar "por color": se elige el color y solo las piezas que se van a contar;
+// de los armados solo salen los que traen esas piezas adentro.
+function pzpChkModo(){ try{ return localStorage.getItem('pzpChkModo')||'color'; }catch(e){ return 'color'; } }
+function pzpChkSetModo(m){ try{ localStorage.setItem('pzpChkModo', m); }catch(e){} pzpChk = null; pzpRender(); }
 function pzpChkIniciar(f){
   const doc = pzpChkDoc(f), R = pzpCalcular(pzpD, f); if(!R) return;
-  if(doc) pzpChk = {fecha:f, keys:(doc.piezas||[]).map(p=>p.k), q:Object.fromEntries((doc.piezas||[]).map(p=>[p.k, p.q])), arm:(doc.armados||[]).map(a=>({a:a.a, q:a.q})), guardado:true};
+  if(doc) pzpChk = {fecha:f, keys:(doc.piezas||[]).map(p=>p.k), q:Object.fromEntries((doc.piezas||[]).map(p=>[p.k, p.q])), arm:(doc.armados||[]).map(a=>Object.assign({a:a.a, q:a.q}, a.grupo?{grupo:a.grupo, txt:a.txt}:{})), guardado:true, modo:doc.modo||'dia', color:((doc.piezas||[])[0]||{}).itemId||null};
   else {
     const vistos = new Set(), arm = [];
     (R.arm||[]).filter(a=>(Number(a.cantidad)||0)>0).forEach(a=>{ const key = pzpArmKey(a); if(vistos.has(key)) return; vistos.add(key); const c = Object.assign({}, a); delete c.cantidad; arm.push({a:c, q:''}); });
-    pzpChk = {fecha:f, keys:pzpChkElegir(R, f), q:{}, arm, guardado:false};
+    const modo = pzpChkModo();
+    pzpChk = {fecha:f, keys:modo==='color'?[]:pzpChkElegir(R, f), q:{}, arm, guardado:false, modo, color:null};
   }
   pzpChkFecha = f;
+}
+// Índices de los armados que hay que contar: en "por color", solo los que traen alguna de las piezas elegidas.
+function pzpChkArmIdx(c){
+  if(c.modo!=='color') return c.arm.map((x,i)=>i);
+  return c.arm.map((x,i)=>i).filter(i=>{ try{ return pzpContArmado(Object.assign({}, c.arm[i].a, {cantidad:1})).some(p=>c.keys.includes(pzpKey(p.itemId, p.dim))); }catch(e){ return false; } });
+}
+function pzpChkArmTrae(c, i){
+  try{ return pzpContArmado(Object.assign({}, c.arm[i].a, {cantidad:1})).filter(p=>c.keys.includes(pzpKey(p.itemId, p.dim))).map(p=>`${fmtNum(p.q)} ${pzpChkPlural(String(pzpChkNom[pzpKey(p.itemId, p.dim)]||p.n).toLowerCase(), p.q)}`).join(' + '); }catch(e){ return ''; }
+}
+let pzpChkNom = {};
+function pzpChkPlural(t, q){ t = t.replace(/\s*\([^)]*\)/g,'').trim(); if(Number(q)===1) return t; const i = t.search(/ de | \d/); const a = i<0 ? t : t.slice(0,i), b = i<0 ? '' : t.slice(i);
+  return a.split(' ').map(w=>/[aeiouáéó]$/.test(w) ? w+'s' : (/[a-zñ]$/.test(w) ? w+'es' : w)).join(' ') + b; }
+// v267: en "por color" los armados se juntan sin importar el color del frente (para contar paredes da igual).
+function pzpChkGrupoTxt(a){ return pzpArmTxt(Object.assign({cantidad:1}, a)).replace(/\s*\([^)]*z[oó]clos[^)]*\)/gi,'').trim(); }
+function pzpChkGrupos(c){
+  const g = {}, orden = [];
+  pzpChkArmIdx(c).forEach(i=>{ const t = c.arm[i].txt || pzpChkGrupoTxt(c.arm[i].a), k = t+'|'+pzpChkArmTrae(c, i); if(!g[k]){ g[k] = {k, txt:t, trae:pzpChkArmTrae(c, i), idxs:[]}; orden.push(k); } g[k].idxs.push(i); });
+  return orden.map(k=>g[k]);
+}
+function pzpChkGMas(k, d){ const c = pzpChk; c.gq = c.gq||{}; const v = Math.max(0, (Number(c.gq[k])||0) + d); c.gq[k] = String(v); const e = document.getElementById('pzpchkg-'+k.replace(/[^a-z0-9]/gi,'_')); if(e) e.value = v; }
+function pzpChkTogglePieza(k){ const c = pzpChk; const i = c.keys.indexOf(k); if(i>=0){ c.keys.splice(i,1); delete c.q[k]; } else c.keys.push(k); pzpRender(); }
+function pzpChkMas(k, d){ const c = pzpChk; const v = Math.max(0, (Number(c.q[k])||0) + d); c.q[k] = String(v); const e = document.getElementById('pzpchk-'+k.replace(/[^a-z0-9]/gi,'_')); if(e) e.value = v; }
+function pzpChkArmMas(i, d){ const c = pzpChk; const v = Math.max(0, (Number(c.arm[i].q)||0) + d); c.arm[i].q = String(v); const e = document.getElementById('pzpchka-'+i); if(e) e.value = v; }
+function pzpChkColorHtml(R, f){
+  const c = pzpChk;
+  const conPiezas = k => (R.T[k]||0) > 0.5 || c.keys.includes(k);
+  const colores = [...new Set(Object.keys(R.N).filter(conPiezas).map(k=>R.N[k].itemId))].sort((a,b)=>(a==='melamina_blanco'?-1:b==='melamina_blanco'?1:pzpColor(a).localeCompare(pzpColor(b))));
+  const nomIt = id => (CATALOGO.find(i=>i.id===id)||{nombre:id}).nombre;
+  const paso = (n, t, sub) => `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div style="flex:none;width:30px;height:30px;border-radius:50%;background:#0e7490;color:#fff;font-weight:900;display:flex;align-items:center;justify-content:center">${n}</div><div><strong style="font-size:15px">${t}</strong>${sub?`<div class="hint" style="margin:0">${sub}</div>`:''}</div></div>`;
+  let h = `<div class="card">${paso(1, '¿Qué color vas a contar?')}
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${colores.map(id=>{ const on = c.color===id; return `<button onclick="pzpChk.color='${id}';pzpRender()" style="cursor:pointer;display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:999px;font-size:15px;font-weight:800;border:2px solid ${on?'#0e7490':'var(--line)'};background:${on?'#0e7490':'transparent'};color:${on?'#fff':'var(--ink)'}">${swatchHtml(nomIt(id))}${pzpColor(id)}</button>`; }).join('')}</div></div>`;
+  if(!c.color) return h + `<p class="hint" style="text-align:center;margin:14px 0 24px">👆 Elige primero el color.</p>`;
+  const ks = Object.keys(R.N).filter(k=>R.N[k].itemId===c.color && conPiezas(k)).sort((a,b)=>R.N[a].n.localeCompare(R.N[b].n));
+  ks.forEach(k=>{ pzpChkNom[k] = R.N[k].n; });
+  h += `<div class="card">${paso(2, '¿Qué piezas vas a contar?', 'Toca las que quieras contar. Puedes elegir una o varias.')}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">${ks.map(k=>{ const on = c.keys.includes(k); return `<button onclick="pzpChkTogglePieza('${k}')" style="cursor:pointer;text-align:left;padding:10px 12px;border-radius:12px;border:2px solid ${on?'#16a34a':'var(--line)'};background:${on?'rgba(22,163,74,.15)':'transparent'};color:var(--ink)"><div style="font-weight:800;font-size:14px">${on?'✅ ':''}${R.N[k].n}</div><div class="hint" style="margin:2px 0 0">${R.N[k].dim}</div></button>`; }).join('')}</div></div>`;
+  const sel = c.keys.filter(k=>R.N[k]);
+  if(!sel.length) return h + `<p class="hint" style="text-align:center;margin:14px 0 24px">👆 Toca las piezas que vas a contar.</p>`;
+  const btn = (fn, t) => `<button onclick="${fn}" style="cursor:pointer;flex:none;width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:22px;font-weight:900">${t}</button>`;
+  h += `<div class="card">${paso(3, 'Cuéntalas', 'Solo las <strong>sueltas</strong>. Las que están dentro de un armado se cuentan abajo.')}
+    ${sel.map(k=>`<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)"><div style="flex:1;min-width:0"><strong>${R.N[k].n}</strong><div class="hint" style="margin:0">${pzpColor(c.color)} · ${R.N[k].dim}</div></div>${btn(`pzpChkMas('${k}',-1)`,'−')}<input id="pzpchk-${k.replace(/[^a-z0-9]/gi,'_')}" type="number" min="0" inputmode="numeric" placeholder="0" value="${c.q[k]??''}" oninput="pzpChk.q['${k}']=this.value" style="width:76px;flex:none;text-align:center;font-size:20px;font-weight:900;margin:0">${btn(`pzpChkMas('${k}',1)`,'+')}</div>`).join('')}</div>`;
+  const grupos = pzpChkGrupos(c); c.gq = c.gq||{};
+  if(grupos.length) h += `<div class="card">${paso(4, 'Armados que traen estas piezas adentro', 'Cuenta cuántos hay de cada uno, <strong>sin importar el color del frente</strong>. La app saca las piezas que traen.')}
+    ${grupos.map(g=>{ const id = g.k.replace(/[^a-z0-9]/gi,'_'); return `<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)"><div style="flex:1;min-width:0"><strong>${g.txt}</strong><div class="hint" style="margin:0">cada uno trae ${g.trae}</div></div>${btn(`pzpChkGMas('${g.k.replace(/'/g,"\\'")}',-1)`,'−')}<input id="pzpchkg-${id}" type="number" min="0" inputmode="numeric" placeholder="0" value="${c.gq[g.k] ?? (g.idxs.length===1 && c.arm[g.idxs[0]].grupo ? (c.arm[g.idxs[0]].q??'') : '')}" oninput="pzpChk.gq['${g.k.replace(/'/g,"\\'")}']=this.value" style="width:76px;flex:none;text-align:center;font-size:20px;font-weight:900;margin:0">${btn(`pzpChkGMas('${g.k.replace(/'/g,"\\'")}',1)`,'+')}</div>`; }).join('')}
+    <p class="hint">Si hay un armado con estas piezas que no está aquí, anótalo en la prueba del día (Armados) y vuelve.</p></div>`;
+  const idx = grupos;
+  h += `<button class="btn" style="width:100%;min-height:52px;background:#0e7490;margin-bottom:24px" onclick="pzpChkGuardar()">💾 Guardar y comparar (${sel.length} pieza${sel.length===1?'':'s'}${idx.length?' + '+idx.length+' armado'+(idx.length===1?'':'s'):''})</button>`;
+  return h;
 }
 function pzpChkHtml(){
   const f = pzpFecha || fechaHoyLocal();
@@ -15522,10 +15575,12 @@ function pzpChkHtml(){
   const R = pzpCalcular(pzpD, f); if(!R || !pzpChk) return '';
   const c = pzpChk, ok = c.guardado, capt = !!pzpD.dias.find(x=>x.fecha===f);
   let h = `<div class="card" style="border:2px solid #0e7490"><h3>🎯 Conteo rápido · ${pzpFmtDia(f)}</h3>
-    <p class="hint" style="margin-top:0">Cuenta <strong>a ciegas</strong> (sin ver cuántas debe haber) estas piezas sueltas y <strong>todos los armados</strong>. De los armados la app saca sus piezas. Al guardar te dice si cuadra. Mejor contar <strong>al final del día</strong>, después del cierre.</p>
+    <p class="hint" style="margin-top:0">Cuenta <strong>a ciegas</strong> (sin ver cuántas debe haber)${c.modo==='color'?' solo las piezas que elijas y los armados que las traen':' estas piezas sueltas y <strong>todos los armados</strong>'}. De los armados la app saca sus piezas. Al guardar te dice si cuadra. Mejor contar <strong>al final del día</strong>, después del cierre.</p>
     <label class="hint">Día</label> <input type="date" value="${f}" max="${fechaHoyLocal()}" onchange="pzpFecha=this.value;pzpChk=null;pzpRender()" style="width:auto">
-    ${!ok?`<div class="chips" style="margin-top:6px">${[3,5,10].map(n=>`<button class="chip ${pzpChkN()===n?'on':''}" onclick="try{localStorage.setItem('pzpChkN','${n}')}catch(e){};pzpChk=null;pzpRender()">${n} piezas</button>`).join('')}</div>`:''}
+    ${!ok?`<div style="display:flex;gap:6px;margin-top:10px">${[['color','🎨 Por color','Tú eliges qué contar'],['dia','🔄 Del día','La app elige (rotando)']].map(([m,t,sub])=>`<button onclick="pzpChkSetModo('${m}')" style="cursor:pointer;flex:1;padding:10px;border-radius:12px;border:2px solid ${c.modo===m?'#0e7490':'var(--line)'};background:${c.modo===m?'#0e7490':'transparent'};color:${c.modo===m?'#fff':'var(--ink)'};text-align:center"><div style="font-weight:900;font-size:15px">${t}</div><div style="font-size:12px;opacity:.85">${sub}</div></button>`).join('')}</div>`:''}
+    ${!ok && c.modo!=='color'?`<div class="chips" style="margin-top:6px">${[3,5,10].map(n=>`<button class="chip ${pzpChkN()===n?'on':''}" onclick="try{localStorage.setItem('pzpChkN','${n}')}catch(e){};pzpChk=null;pzpRender()">${n} piezas</button>`).join('')}</div>`:''}
   </div>`;
+  if(!ok && c.modo==='color') return h + pzpChkColorHtml(R, f);
   if(!ok){
     h += `<div class="card"><strong>1 · Piezas sueltas para contar hoy</strong>
       ${c.keys.map(k=>{ const N = R.N[k]; if(!N) return ''; return `<div class="row" style="justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap"><div style="flex:1;min-width:0"><strong>${pzpColor(N.itemId)} · ${N.n}</strong><div class="hint" style="margin:0">${N.dim} · solo las sueltas</div></div><input type="number" min="0" inputmode="numeric" placeholder="cuántas" value="${c.q[k]??''}" oninput="pzpChk.q['${k}']=this.value" style="width:100px;flex:none"></div>`; }).join('')}
@@ -15548,7 +15603,7 @@ function pzpChkHtml(){
     </table></div><p class="hint">✅ = cuadra (o difiere en 1). <span style="color:#dc2626">Rojo</span> = faltan. <span style="color:#d97706">Naranja</span> = hay de más (revisa si se anotó todo el corte).</p></div>`;
   const armDebe = {}; (R.arm||[]).forEach(a=>{ const key = pzpArmKey(a); armDebe[key] = (armDebe[key]||0) + (Number(a.cantidad)||0); });
   h += `<div class="card"><strong>Armados</strong><div class="wrap-x"><table><tr><th>Armado</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contados</th><th style="text-align:right">Dif.</th></tr>
-    ${c.arm.map(x=>{ const key = pzpArmKey(x.a), debe = armDebe[key]||0, q = Number(x.q)||0, d = q - debe; return `<tr><td>${pzpArmTxt(Object.assign({cantidad:1}, x.a))}</td><td style="text-align:right">${fmtNum(debe)}</td><td style="text-align:right">${fmtNum(q)}</td><td style="text-align:right;font-weight:900;color:${d===0?'#16a34a':d<0?'#dc2626':'#d97706'}">${d===0?'✅':(d>0?'+':'')+fmtNum(d)}</td></tr>`; }).join('') || '<tr><td colspan="4" class="hint">Sin armados.</td></tr>'}
+    ${c.arm.map(x=>{ const key = pzpArmKey(x.a), debe = x.grupo ? x.grupo.reduce((t,k)=>t+(armDebe[k]||0),0) : (armDebe[key]||0), q = Number(x.q)||0, d = q - debe; return `<tr><td>${x.txt || pzpArmTxt(Object.assign({cantidad:1}, x.a))}</td><td style="text-align:right">${fmtNum(debe)}</td><td style="text-align:right">${fmtNum(q)}</td><td style="text-align:right;font-weight:900;color:${d===0?'#16a34a':d<0?'#dc2626':'#d97706'}">${d===0?'✅':(d>0?'+':'')+fmtNum(d)}</td></tr>`; }).join('') || '<tr><td colspan="4" class="hint">Sin armados.</td></tr>'}
     </table></div><p class="hint">Que falten armados no siempre es faltante: puede que se desarmaran o se usaran en una instalación. Las piezas de arriba ya cuentan las de los armados.</p></div>
     <button class="btn small" style="margin-bottom:10px;background:transparent;color:#0e7490;border:1px solid #0e7490;box-shadow:none" onclick="pzpChk.guardado=false;pzpRender()">✏️ Corregir el conteo</button>`;
   h += pzpChkHistHtml();
@@ -15563,12 +15618,13 @@ function pzpChkHistHtml(){
 }
 async function pzpChkGuardar(){
   const c = pzpChk, f = c.fecha, mod = pzpD.mod, R = pzpCalcular(pzpD, f); if(!R) return;
+  if(c.modo==='color'){ if(!c.keys.length) return alert('Elige al menos una pieza para contar.'); const gs = pzpChkGrupos(c), gq = c.gq||{}; c.arm = gs.map(g=>({a:c.arm[g.idxs[0]].a, q:gq[g.k] ?? (g.idxs.length===1 && c.arm[g.idxs[0]].grupo ? (c.arm[g.idxs[0]].q??'') : ''), txt:g.txt, grupo:[...new Set(g.idxs.flatMap(i=>c.arm[i].grupo||[pzpArmKey(c.arm[i].a)]))]})); }
   const faltan = c.keys.filter(k=>c.q[k]===undefined || c.q[k]==='').length + c.arm.filter(x=>x.q===undefined || x.q==='').length;
   if(faltan && !confirm(`Hay ${faltan} renglón(es) sin número. Se van a guardar como 0. ¿Seguir?`)) return;
   const armCont = {}; c.arm.forEach(x=>{ const q = Number(x.q)||0; if(q>0) pzpContArmado(Object.assign({}, x.a, {cantidad:q})).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); armCont[k] = (armCont[k]||0) + p.q; }); });
   const doc = {tipo:'chk', modulo:mod, fecha:f,
     piezas:c.keys.filter(k=>R.N[k]).map(k=>{ const q = Number(c.q[k])||0; return {k, itemId:R.N[k].itemId, dim:R.N[k].dim, txt:pzpColor(R.N[k].itemId)+' '+R.N[k].n, q, debe:fmtNum(R.T[k]||0), dif:fmtNum(q + (armCont[k]||0) - (R.T[k]||0))}; }),
-    armados:c.arm.map(x=>({a:x.a, q:Number(x.q)||0})), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
+    armados:c.arm.map(x=>Object.assign({a:x.a, q:Number(x.q)||0}, x.grupo?{grupo:x.grupo, txt:x.txt}:{})), modo:c.modo||'dia', guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{ await db.collection('piezasPrueba').doc('chk_'+mod+'_'+f).set(doc); await pzpCargar(mod); pzpChk = null; toast('✅ Conteo guardado'); pzpRender(); window.scrollTo(0,0); }catch(e){ alert('Error al guardar: '+e.message); }
 }
 function pzpComoVaHtml(){
