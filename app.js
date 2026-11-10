@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v264';
+const APP_VERSION = 'v265';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6557,7 +6557,7 @@ function renderAdicBox(prefix){
   const list = prefix==='d' ? dAdicionales : iAdicionales;
   const rows = list.map((a,idx)=>`<tr>
       <td>${TIPOS_ADICIONAL[a.tipo]}${a.tipo==='cajonera'?(' ('+a.cajones+' cajones)'):''}${/^cajonera(_emma|_max)?$/.test(a.tipo)?(a.sinCajones?' · <strong>sin cajones</strong>':' · completa'):''}${a.tipo==='cajon'?(' · '+({normal:'Normal',emma:'Emma',max:'Max'}[a.variante]||'')+' ×'+a.cantidad+(a.colorCuadro?' · cuadro '+a.colorCuadro:'')):''}${a.tipo==='repisa'?(' ('+a.cantidad+' de '+fmtNum(a.largo)+'×'+fmtNum(a.fondo)+' cm)'):''}${a.tipo==='piezas_sueltas'?'<div class="hint" style="margin:2px 0 0">'+(a.ps||[]).map(r=>{ const d=PIEZAS_SUELTAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+(r.color?' '+r.color:''); }).join('<br>')+'</div>':''}${a.tipo==='piso_zoclo'?'<div class="hint" style="margin:2px 0 0">'+(a.pz||[]).map(r=>{ const d=PISO_ZOCLO_PIEZAS.find(x=>x.k===r.k); return r.cantidad+' '+(d?d.t:r.k)+' '+r.color; }).join('<br>')+'</div>':''}${a.conPuerta?(a.tipo==='zapatera'?' + puerta':' + puertitas'):''}${a.ext?' · corredera de extensión':''}</td>
-      <td>${a.tipo==='piso_zoclo'||a.tipo==='piezas_sueltas'?'—':a.color}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
+      <td>${a.tipo==='piso_zoclo'||a.tipo==='piezas_sueltas'?'—':(ADIC_CON_CAJA.includes(a.tipo)?(adicEsCajonera(a.tipo)?'cajonera ':'paredes y entrepaños ')+a.color:a.color)}${a.colorFrente?'<div class="hint" style="margin:0">'+(a.tipo==='zapatera'?'frente (zóclos y puerta): ':'frentes y zóclos: ')+a.colorFrente+'</div>':''}</td>
       <td><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line)" onclick="quitarAdicional('${prefix}',${idx})">Quitar</button></td>
     </tr>`).join('');
   box.innerHTML = `<div class="card">
@@ -6566,12 +6566,28 @@ function renderAdicBox(prefix){
     ${list.length? `<div class="wrap-x"><table><tr><th>Extra</th><th>Color</th><th></th></tr>${rows}</table></div>` : (prefix==='d'?'<p class="hint">Sin adicionales.</p>':'')}
     <div class="grid2" style="margin-top:8px">
       <div><label class="hint">¿Qué es?</label><select id="${prefix}-adic-tipo" style="margin-top:4px" onchange="toggleAdicionalCajones('${prefix}')">${Object.keys(TIPOS_ADICIONAL).map(k=>`<option value="${k}">${TIPOS_ADICIONAL[k]}</option>`).join('')}</select></div>
-      <div><label class="hint">Color</label><select id="${prefix}-adic-color" style="margin-top:4px" onchange="const f=document.getElementById('${prefix}-adic-colorfrente'); if(f && !f.dataset.tocado) f.value=this.value; PISO_ZOCLO_PIEZAS.forEach(d=>{ const s=document.getElementById('${prefix}-pzc-'+d.k); if(s && !s.dataset.tocado) s.value=this.value; })">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label class="hint" id="${prefix}-adic-color-lbl">Color</label><select id="${prefix}-adic-color" style="margin-top:4px" onchange="adicColorCajaAviso('${prefix}'); const f=document.getElementById('${prefix}-adic-colorfrente'); if(f && !f.dataset.tocado) f.value=this.value; PISO_ZOCLO_PIEZAS.forEach(d=>{ const s=document.getElementById('${prefix}-pzc-'+d.k); if(s && !s.dataset.tocado) s.value=this.value; })">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select></div>
     </div>
+    <div id="${prefix}-adic-caja-aviso"></div>
     <div id="${prefix}-adic-cajones-wrap"></div>
     <button class="btn small" style="margin-top:10px;width:100%" onclick="agregarAdicional('${prefix}')">+ Agregar este extra</button>
   </div>`;
   toggleAdicionalCajones(prefix);
+}
+// v265 (pedido por el usuario): el "Color" de un extra con caja (cajonera, entrepañera, zapatera, espejo)
+// es el de la CAJA (paredes y entrepaños), que casi siempre es Blanco. Se confundía con el color del
+// clóset y la caja se descontaba de ese color en vez de Blanco.
+const ADIC_CON_CAJA = ['entrepanera','cajonera_2','cajonera','cajonera_emma','cajonera_espejo','zapatera','zapatera_grande'];
+function adicEsCajonera(tipo){ return String(tipo).startsWith('cajonera'); }
+function adicColorCajaAviso(prefix){
+  const tipo = (document.getElementById(prefix+'-adic-tipo')||{}).value, col = (document.getElementById(prefix+'-adic-color')||{}).value;
+  const lbl = document.getElementById(prefix+'-adic-color-lbl'), av = document.getElementById(prefix+'-adic-caja-aviso');
+  const caja = ADIC_CON_CAJA.includes(tipo), cj = adicEsCajonera(tipo);
+  if(lbl) lbl.innerHTML = !caja ? 'Color' : (cj ? 'Color de la <strong>cajonera</strong>' : 'Color de <strong>paredes y entrepaños</strong>');
+  const abajo = tipo==='zapatera'?'"Color del frente (zóclos y puerta)"':(tipo==='zapatera_grande'||String(tipo).startsWith('entrepanera'))?'"Color de los zóclos"':'"Color de frentes y zóclos"';
+  if(av) av.innerHTML = !caja ? '' : (col==='Blanco'
+    ? `<p class="hint" style="margin:6px 0 0">${cj?'La cajonera casi siempre es <strong>Blanca</strong>':'Las paredes y entrepaños casi siempre son <strong>Blancos</strong>'}. El color del clóset va abajo, en ${abajo}.</p>`
+    : `<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(217,119,6,.15);border:1px solid #d97706;font-size:13.5px">⚠️ ${cj?'La cajonera de este extra se va':'Las paredes y entrepaños de este extra se van'} a descontar de <strong>${col}</strong>, no de Blanco. Déjalo así solo si de verdad ${cj?'la cajonera es':'son'} ${col}.</div>`);
 }
 function toggleAdicionalCajones(prefix){
   const sel = document.getElementById(prefix+'-adic-tipo');
@@ -6630,6 +6646,7 @@ function toggleAdicionalCajones(prefix){
     </label>`;
   }
   wrap.innerHTML = html;
+  adicColorCajaAviso(prefix);
 }
 function agregarAdicional(prefix){
   let tipo = document.getElementById(prefix+'-adic-tipo').value;
@@ -6647,6 +6664,10 @@ function agregarAdicional(prefix){
   }
   const puertaEl = document.getElementById(prefix+'-adic-puerta');
   const conPuerta = !!(puertaEl && puertaEl.checked);
+  { const tp = document.getElementById(prefix+'-adic-tipo').value, cj = adicEsCajonera(tp);
+    if(ADIC_CON_CAJA.includes(tp) && color!=='Blanco' && !confirm(cj
+      ? `⚠️ La cajonera de este extra se va a descontar de ${color}, no de Blanco.\n\n¿La cajonera de verdad es ${color}?\n\nAceptar = sí, es ${color}\nCancelar = no, la corrijo a Blanco`
+      : `⚠️ Las paredes y entrepaños de este extra se van a descontar de ${color}, no de Blanco.\n\n¿De verdad son ${color}?\n\nAceptar = sí, son ${color}\nCancelar = no, los corrijo a Blanco`)){ const sc=document.getElementById(prefix+'-adic-color'); if(sc){ sc.value='Blanco'; adicColorCajaAviso(prefix); } return; } }
   const nuevo = {tipo, cajones, color, conPuerta};
   if(((document.getElementById(prefix+'-adic-concaj')||{}).value)==='sin') nuevo.sinCajones = true;
   const extEl = document.getElementById(prefix+'-adic-ext'); if((tipo==='cajonera' || tipo==='cajonera_emma' || tipo==='cajon') && extEl && extEl.checked) nuevo.ext = true;
@@ -8017,7 +8038,7 @@ function renderInstMueble(){
  <label class="hint" id="i-color-label" style="display:block;margin-top:10px">Color del frente (frentes de cajón y zóclos)</label>
     <select id="i-color" style="margin-top:4px" onchange="syncTodoColor('i')">${MEL_COLORES.map(c=>`<option>${c}</option>`).join('')}</select>
     <div id="i-cajcolor-wrap"></div>
-    <label class="row" style="margin-top:12px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-todocolor" style="width:22px;min-height:22px;flex:0 0 22px" onchange="syncTodoColor('i')"> El cliente pidió todo del mismo color (también el interior)</label>
+    <label class="row" style="margin-top:12px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" id="i-todocolor" style="width:22px;min-height:22px;flex:0 0 22px" onchange="if(this.checked && !todoColorConfirmar('i')){ this.checked=false; } syncTodoColor('i')"> El cliente pidió todo del mismo color (también el interior)</label>
     <p id="i-todocolor-hint" class="hint" style="display:none;margin:6px 0 0">✅ Frente, cajonera, estructura y piezas de cajón van del mismo color.</p>
   </div>
   <details class="card" ${(iAdicionales.length||iSoloExtras)?'open':''}>
@@ -8087,6 +8108,13 @@ function renderInstMaxToggle(){
   syncTodoColor('i');
 }
 
+// v265 (pedido por el usuario): "todo de un color" pide confirmación, porque con eso las paredes, entrepaños,
+// maleteros, cajonera y cuadros de cajón se descuentan del color y no de Blanco.
+function todoColorConfirmar(prefix){
+  const c = (document.getElementById(prefix+'-color')||{}).value || '';
+  if(c==='Blanco') return true;
+  return confirm(`⚠️ ¿Todo el clóset es ${c}, también por dentro?\n\nCon esto las paredes, entrepaños, maleteros, la cajonera y los cuadros de los cajones se descuentan de ${c}, NO de Blanco.\n\nAceptar = sí, todo es ${c}\nCancelar = no, el interior es Blanco`);
+}
 // "Todo de un color" (confirmado por el usuario): al marcarlo, la cajonera toma en automático el
 // color del frente y se bloquea; al desmarcarlo se puede elegir otra vez.
 function syncTodoColor(prefix){

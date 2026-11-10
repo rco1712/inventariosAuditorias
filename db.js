@@ -238,7 +238,9 @@ async function pullRemote(){
   const meta = await ddb.table('_meta').get(metaKey);
   // Una sola vez tras esta actualización: descarga TODO de nuevo, para recuperar capturas hechas sin
   // internet que la versión anterior pudo haberse saltado.
-  const repaso = await ddb.table('_meta').get('resyncV2');
+  // v265: se repite el repaso completo (resyncV3) porque la descarga por páginas se saltaba documentos
+  // que tenían la misma hora de subida justo en el corte de página (se suben en lotes con la misma hora).
+  const repaso = await ddb.table('_meta').get('resyncV3');
   const ultima = (meta && repaso) ? meta.value : null;
   let cursor = ultima ? new Date(new Date(ultima).getTime() - 5 * 60 * 1000).toISOString() : '1970-01-01T00:00:00.000Z';
   let maxVisto = ultima;
@@ -269,13 +271,29 @@ async function pullRemote(){
       }
     }
     if (data.length) {
-      cursor = data[data.length - 1].updated_at;
-      if (!maxVisto || new Date(cursor) > new Date(maxVisto)) maxVisto = cursor;
+      const ultimo = data[data.length - 1].updated_at;
+      if (!maxVisto || new Date(ultimo) > new Date(maxVisto)) maxVisto = ultimo;
+      // v265: la siguiente página empieza 1 ms ANTES de la última hora vista, para no saltarse los
+      // documentos del mismo lote (misma hora) que quedaron del otro lado del corte de página.
+      // Los que ya se bajaron se brincan solos ("ya lo tenemos igual").
+      const atras = new Date(new Date(ultimo).getTime() - 1).toISOString();
+      if (data.length === 1000 && new Date(data[0].updated_at).getTime() === new Date(ultimo).getTime()) {
+        // Página completa con una sola hora (no debería pasar: los lotes son de 200): se avanza por posición.
+        const { data: resto } = await sb.from('docs').select('*').eq('updated_at', ultimo).range(1000, 5999);
+        for (const remote of (resto || [])) {
+          if (!ddb.tables.some(t => t.name === remote.collection) || NO_DESCARGAR.has(remote.collection)) continue;
+          const local = await ddb.table(remote.collection).get(remote.id);
+          if (local && (local._dirty || new Date(local._updatedAt || 0).getTime() > new Date(remote.updated_at).getTime())) continue;
+          await ddb.table(remote.collection).put({ ...remote.payload, id: remote.id, modulo: remote.modulo, _dirty: false, _synced: true, _deleted: !!remote.deleted, _updatedAt: remote.updated_at });
+          touched.add(remote.collection);
+        }
+        cursor = ultimo;
+      } else cursor = atras;
     }
     if (data.length < 1000) break;
   }
   if (maxVisto && maxVisto !== ultima) await ddb.table('_meta').put({ key: metaKey, value: maxVisto });
-  if (!repaso) await ddb.table('_meta').put({ key: 'resyncV2', value: new Date().toISOString() });
+  if (!repaso) await ddb.table('_meta').put({ key: 'resyncV3', value: new Date().toISOString() });
   touched.forEach(notify);
 }
 
