@@ -16143,46 +16143,77 @@ async function renderMul(){
   const multas = todas.filter(m=>m.tipo==='multa'), refs = todas.filter(m=>m.tipo==='refrendo');
   const P = mulPersonas(), totM = multas.reduce((t,m)=>t+mulSaldo(m),0), totR = refs.reduce((t,m)=>t+mulSaldo(m),0);
   const tocan = P.map(p=>({p, x:mulProximo(p)})).filter(o=>o.x && o.x.toca);
-  const chip = (k, t, c) => `<button onclick="mulMod='${k}';renderMul()" style="cursor:pointer;border-radius:12px;padding:8px 12px;border:2px solid ${c};background:${mulMod===k?c:'transparent'};color:${mulMod===k?'#fff':'var(--ink)'};font:inherit;font-weight:800">${t}</button>`;
-  const tab = (k, t) => `<button onclick="mulTab='${k}';renderMul()" style="cursor:pointer;flex:1;padding:10px 6px;border-radius:12px;border:2px solid ${mulTab===k?'#b91c1c':'var(--line)'};background:${mulTab===k?'#b91c1c':'transparent'};color:${mulTab===k?'#fff':'var(--ink)'};font:inherit;font-weight:800">${t}</button>`;
-  let lista = '';
-  if(mulTab==='persona'){
-    lista = P.length ? P.map(p=>{ const pr = mulProximo(p), pag = p.total ? Math.min(100, Math.round((p.total-p.saldo)/p.total*100)) : 0;
-      return `<div class="card" onclick="mulAbierto='${mulEsc(p.k)}';renderMul();window.scrollTo(0,0)" style="cursor:pointer;padding:12px 14px;border-left:8px solid ${p.saldo>0?'#dc2626':'#16a34a'}">
-        <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><div style="min-width:0"><div style="font-size:17px;font-weight:900">👷 ${mulEsc(p.nombre)}</div>
-          <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">${[...p.mods].map(m=>`<span style="padding:2px 8px;border-radius:7px;font-weight:800;font-size:12px;background:${mulModColor(m)};color:#fff">${mulEsc(m)}</span>`).join('')}<span class="hint" style="margin:0">🚗 ${mulEsc([...p.carros].join(', '))}</span></div></div>
-          <div style="text-align:right;flex:none"><div style="font-size:20px;font-weight:900;color:${p.saldo>0?'#dc2626':'#16a34a'}">${p.saldo>0?mulPesos(p.saldo):'✅ Pagado'}</div><div class="hint" style="margin:0">${p.multas.length} multa${p.multas.length===1?'':'s'} · de ${mulPesos(p.total)}</div></div></div>
-        <div style="height:8px;border-radius:6px;background:var(--line);margin-top:8px;overflow:hidden"><div style="height:100%;width:${pag}%;background:#16a34a"></div></div>
-        <div class="hint" style="margin:6px 0 0">${pag}% pagado · ${mulEsc(mulPlanTxt(p))}${pr?` · ${pr.toca?'<strong style="color:#dc2626">📅 Ya toca descontar</strong>':'próximo: <strong>'+fCorta(pr.fecha)+'</strong>'}`:''}</div>
-      </div>`; }).join('') : '<div class="card"><p class="hint" style="margin:0">No hay multas registradas.</p></div>';
-  } else if(mulTab==='carro'){
-    const g = {}; todas.forEach(m=>{ const k = (m.placa||'Sin placa').toUpperCase(); const c = g[k] = g[k] || {placa:k, carro:m.carro||'', mod:m.mod, conductores:new Set(), multa:0, ref:0}; if(m.tipo==='multa'){ c.multa += mulSaldo(m); if(m.conductor) c.conductores.add(mulNombreBonito(m.conductor)); } else c.ref += mulSaldo(m); });
-    const xs = Object.values(g).sort((a,b)=>(a.mod||'').localeCompare(b.mod||'')||(b.multa+b.ref)-(a.multa+a.ref));
-    lista = `<div class="card" style="padding:0;overflow:hidden"><div class="wrap-x"><table><tr><th>Carro</th><th>Multas pendientes</th><th>Refrendos</th><th>Total</th></tr>${xs.map(c=>`<tr><td><strong>${mulEsc(c.carro)}</strong> <span class="tag">${mulEsc(c.placa)}</span><div class="hint" style="margin:2px 0 0"><span style="color:${mulModColor(c.mod)};font-weight:800">${mulEsc(c.mod)}</span>${c.conductores.size?' · 👷 '+mulEsc([...c.conductores].join(', ')):''}</div></td><td class="${c.multa>0?'neg':''}">${mulPesos(c.multa)}</td><td>${mulPesos(c.ref)}</td><td><strong>${mulPesos(c.multa+c.ref)}</strong></td></tr>`).join('')}</table></div></div>`;
-  } else {
-    lista = refs.length ? refs.sort((a,b)=>mulSaldo(b)-mulSaldo(a)).map(m=>`<div class="card" style="padding:12px 14px;border-left:8px solid ${mulSaldo(m)>0?'#7c3aed':'#16a34a'}">
-      <div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><strong>🚗 ${mulEsc(m.carro)} · ${mulEsc(m.placa)}</strong><div class="hint" style="margin:2px 0 0"><span style="color:${mulModColor(m.mod)};font-weight:800">${mulEsc(m.mod)}</span> · ${mulEsc(m.concepto||'Adeudos y refrendos')}${m.fecha?' · '+fCorta(m.fecha):''}</div></div>
-      <div style="text-align:right;flex:none"><div style="font-size:18px;font-weight:900;color:${mulSaldo(m)>0?'#7c3aed':'#16a34a'}">${mulSaldo(m)>0?mulPesos(mulSaldo(m)):'✅ Pagado'}</div></div></div>
-      <div class="row" style="gap:6px;margin-top:8px">${mulSaldo(m)>0?`<button class="btn small" onclick="mulPago={tipo:'ref',id:'${m.id}',monto:'${mulSaldo(m)}',forma:'empresa',fecha:fechaHoyLocal(),nota:''};renderMul()">✅ Ya se pagó</button>`:''}<button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulEditar('${m.id}')">✏️ Editar</button></div></div>`).join('') : '<div class="card"><p class="hint" style="margin:0">No hay refrendos ni adeudos registrados.</p></div>';
-  }
+  const debeMod = md => (mulCache||[]).filter(m=>m.mod===md).reduce((t,m)=>t+mulSaldo(m),0);
+  const chip = (k, t, c, n) => `<button onclick="mulMod='${k}';renderMul()" style="cursor:pointer;border-radius:12px;padding:6px 10px;border:2px solid ${c};background:${mulMod===k?c:'transparent'};color:${mulMod===k?'#fff':'var(--ink)'};font:inherit;font-weight:800;line-height:1.15">${t}${n!==undefined?`<br><span style="font-size:11px;font-weight:700;opacity:.85">${n>0?mulPesos(n):'sin deuda'}</span>`:''}</button>`;
+  const tab = (k, t, n) => `<button onclick="mulTab='${k}';renderMul()" style="cursor:pointer;flex:1;padding:9px 4px;border-radius:12px;border:2px solid ${mulTab===k?'#b91c1c':'var(--line)'};background:${mulTab===k?'#b91c1c':'transparent'};color:${mulTab===k?'#fff':'var(--ink)'};font:inherit;font-weight:800;line-height:1.15">${t}<br><span style="font-size:11px;font-weight:700;opacity:.85">${n}</span></button>`;
+  const lado = 'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none';
   $('#main').innerHTML = `<div class="card" style="border-top:6px solid #b91c1c">
-      <h3 style="margin:0">🚔 Multas y adeudos de carros</h3><p class="hint" style="margin:4px 0 10px">Solo lo ve Dirección. Las multas se cargan al conductor y se descuentan por partes.</p>
+      <h3 style="margin:0">🚔 Multas y adeudos de carros</h3><p class="hint" style="margin:4px 0 10px">Solo lo ve Dirección.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div style="padding:10px;border-radius:12px;background:rgba(220,38,38,.12)"><div class="hint" style="margin:0">Multas por cobrar</div><div style="font-size:22px;font-weight:900;color:#dc2626">${mulPesos(totM)}</div><div class="hint" style="margin:0">${P.filter(p=>p.saldo>0).length} persona(s)</div></div>
-        <div style="padding:10px;border-radius:12px;background:rgba(124,58,237,.12)"><div class="hint" style="margin:0">Refrendos (empresa)</div><div style="font-size:22px;font-weight:900;color:#7c3aed">${mulPesos(totR)}</div><div class="hint" style="margin:0">${refs.filter(m=>mulSaldo(m)>0).length} carro(s)</div></div>
+        <div style="padding:10px;border-radius:12px;background:rgba(220,38,38,.12)"><div class="hint" style="margin:0">🚔 Multas que deben</div><div style="font-size:22px;font-weight:900;color:#dc2626">${mulPesos(totM)}</div><div class="hint" style="margin:0">${P.filter(p=>p.saldo>0).length} persona(s) · se les descuenta</div></div>
+        <div style="padding:10px;border-radius:12px;background:rgba(124,58,237,.12)"><div class="hint" style="margin:0">🏢 Refrendos y adeudos</div><div style="font-size:22px;font-weight:900;color:#7c3aed">${mulPesos(totR)}</div><div class="hint" style="margin:0">${refs.filter(m=>mulSaldo(m)>0).length} carro(s) · los paga la empresa</div></div>
       </div>
-      ${tocan.length?`<div style="margin-top:8px;padding:10px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)"><strong>📅 Recordatorio: ya toca descontarle a ${tocan.length}</strong> <span class="hint">(no se descuenta solo; regístralo con ➖ cuando se haga)</span><br> ${tocan.map(o=>`${mulEsc(o.p.nombre)} (${mulPesos(Math.min(o.p.saldo, Number(o.p.plan.monto)||o.p.saldo))})`).join(', ')}</div>`:''}
+      ${tocan.length?`<div style="margin-top:8px;padding:10px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)"><strong>📅 Ya toca descontarle a:</strong> ${tocan.map(o=>`<a href="#" onclick="mulAbierto='${mulEsc(o.p.k)}';renderMul();window.scrollTo(0,0);return false" style="font-weight:800;color:var(--ink)">${mulEsc(o.p.nombre)}</a>${Number(o.p.plan.monto)?' ('+mulPesos(Math.min(o.p.saldo, Number(o.p.plan.monto)))+')':''}`).join(', ')}<div class="hint" style="margin:4px 0 0">Es solo un recordatorio. No se descuenta solo: cuando se haga, ábrelo y toca ➖ Registrar descuento.</div></div>`:''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
         <button class="btn" style="background:#b91c1c" onclick="mulNueva('multa')">➕ Nueva multa</button>
         <button class="btn" style="background:#7c3aed" onclick="mulNueva('refrendo')">➕ Refrendo / adeudo</button>
-        <button class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulImportarElegir()">📥 Importar Excel</button>
-        <button class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulExportar()">📊 Descargar Excel</button>
-      <div style="grid-column:1/-1;padding:10px;border-radius:12px;border:1px solid var(--line)"><strong>📄 Descargar PDF</strong><div class="hint" style="margin:2px 0 8px">Todos: cada módulo sale en su propia hoja. O elige un solo módulo.</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px"><button onclick="generarMulPDF('')" style="cursor:pointer;padding:8px 12px;border-radius:10px;border:2px solid #b91c1c;background:#b91c1c;color:#fff;font:inherit;font-weight:800">Todos</button>${MODULOS.map(m=>`<button onclick="generarMulPDF('${m.nombre}')" style="cursor:pointer;padding:8px 12px;border-radius:10px;border:2px solid ${m.color};background:transparent;color:var(--ink);font:inherit;font-weight:800">${m.nombre}</button>`).join('')}</div></div>
-      </div></div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${chip('', 'Todos', '#4b5563')}${MODULOS.map(m=>chip(m.nombre, m.nombre, m.color)).join('')}</div>
-    <div style="display:flex;gap:6px;margin-bottom:10px">${tab('persona','👷 Por persona')}${tab('carro','🚗 Por carro')}${tab('ref','🏢 Refrendos')}</div>
-    ${lista}`;
+      </div>
+      <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:800">❓ ¿Cómo funciona?</summary><div class="hint" style="margin:6px 0 0;line-height:1.5">
+        1. Cada <strong>multa</strong> se le carga a la persona que manejaba ese día.<br>
+        2. Cuando se le descuente (en nómina), ábrela y toca <strong>➖ Registrar descuento</strong>. Si la pagó él por su cuenta: <strong>💵 Pagó por fuera</strong>. Si la absorbe la empresa: <strong>🏢 La paga la empresa</strong>.<br>
+        3. Nada se descuenta solo. El 📅 recordatorio solo avisa cuándo toca, según el plan de cada persona.<br>
+        4. Los <strong>refrendos y adeudos</strong> del carro los paga la empresa: solo se marcan ✅ cuando se pagan.<br>
+        5. Todo se puede corregir con ✏️ o borrar con 🗑️.</div></details>
+    </div>
+    <div style="position:relative;margin:0 0 10px"><input id="mul-busca" type="search" placeholder="🔎 Buscar persona, placas o carro…" value="${mulEsc(mulBusca)}" oninput="mulBusca=this.value;document.getElementById('mul-lista').innerHTML=mulListaHtml()" style="margin:0;font-size:16px;padding:12px 14px"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${chip('', 'Todos', '#4b5563')}${MODULOS.map(m=>chip(m.nombre, m.nombre, m.color, debeMod(m.nombre))).join('')}</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">${tab('persona','👷 Quién debe', P.filter(p=>p.saldo>0).length+' persona(s)')}${tab('carro','🚗 Carros', new Set(todas.map(m=>m.placa)).size+' carro(s)')}${tab('ref','🏢 Refrendos', refs.filter(m=>mulSaldo(m)>0).length+' pendiente(s)')}</div>
+    <div id="mul-lista">${mulListaHtml()}</div>
+    <div class="card" style="margin-top:14px"><strong>📎 Reportes y Excel</strong>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+        <button class="btn small" style="${lado};min-height:52px;line-height:1.2" onclick="generarMulPDF()">📄 PDF<br><span style="font-size:11px">${mulMod||'todos'}</span></button>
+        <button class="btn small" style="${lado};min-height:52px;line-height:1.2" onclick="mulExportar()">📊 Excel<br><span style="font-size:11px">descargar</span></button>
+        <button class="btn small" style="${lado};min-height:52px;line-height:1.2" onclick="mulImportarElegir()">📥 Excel<br><span style="font-size:11px">importar</span></button>
+      </div><div class="hint" style="margin:6px 0 0">El PDF sale del módulo que tengas elegido arriba.</div></div>`;
+}
+let mulBusca = '';
+const mulNorm = t => String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim();
+function mulListaHtml(){
+  const q = mulNorm(mulBusca), ok = (...xs) => !q || q.split(' ').every(w=>mulNorm(xs.join(' ')).includes(w));
+  const todas = (mulCache||[]).filter(m=>!mulMod || m.mod===mulMod), refs = todas.filter(m=>m.tipo==='refrendo');
+  const modTag = m => `<span style="padding:2px 8px;border-radius:7px;font-weight:800;font-size:12px;background:${mulModColor(m)};color:#fff">${mulEsc(m)}</span>`;
+  const nada = t => `<div class="card"><p class="hint" style="margin:0">${q?'🔎 No encontré nada con «'+mulEsc(mulBusca)+'».':t}</p></div>`;
+  if(mulTab==='persona'){
+    const P = mulPersonas().filter(p=>ok(p.nombre, [...p.carros].join(' '), [...p.mods].join(' ')));
+    const deben = P.filter(p=>p.saldo>0), pagados = P.filter(p=>p.saldo<=0);
+    const card = p => { const pr = mulProximo(p), pag = p.total ? Math.min(100, Math.round((p.total-p.saldo)/p.total*100)) : 0;
+      return `<div class="card" onclick="mulAbierto='${mulEsc(p.k)}';renderMul();window.scrollTo(0,0)" style="cursor:pointer;padding:12px 14px;border-left:8px solid ${p.saldo>0?'#dc2626':'#16a34a'}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><div style="font-size:17px;font-weight:900;min-width:0">👷 ${mulEsc(p.nombre)} <span style="color:var(--muted,#9ca3af)">›</span></div>
+          <div style="flex:none;text-align:right;white-space:nowrap">${p.saldo>0?`<span class="hint" style="margin:0">debe </span><span style="font-size:20px;font-weight:900;color:#dc2626">${mulPesos(p.saldo)}</span>`:'<span style="font-size:18px;font-weight:900;color:#16a34a">✅ Pagado</span>'}</div></div>
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">${[...p.mods].map(modTag).join('')}<span class="hint" style="margin:0">🚗 ${mulEsc([...p.carros].join(', '))}</span></div>
+        <div style="height:8px;border-radius:6px;background:var(--line);margin-top:8px;overflow:hidden"><div style="height:100%;width:${pag}%;background:#16a34a"></div></div>
+        <div class="hint" style="margin:6px 0 0">Pagado ${mulPesos(p.total-p.saldo)} de ${mulPesos(p.total)} (${pag}%) · ${mulEsc(mulPlanTxt(p))}${pr?` · ${pr.toca?'<strong style="color:#dc2626">📅 ya toca</strong>':'próximo: <strong>'+fCorta(pr.fecha)+'</strong>'}`:''}</div></div>`; };
+    if(!P.length) return nada('No hay multas registradas.');
+    return deben.map(card).join('') + (pagados.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:800;padding:6px 0">✅ Ya pagaron todo (${pagados.length})</summary>${pagados.map(card).join('')}</details>` : '');
+  }
+  if(mulTab==='carro'){
+    const g = {}; todas.forEach(m=>{ const k = (m.placa||'Sin placa').toUpperCase(); const c = g[k] = g[k] || {placa:k, carro:m.carro||'', mod:m.mod, gente:{}, multa:0, ref:0};
+      if(m.tipo==='multa'){ c.multa += mulSaldo(m); const pk = mulPersona(m.conductor)||'(sin asignar)'; c.gente[pk] = m.conductor ? mulNombreBonito(m.conductor) : 'Sin conductor asignado'; } else c.ref += mulSaldo(m); });
+    const xs = Object.values(g).filter(c=>ok(c.placa, c.carro, c.mod, Object.values(c.gente).join(' '))).sort((a,b)=>(b.multa+b.ref)-(a.multa+a.ref));
+    if(!xs.length) return nada('No hay carros registrados.');
+    return xs.map(c=>`<div class="card" style="padding:12px 14px;border-left:8px solid ${mulModColor(c.mod)}">
+      <div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:16px;font-weight:900">🚗 ${mulEsc(c.carro)} <span class="tag">${mulEsc(c.placa)}</span></div><div style="margin-top:4px">${modTag(c.mod)}</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+        <div style="padding:8px;border-radius:10px;background:rgba(220,38,38,.1)"><div class="hint" style="margin:0">Multas pendientes</div><strong style="color:${c.multa>0?'#dc2626':'#16a34a'}">${c.multa>0?mulPesos(c.multa):'✅ $0'}</strong></div>
+        <div style="padding:8px;border-radius:10px;background:rgba(124,58,237,.1)"><div class="hint" style="margin:0">Refrendo (empresa)</div><strong style="color:${c.ref>0?'#7c3aed':'#16a34a'}">${c.ref>0?mulPesos(c.ref):'✅ $0'}</strong></div></div>
+      ${Object.keys(c.gente).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${Object.entries(c.gente).map(([k,n])=>`<button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulAbierto='${mulEsc(k)}';renderMul();window.scrollTo(0,0)">👷 ${mulEsc(n)} ›</button>`).join('')}</div>`:''}</div>`).join('');
+  }
+  const rs = refs.filter(m=>ok(m.placa, m.carro, m.mod, m.concepto)).sort((a,b)=>mulSaldo(b)-mulSaldo(a));
+  if(!rs.length) return nada('No hay refrendos ni adeudos registrados.');
+  return rs.map(m=>`<div class="card" style="padding:12px 14px;border-left:8px solid ${mulSaldo(m)>0?'#7c3aed':'#16a34a'}">
+      <div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><strong>🚗 ${mulEsc(m.carro)} <span class="tag">${mulEsc(m.placa)}</span></strong><div class="hint" style="margin:4px 0 0">${modTag(m.mod)} ${mulEsc(m.concepto||'Adeudos y refrendos')}${m.fecha?' · '+fCorta(m.fecha):''}</div></div>
+      <div style="text-align:right;flex:none"><div style="font-size:18px;font-weight:900;color:${mulSaldo(m)>0?'#7c3aed':'#16a34a'}">${mulSaldo(m)>0?mulPesos(mulSaldo(m)):'✅ Pagado'}</div></div></div>
+      <div class="row" style="gap:6px;margin-top:8px">${mulSaldo(m)>0?`<button class="btn small" onclick="mulPago={tipo:'ref',id:'${m.id}',monto:'${mulSaldo(m)}',forma:'empresa',fecha:fechaHoyLocal(),nota:''};renderMul()">✅ Ya se pagó</button>`:''}<button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulEditar('${m.id}')">✏️ Editar</button></div></div>`).join('');
 }
 function mulPersonaPintar(){
   const p = mulPersonas().find(x=>x.k===mulAbierto) || (mulMod='', mulPersonas().find(x=>x.k===mulAbierto));
@@ -16395,59 +16426,63 @@ async function mulExportar(){
     X.writeFile(wb, `multas-carros-${fechaHoyLocal()}.xlsx`);
   }catch(e){ alert('No se pudo generar el Excel: '+e.message); }
 }
-// v269: PDF de multas (pedido por el usuario). Respeta el módulo elegido arriba (o todos).
+// v269: PDF de multas (pedido por el usuario): sencillo, una tabla por módulo, y al final los pagos.
 async function generarMulPDF(soloMod){
   if(!esAdmin()) return;
   try{ if(!mulCache) await mulCargar(); }catch(e){ return alert('No se pudo cargar: '+e.message); }
-  const guardaFiltro = mulMod; if(soloMod!==undefined) mulMod = soloMod;
-  try{
-  const mods = mulMod ? [mulMod] : MODULOS.map(m=>m.nombre);
+  const filtro = soloMod!==undefined ? soloMod : mulMod;
+  const mods = filtro ? [filtro] : MODULOS.map(m=>m.nombre);
   const hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
   const ROJ=[185,28,28], MOR=[124,58,237], VER=[22,128,74], GRI=[107,114,128];
   const rgb = h => { const x = String(h).replace('#',''); return [0,2,4].map(i=>parseInt(x.substr(i,2),16)); };
   const fCor = d => d ? new Date(d+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'}) : '-';
-  const S = herrPdfBase('Multas y adeudos de carros', `${mulMod||'Todos los módulos'} · ${hoy}`, ROJ);
+  const S = herrPdfBase('Multas y adeudos de carros', `${filtro||'Todos los módulos'} · al ${hoy}`, ROJ), doc = S.doc;
   const todas = (mulCache||[]).filter(m=>mods.includes(m.mod)), multas = todas.filter(m=>m.tipo==='multa'), refs = todas.filter(m=>m.tipo==='refrendo');
-  const totM = multas.reduce((t,m)=>t+mulSaldo(m),0), pagM = multas.reduce((t,m)=>t+mulPagado(m),0), totR = refs.reduce((t,m)=>t+mulSaldo(m),0);
-  const guardaMod = mulMod; mulMod = ''; const P = mulPersonas(); mulMod = guardaMod;
-  S.kpis([[mulPesos(totM),'multas por cobrar',ROJ],[mulPesos(pagM),'ya pagado o descontado',VER],[mulPesos(totR),'refrendos (empresa)',MOR],[String(P.filter(p=>p.saldo>0 && p.multas.some(m=>mods.includes(m.mod))).length),'personas con saldo',ROJ]]);
-  if(mods.length>1){
-    S.banda('Resumen por módulo', mulPesos(totM+totR), ROJ);
-    S.tabla([{t:'Módulo',w:46},{t:'Multas por cobrar',w:46},{t:'Refrendos pendientes',w:46},{t:'Total',w:44}],
-      [...mods.map(md=>{ const xs = todas.filter(m=>m.mod===md), a = xs.filter(m=>m.tipo==='multa').reduce((t,m)=>t+mulSaldo(m),0), b = xs.filter(m=>m.tipo==='refrendo').reduce((t,m)=>t+mulSaldo(m),0), c = rgb(mulModColor(md));
-        return [{t:md, col:c, b:true}, mulPesos(a), mulPesos(b), {t:mulPesos(a+b), b:true, col:c}]; }),
-       [{t:'Total', b:true}, {t:mulPesos(totM), b:true}, {t:mulPesos(totR), b:true}, {t:mulPesos(totM+totR), b:true}]], ROJ);
-  }
+  const totMon = multas.reduce((t,m)=>t+(Number(m.monto)||0),0), totM = multas.reduce((t,m)=>t+mulSaldo(m),0), totR = refs.reduce((t,m)=>t+mulSaldo(m),0);
+  S.kpis([[mulPesos(totMon),'total de multas',GRI],[mulPesos(totMon-totM),'ya pagado o descontado',VER],[mulPesos(totM),'falta cobrar (multas)',ROJ],[mulPesos(totR),'refrendos (paga la empresa)',MOR]]);
+  // Cómo leer el reporte
+  const guia = ['Multas: se le cargan a quien manejaba el carro ese día y se le descuentan por partes.',
+    'Total = lo que fue la multa. Pagado = lo descontado o pagado hasta hoy. Debe = lo que falta cobrarle.',
+    'Refrendo = adeudos y refrendos del carro. Los paga la empresa; no se le descuentan a nadie.',
+    'Plan = cada cuánto y cuánto se le descuenta. Los descuentos no son automáticos: se registran a mano.'];
+  doc.setFillColor(248,248,250); doc.setDrawColor(220,222,228); doc.rect(S.L, S.y, S.W, 6+guia.length*4.4, 'FD');
+  doc.setFont(undefined,'bold'); doc.setFontSize(8.6); doc.setTextColor(55,65,81); doc.text('Cómo leer este reporte', S.L+3, S.y+4.6); doc.setFont(undefined,'normal'); doc.setFontSize(7.8);
+  guia.forEach((g,i)=>doc.text(String('- '+g), S.L+3, S.y+9+i*4.4)); doc.setTextColor(0,0,0); S.y += 10+guia.length*4.4;
+  const cols = [{t:'Carro',w:38},{t:'Conductor',w:32},{t:'Total\nmultas',w:22},{t:'Pagado',w:22},{t:'Debe',w:22},{t:'Refrendo\n(empresa)',w:22},{t:'Plan de\ndescuento',w:24}];
   mods.forEach(md=>{
-    const xs = todas.filter(m=>m.mod===md); if(!xs.length && mods.length>1) return;
-    const C = rgb(mulModColor(md)), mm = xs.filter(m=>m.tipo==='multa'), rr = xs.filter(m=>m.tipo==='refrendo');
-    S.seccion(md, `multas por cobrar ${mulPesos(mm.reduce((t,m)=>t+mulSaldo(m),0))} · refrendos ${mulPesos(rr.reduce((t,m)=>t+mulSaldo(m),0))}`, C, mods.length>1); // cada módulo en su propia hoja
-    if(!xs.length){ S.vacio('Sin multas ni adeudos registrados.'); return; }
-    const gente = {}; mm.forEach(m=>{ const k = mulPersona(m.conductor)||'(sin asignar)'; (gente[k] = gente[k] || []).push(m); });
-    const filas = Object.entries(gente).map(([k, ms])=>({k, ms, nombre: ms[0].conductor ? mulNombreBonito(ms[0].conductor) : 'Sin conductor asignado', total: ms.reduce((t,m)=>t+(Number(m.monto)||0),0), saldo: ms.reduce((t,m)=>t+mulSaldo(m),0)})).sort((a,b)=>b.saldo-a.saldo);
-    if(filas.length){
-      S.banda('Multas por persona', `${filas.length} persona(s)`, C);
-      S.tabla([{t:'Conductor',w:36},{t:'Carro',w:40},{t:'Multas',w:24},{t:'Pagado',w:24},{t:'Debe',w:24},{t:'Plan de descuento',w:34}],
-        filas.map(f=>{ const pl = f.ms.find(m=>m.plan && mulSaldo(m)>0); const pp = {plan: pl ? pl.plan : null};
-          return [{t:f.nombre, b:true, col:f.k==='(sin asignar)'?ROJ:null}, [...new Set(f.ms.map(m=>`${m.carro||''} ${m.placa||''}`.trim()))].join('\n'), mulPesos(f.total), {t:mulPesos(f.total-f.saldo), col:VER}, f.saldo>0?{t:mulPesos(f.saldo), b:true, col:ROJ}:{t:'Pagado', b:true, col:VER}, f.saldo>0?mulPlanTxt(pp):'-']; }), C);
-      S.tabla([{t:'Fecha',w:22},{t:'Conductor',w:30},{t:'Carro',w:34},{t:'Motivo',w:52},{t:'Monto',w:22},{t:'Debe',w:22}],
-        mm.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).map(m=>[fCor(m.fecha), m.conductor?mulNombreBonito(m.conductor):{t:'Sin asignar', col:ROJ}, `${m.carro||''} ${m.placa||''}`.trim(), (m.concepto||'Multa')+(m.folio?'\nFolio '+m.folio:''), mulPesos(m.monto), mulSaldo(m)>0?{t:mulPesos(mulSaldo(m)), b:true, col:ROJ}:{t:'Pagada', col:VER, b:true}]), C);
-    }
-    if(rr.length){
-      S.banda('Refrendos y adeudos (los paga la empresa)', mulPesos(rr.reduce((t,m)=>t+mulSaldo(m),0)), MOR);
-      S.tabla([{t:'Carro',w:48},{t:'Concepto',w:64},{t:'Monto',w:30},{t:'Pendiente',w:40}],
-        rr.map(m=>[`${m.carro||''} ${m.placa||''}`.trim(), m.concepto||'Adeudos y refrendos', mulPesos(m.monto), mulSaldo(m)>0?{t:mulPesos(mulSaldo(m)), b:true, col:MOR}:{t:'Pagado', b:true, col:VER}]), MOR);
-    }
-    const ab = xs.flatMap(m=>(m.abonos||[]).map(a=>({a, m}))).sort((x,y)=>(y.a.fecha||'').localeCompare(x.a.fecha||''));
-    if(ab.length){
-      S.banda('Pagos y descuentos', `${ab.length} movimiento(s) · ${mulPesos(ab.reduce((t,x)=>t+(Number(x.a.monto)||0),0))}`, VER);
-      S.tabla([{t:'Fecha',w:22},{t:'Quién',w:32},{t:'Carro',w:30},{t:'Forma',w:40},{t:'Nota',w:34},{t:'Monto',w:24}],
-        ab.map(({a, m})=>[fCor(a.fecha), m.tipo==='refrendo'?'Empresa':(m.conductor?mulNombreBonito(m.conductor):'Sin asignar'), m.placa||'-', {t:(MUL_FORMA[a.forma]||MUL_FORMA.descuento)[0].replace(/^\S+\s/,''), col:rgb((MUL_FORMA[a.forma]||MUL_FORMA.descuento)[1]), b:true}, a.nota||'-', {t:mulPesos(a.monto), b:true}]), VER);
-    }
+    const xs = todas.filter(m=>m.mod===md), C = rgb(mulModColor(md));
+    const debe = xs.filter(m=>m.tipo==='multa').reduce((t,m)=>t+mulSaldo(m),0), ref = xs.filter(m=>m.tipo==='refrendo').reduce((t,m)=>t+mulSaldo(m),0);
+    if(S.y > S.pageH-45){ doc.addPage(); S.y = 15; }
+    S.banda(md, xs.length ? `Debe ${mulPesos(debe)} en multas · refrendos ${mulPesos(ref)}` : 'Sin multas ni adeudos', C);
+    if(!xs.length) return;
+    // un renglón por carro y conductor; el refrendo va en el primer renglón del carro
+    const carros = {}; xs.forEach(m=>{ const c = carros[m.placa] = carros[m.placa] || {carro:`${m.carro||''}\n${m.placa||''}`.trim(), gente:{}, ref:0}; if(m.tipo==='multa'){ const k = mulPersona(m.conductor)||'(sin asignar)'; (c.gente[k] = c.gente[k] || []).push(m); } else { c.ref += mulSaldo(m); c.tieneRef = true; } });
+    const filas = []; let tT=0, tP=0, tD=0, tR=0;
+    Object.values(carros).sort((a,b)=>Object.values(b.gente).flat().reduce((t,m)=>t+mulSaldo(m),0)-Object.values(a.gente).flat().reduce((t,m)=>t+mulSaldo(m),0)).forEach(c=>{
+      const gs = Object.values(c.gente); if(!gs.length) gs.push(null);
+      gs.forEach((ms, i)=>{ const T = ms ? ms.reduce((t,m)=>t+(Number(m.monto)||0),0) : 0, D = ms ? ms.reduce((t,m)=>t+mulSaldo(m),0) : 0, R = i===0 ? c.ref : 0; tT+=T; tP+=T-D; tD+=D; tR+=R;
+        const pl = ms && ms.find(m=>m.plan && mulSaldo(m)>0);
+        filas.push([i===0 ? {t:c.carro, b:true} : '', ms ? (ms[0].conductor ? mulNombreBonito(ms[0].conductor) : {t:'Sin asignar', col:ROJ, b:true}) : {t:'-', col:GRI},
+          ms ? mulPesos(T) : '-', ms ? {t:mulPesos(T-D), col:VER} : '-', ms ? (D>0 ? {t:mulPesos(D), b:true, col:ROJ} : {t:'Pagado', b:true, col:VER}) : '-',
+          R>0 ? {t:mulPesos(R), col:MOR, b:true} : (i===0 && c.tieneRef ? {t:'Pagado', col:VER} : '-'),
+          D>0 && pl ? mulPlanTxt({plan:pl.plan}).replace(' · ','\n') : '-']); }); });
+    filas.push([{t:'Total '+md, b:true}, '', {t:mulPesos(tT), b:true}, {t:mulPesos(tP), b:true, col:VER}, {t:mulPesos(tD), b:true, col:ROJ}, {t:mulPesos(tR), b:true, col:MOR}, '']);
+    S.tabla(cols, filas, C);
   });
-  if(!todas.length) S.vacio('No hay multas ni adeudos registrados.');
-  await S.fin(`Multas_carros_${(mulMod||'todos').replace(/\W+/g,'_')}_${fechaHoyLocal()}.pdf`, 'Closets Vera · Multas de carros');
-  } finally { mulMod = guardaFiltro; }
+  if(mods.length>1){
+    S.banda('Total de todos los módulos', '', ROJ);
+    S.tabla([{t:'Módulo',w:38},{t:'Total multas',w:36},{t:'Pagado',w:36},{t:'Debe',w:36},{t:'Refrendos',w:36}],
+      [...mods.map(md=>{ const xs = todas.filter(m=>m.mod===md), mm = xs.filter(m=>m.tipo==='multa'), T = mm.reduce((t,m)=>t+(Number(m.monto)||0),0), D = mm.reduce((t,m)=>t+mulSaldo(m),0), R = xs.filter(m=>m.tipo==='refrendo').reduce((t,m)=>t+mulSaldo(m),0);
+        return [{t:md, b:true, col:rgb(mulModColor(md))}, mulPesos(T), {t:mulPesos(T-D), col:VER}, {t:mulPesos(D), col:ROJ, b:true}, {t:mulPesos(R), col:MOR}]; }),
+       [{t:'Total', b:true}, {t:mulPesos(totMon), b:true}, {t:mulPesos(totMon-totM), b:true, col:VER}, {t:mulPesos(totM), b:true, col:ROJ}, {t:mulPesos(totR), b:true, col:MOR}]], ROJ);
+  }
+  const ab = todas.flatMap(m=>(m.abonos||[]).map(a=>({a, m}))).sort((x,y)=>(y.a.fecha||'').localeCompare(x.a.fecha||''));
+  if(ab.length){
+    S.banda('Pagos y descuentos registrados', `${ab.length} · ${mulPesos(ab.reduce((t,x)=>t+(Number(x.a.monto)||0),0))}`, VER);
+    S.tabla([{t:'Fecha',w:24},{t:'Módulo',w:24},{t:'Quién',w:30},{t:'Carro',w:22},{t:'Cómo',w:36},{t:'Nota',w:24},{t:'Monto',w:22}],
+      ab.map(({a, m})=>[fCor(a.fecha), {t:m.mod, col:rgb(mulModColor(m.mod)), b:true}, m.tipo==='refrendo'?'Empresa':(m.conductor?mulNombreBonito(m.conductor):'Sin asignar'), m.placa||'-', {t:(MUL_FORMA[a.forma]||MUL_FORMA.descuento)[0].replace(/^\S+\s/,''), col:rgb((MUL_FORMA[a.forma]||MUL_FORMA.descuento)[1]), b:true}, a.nota||'-', {t:mulPesos(a.monto), b:true}]), VER);
+  }
+  await S.fin(`Multas_carros_${(filtro||'todos').replace(/\W+/g,'_')}_${fechaHoyLocal()}.pdf`, 'Closets Vera · Multas de carros');
 }
 generarMulPDF = unaSolaVez('generarMulPDF', generarMulPDF);
 mulPagoGuardar = unaSolaVez('mulPagoGuardar', mulPagoGuardar); mulGuardar = unaSolaVez('mulGuardar', mulGuardar); mulImportar = unaSolaVez('mulImportar', mulImportar); mulGuardarPlan = unaSolaVez('mulGuardarPlan', mulGuardarPlan); mulBorrar = unaSolaVez('mulBorrar', mulBorrar); mulAbBorrar = unaSolaVez('mulAbBorrar', mulAbBorrar);
