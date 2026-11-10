@@ -16177,7 +16177,8 @@ async function renderMul(){
         <button class="btn" style="background:#7c3aed" onclick="mulNueva('refrendo')">➕ Refrendo / adeudo</button>
         <button class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulImportarElegir()">📥 Importar Excel</button>
         <button class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulExportar()">📊 Descargar Excel</button>
-      <button class="btn" style="grid-column:1/-1;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="generarMulPDF()">📄 Descargar PDF${mulMod?' de '+mulMod:' (todos los módulos)'}</button>
+      <div style="grid-column:1/-1;padding:10px;border-radius:12px;border:1px solid var(--line)"><strong>📄 Descargar PDF</strong><div class="hint" style="margin:2px 0 8px">Todos: cada módulo sale en su propia hoja. O elige un solo módulo.</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px"><button onclick="generarMulPDF('')" style="cursor:pointer;padding:8px 12px;border-radius:10px;border:2px solid #b91c1c;background:#b91c1c;color:#fff;font:inherit;font-weight:800">Todos</button>${MODULOS.map(m=>`<button onclick="generarMulPDF('${m.nombre}')" style="cursor:pointer;padding:8px 12px;border-radius:10px;border:2px solid ${m.color};background:transparent;color:var(--ink);font:inherit;font-weight:800">${m.nombre}</button>`).join('')}</div></div>
       </div></div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${chip('', 'Todos', '#4b5563')}${MODULOS.map(m=>chip(m.nombre, m.nombre, m.color)).join('')}</div>
     <div style="display:flex;gap:6px;margin-bottom:10px">${tab('persona','👷 Por persona')}${tab('carro','🚗 Por carro')}${tab('ref','🏢 Refrendos')}</div>
@@ -16347,9 +16348,11 @@ async function mulExportar(){
   }catch(e){ alert('No se pudo generar el Excel: '+e.message); }
 }
 // v269: PDF de multas (pedido por el usuario). Respeta el módulo elegido arriba (o todos).
-async function generarMulPDF(){
+async function generarMulPDF(soloMod){
   if(!esAdmin()) return;
   try{ if(!mulCache) await mulCargar(); }catch(e){ return alert('No se pudo cargar: '+e.message); }
+  const guardaFiltro = mulMod; if(soloMod!==undefined) mulMod = soloMod;
+  try{
   const mods = mulMod ? [mulMod] : MODULOS.map(m=>m.nombre);
   const hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
   const ROJ=[185,28,28], MOR=[124,58,237], VER=[22,128,74], GRI=[107,114,128];
@@ -16370,7 +16373,7 @@ async function generarMulPDF(){
   mods.forEach(md=>{
     const xs = todas.filter(m=>m.mod===md); if(!xs.length && mods.length>1) return;
     const C = rgb(mulModColor(md)), mm = xs.filter(m=>m.tipo==='multa'), rr = xs.filter(m=>m.tipo==='refrendo');
-    S.seccion(md, `multas por cobrar ${mulPesos(mm.reduce((t,m)=>t+mulSaldo(m),0))} · refrendos ${mulPesos(rr.reduce((t,m)=>t+mulSaldo(m),0))}`, C, false);
+    S.seccion(md, `multas por cobrar ${mulPesos(mm.reduce((t,m)=>t+mulSaldo(m),0))} · refrendos ${mulPesos(rr.reduce((t,m)=>t+mulSaldo(m),0))}`, C, mods.length>1); // cada módulo en su propia hoja
     if(!xs.length){ S.vacio('Sin multas ni adeudos registrados.'); return; }
     const gente = {}; mm.forEach(m=>{ const k = mulPersona(m.conductor)||'(sin asignar)'; (gente[k] = gente[k] || []).push(m); });
     const filas = Object.entries(gente).map(([k, ms])=>({k, ms, nombre: ms[0].conductor ? mulNombreBonito(ms[0].conductor) : 'Sin conductor asignado', total: ms.reduce((t,m)=>t+(Number(m.monto)||0),0), saldo: ms.reduce((t,m)=>t+mulSaldo(m),0)})).sort((a,b)=>b.saldo-a.saldo);
@@ -16396,6 +16399,7 @@ async function generarMulPDF(){
   });
   if(!todas.length) S.vacio('No hay multas ni adeudos registrados.');
   await S.fin(`Multas_carros_${(mulMod||'todos').replace(/\W+/g,'_')}_${fechaHoyLocal()}.pdf`, 'Closets Vera · Multas de carros');
+  } finally { mulMod = guardaFiltro; }
 }
 generarMulPDF = unaSolaVez('generarMulPDF', generarMulPDF);
 mulPagoGuardar = unaSolaVez('mulPagoGuardar', mulPagoGuardar); mulGuardar = unaSolaVez('mulGuardar', mulGuardar); mulImportar = unaSolaVez('mulImportar', mulImportar); mulGuardarPlan = unaSolaVez('mulGuardarPlan', mulGuardarPlan); mulBorrar = unaSolaVez('mulBorrar', mulBorrar);
