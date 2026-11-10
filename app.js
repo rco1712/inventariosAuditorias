@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v270';
+const APP_VERSION = 'v271';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9438,6 +9438,11 @@ function prestAplicarEventos(bases, evs){
         if(ev.llego){ e.estado='recibido'; e.fechaConf=ev.fecha; e.confPor=ev.creadoPor; p.devuelto = Number(p.devuelto||0) + Number(e.cantidad);
           p.devoluciones.push({fecha:ev.fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:!!ev.yaContadas}); }
         else { e.estado='cancelado'; e.fechaConf=ev.fecha; e.confPor=ev.creadoPor; } }
+      else if(ev.tipo==='compensa'){ if(p.estado==='encamino' || p.estado==='cancelado') return;
+        // v271 (pedido por el usuario): dos módulos que se deben entre sí cierran la deuda sin mover material.
+        const q = Math.min(Number(ev.cantidad)||0, Math.max(0, Number(p.cantidad) - Number(p.devuelto||0))); if(!(q>0)) return;
+        p.devuelto = Number(p.devuelto||0) + q;
+        p.devoluciones.push({fecha:ev.fecha, cantidad:q, itemId:p.itemId, itemNombre:p.itemNombre, compensacion:true, conMod:p.destino, por:ev.creadoPor}); }
       else if(ev.tipo==='traspConf'){ if(p.estado!=='encamino') return;
         if(ev.llego){ p.estado='pendiente'; p.recibido={fecha:ev.fecha, por:ev.creadoPor, yaContadasEnCierre:!!ev.yaContadas}; }
         else { p.estado='cancelado'; p.canceladoEn=ev.fecha; p.canceladoPor=ev.creadoPor; } }
@@ -9694,14 +9699,15 @@ async function renderTraspHistorial(){
     return `<div class="card" style="border-left:6px solid ${col}">
       <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:15.5px;color:${col}">${titulo}</strong><span class="tag">${fCorta(diaLocal(p.fecha))}</span></div>
       <p class="hint" style="margin:6px 0">${p.origen} → ${p.destino} · ${p.itemNombre}${p.esMelamina?' (en melamina cuenta cualquier color)':''} · Prestado ${fmtNum(p.cantidad)} · Regresado ${fmtNum(p.devuelto)}${p.nota?' · '+p.nota:''}</p>
-      ${(p.devoluciones||[]).length?`<div class="hint" style="margin:0 0 6px">${p.devoluciones.map(d=>`✅ ${fCorta(diaLocal(d.fecha))}: regresaron ${fmtNum(d.cantidad)} ${d.itemNombre}${d.yaContadasEnCierre?' (ya se habían contado en el cierre del turno)':''}`).join('<br>')}</div>`:''}
+      ${(p.devoluciones||[]).length?`<div class="hint" style="margin:0 0 6px">${p.devoluciones.map(d=>d.compensacion ? `🔁 ${fCorta(diaLocal(d.fecha))}: se compensaron ${fmtNum(d.cantidad)} ${p.unidad} con lo que ${p.origen} le debía a ${p.destino} (no se movió material)` : `✅ ${fCorta(diaLocal(d.fecha))}: regresaron ${fmtNum(d.cantidad)} ${d.itemNombre}${d.yaContadasEnCierre?' (ya se habían contado en el cierre del turno)':''}`).join('<br>')}</div>`:''}
       ${enC.map(e=>`<div style="margin-top:6px;padding:10px 12px;border-radius:12px;background:rgba(8,145,178,.12);border:1px solid rgba(8,145,178,.5)"><strong>🚚 En camino: ${fmtNum(e.cantidad)} ${e.itemNombre}</strong><div class="hint" style="margin:2px 0 0">${p.destino} lo mandó el ${fCorta(diaLocal(e.fecha))} ${new Date(e.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})}. Ya salió de ${p.destino}; entra a ${p.origen} cuando lo confirme.</div>
         ${(!debe || dir)?`<div class="row" style="gap:6px;margin-top:8px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="prestConfirmar('${p.id}','${e.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="prestConfirmar('${p.id}','${e.id}',false)">❌ No llegaron</button></div>`:`<div class="hint" style="margin:6px 0 0">Esperando que ${p.origen} confirme que llegaron.</div>`}</div>`).join('')}
       ${p.pendiente - enCq > 0.0005 && (debe || dir) ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#dc2626,#b91c1c)" onclick="mostrarFormDevolucion('${p.id}')">💸 Saldar deuda (mandar a ${p.origen})</button><div id="dev-${p.id}"></div>` : ''}
     </div>`; };
   const cam = xs.filter(p=>p.estado==='encamino');
   const deb = xs.filter(p=>!['cerrado','encamino','cancelado'].includes(p.estado) && p.destino===mod), nos = xs.filter(p=>!['cerrado','encamino','cancelado'].includes(p.estado) && p.origen===mod), cer = xs.filter(p=>p.estado==='cerrado' || p.estado==='cancelado');
-  $('#trasp-body').innerHTML = (cam.length?`<div style="font-weight:900;margin:6px 4px">🚚 Traspasos en camino</div>`+cam.map(card).join(''):'') + (deb.length?`<div style="font-weight:900;margin:6px 4px">🔴 Lo que ${mod} debe</div>`+deb.map(card).join(''):'')
+  const compH = dir ? prestCompensables().filter(g=>g.m1===mod||g.m2===mod) : [];
+  $('#trasp-body').innerHTML = (compH.length?`<div class="card" style="border:2px solid #d97706;padding:12px"><strong>🔁 ${mod} y ${compH.map(g=>g.m1===mod?g.m2:g.m1).join(', ')} se deben entre sí.</strong> <span class="hint" style="margin:0">Se pueden cruzar sin mover inventario.</span><button class="btn small" style="width:100%;margin-top:8px;background:#d97706" onclick="traspSub='resumen';renderTrasp()">Ver y compensar</button></div>`:'') + (cam.length?`<div style="font-weight:900;margin:6px 4px">🚚 Traspasos en camino</div>`+cam.map(card).join(''):'') + (deb.length?`<div style="font-weight:900;margin:6px 4px">🔴 Lo que ${mod} debe</div>`+deb.map(card).join(''):'')
     + (nos.length?`<div style="font-weight:900;margin:12px 4px 6px">🟢 Lo que le deben a ${mod}</div>`+nos.map(card).join(''):'')
     + (cer.length?`<details class="card"><summary><strong>✅ Ya saldados (${cer.length})</strong></summary>${cer.map(card).join('')}</details>`:'');
 }
@@ -9852,7 +9858,7 @@ async function generarTraspasosPDF(){
   const MOR=[109,40,217], VER=[22,128,74], ROJ=[185,28,28], AMB=[180,83,9];
   const ev = [];
   ps.forEach(p=>{ if(enRango(p.fecha)) ev.push({f:p.fecha, tipo:'t', p, q:p.cantidad, art:p.itemNombre});
-    (p.devoluciones||[]).forEach(d=>{ if(enRango(d.fecha)) ev.push({f:d.fecha, tipo:'d', p, q:d.cantidad, art:d.itemNombre||p.itemNombre}); }); });
+    (p.devoluciones||[]).forEach(d=>{ if(enRango(d.fecha)) ev.push({f:d.fecha, tipo:d.compensacion?'c':'d', p, q:d.cantidad, art:d.compensacion?(p.esMelamina?'Melamina (cualquier color)':p.itemNombre)+' · se cruzó con la deuda contraria, sin mover material':(d.itemNombre||p.itemNombre)}); }); });
   ev.sort((a,b)=>(a.f||'').localeCompare(b.f||''));
   const pend = ps.filter(p=>p.pendiente>0);
   const grupos = {}; pend.forEach(p=>{ const k = p.destino+'||'+p.origen+'||'+grupoDeuda(p.itemId);
@@ -9870,14 +9876,63 @@ async function generarTraspasosPDF(){
   if(!ev.length) S.vacio('Sin traspasos ni devoluciones en estas fechas.');
   else S.tabla([{t:'Fecha',w:18},{t:'Movimiento',w:30},{t:'De → A',w:44},{t:'Artículo',w:50},{t:'Cant.',w:18},{t:'Estado',w:22}],
     ev.map(e=>{ const t = e.tipo==='t', est = e.p.estado==='cerrado'?{t:'Pagado',col:VER,b:true}:e.p.estado==='parcial'?{t:'Parcial',col:AMB,b:true}:{t:'Pendiente',col:ROJ,b:true};
-      return [fTxt(e.f), t?{t:'Préstamo',col:MOR,b:true}:{t:'Devolución',col:VER,b:true}, t?`${e.p.origen} → ${e.p.destino}`:`${e.p.destino} → ${e.p.origen}`, e.art+(e.p.nota&&t?' · '+e.p.nota:''), {t:fmtNum(e.q)+' '+(e.p.unidad||''),b:true}, t?est:{t:'—'}]; }), MOR);
+      return [fTxt(e.f), t?{t:'Préstamo',col:MOR,b:true}:e.tipo==='c'?{t:'Compensación',col:AMB,b:true}:{t:'Devolución',col:VER,b:true}, t?`${e.p.origen} → ${e.p.destino}`:`${e.p.destino} → ${e.p.origen}`, e.art+(e.p.nota&&t?' · '+e.p.nota:''), {t:fmtNum(e.q)+' '+(e.p.unidad||''),b:true}, t?est:{t:'—'}]; }), MOR);
   await S.fin(`Traspasos_${mods.length?mods.join('-'):'todos'}_${d1}_a_${d2}.pdf`, 'Closets Vera · Traspasos entre módulos');
+}
+// v271 (pedido por el usuario): si dos módulos se deben entre sí (en melamina cualquier color; lo demás por
+// artículo), Dirección puede cruzar las deudas: se cierra la misma cantidad de los dos lados y NO se mueve
+// inventario (el material ya se movió con los traspasos). Lo que va en camino no se toca.
+function prestCompensables(){
+  const enCam = p => (p.envios||[]).filter(e=>e.estado==='encamino').reduce((t,e)=>t+Number(e.cantidad),0);
+  const libre = p => Math.max(0, fmtNum(Number(p.pendiente||0) - enCam(p)));
+  const abiertos = (prestamos||[]).filter(p=>['pendiente','parcial'].includes(p.estado) && libre(p)>0.0005);
+  const pares = {};
+  abiertos.forEach(p=>{ const a = [p.origen, p.destino].sort(), k = a[0]+'||'+a[1]+'||'+grupoDeuda(p.itemId);
+    const g = pares[k] || (pares[k] = {m1:a[0], m2:a[1], grupo:grupoDeuda(p.itemId), etiqueta:p.esMelamina?'hojas de melamina':p.itemNombre, unidad:p.unidad, d12:[], d21:[]});
+    (p.destino===a[0] ? g.d12 : g.d21).push(p); }); // d12: lo que m1 le debe a m2
+  return Object.values(pares).map(g=>{ const t12 = g.d12.reduce((t,p)=>t+libre(p),0), t21 = g.d21.reduce((t,p)=>t+libre(p),0);
+    return Object.assign(g, {t12:fmtNum(t12), t21:fmtNum(t21), q:fmtNum(Math.min(t12, t21)), libre}); }).filter(g=>g.q>0.0005);
+}
+function prestCompensablesHtml(){
+  if(!esAdmin()) return '';
+  const C = prestCompensables(); if(!C.length) return '';
+  return `<div class="card" style="border:2px solid #d97706"><div style="font-size:16px;font-weight:900">🔁 Deudas que se pueden cruzar</div>
+    <p class="hint" style="margin:4px 0 8px">Estos módulos se deben entre sí. Al compensar se cierra la misma cantidad de los dos lados. <strong>No se mueve inventario</strong>: el material ya se movió con los traspasos.</p>
+    ${C.map((g,i)=>`<div style="padding:10px 12px;border-radius:12px;border:1px solid var(--line);margin-top:8px">
+      <div style="font-weight:800">${g.m1} ⇄ ${g.m2} · ${g.etiqueta}</div>
+      <div class="hint" style="margin:4px 0 0">${g.m1} le debe ${fmtNum(g.t12)} ${g.unidad} a ${g.m2}<br>${g.m2} le debe ${fmtNum(g.t21)} ${g.unidad} a ${g.m1}</div>
+      <div style="margin-top:6px;font-weight:800;color:#b45309">Se cancelan ${fmtNum(g.q)} ${g.unidad} de cada lado${g.t12!==g.t21?` · queda: ${g.t12>g.t21?g.m1+' le debe '+fmtNum(g.t12-g.q)+' '+g.unidad+' a '+g.m2:g.m2+' le debe '+fmtNum(g.t21-g.q)+' '+g.unidad+' a '+g.m1}`:' · ya no queda deuda entre ellos'}</div>
+      <button class="btn" style="width:100%;margin-top:8px;background:#d97706" onclick="prestCompensar(${i})">🔁 Compensar ${fmtNum(g.q)} ${g.unidad}</button></div>`).join('')}</div>`;
+}
+async function prestCompensar(i){
+  if(!esAdmin()) return alert('Solo Dirección puede compensar deudas.');
+  await cargarPrestamos(); const g = prestCompensables()[i]; if(!g) return alert('Ya no hay nada que compensar ahí.');
+  if(!confirm(`🔁 Compensar ${fmtNum(g.q)} ${g.unidad} (${g.etiqueta}) entre ${g.m1} y ${g.m2}
+
+• ${g.m1} le debe ${fmtNum(g.t12)} a ${g.m2}
+• ${g.m2} le debe ${fmtNum(g.t21)} a ${g.m1}
+
+Se cierran ${fmtNum(g.q)} de cada lado. NO se mueve inventario.
+
+¿Compensar?`)) return;
+  try{
+    const fecha = new Date().toISOString();
+    for(const lado of [g.d12, g.d21]){
+      let resta = g.q;
+      for(const p of lado.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))){ if(resta<=0.0005) break;
+        const q = fmtNum(Math.min(resta, g.libre(p))); if(!(q>0)) continue;
+        await prestEvento(p, {tipo:'compensa', cantidad:q, fecha, grupo:g.grupo}); resta = fmtNum(resta - q); }
+    }
+    toast('🔁 Deudas compensadas'); await cargarPrestamos();
+    if(traspSub==='resumen') renderTraspResumen(); else renderTraspHistorial();
+  }catch(e){ alert('Error: '+e.message); }
 }
 async function renderTraspResumen(){
   $('#trasp-body').innerHTML = `<div class="card hint">Calculando deudas…</div>`;
   await cargarPrestamos();
   const pendientes = prestamos.filter(p=>p.pendiente>0);
   if(pendientes.length===0){ $('#trasp-body').innerHTML = `<div class="card">No hay deudas pendientes entre módulos.</div>`; return; }
+  const compHtml = prestCompensablesHtml();
   // Agrupar por (destino debe a origen) + grupo de deuda (Melamina agrupa colores; lo demás por itemId)
   const grupos = {};
   pendientes.forEach(p=>{
@@ -9887,7 +9942,7 @@ async function renderTraspResumen(){
   });
   const porDeudor = {};
   Object.values(grupos).forEach(g=>{ (porDeudor[g.deudor+'||'+g.acreedor] = porDeudor[g.deudor+'||'+g.acreedor]||[]).push(g); });
-  $('#trasp-body').innerHTML = `<div class="card"><strong>Préstamos entre módulos (pendientes)</strong>
+  $('#trasp-body').innerHTML = compHtml + `<div class="card"><strong>Préstamos entre módulos (pendientes)</strong>
     <p class="hint">Para hojas de melamina, el color no afecta la deuda: se suma por hoja, sin importar el color prestado o devuelto.</p></div>` +
     Object.keys(porDeudor).map(key=>{
       const [deudor,acreedor] = key.split('||');
@@ -16516,3 +16571,5 @@ async function generarMulPDF(soloMod){
 }
 generarMulPDF = unaSolaVez('generarMulPDF', generarMulPDF);
 mulPagoGuardar = unaSolaVez('mulPagoGuardar', mulPagoGuardar); mulGuardar = unaSolaVez('mulGuardar', mulGuardar); mulImportar = unaSolaVez('mulImportar', mulImportar); mulGuardarPlan = unaSolaVez('mulGuardarPlan', mulGuardarPlan); mulBorrar = unaSolaVez('mulBorrar', mulBorrar); mulAbBorrar = unaSolaVez('mulAbBorrar', mulAbBorrar);
+
+prestCompensar = unaSolaVez('prestCompensar', prestCompensar);
