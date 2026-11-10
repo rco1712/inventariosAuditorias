@@ -16129,7 +16129,8 @@ function mulProximo(p){
   const base = p.ult || p.plan.desde || p.inicio || fechaHoyLocal(); const d = new Date(base+'T12:00:00'); d.setDate(d.getDate()+MUL_FREC[p.plan.frec][1]);
   const f = d.toISOString().slice(0,10); return {fecha:f, toca: f<=fechaHoyLocal()};
 }
-function mulPlanTxt(p){ if(!p.plan) return 'Sin plan de descuento'; const f = MUL_FREC[p.plan.frec]||MUL_FREC.libre; return `${p.plan.monto?mulPesos(p.plan.monto)+' · ':''}${f[0].toLowerCase()}`; }
+function mulPlanCorto(pl){ if(!pl || (pl.frec==='libre' && !Number(pl.monto))) return 'Sin definir'; const f = (MUL_FREC[pl.frec]||MUL_FREC.libre)[0].toLowerCase(); return Number(pl.monto) ? `${mulPesos(pl.monto)}\n${f}` : f; }
+function mulPlanTxt(p){ if(!p.plan || (p.plan.frec==='libre' && !Number(p.plan.monto))) return 'Sin plan de descuento todavía'; const f = MUL_FREC[p.plan.frec]||MUL_FREC.libre; return Number(p.plan.monto) ? `Se le descuentan ${mulPesos(p.plan.monto)} ${f[0].toLowerCase()}` : `Se le descuenta ${f[0].toLowerCase()} (sin cantidad fija)`; }
 async function renderMul(){
   current = 'mul';
   if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
@@ -16220,7 +16221,7 @@ function mulPersonaPintar(){
   if(!p){ mulAbierto=''; return renderMul(); }
   const pr = mulProximo(p), sug = p.plan && Number(p.plan.monto) ? Math.min(p.saldo, Number(p.plan.monto)) : '';
   const abonos = p.multas.flatMap(m=>(m.abonos||[]).map(a=>Object.assign({m}, a))).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
-  const fr = p.plan ? p.plan.frec : 'quincenal';
+  const fr = p.plan ? p.plan.frec : '';
   $('#main').innerHTML = `<button class="btn small" style="margin-bottom:10px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulAbierto='';renderMul()">‹ Volver</button>
     <div class="card" style="border-top:6px solid ${p.saldo>0?'#dc2626':'#16a34a'}">
       <div style="font-size:20px;font-weight:900">👷 ${mulEsc(p.nombre)}</div><div class="hint" style="margin:2px 0 8px">${[...p.mods].join(', ')} · 🚗 ${mulEsc([...p.carros].join(', '))}</div>
@@ -16228,10 +16229,10 @@ function mulPersonaPintar(){
         <div style="padding:8px;border-radius:10px;background:var(--bg,rgba(0,0,0,.04))"><div class="hint" style="margin:0">Total</div><strong>${mulPesos(p.total)}</strong></div>
         <div style="padding:8px;border-radius:10px;background:rgba(22,163,74,.12)"><div class="hint" style="margin:0">Pagado</div><strong style="color:#16a34a">${mulPesos(p.total-p.saldo)}</strong></div>
         <div style="padding:8px;border-radius:10px;background:rgba(220,38,38,.12)"><div class="hint" style="margin:0">Debe</div><strong style="color:#dc2626">${mulPesos(p.saldo)}</strong></div></div>
-      <div style="margin-top:10px;padding:10px;border-radius:12px;border:1px solid var(--line)"><strong>📅 Plan de descuento</strong>
+      <div style="margin-top:10px;padding:10px;border-radius:12px;border:1px solid var(--line)"><strong>📅 ¿Cada cuándo se le descuenta?</strong><div class="hint" style="margin:2px 0 0">Lo decides tú. Solo sirve para que la app te recuerde; no descuenta nada sola.</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${Object.entries(MUL_FREC).map(([k,v])=>`<button onclick="mulPlanFrec='${k}';document.querySelectorAll('.mulfr').forEach(b=>b.style.background='transparent');this.style.background='#2563eb33'" class="mulfr" style="cursor:pointer;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:${fr===k?'#2563eb33':'transparent'};color:var(--ink);font:inherit;font-weight:700">${v[0]}</button>`).join('')}</div>
-        <div class="row" style="gap:6px;margin-top:6px"><input id="mul-plan-monto" type="number" inputmode="decimal" placeholder="$ por descuento" value="${p.plan&&p.plan.monto?p.plan.monto:''}" style="flex:1;margin:0"><button class="btn small" onclick="mulGuardarPlan('${mulEsc(p.k)}')">Guardar plan</button></div>
-        <div class="hint" style="margin:6px 0 0">${pr?(pr.toca?'<strong style="color:#dc2626">📅 Ya toca descontar</strong> (se registra a mano con ➖ cuando se haga)':'Próximo descuento: <strong>'+fCorta(pr.fecha)+'</strong>'):'Sin fecha de próximo descuento.'}</div></div>
+        <div class="row" style="gap:6px;margin-top:6px"><input id="mul-plan-monto" type="number" inputmode="decimal" placeholder="¿Cuánto cada vez? Ej. 500" value="${p.plan&&p.plan.monto?p.plan.monto:''}" style="flex:1;margin:0"><button class="btn small" onclick="mulGuardarPlan('${mulEsc(p.k)}')">Guardar plan</button></div>
+        <div class="hint" style="margin:6px 0 0">${pr?(pr.toca?'<strong style="color:#dc2626">📅 Ya toca descontar</strong> (se registra a mano con ➖ cuando se haga)':'Próximo descuento: <strong>'+fCorta(pr.fecha)+'</strong>'):(p.plan && !(p.plan.frec==='libre' && !Number(p.plan.monto)) ? mulEsc(mulPlanTxt(p))+'.' : 'Todavía no tiene plan: elige cada cuándo y cuánto, y toca Guardar plan.')}</div></div>
       ${p.saldo>0?`<div style="display:grid;gap:6px;margin-top:10px">
         <button class="btn" style="background:#2563eb;min-height:50px" onclick="mulPago={tipo:'persona',k:'${mulEsc(p.k)}',monto:'${sug}',forma:'descuento',fecha:fechaHoyLocal(),nota:''};renderMul()">➖ Registrar descuento${sug?' ('+mulPesos(sug)+')':''}</button>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><button class="btn" style="background:#16a34a" onclick="mulPago={tipo:'persona',k:'${mulEsc(p.k)}',monto:'${p.saldo}',forma:'fuera',fecha:fechaHoyLocal(),nota:''};renderMul()">💵 Pagó por fuera</button><button class="btn" style="background:#7c3aed" onclick="mulPago={tipo:'persona',k:'${mulEsc(p.k)}',monto:'${p.saldo}',forma:'empresa',fecha:fechaHoyLocal(),nota:''};renderMul()">🏢 La paga la empresa</button></div></div>`:''}
@@ -16246,7 +16247,7 @@ function mulPersonaPintar(){
 let mulPlanFrec = null;
 async function mulGuardarPlan(k){
   const p = mulPersonas().find(x=>x.k===k) || (mulMod='', mulPersonas().find(x=>x.k===k)); if(!p) return;
-  const frec = mulPlanFrec || (p.plan&&p.plan.frec) || 'quincenal', monto = Number(document.getElementById('mul-plan-monto').value)||0;
+  const frec = mulPlanFrec || (p.plan&&p.plan.frec) || 'libre', monto = Number(document.getElementById('mul-plan-monto').value)||0;
   const plan = {frec, monto, desde:(p.plan&&p.plan.desde)||fechaHoyLocal()};
   try{ for(const m of p.multas.filter(x=>mulSaldo(x)>0)){ await db.collection('multas').doc(m.id).update({plan}); m.plan = plan; } mulPlanFrec = null; toast('✅ Plan guardado'); renderMul(); }catch(e){ alert('Error: '+e.message); }
 }
@@ -16292,10 +16293,10 @@ async function mulAbBorrar(mid, aid){
 }
 function mulNueva(tipo, personaK){
   const p = personaK ? mulPersonas().find(o=>o.k===personaK) : null;
-  mulForm = {tipo, mod: p ? [...p.mods][0] : (mulMod||''), placa:'', carro:'', conductor: p ? p.nombre : '', fecha:fechaHoyLocal(), concepto:'', folio:'', monto:'', frec: (p&&p.plan&&p.plan.frec)||'quincenal', porDesc:(p&&p.plan&&p.plan.monto)||''};
+  mulForm = {tipo, mod: p ? [...p.mods][0] : (mulMod||''), placa:'', carro:'', conductor: p ? p.nombre : '', fecha:fechaHoyLocal(), concepto:'', folio:'', monto:'', frec: (p&&p.plan&&p.plan.frec)||'libre', porDesc:(p&&p.plan&&p.plan.monto)||''};
   renderMul(); window.scrollTo(0,0);
 }
-function mulEditar(id){ const m = mulCache.find(x=>x.id===id); if(!m) return; mulForm = {id, tipo:m.tipo, mod:m.mod||'', placa:m.placa||'', carro:m.carro||'', conductor:m.conductor||'', fecha:m.fecha||'', concepto:m.concepto||'', folio:m.folio||'', monto:String(m.monto||''), frec:(m.plan&&m.plan.frec)||'quincenal', porDesc:(m.plan&&m.plan.monto)||''}; renderMul(); window.scrollTo(0,0); }
+function mulEditar(id){ const m = mulCache.find(x=>x.id===id); if(!m) return; mulForm = {id, tipo:m.tipo, mod:m.mod||'', placa:m.placa||'', carro:m.carro||'', conductor:m.conductor||'', fecha:m.fecha||'', concepto:m.concepto||'', folio:m.folio||'', monto:String(m.monto||''), frec:(m.plan&&m.plan.frec)||'libre', porDesc:(m.plan&&m.plan.monto)||''}; renderMul(); window.scrollTo(0,0); }
 function mulFormPintar(){
   const f = mulForm, multa = f.tipo==='multa';
   const V = (vehCache && vehCache.vehs) ? vehCache.vehs.filter(v=>!f.mod || v.modulo===f.mod) : [];
@@ -16393,7 +16394,7 @@ async function mulImportar(){
       for(const tipo of ['multa','refrendo']){
         const k = mulImpCmp(f, tipo);
         if(k.estado==='nuevo'){
-          const d = tipo==='multa' ? Object.assign({}, base, {tipo, conductor:f.conductor, concepto:'Saldo de multas del Excel al '+fTxt+(f.nota?' · carro en '+f.nota.toLowerCase():''), monto:f.mu, plan:{frec:'quincenal', monto:0, desde:x.fecha}})
+          const d = tipo==='multa' ? Object.assign({}, base, {tipo, conductor:f.conductor, concepto:'Saldo de multas del Excel al '+fTxt+(f.nota?' · carro en '+f.nota.toLowerCase():''), monto:f.mu, plan:null})
                                    : Object.assign({}, base, {tipo, conductor:'', concepto:'Adeudos y refrendos pendientes', monto:f.ad});
           const id = cryptoId(); await db.collection('multas').doc(id).set(d); mulCache.push({id, ...d}); n++;
         } else if(k.estado==='cambio' && x.dec[f.placa+'|'+tipo]==='si'){
@@ -16444,11 +16445,12 @@ async function generarMulPDF(soloMod){
   const guia = ['Multas: se le cargan a quien manejaba el carro ese día y se le descuentan por partes.',
     'Total = lo que fue la multa. Pagado = lo descontado o pagado hasta hoy. Debe = lo que falta cobrarle.',
     'Refrendo = adeudos y refrendos del carro. Los paga la empresa; no se le descuentan a nadie.',
-    'Plan = cada cuánto y cuánto se le descuenta. Los descuentos no son automáticos: se registran a mano.'];
-  doc.setFillColor(248,248,250); doc.setDrawColor(220,222,228); doc.rect(S.L, S.y, S.W, 6+guia.length*4.4, 'FD');
+    'Cada cuándo se le descuenta = lo que tú decidas para esa persona (ej. $500 cada 15 días). "Sin definir" = todavía no se acuerda. Los descuentos no son automáticos: se registran a mano.'];
+  doc.setFontSize(7.8); const gl = guia.flatMap(g=>doc.splitTextToSize(String('- '+g), S.W-6));
+  doc.setFillColor(248,248,250); doc.setDrawColor(220,222,228); doc.rect(S.L, S.y, S.W, 6+gl.length*3.8, 'FD');
   doc.setFont(undefined,'bold'); doc.setFontSize(8.6); doc.setTextColor(55,65,81); doc.text('Cómo leer este reporte', S.L+3, S.y+4.6); doc.setFont(undefined,'normal'); doc.setFontSize(7.8);
-  guia.forEach((g,i)=>doc.text(String('- '+g), S.L+3, S.y+9+i*4.4)); doc.setTextColor(0,0,0); S.y += 10+guia.length*4.4;
-  const cols = [{t:'Carro',w:38},{t:'Conductor',w:32},{t:'Total\nmultas',w:22},{t:'Pagado',w:22},{t:'Debe',w:22},{t:'Refrendo\n(empresa)',w:22},{t:'Plan de\ndescuento',w:24}];
+  gl.forEach((g,i)=>doc.text(String(g), S.L+3, S.y+9+i*3.8)); doc.setTextColor(0,0,0); S.y += 10+gl.length*3.8;
+  const cols = [{t:'Carro',w:38},{t:'Conductor',w:32},{t:'Total\nmultas',w:22},{t:'Pagado',w:22},{t:'Debe',w:22},{t:'Refrendo\n(empresa)',w:22},{t:'Cada cuándo se\nle descuenta',w:24}];
   mods.forEach(md=>{
     const xs = todas.filter(m=>m.mod===md), C = rgb(mulModColor(md));
     const debe = xs.filter(m=>m.tipo==='multa').reduce((t,m)=>t+mulSaldo(m),0), ref = xs.filter(m=>m.tipo==='refrendo').reduce((t,m)=>t+mulSaldo(m),0);
@@ -16465,7 +16467,7 @@ async function generarMulPDF(soloMod){
         filas.push([i===0 ? {t:c.carro, b:true} : '', ms ? (ms[0].conductor ? mulNombreBonito(ms[0].conductor) : {t:'Sin asignar', col:ROJ, b:true}) : {t:'-', col:GRI},
           ms ? mulPesos(T) : '-', ms ? {t:mulPesos(T-D), col:VER} : '-', ms ? (D>0 ? {t:mulPesos(D), b:true, col:ROJ} : {t:'Pagado', b:true, col:VER}) : '-',
           R>0 ? {t:mulPesos(R), col:MOR, b:true} : (i===0 && c.tieneRef ? {t:'Pagado', col:VER} : '-'),
-          D>0 && pl ? mulPlanTxt({plan:pl.plan}).replace(' · ','\n') : '-']); }); });
+          D>0 ? mulPlanCorto(pl ? pl.plan : null) : '-']); }); });
     filas.push([{t:'Total '+md, b:true}, '', {t:mulPesos(tT), b:true}, {t:mulPesos(tP), b:true, col:VER}, {t:mulPesos(tD), b:true, col:ROJ}, {t:mulPesos(tR), b:true, col:MOR}, '']);
     S.tabla(cols, filas, C);
   });
