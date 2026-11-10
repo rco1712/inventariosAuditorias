@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v269';
+const APP_VERSION = 'v270';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -16198,15 +16198,17 @@ function mulListaHtml(){
     return deben.map(card).join('') + (pagados.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:800;padding:6px 0">✅ Ya pagaron todo (${pagados.length})</summary>${pagados.map(card).join('')}</details>` : '');
   }
   if(mulTab==='carro'){
-    const g = {}; todas.forEach(m=>{ const k = (m.placa||'Sin placa').toUpperCase(); const c = g[k] = g[k] || {placa:k, carro:m.carro||'', mod:m.mod, gente:{}, multa:0, ref:0};
-      if(m.tipo==='multa'){ c.multa += mulSaldo(m); const pk = mulPersona(m.conductor)||'(sin asignar)'; c.gente[pk] = m.conductor ? mulNombreBonito(m.conductor) : 'Sin conductor asignado'; } else c.ref += mulSaldo(m); });
-    const xs = Object.values(g).filter(c=>ok(c.placa, c.carro, c.mod, Object.values(c.gente).join(' '))).sort((a,b)=>(b.multa+b.ref)-(a.multa+a.ref));
-    if(!xs.length) return nada('No hay carros registrados.');
-    return xs.map(c=>`<div class="card" style="padding:12px 14px;border-left:8px solid ${mulModColor(c.mod)}">
-      <div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:16px;font-weight:900">🚗 ${mulEsc(c.carro)} <span class="tag">${mulEsc(c.placa)}</span></div><div style="margin-top:4px">${modTag(c.mod)}</div></div></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+    const g = {}; todas.forEach(m=>{ const k = (m.placa||'Sin placa').toUpperCase(); const c = g[k] = g[k] || {placa:k, carro:m.carro||'', mod:m.mod, gente:{}, multa:0, ref:0, reg:null};
+      if(m.tipo==='carro'){ c.reg = m; if(m.carro) c.carro = m.carro; } else if(m.tipo==='multa'){ c.multa += mulSaldo(m); const pk = mulPersona(m.conductor)||'(sin asignar)'; c.gente[pk] = m.conductor ? mulNombreBonito(m.conductor) : 'Sin conductor asignado'; } else c.ref += mulSaldo(m); });
+    const xs = Object.values(g).filter(c=>ok(c.placa, c.carro, c.mod, Object.values(c.gente).join(' '), c.reg?c.reg.conductor:'')).sort((a,b)=>(b.multa+b.ref)-(a.multa+a.ref) || (a.mod||'').localeCompare(b.mod||''));
+    const agregar = `<button class="btn" style="width:100%;margin-bottom:10px;background:transparent;color:var(--ink);border:1px dashed var(--line);box-shadow:none" onclick="mulNueva('carro')">➕ Agregar carro a la lista</button>`;
+    if(!xs.length) return agregar + nada('No hay carros registrados.');
+    return agregar + xs.map(c=>`<div class="card" style="padding:12px 14px;border-left:8px solid ${mulModColor(c.mod)}">
+      <div class="row" style="justify-content:space-between;gap:8px;align-items:flex-start"><div style="min-width:0"><div style="font-size:16px;font-weight:900">🚗 ${mulEsc(c.carro)} <span class="tag">${mulEsc(c.placa)}</span></div><div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">${modTag(c.mod)}${c.reg?`<span class="hint" style="margin:0">👷 ${c.reg.conductor?'Lo maneja <strong>'+mulEsc(mulNombreBonito(c.reg.conductor))+'</strong>':mulEsc(mulNombreBonito(c.reg.estado)||'Sin chofer')}</span>`:''}</div></div>
+        <div style="flex:none;display:flex;align-items:center;gap:6px">${c.multa+c.ref>0?'':'<span style="padding:3px 9px;border-radius:8px;background:#16a34a;color:#fff;font-weight:800;font-size:12px;white-space:nowrap">✅ Sin adeudo</span>'}${c.reg?`<div><button class="btn small" style="padding:4px 8px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulEditar('${c.reg.id}')">✏️</button></div>`:''}</div></div>
+      ${c.multa+c.ref>0?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
         <div style="padding:8px;border-radius:10px;background:rgba(220,38,38,.1)"><div class="hint" style="margin:0">Multas pendientes</div><strong style="color:${c.multa>0?'#dc2626':'#16a34a'}">${c.multa>0?mulPesos(c.multa):'✅ $0'}</strong></div>
-        <div style="padding:8px;border-radius:10px;background:rgba(124,58,237,.1)"><div class="hint" style="margin:0">Refrendo (empresa)</div><strong style="color:${c.ref>0?'#7c3aed':'#16a34a'}">${c.ref>0?mulPesos(c.ref):'✅ $0'}</strong></div></div>
+        <div style="padding:8px;border-radius:10px;background:rgba(124,58,237,.1)"><div class="hint" style="margin:0">Refrendo (empresa)</div><strong style="color:${c.ref>0?'#7c3aed':'#16a34a'}">${c.ref>0?mulPesos(c.ref):'✅ $0'}</strong></div></div>`:''}
       ${Object.keys(c.gente).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${Object.entries(c.gente).map(([k,n])=>`<button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulAbierto='${mulEsc(k)}';renderMul();window.scrollTo(0,0)">👷 ${mulEsc(n)} ›</button>`).join('')}</div>`:''}</div>`).join('');
   }
   const rs = refs.filter(m=>ok(m.placa, m.carro, m.mod, m.concepto)).sort((a,b)=>mulSaldo(b)-mulSaldo(a));
@@ -16298,29 +16300,42 @@ function mulNueva(tipo, personaK){
 }
 function mulEditar(id){ const m = mulCache.find(x=>x.id===id); if(!m) return; mulForm = {id, tipo:m.tipo, mod:m.mod||'', placa:m.placa||'', carro:m.carro||'', conductor:m.conductor||'', fecha:m.fecha||'', concepto:m.concepto||'', folio:m.folio||'', monto:String(m.monto||''), frec:(m.plan&&m.plan.frec)||'libre', porDesc:(m.plan&&m.plan.monto)||''}; renderMul(); window.scrollTo(0,0); }
 function mulFormPintar(){
-  const f = mulForm, multa = f.tipo==='multa';
+  const f = mulForm, multa = f.tipo==='multa', esCarro = f.tipo==='carro';
   const V = (vehCache && vehCache.vehs) ? vehCache.vehs.filter(v=>!f.mod || v.modulo===f.mod) : [];
   const conocidos = [...new Set((mulCache||[]).map(m=>m.conductor).filter(Boolean).map(mulNombreBonito).concat(V.map(v=>v.instalador).filter(Boolean)))];
   const placas = [...new Set((mulCache||[]).filter(m=>!f.mod||m.mod===f.mod).map(m=>m.placa+'|'+(m.carro||'')).concat(V.map(v=>v.placas+'|'+(v.carro||''))))].filter(x=>x.split('|')[0]);
-  $('#main').innerHTML = `<div class="card" style="border-top:6px solid ${multa?'#b91c1c':'#7c3aed'}"><h3 style="margin-top:0">${f.id?'✏️ Editar':'➕ Nueva'} ${multa?'multa':'refrendo / adeudo del carro'}</h3>
-    ${multa?'':'<p class="hint">Los refrendos y adeudos del carro los paga la empresa: solo se registran para control.</p>'}
+  $('#main').innerHTML = `<div class="card" style="border-top:6px solid ${multa?'#b91c1c':'#7c3aed'}"><h3 style="margin-top:0">${esCarro?(f.id?'✏️ Editar carro':'➕ Agregar carro'):(f.id?'✏️ Editar ':'➕ Nueva ')+(multa?'multa':'refrendo / adeudo del carro')}</h3>
+    ${esCarro?'<p class="hint">Para que el carro salga en la lista y en el PDF aunque no deba nada.</p>':multa?'':'<p class="hint">Los refrendos y adeudos del carro los paga la empresa: solo se registran para control.</p>'}
     <label class="hint">Módulo</label><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">${MODULOS.map(m=>`<button onclick="mulForm.mod='${m.nombre}';renderMul()" style="cursor:pointer;padding:8px 10px;border-radius:10px;border:2px solid ${m.color};background:${f.mod===m.nombre?m.color:'transparent'};color:${f.mod===m.nombre?'#fff':'var(--ink)'};font:inherit;font-weight:800">${m.nombre}</button>`).join('')}</div>
     <label class="hint">Carro (placas)</label><input list="mul-placas" placeholder="Ej. SRJ018B" value="${mulEsc(f.placa)}" oninput="mulForm.placa=this.value.toUpperCase();const o=[...document.querySelectorAll('#mul-placas option')].find(x=>x.value===mulForm.placa);if(o){mulForm.carro=o.dataset.c;document.getElementById('mul-carro').value=o.dataset.c;}">
     <datalist id="mul-placas">${placas.map(x=>{ const [pl,c] = x.split('|'); return `<option value="${mulEsc(pl)}" data-c="${mulEsc(c)}">${mulEsc(c)}</option>`; }).join('')}</datalist>
     <label class="hint">Carro (marca / color)</label><input id="mul-carro" placeholder="Ej. March gris 2019" value="${mulEsc(f.carro)}" oninput="mulForm.carro=this.value">
+    ${esCarro?`<label class="hint">¿Quién lo maneja normalmente?</label><input list="mul-cond" placeholder="Ej. Ángel (o vacío si no tiene chofer)" value="${mulEsc(f.conductor)}" oninput="mulForm.conductor=this.value"><datalist id="mul-cond">${conocidos.map(c=>`<option value="${mulEsc(c)}">`).join('')}</datalist>`:''}
+    ${esCarro?'':`<div class="row" style="gap:8px"><div style="flex:1"><label class="hint">Fecha</label><input type="date" value="${f.fecha}" oninput="mulForm.fecha=this.value"></div><div style="flex:1"><label class="hint">Monto</label><input type="number" inputmode="decimal" value="${mulEsc(f.monto)}" oninput="mulForm.monto=this.value" style="font-weight:900"></div></div>
+    <label class="hint">${multa?'Motivo':'Concepto'}</label><input placeholder="${multa?'Ej. Exceso de velocidad':'Ej. Refrendo 2026'}" value="${mulEsc(f.concepto)}" oninput="mulForm.concepto=this.value">`}
     ${multa?`<label class="hint">Conductor ese día (a quién se le carga)</label><input list="mul-cond" placeholder="Ej. Ángel" value="${mulEsc(f.conductor)}" oninput="mulForm.conductor=this.value"><datalist id="mul-cond">${conocidos.map(c=>`<option value="${mulEsc(c)}">`).join('')}</datalist>`:''}
-    <div class="row" style="gap:8px"><div style="flex:1"><label class="hint">Fecha</label><input type="date" value="${f.fecha}" oninput="mulForm.fecha=this.value"></div><div style="flex:1"><label class="hint">Monto</label><input type="number" inputmode="decimal" value="${mulEsc(f.monto)}" oninput="mulForm.monto=this.value" style="font-weight:900"></div></div>
-    <label class="hint">${multa?'Motivo':'Concepto'}</label><input placeholder="${multa?'Ej. Exceso de velocidad':'Ej. Refrendo 2026'}" value="${mulEsc(f.concepto)}" oninput="mulForm.concepto=this.value">
     ${multa?`<label class="hint">Folio (opcional)</label><input value="${mulEsc(f.folio)}" oninput="mulForm.folio=this.value">
     <label class="hint">¿Cada cuánto se le descuenta?</label><div style="display:flex;flex-wrap:wrap;gap:6px">${Object.entries(MUL_FREC).map(([k,v])=>`<button onclick="mulForm.frec='${k}';renderMul()" style="cursor:pointer;padding:8px 10px;border-radius:10px;border:2px solid ${f.frec===k?'#2563eb':'var(--line)'};background:${f.frec===k?'#2563eb':'transparent'};color:${f.frec===k?'#fff':'var(--ink)'};font:inherit;font-weight:700">${v[0]}</button>`).join('')}</div>
     <label class="hint">¿Cuánto en cada descuento? (opcional)</label><input type="number" inputmode="decimal" placeholder="Ej. 500" value="${mulEsc(f.porDesc)}" oninput="mulForm.porDesc=this.value">`:''}
-    <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:${multa?'#b91c1c':'#7c3aed'}" onclick="mulGuardar()">💾 Guardar</button>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:${esCarro?'#0e7490':multa?'#b91c1c':'#7c3aed'}" onclick="mulGuardar()">💾 Guardar</button>
     ${f.id?`<button class="btn" style="width:100%;margin-top:6px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="mulBorrar('${f.id}')">🗑️ Borrar</button>`:''}
     <button class="btn" style="width:100%;margin-top:6px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulForm=null;renderMul()">Cancelar</button></div>`;
 }
 async function mulGuardar(){
   const f = mulForm; const monto = Math.round((Number(f.monto)||0)*100)/100;
-  if(!f.mod) return alert('Elige el módulo.'); if(!String(f.placa).trim()) return alert('Escribe las placas del carro.'); if(!(monto>0)) return alert('Escribe el monto.');
+  if(!f.mod) return alert('Elige el módulo.'); if(!String(f.placa).trim()) return alert('Escribe las placas del carro.');
+  if(f.tipo==='carro'){
+    const placa = String(f.placa).trim().toUpperCase();
+    if(!f.id && (mulCache||[]).some(m=>m.tipo==='carro' && m.placa===placa)) return alert('Ese carro ya está en la lista.');
+    const datos = {modulo:'_direccion', mod:f.mod, tipo:'carro', placa, carro:String(f.carro).trim(), conductor:String(f.conductor||'').trim(), estado:String(f.conductor||'').trim()?'':((mulCache||[]).find(x=>x.id===f.id)||{}).estado||''};
+    try{
+      if(f.id){ await db.collection('multas').doc(f.id).update(datos); Object.assign(mulCache.find(x=>x.id===f.id)||{}, datos); }
+      else { const id = cryptoId(), d = Object.assign(datos, {alta:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); await db.collection('multas').doc(id).set(d); mulCache.push({id, ...d}); }
+      mulForm = null; toast('✅ Guardado'); renderMul();
+    }catch(e){ alert('Error: '+e.message); }
+    return;
+  }
+  if(!(monto>0)) return alert('Escribe el monto.');
   if(f.tipo==='multa' && !String(f.conductor).trim() && !confirm('No escribiste a quién se le carga. ¿Guardar como "Sin conductor asignado"?')) return;
   const datos = {modulo:'_direccion', mod:f.mod, tipo:f.tipo, placa:String(f.placa).trim().toUpperCase(), carro:String(f.carro).trim(), conductor:f.tipo==='multa'?String(f.conductor).trim():'', fecha:f.fecha||'', concepto:String(f.concepto).trim(), folio:String(f.folio||'').trim(), monto};
   if(f.tipo==='multa') datos.plan = {frec:f.frec||'quincenal', monto:Number(f.porDesc)||0, desde:f.fecha||fechaHoyLocal()};
@@ -16332,7 +16347,8 @@ async function mulGuardar(){
 }
 async function mulBorrar(id){
   const m = mulCache.find(x=>x.id===id); if(!m) return;
-  if(!confirm(`¿Borrar ${m.tipo==='multa'?'la multa':'el adeudo'} de ${mulPesos(m.monto)} (${m.placa})?${mulPagado(m)?'\n\nYa tiene '+mulPesos(mulPagado(m))+' pagados; también se borran.':''}`)) return;
+  if(m.tipo==='carro'){ if(!confirm(`¿Quitar ${m.carro||''} ${m.placa} de la lista de carros?\n\nSus multas y refrendos NO se borran.`)) return; }
+  else if(!confirm(`¿Borrar ${m.tipo==='multa'?'la multa':'el adeudo'} de ${mulPesos(m.monto)} (${m.placa})?${mulPagado(m)?'\n\nYa tiene '+mulPesos(mulPagado(m))+' pagados; también se borran.':''}`)) return;
   try{ await db.collection('multas').doc(id).update({borrada:true, borradaEn:new Date().toISOString()}); mulCache = mulCache.filter(x=>x.id!==id); mulForm = null; renderMul(); }catch(e){ alert('Error: '+e.message); }
 }
 // --- Excel (SheetJS se carga solo cuando se usa) ---
@@ -16358,13 +16374,20 @@ async function mulImportarLeer(file){
 // Al volver a importar (Excel nuevo) se compara carro por carro contra lo que hay en la app.
 // Lo que no existe se agrega; si un monto cambió NO se toca solo: Dirección decide en cada renglón.
 function mulImpCmp(f, tipo){
+  if(tipo==='carro'){ const ex = (mulCache||[]).filter(m=>m.tipo==='carro' && m.placa===f.placa), r = ex[0];
+    if(!r) return {estado:'nuevo', ex};
+    const igual = mulPersona(r.conductor)===mulPersona(f.conductor) && mulPersona(r.estado)===mulPersona(f.nota) && r.mod===f.mod;
+    return {estado: igual ? 'igual' : 'cambio', ex, r}; }
   const xl = tipo==='multa' ? f.mu : f.ad, ex = (mulCache||[]).filter(m=>m.tipo===tipo && m.placa===f.placa), app = Math.round(ex.reduce((t,m)=>t+mulSaldo(m),0)*100)/100;
   if(!ex.length) return {estado: xl>0 ? 'nuevo' : 'nada', xl, app:0, ex};
   return {estado: Math.abs(app-xl)<0.01 ? 'igual' : 'cambio', xl, app, ex};
 }
 function mulImpPintar(){
   const x = mulImp, F = x.filas, dec = x.dec;
-  const filas = F.map(f=>({f, mu:mulImpCmp(f,'multa'), ad:mulImpCmp(f,'refrendo')})).filter(o=>o.mu.estado!=='nada' || o.ad.estado!=='nada');
+  const filas = F.map(f=>({f, mu:mulImpCmp(f,'multa'), ad:mulImpCmp(f,'refrendo'), ca:mulImpCmp(f,'carro')})).filter(o=>o.mu.estado!=='nada' || o.ad.estado!=='nada' || o.ca.estado!=='igual');
+  const nCarN = filas.filter(o=>o.ca.estado==='nuevo').length, nCarC = filas.filter(o=>o.ca.estado==='cambio').length;
+  const carroTxt = o => o.ca.estado==='nuevo' ? `<div class="hint" style="margin:3px 0 0">🚗 Se agrega a la lista de carros${!o.mu.xl && !o.ad.xl?' · <strong style="color:#16a34a">✅ Sin adeudo</strong>':''}</div>`
+    : o.ca.estado==='cambio' ? `<div class="hint" style="margin:3px 0 0">🔄 Lo maneja: ${mulEsc(o.ca.r.conductor?mulNombreBonito(o.ca.r.conductor):(o.ca.r.estado||'nadie'))} → <strong>${mulEsc(o.f.conductor?mulNombreBonito(o.f.conductor):(o.f.nota||'nadie'))}</strong></div>` : '';
   const cuenta = e => filas.reduce((t,o)=>t+(o.mu.estado===e)+(o.ad.estado===e),0), nNuevo = cuenta('nuevo'), nCambio = cuenta('cambio'), nIgual = cuenta('igual');
   const nAct = filas.reduce((t,o)=>t+(o.mu.estado==='cambio' && dec[o.f.placa+'|multa']==='si')+(o.ad.estado==='cambio' && dec[o.f.placa+'|refrendo']==='si'),0);
   const celda = (o, tipo) => { const c = o[tipo==='multa'?'mu':'ad'], col = tipo==='multa' ? '#dc2626' : '#7c3aed', nom = tipo==='multa' ? 'Multa' : 'Refrendo', k = o.f.placa+'|'+tipo;
@@ -16376,13 +16399,13 @@ function mulImpPintar(){
       <div style="display:flex;gap:6px;margin-top:6px"><button onclick="mulImp.dec['${k}']='no';renderMul()" style="cursor:pointer;flex:1;padding:8px;border-radius:10px;border:2px solid ${!si?'#4b5563':'var(--line)'};background:${!si?'#4b5563':'transparent'};color:${!si?'#fff':'var(--ink)'};font:inherit;font-weight:800">Dejar como está</button>
       <button onclick="mulImp.dec['${k}']='si';renderMul()" style="cursor:pointer;flex:1;padding:8px;border-radius:10px;border:2px solid ${si?'#d97706':'var(--line)'};background:${si?'#d97706':'transparent'};color:${si?'#fff':'var(--ink)'};font:inherit;font-weight:800">Poner ${mulPesos(c.xl)}</button></div></div>`; };
   $('#main').innerHTML = `<div class="card" style="border-top:6px solid #0e7490"><h3 style="margin-top:0">📥 Importar del Excel</h3><p class="hint">${mulEsc(x.archivo)}. Se compara carro por carro con lo que ya hay en la app. <strong>Nada se cambia solo:</strong> lo nuevo se agrega y lo que cambió lo decides tú.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"><span style="padding:4px 10px;border-radius:9px;background:rgba(22,163,74,.15);font-weight:800">🆕 ${nNuevo} nuevo(s)</span><span style="padding:4px 10px;border-radius:9px;background:rgba(217,119,6,.15);font-weight:800">✏️ ${nCambio} cambiaron</span><span style="padding:4px 10px;border-radius:9px;background:var(--line);font-weight:800">${nIgual} sin cambio</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"><span style="padding:4px 10px;border-radius:9px;background:rgba(22,163,74,.15);font-weight:800">🆕 ${nNuevo} nuevo(s)</span><span style="padding:4px 10px;border-radius:9px;background:rgba(217,119,6,.15);font-weight:800">✏️ ${nCambio} cambiaron</span><span style="padding:4px 10px;border-radius:9px;background:var(--line);font-weight:800">${nIgual} sin cambio</span>${nCarN?`<span style="padding:4px 10px;border-radius:9px;background:rgba(14,116,144,.15);font-weight:800">🚗 ${nCarN} carro(s) a la lista</span>`:''}</div>
     <label class="hint">Fecha de estos saldos</label><input type="date" value="${x.fecha}" oninput="mulImp.fecha=this.value">
     <div style="margin-top:8px">${filas.map(o=>{ const f = o.f; return `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div><span style="color:${mulModColor(f.mod)};font-weight:800">${mulEsc(f.mod)}</span> · ${mulEsc(mulNombreBonito(f.carro))} <span class="tag">${mulEsc(f.placa)}</span></div>
-        <div style="margin-top:2px">👷 ${f.conductor?'<strong>'+mulEsc(mulNombreBonito(f.conductor))+'</strong>':(f.mu?`<strong class="neg">Sin asignar${f.nota?' (carro en '+mulEsc(f.nota.toLowerCase())+')':''}</strong>`:'<span class="hint">—</span>')}</div>${celda(o,'multa')}${celda(o,'refrendo')}</div>`; }).join('')}</div>
+        <div style="margin-top:2px">👷 ${f.conductor?'<strong>'+mulEsc(mulNombreBonito(f.conductor))+'</strong>':(f.mu?`<strong class="neg">Sin asignar${f.nota?' (carro en '+mulEsc(f.nota.toLowerCase())+')':''}</strong>`:'<span class="hint">'+mulEsc(f.nota||'—')+'</span>')}</div>${celda(o,'multa')}${celda(o,'refrendo')}${carroTxt(o)}</div>`; }).join('')}</div>
     ${filas.some(o=>o.mu.estado==='nuevo' && !o.f.conductor)?'<p class="hint">⚠️ Las multas <strong>sin asignar</strong> quedan en "Sin conductor asignado". Después ábrelas con ✏️ Editar y pon a quién se le cargan.</p>':''}
     ${nCambio?'<p class="hint">"Poner" ajusta la deuda a lo que dice el Excel sin borrar los pagos que ya registraste; queda anotado el cambio.</p>':''}
-    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:#0e7490" onclick="mulImportar()" ${nNuevo+nAct?'':'disabled'}>📥 Guardar: ${nNuevo} nuevo(s)${nAct?' y '+nAct+' cambio(s)':''}</button>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:#0e7490" onclick="mulImportar()" ${nNuevo+nAct+nCarN+nCarC?'':'disabled'}>📥 Guardar${nNuevo?': '+nNuevo+' nuevo(s)':''}${nAct?' · '+nAct+' cambio(s)':''}${nCarN+nCarC?' · '+(nCarN+nCarC)+' carro(s)':''}</button>
     <button class="btn" style="width:100%;margin-top:6px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulImp=null;renderMul()">Cancelar</button></div>`;
 }
 async function mulImportar(){
@@ -16391,6 +16414,9 @@ async function mulImportar(){
   try{
     for(const f of x.filas){
       const base = {modulo:'_direccion', mod:f.mod, placa:f.placa, carro:mulNombreBonito(f.carro), fecha:x.fecha, folio:'', abonos:[], origen:'excel', alta:new Date().toISOString(), creadoPor:por};
+      const kc = mulImpCmp(f, 'carro');
+      if(kc.estado==='nuevo'){ const id = cryptoId(), d = {modulo:'_direccion', tipo:'carro', mod:f.mod, placa:f.placa, carro:mulNombreBonito(f.carro), conductor:f.conductor, estado:f.nota||'', origen:'excel', alta:new Date().toISOString(), creadoPor:por}; await db.collection('multas').doc(id).set(d); mulCache.push({id, ...d}); n++; }
+      else if(kc.estado==='cambio'){ const upd = {mod:f.mod, conductor:f.conductor, estado:f.nota||''}; await db.collection('multas').doc(kc.r.id).update(upd); Object.assign(kc.r, upd); c++; }
       for(const tipo of ['multa','refrendo']){
         const k = mulImpCmp(f, tipo);
         if(k.estado==='nuevo'){
@@ -16415,10 +16441,10 @@ async function mulImportar(){
 async function mulExportar(){
   try{
     const X = await mulXlsx(); const g = {};
-    (mulCache||[]).forEach(m=>{ const k = m.placa||'—'; const c = g[k] = g[k] || {mod:m.mod, carro:m.carro, placa:m.placa, cond:new Set(), ad:0, mu:0}; if(m.tipo==='multa'){ c.mu += mulSaldo(m); if(m.conductor && mulSaldo(m)>0) c.cond.add(mulNombreBonito(m.conductor)); } else c.ad += mulSaldo(m); });
+    (mulCache||[]).forEach(m=>{ const k = m.placa||'—'; const c = g[k] = g[k] || {mod:m.mod, carro:m.carro, placa:m.placa, cond:new Set(), ad:0, mu:0}; if(m.tipo==='carro'){ c.reg = m; } else if(m.tipo==='multa'){ c.mu += mulSaldo(m); if(m.conductor && mulSaldo(m)>0) c.cond.add(mulNombreBonito(m.conductor)); } else c.ad += mulSaldo(m); });
     const orden = MODULOS.map(m=>m.nombre), filas = Object.values(g).sort((a,b)=>orden.indexOf(a.mod)-orden.indexOf(b.mod));
-    const aoa = [['CLOSETS VERA'],['CONTROL LOGÍSTICO DE VEHÍCULOS · MULTAS Y ADEUDOS'],['Fecha:', new Date().toLocaleDateString('es-MX')],[],['MÓDULO','VEHÍCULO','PLACA','CONDUCTOR (multas pendientes)','ADEUDOS Y REFRENDOS PTE','MULTAS PENDIENTES','TOTAL']];
-    filas.forEach(c=>aoa.push([c.mod, c.carro, c.placa, [...c.cond].join(', '), c.ad||0, c.mu||0, (c.ad||0)+(c.mu||0)]));
+    const aoa = [['CLOSETS VERA'],['CONTROL LOGÍSTICO DE VEHÍCULOS · MULTAS Y ADEUDOS'],['Fecha:', new Date().toLocaleDateString('es-MX')],[],['MÓDULO','VEHÍCULO','PLACA','CONDUCTOR','ADEUDOS Y REFRENDOS PTE','MULTAS PENDIENTES','TOTAL']];
+    filas.forEach(c=>aoa.push([c.mod, c.carro, c.placa, [...c.cond].join(', ') || (c.reg ? (c.reg.conductor ? mulNombreBonito(c.reg.conductor) : (c.reg.estado||'')) : ''), c.ad||0, c.mu||0, (c.ad||0)+(c.mu||0)]));
     aoa.push([], ['TOTAL','','','', filas.reduce((t,c)=>t+c.ad,0), filas.reduce((t,c)=>t+c.mu,0), filas.reduce((t,c)=>t+c.ad+c.mu,0)]);
     const pagos = [['FECHA','MÓDULO','CONDUCTOR','PLACA','MULTA','FORMA','MONTO','NOTA']];
     (mulCache||[]).forEach(m=>(m.abonos||[]).forEach(a=>pagos.push([a.fecha, m.mod, m.conductor?mulNombreBonito(m.conductor):(m.tipo==='refrendo'?'Empresa':''), m.placa, m.concepto, (MUL_FORMA[a.forma]||['']) [0].replace(/^\S+\s/,''), a.monto, a.nota||''])));
@@ -16445,6 +16471,7 @@ async function generarMulPDF(soloMod){
   const guia = ['Multas: se le cargan a quien manejaba el carro ese día y se le descuentan por partes.',
     'Total = lo que fue la multa. Pagado = lo descontado o pagado hasta hoy. Debe = lo que falta cobrarle.',
     'Refrendo = adeudos y refrendos del carro. Los paga la empresa; no se le descuentan a nadie.',
+    'Sin adeudo = el carro no debe nada (ni multas ni refrendos). Si no tiene multas, el conductor es quien lo maneja normalmente.',
     'Cada cuándo se le descuenta = lo que tú decidas para esa persona (ej. $500 cada 15 días). "Sin definir" = todavía no se acuerda. Los descuentos no son automáticos: se registran a mano.'];
   doc.setFontSize(7.8); const gl = guia.flatMap(g=>doc.splitTextToSize(String('- '+g), S.W-6));
   doc.setFillColor(248,248,250); doc.setDrawColor(220,222,228); doc.rect(S.L, S.y, S.W, 6+gl.length*3.8, 'FD');
@@ -16458,14 +16485,15 @@ async function generarMulPDF(soloMod){
     S.banda(md, xs.length ? `Debe ${mulPesos(debe)} en multas · refrendos ${mulPesos(ref)}` : 'Sin multas ni adeudos', C);
     if(!xs.length) return;
     // un renglón por carro y conductor; el refrendo va en el primer renglón del carro
-    const carros = {}; xs.forEach(m=>{ const c = carros[m.placa] = carros[m.placa] || {carro:`${m.carro||''}\n${m.placa||''}`.trim(), gente:{}, ref:0}; if(m.tipo==='multa'){ const k = mulPersona(m.conductor)||'(sin asignar)'; (c.gente[k] = c.gente[k] || []).push(m); } else { c.ref += mulSaldo(m); c.tieneRef = true; } });
+    const carros = {}; xs.forEach(m=>{ const c = carros[m.placa] = carros[m.placa] || {carro:`${m.carro||''}\n${m.placa||''}`.trim(), gente:{}, ref:0}; if(m.tipo==='carro'){ c.reg = m; } else if(m.tipo==='multa'){ const k = mulPersona(m.conductor)||'(sin asignar)'; (c.gente[k] = c.gente[k] || []).push(m); } else { c.ref += mulSaldo(m); c.tieneRef = true; } });
     const filas = []; let tT=0, tP=0, tD=0, tR=0;
-    Object.values(carros).sort((a,b)=>Object.values(b.gente).flat().reduce((t,m)=>t+mulSaldo(m),0)-Object.values(a.gente).flat().reduce((t,m)=>t+mulSaldo(m),0)).forEach(c=>{
+    const deuda = c => Object.values(c.gente).flat().reduce((t,m)=>t+mulSaldo(m),0) + c.ref;
+    Object.values(carros).sort((a,b)=>deuda(b)-deuda(a)).forEach(c=>{
       const gs = Object.values(c.gente); if(!gs.length) gs.push(null);
       gs.forEach((ms, i)=>{ const T = ms ? ms.reduce((t,m)=>t+(Number(m.monto)||0),0) : 0, D = ms ? ms.reduce((t,m)=>t+mulSaldo(m),0) : 0, R = i===0 ? c.ref : 0; tT+=T; tP+=T-D; tD+=D; tR+=R;
         const pl = ms && ms.find(m=>m.plan && mulSaldo(m)>0);
-        filas.push([i===0 ? {t:c.carro, b:true} : '', ms ? (ms[0].conductor ? mulNombreBonito(ms[0].conductor) : {t:'Sin asignar', col:ROJ, b:true}) : {t:'-', col:GRI},
-          ms ? mulPesos(T) : '-', ms ? {t:mulPesos(T-D), col:VER} : '-', ms ? (D>0 ? {t:mulPesos(D), b:true, col:ROJ} : {t:'Pagado', b:true, col:VER}) : '-',
+        filas.push([i===0 ? {t:c.carro, b:true} : '', ms ? (ms[0].conductor ? mulNombreBonito(ms[0].conductor) : {t:'Sin asignar', col:ROJ, b:true}) : (c.reg ? (c.reg.conductor ? mulNombreBonito(c.reg.conductor) : {t:mulNombreBonito(c.reg.estado)||'Sin chofer', col:GRI}) : {t:'-', col:GRI}),
+          ms ? mulPesos(T) : '-', ms ? {t:mulPesos(T-D), col:VER} : '-', ms ? (D>0 ? {t:mulPesos(D), b:true, col:ROJ} : {t:'Pagado', b:true, col:VER}) : (c.ref>0 ? '-' : {t:'Sin adeudo', b:true, col:VER}),
           R>0 ? {t:mulPesos(R), col:MOR, b:true} : (i===0 && c.tieneRef ? {t:'Pagado', col:VER} : '-'),
           D>0 ? mulPlanCorto(pl ? pl.plan : null) : '-']); }); });
     filas.push([{t:'Total '+md, b:true}, '', {t:mulPesos(tT), b:true}, {t:mulPesos(tP), b:true, col:VER}, {t:mulPesos(tD), b:true, col:ROJ}, {t:mulPesos(tR), b:true, col:MOR}, '']);
