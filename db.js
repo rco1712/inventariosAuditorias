@@ -33,7 +33,9 @@ const COLLECTIONS_V12 = [...COLLECTIONS_V11, 'reportesInst'];
 // v13: maquinaria por módulo con mantenimientos y reparaciones (solo Dirección, confirmado por el usuario).
 const COLLECTIONS_V13 = [...COLLECTIONS_V12, 'maquinas'];
 // v14: prueba del inventario por piezas (solo guarda lo de la prueba; no toca las demás colecciones).
-const COLLECTIONS = [...COLLECTIONS_V13, 'piezasPrueba'];
+const COLLECTIONS_V14 = [...COLLECTIONS_V13, 'piezasPrueba'];
+// v15: multas y adeudos de los carros (solo Dirección; se guardan con modulo '_direccion').
+const COLLECTIONS = [...COLLECTIONS_V14, 'multas'];
 const NO_DESCARGAR = new Set(['fotos']);
 
 const ddb = new Dexie('auditoriamodulos');
@@ -51,7 +53,8 @@ ddb.version(10).stores(storesDe(COLLECTIONS_V10));
 ddb.version(11).stores(storesDe(COLLECTIONS_V11));
 ddb.version(12).stores(storesDe(COLLECTIONS_V12));
 ddb.version(13).stores(storesDe(COLLECTIONS_V13));
-ddb.version(14).stores(storesDe(COLLECTIONS));
+ddb.version(14).stores(storesDe(COLLECTIONS_V14));
+ddb.version(15).stores(storesDe(COLLECTIONS));
 
 const listeners = {}; // collection -> [{where:[field,op,val]|null, cb}]
 

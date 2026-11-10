@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v266';
+const APP_VERSION = 'v269';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -734,6 +734,7 @@ function setView(v){
   if(v==='dup') renderDup();
   if(v==='apart') renderApart();
   if(v==='maq') renderMaq();
+  if(v==='mul'){ mulCache=null; mulAbierto=''; mulForm=null; mulPago=null; mulImp=null; renderMul(); }
   if(v==='herrcuad') renderHerrCuad();
 }
 
@@ -1001,6 +1002,7 @@ function irA(v, opts){
 }
 // Iconos de línea para Inicio (diseño serio, confirmado por el usuario).
 const HOME_IC = {
+  multa:'<path d="M5 17h14l-1.5-6.5A2 2 0 0 0 15.6 9H8.4a2 2 0 0 0-1.9 1.5z"/><circle cx="8" cy="17.5" r="1.6"/><circle cx="16" cy="17.5" r="1.6"/><path d="M12 3v3M9 4l1 2M15 4l-1 2"/>',
   maquina:'<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
   llave:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
   almacen:'<path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/>',
@@ -3839,6 +3841,17 @@ const AUD_SECCIONES = [
   {k:'__armados', t:'Armados', s:'Cajoneras, cajones y cuadros armados'},
   {k:'__revisar', t:'Revisar y enviar'}
 ];
+// v268 (pedido por el usuario): "Auditoría de Melamina y MDF": igual que la auditoría normal pero solo con
+// Melamina, MDF, piezas cortadas y armados. Al aplicarla solo se mueve Melamina y MDF; herrajes y lo demás no.
+const AUD_SECCIONES_TODAS = AUD_SECCIONES.slice();
+const AUD_CATS_MEL = ['Melamina','MDF'];
+function esMelAud(){ return audTipo==='melamina' && !modoConteoCoord(); }
+function audSeccionesSync(){
+  const want = esMelAud() ? AUD_SECCIONES_TODAS.filter(x=>AUD_CATS_MEL.includes(x.k) || ['__piezas','__armados','__revisar'].includes(x.k)) : AUD_SECCIONES_TODAS;
+  if(AUD_SECCIONES.length===want.length && AUD_SECCIONES.every((x,i)=>x===want[i])) return;
+  const cat = auditCat; AUD_SECCIONES.splice(0, AUD_SECCIONES.length, ...want);
+  const i = AUD_SECCIONES.findIndex(x=>x.k===cat); audPaso = i<0 ? 0 : i; auditCat = AUD_SECCIONES[audPaso].k;
+}
 const AUD_ICONO = {Melamina:'🟫', MDF:'🟤', Cintilla:'🎞️', PVC:'📏', Pegamento:'🧴', Stickers:'🏷️', Herrajes:'🔩', __piezas:'✂️', __armados:'📦', __revisar:'✅'};
 function itemsSeccionAud(k){ return CATALOGO.filter(i=>i.cat===k); }
 // Correderas sueltas contadas en Herrajes (hembra / macho sin su pareja): entran al mismo "pool"
@@ -3869,6 +3882,7 @@ function setAudTipo(v){
     audTipo = v;
     _borradorRevisado[modulo()+(seraSim?'_sim':'')] = false;
   } else audTipo = v;
+  audSeccionesSync();
   renderAud();
 }
 function simResultados(){
@@ -3983,7 +3997,7 @@ function sumarPiezaAud(grupo, key){
   setAuditPieza(grupo, key, String(actual+n)); guardarBorradorAud(); renderAud();
   toast(`${p.label}: ahora ${actual+n}`);
 }
-function etiquetaTipoAud(t){ if(t==='simulacion') return '🧪 Simulador de auditoría'; return t==='conteo' ? 'Conteo inicial' : (t==='complemento' ? '➕ Complemento del conteo inicial' : (t==='parcial' ? '🎯 Auditoría de un material' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'))); }
+function etiquetaTipoAud(t){ if(t==='simulacion') return '🧪 Simulador de auditoría'; return t==='conteo' ? 'Conteo inicial' : (t==='complemento' ? '➕ Complemento del conteo inicial' : (t==='parcial' ? '🎯 Auditoría de un material' : t==='melamina' ? '🟫 Auditoría de Melamina y MDF' : (t==='inicial' ? 'Auditoría inicial' : 'Auditoría'))); }
 function renderAud(){
   const ciego = modoConteoCoord();
   if(esCoordinador() && !ciego){ $('#main').innerHTML = '<div class="card">📋 El conteo del almacén solo se abre cuando Dirección lo activa, y solo ese día.</div>'; return; }
@@ -3994,6 +4008,7 @@ function renderAud(){
   audMarcarCambios(); _audMovCache = null;
   if(ciego){ audTipo='conteo'; if(!audAuditor) audAuditor=(getCurrentUserEmail?getCurrentUserEmail():'').split('@')[0]; }
   if(audTipo==='inicial') audTipo='seguimiento';
+  audSeccionesSync();
   // auditCat puede venir de fuera (selectAuditCat); se alinea con el paso.
   const idxCat = AUD_SECCIONES.findIndex(x=>x.k===auditCat);
   if(idxCat>=0) audPaso = idxCat; else { audPaso = Math.min(audPaso, AUD_SECCIONES.length-1); auditCat = AUD_SECCIONES[audPaso].k; }
@@ -4092,11 +4107,11 @@ function renderAud(){
   <div class="card">
     <strong>${ciego?'Conteo paso a paso':etiquetaTipoAud(audTipo)+' · '+modulo()}</strong>
     <div class="grid2" style="margin-top:8px">
-      <select id="aud-tipo" onchange="setAudTipo(this.value)" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option><option value="parcial" ${audTipo==='parcial'?'selected':''}>🎯 Auditoría de un material (solo lo que cuentes)</option><option value="simulacion" ${audTipo==='simulacion'?'selected':''}>🧪 Simulador (solo para checar, no guarda nada)</option></select>
+      <select id="aud-tipo" onchange="setAudTipo(this.value)" ${ciego?'style="display:none"':''}><option value="conteo" ${audTipo==='conteo'?'selected':''}>Conteo inicial (arranque desde cero)</option><option value="complemento" ${audTipo==='complemento'?'selected':''}>➕ Complemento del conteo inicial (lo que faltó)</option><option value="seguimiento" ${audTipo==='seguimiento'?'selected':''}>Auditoría</option><option value="melamina" ${audTipo==='melamina'?'selected':''}>🟫 Auditoría de Melamina y MDF (sin herrajes)</option><option value="parcial" ${audTipo==='parcial'?'selected':''}>🎯 Auditoría de un material (solo lo que cuentes)</option><option value="simulacion" ${audTipo==='simulacion'?'selected':''}>🧪 Simulador (solo para checar, no guarda nada)</option></select>
       <input id="aud-auditor" placeholder="Nombre de quien cuenta" value="${String(audAuditor).replace(/"/g,'&quot;')}" oninput="audAuditor=this.value">
     </div>
     ${ciego||audTipo==='conteo'?'':`<button class="btn small" style="margin-top:8px;width:100%;${audOcultarTeo?'background:linear-gradient(135deg,#6b4bd6,#5338b8)':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="audOcultarTeo=!audOcultarTeo;guardarBorradorAud();renderAud()">${audOcultarTeo?'🙈 Contando a ciegas · toca para ver el teórico':'👁️ Viendo el teórico · toca para contar a ciegas'}</button>`}
-    ${ciego?'':`<p class="hint" style="margin-top:6px">${esSimAud()?'<strong>Simulador:</strong> ve a cualquier sección, cuenta lo que quieras y revisa en ✅ Revisar si cuadra. Nada se guarda.':parcial?'<strong>Auditoría de un material:</strong> cuenta solo lo que quieres corregir (por ejemplo, la Melamina Blanco). Se compara contra lo que dice la app y, al aplicarla, solo eso se corrige; lo que no cuentes se queda igual.':comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
+    ${ciego?'':`<p class="hint" style="margin-top:6px">${esSimAud()?'<strong>Simulador:</strong> ve a cualquier sección, cuenta lo que quieras y revisa en ✅ Revisar si cuadra. Nada se guarda.':esMelAud()?'<strong>Auditoría de Melamina y MDF:</strong> igual que la auditoría normal, pero solo cuentas hojas completas, piezas cortadas y armados de Melamina y MDF. Al aplicarla <strong>solo se corrigen Melamina y MDF</strong>; herrajes, cintilla, PVC, pegamento, stickers y todo lo demás se quedan exactamente como están.':parcial?'<strong>Auditoría de un material:</strong> cuenta solo lo que quieres corregir (por ejemplo, la Melamina Blanco). Se compara contra lo que dice la app y, al aplicarla, solo eso se corrige; lo que no cuentes se queda igual.':comp?'<strong>Complemento:</strong> para lo que no se pudo contar en el conteo inicial. Solo capturas eso y, al guardarlo, se <strong>SUMA</strong> al stock inicial sin tocar lo que ya estaba contado.':audTipo==='conteo'?'<strong>Conteo inicial:</strong> lo contado se vuelve el stock inicial del módulo (no se compara ni genera faltantes).':'<strong>Auditoría:</strong> se compara contra lo que dice la app; al aplicarla se corrige el inventario y lo que faltó queda como deuda.'}</p>`}
     ${libre?'':`<div style="margin-top:10px;height:8px;border-radius:6px;background:var(--line);overflow:hidden"><div style="height:100%;width:${Math.round(hechas/(AUD_SECCIONES.length-1)*100)}%;background:var(--ok)"></div></div>`}
     <p class="hint" style="margin:4px 0 0;${libre?'display:none':''}">Paso ${audPaso+1} de ${AUD_SECCIONES.length}: <strong>${sec.t}</strong> · ${hechas} de ${AUD_SECCIONES.length-1} secciones listas. Puedes pasar a cualquier sección; lo pendiente se marca con ⏳.</p>
     <div class="chips" style="margin-top:8px">${chips}</div>
@@ -4398,6 +4413,7 @@ function audCargarBorrador(b){
   audHechas = b.audHechas||{}; if(typeof b.audPaso==='number'){ audPaso = b.audPaso; auditCat = (AUD_SECCIONES[audPaso]||{}).k; } if(b.audTipo && !modoConteoCoord()) audTipo = b.audTipo; if(typeof b.audOcultarTeo==='boolean') audOcultarTeo = b.audOcultarTeo;
   auditCapTs = b.auditCapTs||{}; _audValPrev = Object.assign({}, auditCapturas); audEdit = b.audEdit || null;
   const m = modulo(); _audContenido[m] = JSON.stringify(audDatosBorrador()); _audCambioT[m] = b.cambio || b.fecha || new Date().toISOString();
+  if(b.audTipo && typeof b.audPaso==='number' && !modoConteoCoord()){ audSeccionesSync(); audPaso = Math.min(b.audPaso, AUD_SECCIONES.length-1); auditCat = AUD_SECCIONES[audPaso].k; }
 }
 // Si en otro aparato se avanzó el conteo de este módulo, se trae (si aquí no hay nada más nuevo).
 function audRevisarNube(){
@@ -4811,7 +4827,7 @@ async function saveAudit(){
     if(movidos.length) av.push(`⚠️ ${movidos.length} artículo(s) se movieron DESPUÉS de que los contaste:\n${movidos.slice(0,8).map(x=>'• '+x.it.nombre+': '+x.ms.slice(0,2).map(movDescCorta).join(', ')).join('\n')}${movidos.length>8?'\n…':''}`);
     if(tipo!=='conteo' && tipo!=='complemento'){
       const nP = audPendAprobMod(); if(nP) av.push(`⏳ ${nP} captura(s) de ${modulo()} esperan tu aprobación: todavía no cuentan en el inventario.`);
-      if(new Date().getDay()!==0 && !cierreHechoHoy()) av.push(`📝 ${modulo()} todavía no hace su cierre del turno de hoy: lo que se usó hoy de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta.`);
+      if(tipo!=='melamina' && new Date().getDay()!==0 && !cierreHechoHoy()) av.push(`📝 ${modulo()} todavía no hace su cierre del turno de hoy: lo que se usó hoy de PVC, cintilla, pegamento, stickers y pijas todavía no se descuenta.`);
     }
     if(av.length && !confirm(`Antes de guardar, revisa:\n\n${av.join('\n\n')}\n\n¿Guardar la auditoría así de todos modos?`)) return;
   }
@@ -4819,12 +4835,13 @@ async function saveAudit(){
   // cero. Lo que no se capturó se toma como 0 físico; antes se avisa de los que sí tenían existencia.
   const ciego = modoConteoCoord();
   if(ciego && !confirm('¿Ya contaste TODO el almacén?\n\nLo que no escribiste se toma como 0.\n\nAl enviar, el conteo le llega a Dirección y esta opción se cierra.')) return;
-  const comp = tipo==='complemento', parcial = tipo==='parcial';
+  const comp = tipo==='complemento', parcial = tipo==='parcial', melA = tipo==='melamina';
   if(comp && !confirm('¿Guardar este COMPLEMENTO del conteo inicial de '+modulo()+'?\n\nSolo lleva lo que acabas de capturar; se va a SUMAR al stock inicial sin tocar lo que ya estaba contado.')) return;
-  const noContados = (ciego||comp||parcial||audEdit) ? [] : CATALOGO.filter(it=>auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
+  const noContados = (ciego||comp||parcial||audEdit) ? [] : CATALOGO.filter(it=>(!melA || AUD_CATS_MEL.includes(it.cat)) && auditCapturas[it.id]===undefined && !eq[it.id] && Math.abs(calcFormula(it.id).final)>0.005);
   if(noContados.length && !confirm(`Hay ${noContados.length} artículo(s) que según el inventario SÍ hay, pero no los contaste:\n\n${noContados.slice(0,15).map(it=>'• '+it.nombre+' (debería haber '+fmtNum(calcFormula(it.id).final)+')').join('\n')}${noContados.length>15?'\n… y '+(noContados.length-15)+' más':''}\n\nSi guardas así, se toman como 0 (faltante). ¿Guardar de todos modos?\n\n(Cancelar = regresar a contarlos)`)) return;
   CATALOGO.forEach(it=>{
     const itemId = it.id;
+    if(melA && !AUD_CATS_MEL.includes(it.cat)) return; // v268: solo Melamina y MDF; herrajes y lo demás ni se comparan ni se tocan
     const f = audEdit ? audEditTeo(itemId) : calcFormula(itemId);
     // Las correderas sueltas ya entraron al balance de juegos (eq), no se suman dos veces.
     const hojasCompletas = (auditCapturas[itemId]!==undefined && !esCorrSuelta(it)) ? auditCapturas[itemId] : 0;
@@ -4859,13 +4876,13 @@ async function saveAudit(){
   });
   try{
     if(parcial) totalDiff = resultados.filter(r=>Math.abs(Number(r.diff)||0)>0.005).length;
-    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:!parcial,creadoPor:getCurrentUserEmail?getCurrentUserEmail():''};
+    const doc = {modulo:modulo(),tipo,auditor,fecha:new Date().toISOString(),resultados,totalDiff,completa:!parcial && !melA,...(melA?{soloMelamina:true}:{}),creadoPor:getCurrentUserEmail?getCurrentUserEmail():''};
     if(tipo==='conteo') doc.conteoInicial = true;
     if(comp){ doc.complemento = true; doc.totalDiff = 0; }
     if(piezasContadas.length) doc.piezasContadas = piezasContadas;
     if(auditMelFuera.length) doc.melaminasFuera = auditMelFuera.map(x=>({nombre:x.nombre, hojas:Number(x.hojas)||0}));
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
-    const bc = balanceCorrederas();
+    const bc = melA ? [] : balanceCorrederas();
     if(bc.length) doc.correderas = bc;
     let audId = cryptoId();
     if(audEdit){
@@ -5496,7 +5513,7 @@ async function aplicarAuditoria(id, a){
   const {ajustes, faltantes} = calcularAjustesAuditoria(a, ajustarCortado);
   const reales = ajustes.filter(x=>x.total || x.completasDelta || x.cortadoDelta);
   const resumen = reales.slice(0,12).map(x=>`• ${x.it.nombre}: ${x.total>0?'+':''}${fmtNum(x.total)}${(x.completasDelta&&x.cortadoDelta)?` (compl. ${fmtNum(x.completasDelta)}, cort. ${fmtNum(x.cortadoDelta)})`:(x.cortadoDelta?' (cortado)':'')}`).join('\n') + (reales.length>12?`\n… y ${reales.length-12} más`:'');
-  if(!confirm(`Aplicar auditoría del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?`)) return;
+  if(!confirm(`Aplicar ${a.tipo==='melamina'?'auditoría de MELAMINA Y MDF':'auditoría'} del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:${a.tipo==='melamina'?'\n(Solo se mueven Melamina y MDF. Herrajes y lo demás NO se tocan.)':''}\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?`)) return;
   const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
   const fechaAjuste = new Date(new Date(a.fecha).getTime()+1).toISOString();
   const fechaStr = new Date(a.fecha).toLocaleDateString('es-MX');
@@ -11045,6 +11062,7 @@ function renderHomeDir(){
     tile('camion','Vehículos','Los 5 módulos',"vehMod='__todos';vehAbierto='';vehForm=null;irA('veh')",'#0369a1', nVeh||''),
     tile('llave','Herramienta','Por módulo',"irA('herr')",'#c2410c'),
     tile('maquina','Maquinaria','Mantenimiento y reparaciones',"maqCache=null;maqAbierta='';maqForm=null;maqServ=null;irA('maq')",'#7c3aed'),
+    tile('multa','Multas de carros','Multas, descuentos y refrendos',"irA('mul')",'#b91c1c'),
     tile('almacen','Almacén general', nRec ? nRec+' por recibir' : 'Entregas, regresos y ferretería',"irA('alm')",'#9a3412', nRec||''),
     tile('lista','Pedidos','Material que va a llegar',"irA('ped')",'#2348b5'),
     tile('tendencia','Resumen semanal','Cómo va cada módulo',"irA('resumen')",'#0d7468'),
@@ -13770,7 +13788,7 @@ async function borrarDatosModulo(mods){
 
 async function exportarRespaldo(){
   // Todo lo que guarda la app (las fotos no, porque pesan mucho: se quedan en Supabase).
-  const COLLECTIONS = ['inicial','inicialHist','movimientos','resets','auditorias','deudasAuditoria','conteoAbierto','instalacionesLog','instalacionesPuertas','garantiasLog','prestamos','pedidos','sobrantes','cierres','gasolina','herramientas','herrMovs','herrInstaladores','config','versiones','reportesInst','maquinas','piezasPrueba'];
+  const COLLECTIONS = ['inicial','inicialHist','movimientos','resets','auditorias','deudasAuditoria','conteoAbierto','instalacionesLog','instalacionesPuertas','garantiasLog','prestamos','pedidos','sobrantes','cierres','gasolina','herramientas','herrMovs','herrInstaladores','config','versiones','reportesInst','maquinas','piezasPrueba','multas'];
   const data = {};
   for(const c of COLLECTIONS){
     const snap = await db.collection(c).get();
@@ -15506,15 +15524,68 @@ function pzpChkElegir(R, f){
   ks.sort((a,b)=>(ult[a]||'').localeCompare(ult[b]||'') || ((R.T[b]-R.AC[b])*R.N[b].area) - ((R.T[a]-R.AC[a])*R.N[a].area));
   return ks.slice(0, pzpChkN());
 }
+// v267 (pedido por el usuario): contar "por color": se elige el color y solo las piezas que se van a contar;
+// de los armados solo salen los que traen esas piezas adentro.
+function pzpChkModo(){ try{ return localStorage.getItem('pzpChkModo')||'color'; }catch(e){ return 'color'; } }
+function pzpChkSetModo(m){ try{ localStorage.setItem('pzpChkModo', m); }catch(e){} pzpChk = null; pzpRender(); }
 function pzpChkIniciar(f){
   const doc = pzpChkDoc(f), R = pzpCalcular(pzpD, f); if(!R) return;
-  if(doc) pzpChk = {fecha:f, keys:(doc.piezas||[]).map(p=>p.k), q:Object.fromEntries((doc.piezas||[]).map(p=>[p.k, p.q])), arm:(doc.armados||[]).map(a=>({a:a.a, q:a.q})), guardado:true};
+  if(doc) pzpChk = {fecha:f, keys:(doc.piezas||[]).map(p=>p.k), q:Object.fromEntries((doc.piezas||[]).map(p=>[p.k, p.q])), arm:(doc.armados||[]).map(a=>Object.assign({a:a.a, q:a.q}, a.grupo?{grupo:a.grupo, txt:a.txt}:{})), guardado:true, modo:doc.modo||'dia', color:((doc.piezas||[])[0]||{}).itemId||null};
   else {
     const vistos = new Set(), arm = [];
     (R.arm||[]).filter(a=>(Number(a.cantidad)||0)>0).forEach(a=>{ const key = pzpArmKey(a); if(vistos.has(key)) return; vistos.add(key); const c = Object.assign({}, a); delete c.cantidad; arm.push({a:c, q:''}); });
-    pzpChk = {fecha:f, keys:pzpChkElegir(R, f), q:{}, arm, guardado:false};
+    const modo = pzpChkModo();
+    pzpChk = {fecha:f, keys:modo==='color'?[]:pzpChkElegir(R, f), q:{}, arm, guardado:false, modo, color:null};
   }
   pzpChkFecha = f;
+}
+// Índices de los armados que hay que contar: en "por color", solo los que traen alguna de las piezas elegidas.
+function pzpChkArmIdx(c){
+  if(c.modo!=='color') return c.arm.map((x,i)=>i);
+  return c.arm.map((x,i)=>i).filter(i=>{ try{ return pzpContArmado(Object.assign({}, c.arm[i].a, {cantidad:1})).some(p=>c.keys.includes(pzpKey(p.itemId, p.dim))); }catch(e){ return false; } });
+}
+function pzpChkArmTrae(c, i){
+  try{ return pzpContArmado(Object.assign({}, c.arm[i].a, {cantidad:1})).filter(p=>c.keys.includes(pzpKey(p.itemId, p.dim))).map(p=>`${fmtNum(p.q)} ${pzpChkPlural(String(pzpChkNom[pzpKey(p.itemId, p.dim)]||p.n).toLowerCase(), p.q)}`).join(' + '); }catch(e){ return ''; }
+}
+let pzpChkNom = {};
+function pzpChkPlural(t, q){ t = t.replace(/\s*\([^)]*\)/g,'').trim(); if(Number(q)===1) return t; const i = t.search(/ de | \d/); const a = i<0 ? t : t.slice(0,i), b = i<0 ? '' : t.slice(i);
+  return a.split(' ').map(w=>/[aeiouáéó]$/.test(w) ? w+'s' : (/[a-zñ]$/.test(w) ? w+'es' : w)).join(' ') + b; }
+// v267: en "por color" los armados se juntan sin importar el color del frente (para contar paredes da igual).
+function pzpChkGrupoTxt(a){ return pzpArmTxt(Object.assign({cantidad:1}, a)).replace(/\s*\([^)]*z[oó]clos[^)]*\)/gi,'').trim(); }
+function pzpChkGrupos(c){
+  const g = {}, orden = [];
+  pzpChkArmIdx(c).forEach(i=>{ const t = c.arm[i].txt || pzpChkGrupoTxt(c.arm[i].a), k = t+'|'+pzpChkArmTrae(c, i); if(!g[k]){ g[k] = {k, txt:t, trae:pzpChkArmTrae(c, i), idxs:[]}; orden.push(k); } g[k].idxs.push(i); });
+  return orden.map(k=>g[k]);
+}
+function pzpChkGMas(k, d){ const c = pzpChk; c.gq = c.gq||{}; const v = Math.max(0, (Number(c.gq[k])||0) + d); c.gq[k] = String(v); const e = document.getElementById('pzpchkg-'+k.replace(/[^a-z0-9]/gi,'_')); if(e) e.value = v; }
+function pzpChkTogglePieza(k){ const c = pzpChk; const i = c.keys.indexOf(k); if(i>=0){ c.keys.splice(i,1); delete c.q[k]; } else c.keys.push(k); pzpRender(); }
+function pzpChkMas(k, d){ const c = pzpChk; const v = Math.max(0, (Number(c.q[k])||0) + d); c.q[k] = String(v); const e = document.getElementById('pzpchk-'+k.replace(/[^a-z0-9]/gi,'_')); if(e) e.value = v; }
+function pzpChkArmMas(i, d){ const c = pzpChk; const v = Math.max(0, (Number(c.arm[i].q)||0) + d); c.arm[i].q = String(v); const e = document.getElementById('pzpchka-'+i); if(e) e.value = v; }
+function pzpChkColorHtml(R, f){
+  const c = pzpChk;
+  const conPiezas = k => (R.T[k]||0) > 0.5 || c.keys.includes(k);
+  const colores = [...new Set(Object.keys(R.N).filter(conPiezas).map(k=>R.N[k].itemId))].sort((a,b)=>(a==='melamina_blanco'?-1:b==='melamina_blanco'?1:pzpColor(a).localeCompare(pzpColor(b))));
+  const nomIt = id => (CATALOGO.find(i=>i.id===id)||{nombre:id}).nombre;
+  const paso = (n, t, sub) => `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div style="flex:none;width:30px;height:30px;border-radius:50%;background:#0e7490;color:#fff;font-weight:900;display:flex;align-items:center;justify-content:center">${n}</div><div><strong style="font-size:15px">${t}</strong>${sub?`<div class="hint" style="margin:0">${sub}</div>`:''}</div></div>`;
+  let h = `<div class="card">${paso(1, '¿Qué color vas a contar?')}
+    <div style="display:flex;flex-wrap:wrap;gap:8px">${colores.map(id=>{ const on = c.color===id; return `<button onclick="pzpChk.color='${id}';pzpRender()" style="cursor:pointer;display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:999px;font-size:15px;font-weight:800;border:2px solid ${on?'#0e7490':'var(--line)'};background:${on?'#0e7490':'transparent'};color:${on?'#fff':'var(--ink)'}">${swatchHtml(nomIt(id))}${pzpColor(id)}</button>`; }).join('')}</div></div>`;
+  if(!c.color) return h + `<p class="hint" style="text-align:center;margin:14px 0 24px">👆 Elige primero el color.</p>`;
+  const ks = Object.keys(R.N).filter(k=>R.N[k].itemId===c.color && conPiezas(k)).sort((a,b)=>R.N[a].n.localeCompare(R.N[b].n));
+  ks.forEach(k=>{ pzpChkNom[k] = R.N[k].n; });
+  h += `<div class="card">${paso(2, '¿Qué piezas vas a contar?', 'Toca las que quieras contar. Puedes elegir una o varias.')}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">${ks.map(k=>{ const on = c.keys.includes(k); return `<button onclick="pzpChkTogglePieza('${k}')" style="cursor:pointer;text-align:left;padding:10px 12px;border-radius:12px;border:2px solid ${on?'#16a34a':'var(--line)'};background:${on?'rgba(22,163,74,.15)':'transparent'};color:var(--ink)"><div style="font-weight:800;font-size:14px">${on?'✅ ':''}${R.N[k].n}</div><div class="hint" style="margin:2px 0 0">${R.N[k].dim}</div></button>`; }).join('')}</div></div>`;
+  const sel = c.keys.filter(k=>R.N[k]);
+  if(!sel.length) return h + `<p class="hint" style="text-align:center;margin:14px 0 24px">👆 Toca las piezas que vas a contar.</p>`;
+  const btn = (fn, t) => `<button onclick="${fn}" style="cursor:pointer;flex:none;width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:22px;font-weight:900">${t}</button>`;
+  h += `<div class="card">${paso(3, 'Cuéntalas', 'Solo las <strong>sueltas</strong>. Las que están dentro de un armado se cuentan abajo.')}
+    ${sel.map(k=>`<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)"><div style="flex:1;min-width:0"><strong>${R.N[k].n}</strong><div class="hint" style="margin:0">${pzpColor(c.color)} · ${R.N[k].dim}</div></div>${btn(`pzpChkMas('${k}',-1)`,'−')}<input id="pzpchk-${k.replace(/[^a-z0-9]/gi,'_')}" type="number" min="0" inputmode="numeric" placeholder="0" value="${c.q[k]??''}" oninput="pzpChk.q['${k}']=this.value" style="width:76px;flex:none;text-align:center;font-size:20px;font-weight:900;margin:0">${btn(`pzpChkMas('${k}',1)`,'+')}</div>`).join('')}</div>`;
+  const grupos = pzpChkGrupos(c); c.gq = c.gq||{};
+  if(grupos.length) h += `<div class="card">${paso(4, 'Armados que traen estas piezas adentro', 'Cuenta cuántos hay de cada uno, <strong>sin importar el color del frente</strong>. La app saca las piezas que traen.')}
+    ${grupos.map(g=>{ const id = g.k.replace(/[^a-z0-9]/gi,'_'); return `<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)"><div style="flex:1;min-width:0"><strong>${g.txt}</strong><div class="hint" style="margin:0">cada uno trae ${g.trae}</div></div>${btn(`pzpChkGMas('${g.k.replace(/'/g,"\\'")}',-1)`,'−')}<input id="pzpchkg-${id}" type="number" min="0" inputmode="numeric" placeholder="0" value="${c.gq[g.k] ?? (g.idxs.length===1 && c.arm[g.idxs[0]].grupo ? (c.arm[g.idxs[0]].q??'') : '')}" oninput="pzpChk.gq['${g.k.replace(/'/g,"\\'")}']=this.value" style="width:76px;flex:none;text-align:center;font-size:20px;font-weight:900;margin:0">${btn(`pzpChkGMas('${g.k.replace(/'/g,"\\'")}',1)`,'+')}</div>`; }).join('')}
+    <p class="hint">Si hay un armado con estas piezas que no está aquí, anótalo en la prueba del día (Armados) y vuelve.</p></div>`;
+  const idx = grupos;
+  h += `<button class="btn" style="width:100%;min-height:52px;background:#0e7490;margin-bottom:24px" onclick="pzpChkGuardar()">💾 Guardar y comparar (${sel.length} pieza${sel.length===1?'':'s'}${idx.length?' + '+idx.length+' armado'+(idx.length===1?'':'s'):''})</button>`;
+  return h;
 }
 function pzpChkHtml(){
   const f = pzpFecha || fechaHoyLocal();
@@ -15522,10 +15593,12 @@ function pzpChkHtml(){
   const R = pzpCalcular(pzpD, f); if(!R || !pzpChk) return '';
   const c = pzpChk, ok = c.guardado, capt = !!pzpD.dias.find(x=>x.fecha===f);
   let h = `<div class="card" style="border:2px solid #0e7490"><h3>🎯 Conteo rápido · ${pzpFmtDia(f)}</h3>
-    <p class="hint" style="margin-top:0">Cuenta <strong>a ciegas</strong> (sin ver cuántas debe haber) estas piezas sueltas y <strong>todos los armados</strong>. De los armados la app saca sus piezas. Al guardar te dice si cuadra. Mejor contar <strong>al final del día</strong>, después del cierre.</p>
+    <p class="hint" style="margin-top:0">Cuenta <strong>a ciegas</strong> (sin ver cuántas debe haber)${c.modo==='color'?' solo las piezas que elijas y los armados que las traen':' estas piezas sueltas y <strong>todos los armados</strong>'}. De los armados la app saca sus piezas. Al guardar te dice si cuadra. Mejor contar <strong>al final del día</strong>, después del cierre.</p>
     <label class="hint">Día</label> <input type="date" value="${f}" max="${fechaHoyLocal()}" onchange="pzpFecha=this.value;pzpChk=null;pzpRender()" style="width:auto">
-    ${!ok?`<div class="chips" style="margin-top:6px">${[3,5,10].map(n=>`<button class="chip ${pzpChkN()===n?'on':''}" onclick="try{localStorage.setItem('pzpChkN','${n}')}catch(e){};pzpChk=null;pzpRender()">${n} piezas</button>`).join('')}</div>`:''}
+    ${!ok?`<div style="display:flex;gap:6px;margin-top:10px">${[['color','🎨 Por color','Tú eliges qué contar'],['dia','🔄 Del día','La app elige (rotando)']].map(([m,t,sub])=>`<button onclick="pzpChkSetModo('${m}')" style="cursor:pointer;flex:1;padding:10px;border-radius:12px;border:2px solid ${c.modo===m?'#0e7490':'var(--line)'};background:${c.modo===m?'#0e7490':'transparent'};color:${c.modo===m?'#fff':'var(--ink)'};text-align:center"><div style="font-weight:900;font-size:15px">${t}</div><div style="font-size:12px;opacity:.85">${sub}</div></button>`).join('')}</div>`:''}
+    ${!ok && c.modo!=='color'?`<div class="chips" style="margin-top:6px">${[3,5,10].map(n=>`<button class="chip ${pzpChkN()===n?'on':''}" onclick="try{localStorage.setItem('pzpChkN','${n}')}catch(e){};pzpChk=null;pzpRender()">${n} piezas</button>`).join('')}</div>`:''}
   </div>`;
+  if(!ok && c.modo==='color') return h + pzpChkColorHtml(R, f);
   if(!ok){
     h += `<div class="card"><strong>1 · Piezas sueltas para contar hoy</strong>
       ${c.keys.map(k=>{ const N = R.N[k]; if(!N) return ''; return `<div class="row" style="justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap"><div style="flex:1;min-width:0"><strong>${pzpColor(N.itemId)} · ${N.n}</strong><div class="hint" style="margin:0">${N.dim} · solo las sueltas</div></div><input type="number" min="0" inputmode="numeric" placeholder="cuántas" value="${c.q[k]??''}" oninput="pzpChk.q['${k}']=this.value" style="width:100px;flex:none"></div>`; }).join('')}
@@ -15548,7 +15621,7 @@ function pzpChkHtml(){
     </table></div><p class="hint">✅ = cuadra (o difiere en 1). <span style="color:#dc2626">Rojo</span> = faltan. <span style="color:#d97706">Naranja</span> = hay de más (revisa si se anotó todo el corte).</p></div>`;
   const armDebe = {}; (R.arm||[]).forEach(a=>{ const key = pzpArmKey(a); armDebe[key] = (armDebe[key]||0) + (Number(a.cantidad)||0); });
   h += `<div class="card"><strong>Armados</strong><div class="wrap-x"><table><tr><th>Armado</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contados</th><th style="text-align:right">Dif.</th></tr>
-    ${c.arm.map(x=>{ const key = pzpArmKey(x.a), debe = armDebe[key]||0, q = Number(x.q)||0, d = q - debe; return `<tr><td>${pzpArmTxt(Object.assign({cantidad:1}, x.a))}</td><td style="text-align:right">${fmtNum(debe)}</td><td style="text-align:right">${fmtNum(q)}</td><td style="text-align:right;font-weight:900;color:${d===0?'#16a34a':d<0?'#dc2626':'#d97706'}">${d===0?'✅':(d>0?'+':'')+fmtNum(d)}</td></tr>`; }).join('') || '<tr><td colspan="4" class="hint">Sin armados.</td></tr>'}
+    ${c.arm.map(x=>{ const key = pzpArmKey(x.a), debe = x.grupo ? x.grupo.reduce((t,k)=>t+(armDebe[k]||0),0) : (armDebe[key]||0), q = Number(x.q)||0, d = q - debe; return `<tr><td>${x.txt || pzpArmTxt(Object.assign({cantidad:1}, x.a))}</td><td style="text-align:right">${fmtNum(debe)}</td><td style="text-align:right">${fmtNum(q)}</td><td style="text-align:right;font-weight:900;color:${d===0?'#16a34a':d<0?'#dc2626':'#d97706'}">${d===0?'✅':(d>0?'+':'')+fmtNum(d)}</td></tr>`; }).join('') || '<tr><td colspan="4" class="hint">Sin armados.</td></tr>'}
     </table></div><p class="hint">Que falten armados no siempre es faltante: puede que se desarmaran o se usaran en una instalación. Las piezas de arriba ya cuentan las de los armados.</p></div>
     <button class="btn small" style="margin-bottom:10px;background:transparent;color:#0e7490;border:1px solid #0e7490;box-shadow:none" onclick="pzpChk.guardado=false;pzpRender()">✏️ Corregir el conteo</button>`;
   h += pzpChkHistHtml();
@@ -15563,12 +15636,13 @@ function pzpChkHistHtml(){
 }
 async function pzpChkGuardar(){
   const c = pzpChk, f = c.fecha, mod = pzpD.mod, R = pzpCalcular(pzpD, f); if(!R) return;
+  if(c.modo==='color'){ if(!c.keys.length) return alert('Elige al menos una pieza para contar.'); const gs = pzpChkGrupos(c), gq = c.gq||{}; c.arm = gs.map(g=>({a:c.arm[g.idxs[0]].a, q:gq[g.k] ?? (g.idxs.length===1 && c.arm[g.idxs[0]].grupo ? (c.arm[g.idxs[0]].q??'') : ''), txt:g.txt, grupo:[...new Set(g.idxs.flatMap(i=>c.arm[i].grupo||[pzpArmKey(c.arm[i].a)]))]})); }
   const faltan = c.keys.filter(k=>c.q[k]===undefined || c.q[k]==='').length + c.arm.filter(x=>x.q===undefined || x.q==='').length;
   if(faltan && !confirm(`Hay ${faltan} renglón(es) sin número. Se van a guardar como 0. ¿Seguir?`)) return;
   const armCont = {}; c.arm.forEach(x=>{ const q = Number(x.q)||0; if(q>0) pzpContArmado(Object.assign({}, x.a, {cantidad:q})).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); armCont[k] = (armCont[k]||0) + p.q; }); });
   const doc = {tipo:'chk', modulo:mod, fecha:f,
     piezas:c.keys.filter(k=>R.N[k]).map(k=>{ const q = Number(c.q[k])||0; return {k, itemId:R.N[k].itemId, dim:R.N[k].dim, txt:pzpColor(R.N[k].itemId)+' '+R.N[k].n, q, debe:fmtNum(R.T[k]||0), dif:fmtNum(q + (armCont[k]||0) - (R.T[k]||0))}; }),
-    armados:c.arm.map(x=>({a:x.a, q:Number(x.q)||0})), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
+    armados:c.arm.map(x=>Object.assign({a:x.a, q:Number(x.q)||0}, x.grupo?{grupo:x.grupo, txt:x.txt}:{})), modo:c.modo||'dia', guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{ await db.collection('piezasPrueba').doc('chk_'+mod+'_'+f).set(doc); await pzpCargar(mod); pzpChk = null; toast('✅ Conteo guardado'); pzpRender(); window.scrollTo(0,0); }catch(e){ alert('Error al guardar: '+e.message); }
 }
 function pzpComoVaHtml(){
@@ -15808,7 +15882,7 @@ async function reabrirAuditoria(id){
   if(!confirm(`✏️ ¿Volver a abrir la auditoría del ${new Date(a.fecha).toLocaleString('es-MX')} para corregirla?\n\nSe cargan sus conteos en Auditoría. Al guardar se reemplaza esa misma auditoría. No toca el inventario.`)){ auditPiezas = prevP; auditArmados = prevA; auditCapturas = prevC; return; }
   if(a.modulo!==modulo()){ moduloActual = a.modulo; localStorage.setItem('am_modulo', a.modulo); if(typeof renderModBar==='function') renderModBar(); await loadStock(); }
   audEdit = {id:a.id, fecha:a.fecha};
-  audTipo = a.tipo==='parcial' ? 'parcial' : (a.conteoInicial ? 'conteo' : 'seguimiento'); audAuditor = a.auditor||'';
+  audTipo = a.tipo==='parcial' ? 'parcial' : a.tipo==='melamina' ? 'melamina' : (a.conteoInicial ? 'conteo' : 'seguimiento'); audSeccionesSync(); audAuditor = a.auditor||'';
   auditMelFuera = (a.melaminasFuera||[]).map(x=>({nombre:x.nombre, hojas:x.hojas})); auditDesglose = {}; audHechas = {}; audPaso = 0; auditCat = AUD_SECCIONES[0].k;
   try{ localStorage.setItem(claveBorradorAud(), JSON.stringify(Object.assign({}, audDatosBorrador(), {fecha:new Date().toISOString()}))); }catch(e){}
   setView('aud'); window.scrollTo(0,0);
@@ -16019,3 +16093,398 @@ async function repModPDF(){
 maqRepGuardar = unaSolaVez('maqRepGuardar', maqRepGuardar); maqRepEstado = unaSolaVez('maqRepEstado', maqRepEstado); maqRepBorrar = unaSolaVez('maqRepBorrar', maqRepBorrar);
 // v258: guardar el conteo rápido una sola vez aunque se toque dos veces.
 pzpChkGuardar = unaSolaVez('pzpChkGuardar', pzpChkGuardar);
+
+// ===== v269 (pedido por el usuario): Multas y adeudos de los carros =====
+// Solo Dirección (confirmado por el usuario). Las multas se le cargan al CONDUCTOR de ese día y se van
+// descontando por partes (semanal, quincenal o mensual), o se marcan como pagadas por fuera o absorbidas
+// por la empresa. Los refrendos/adeudos del carro los paga la empresa: solo se controlan.
+// Se guardan con modulo '_direccion' (igual que los borradores de Dirección) para que no le bajen a los
+// coordinadores; el módulo real va en "mod".
+const MUL_FREC = {semanal:['Cada semana',7], quincenal:['Cada 15 días',15], mensual:['Cada mes',30], libre:['Cuando se pueda',0]};
+const MUL_FORMA = {descuento:['➖ Descuento al instalador','#2563eb'], fuera:['💵 Pagó por fuera','#16a34a'], empresa:['🏢 La pagó la empresa','#7c3aed']};
+const MUL_SIN = ['sin chofer','descompuesto','taller',''];
+let mulCache = null, mulTab = 'persona', mulMod = '', mulAbierto = '', mulForm = null, mulPago = null, mulImp = null;
+const mulEsc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const mulPesos = n => '$'+(Math.round((Number(n)||0)*100)/100).toLocaleString('es-MX',{minimumFractionDigits:0, maximumFractionDigits:2});
+const mulPersona = s => String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+const mulNombreBonito = s => String(s||'').trim().toLowerCase().replace(/(^|\s)\S/g, c=>c.toUpperCase());
+const mulPagado = m => (m.abonos||[]).reduce((t,a)=>t+(Number(a.monto)||0),0);
+const mulSaldo = m => Math.max(0, Math.round(((Number(m.monto)||0) - mulPagado(m))*100)/100);
+const mulModColor = m => (MODULOS.find(x=>x.nombre===m)||{color:'#6b7280'}).color;
+async function mulCargar(){ const s = await db.collection('multas').get(); mulCache = s.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>!x.borrada); return mulCache; }
+function mulPersonas(){
+  const g = {};
+  (mulCache||[]).filter(m=>m.tipo==='multa' && (!mulMod || m.mod===mulMod)).forEach(m=>{
+    const k = mulPersona(m.conductor) || '(sin asignar)';
+    const p = g[k] = g[k] || {k, nombre: m.conductor ? mulNombreBonito(m.conductor) : 'Sin conductor asignado', mods:new Set(), carros:new Set(), multas:[], total:0, saldo:0, plan:null, ult:''};
+    p.mods.add(m.mod); if(m.placa) p.carros.add((m.carro?m.carro+' ':'')+m.placa); p.multas.push(m); p.total += Number(m.monto)||0; p.saldo += mulSaldo(m);
+    if(m.plan && mulSaldo(m)>0) p.plan = m.plan;
+    (m.abonos||[]).forEach(a=>{ if((a.fecha||'')>p.ult) p.ult = a.fecha; });
+    if(!p.inicio || (m.fecha||'')<p.inicio) p.inicio = m.fecha||'';
+  });
+  return Object.values(g).sort((a,b)=>b.saldo-a.saldo);
+}
+function mulProximo(p){
+  if(!p.plan || !MUL_FREC[p.plan.frec] || !MUL_FREC[p.plan.frec][1] || p.saldo<=0) return null;
+  const base = p.ult || p.plan.desde || p.inicio || fechaHoyLocal(); const d = new Date(base+'T12:00:00'); d.setDate(d.getDate()+MUL_FREC[p.plan.frec][1]);
+  const f = d.toISOString().slice(0,10); return {fecha:f, toca: f<=fechaHoyLocal()};
+}
+function mulPlanCorto(pl){ if(!pl || (pl.frec==='libre' && !Number(pl.monto))) return 'Sin definir'; const f = (MUL_FREC[pl.frec]||MUL_FREC.libre)[0].toLowerCase(); return Number(pl.monto) ? `${mulPesos(pl.monto)}\n${f}` : f; }
+function mulPlanTxt(p){ if(!p.plan || (p.plan.frec==='libre' && !Number(p.plan.monto))) return 'Sin plan de descuento todavía'; const f = MUL_FREC[p.plan.frec]||MUL_FREC.libre; return Number(p.plan.monto) ? `Se le descuentan ${mulPesos(p.plan.monto)} ${f[0].toLowerCase()}` : `Se le descuenta ${f[0].toLowerCase()} (sin cantidad fija)`; }
+async function renderMul(){
+  current = 'mul';
+  if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Solo Dirección.</div>'; return; }
+  if(!mulCache){ $('#main').innerHTML = '<div class="card">Cargando multas…</div>'; try{ await mulCargar(); }catch(e){ $('#main').innerHTML = `<div class="card">No se pudo cargar: ${mulEsc(e.message)}</div>`; return; } }
+  if(current!=='mul') return;
+  if(mulImp) return mulImpPintar();
+  if(mulPago) return mulPagoPintar();
+  if(mulForm) return mulFormPintar();
+  if(mulAbierto) return mulPersonaPintar();
+  const todas = (mulCache||[]).filter(m=>!mulMod || m.mod===mulMod);
+  const multas = todas.filter(m=>m.tipo==='multa'), refs = todas.filter(m=>m.tipo==='refrendo');
+  const P = mulPersonas(), totM = multas.reduce((t,m)=>t+mulSaldo(m),0), totR = refs.reduce((t,m)=>t+mulSaldo(m),0);
+  const tocan = P.map(p=>({p, x:mulProximo(p)})).filter(o=>o.x && o.x.toca);
+  const debeMod = md => (mulCache||[]).filter(m=>m.mod===md).reduce((t,m)=>t+mulSaldo(m),0);
+  const chip = (k, t, c, n) => `<button onclick="mulMod='${k}';renderMul()" style="cursor:pointer;border-radius:12px;padding:6px 10px;border:2px solid ${c};background:${mulMod===k?c:'transparent'};color:${mulMod===k?'#fff':'var(--ink)'};font:inherit;font-weight:800;line-height:1.15">${t}${n!==undefined?`<br><span style="font-size:11px;font-weight:700;opacity:.85">${n>0?mulPesos(n):'sin deuda'}</span>`:''}</button>`;
+  const tab = (k, t, n) => `<button onclick="mulTab='${k}';renderMul()" style="cursor:pointer;flex:1;padding:9px 4px;border-radius:12px;border:2px solid ${mulTab===k?'#b91c1c':'var(--line)'};background:${mulTab===k?'#b91c1c':'transparent'};color:${mulTab===k?'#fff':'var(--ink)'};font:inherit;font-weight:800;line-height:1.15">${t}<br><span style="font-size:11px;font-weight:700;opacity:.85">${n}</span></button>`;
+  const lado = 'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none';
+  $('#main').innerHTML = `<div class="card" style="border-top:6px solid #b91c1c">
+      <h3 style="margin:0">🚔 Multas y adeudos de carros</h3><p class="hint" style="margin:4px 0 10px">Solo lo ve Dirección.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="padding:10px;border-radius:12px;background:rgba(220,38,38,.12)"><div class="hint" style="margin:0">🚔 Multas que deben</div><div style="font-size:22px;font-weight:900;color:#dc2626">${mulPesos(totM)}</div><div class="hint" style="margin:0">${P.filter(p=>p.saldo>0).length} persona(s) · se les descuenta</div></div>
+        <div style="padding:10px;border-radius:12px;background:rgba(124,58,237,.12)"><div class="hint" style="margin:0">🏢 Refrendos y adeudos</div><div style="font-size:22px;font-weight:900;color:#7c3aed">${mulPesos(totR)}</div><div class="hint" style="margin:0">${refs.filter(m=>mulSaldo(m)>0).length} carro(s) · los paga la empresa</div></div>
+      </div>
+      ${tocan.length?`<div style="margin-top:8px;padding:10px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)"><strong>📅 Ya toca descontarle a:</strong> ${tocan.map(o=>`<a href="#" onclick="mulAbierto='${mulEsc(o.p.k)}';renderMul();window.scrollTo(0,0);return false" style="font-weight:800;color:var(--ink)">${mulEsc(o.p.nombre)}</a>${Number(o.p.plan.monto)?' ('+mulPesos(Math.min(o.p.saldo, Number(o.p.plan.monto)))+')':''}`).join(', ')}<div class="hint" style="margin:4px 0 0">Es solo un recordatorio. No se descuenta solo: cuando se haga, ábrelo y toca ➖ Registrar descuento.</div></div>`:''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
+        <button class="btn" style="background:#b91c1c" onclick="mulNueva('multa')">➕ Nueva multa</button>
+        <button class="btn" style="background:#7c3aed" onclick="mulNueva('refrendo')">➕ Refrendo / adeudo</button>
+      </div>
+      <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:800">❓ ¿Cómo funciona?</summary><div class="hint" style="margin:6px 0 0;line-height:1.5">
+        1. Cada <strong>multa</strong> se le carga a la persona que manejaba ese día.<br>
+        2. Cuando se le descuente (en nómina), ábrela y toca <strong>➖ Registrar descuento</strong>. Si la pagó él por su cuenta: <strong>💵 Pagó por fuera</strong>. Si la absorbe la empresa: <strong>🏢 La paga la empresa</strong>.<br>
+        3. Nada se descuenta solo. El 📅 recordatorio solo avisa cuándo toca, según el plan de cada persona.<br>
+        4. Los <strong>refrendos y adeudos</strong> del carro los paga la empresa: solo se marcan ✅ cuando se pagan.<br>
+        5. Todo se puede corregir con ✏️ o borrar con 🗑️.</div></details>
+    </div>
+    <div style="position:relative;margin:0 0 10px"><input id="mul-busca" type="search" placeholder="🔎 Buscar persona, placas o carro…" value="${mulEsc(mulBusca)}" oninput="mulBusca=this.value;document.getElementById('mul-lista').innerHTML=mulListaHtml()" style="margin:0;font-size:16px;padding:12px 14px"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${chip('', 'Todos', '#4b5563')}${MODULOS.map(m=>chip(m.nombre, m.nombre, m.color, debeMod(m.nombre))).join('')}</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">${tab('persona','👷 Quién debe', P.filter(p=>p.saldo>0).length+' persona(s)')}${tab('carro','🚗 Carros', new Set(todas.map(m=>m.placa)).size+' carro(s)')}${tab('ref','🏢 Refrendos', refs.filter(m=>mulSaldo(m)>0).length+' pendiente(s)')}</div>
+    <div id="mul-lista">${mulListaHtml()}</div>
+    <div class="card" style="margin-top:14px"><strong>📎 Reportes y Excel</strong>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+        <button class="btn small" style="${lado};min-height:52px;line-height:1.2" onclick="generarMulPDF()">📄 PDF<br><span style="font-size:11px">${mulMod||'todos'}</span></button>
+        <button class="btn small" style="${lado};min-height:52px;line-height:1.2" onclick="mulExportar()">📊 Excel<br><span style="font-size:11px">descargar</span></button>
+        <button class="btn small" style="${lado};min-height:52px;line-height:1.2" onclick="mulImportarElegir()">📥 Excel<br><span style="font-size:11px">importar</span></button>
+      </div><div class="hint" style="margin:6px 0 0">El PDF sale del módulo que tengas elegido arriba.</div></div>`;
+}
+let mulBusca = '';
+const mulNorm = t => String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim();
+function mulListaHtml(){
+  const q = mulNorm(mulBusca), ok = (...xs) => !q || q.split(' ').every(w=>mulNorm(xs.join(' ')).includes(w));
+  const todas = (mulCache||[]).filter(m=>!mulMod || m.mod===mulMod), refs = todas.filter(m=>m.tipo==='refrendo');
+  const modTag = m => `<span style="padding:2px 8px;border-radius:7px;font-weight:800;font-size:12px;background:${mulModColor(m)};color:#fff">${mulEsc(m)}</span>`;
+  const nada = t => `<div class="card"><p class="hint" style="margin:0">${q?'🔎 No encontré nada con «'+mulEsc(mulBusca)+'».':t}</p></div>`;
+  if(mulTab==='persona'){
+    const P = mulPersonas().filter(p=>ok(p.nombre, [...p.carros].join(' '), [...p.mods].join(' ')));
+    const deben = P.filter(p=>p.saldo>0), pagados = P.filter(p=>p.saldo<=0);
+    const card = p => { const pr = mulProximo(p), pag = p.total ? Math.min(100, Math.round((p.total-p.saldo)/p.total*100)) : 0;
+      return `<div class="card" onclick="mulAbierto='${mulEsc(p.k)}';renderMul();window.scrollTo(0,0)" style="cursor:pointer;padding:12px 14px;border-left:8px solid ${p.saldo>0?'#dc2626':'#16a34a'}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><div style="font-size:17px;font-weight:900;min-width:0">👷 ${mulEsc(p.nombre)} <span style="color:var(--muted,#9ca3af)">›</span></div>
+          <div style="flex:none;text-align:right;white-space:nowrap">${p.saldo>0?`<span class="hint" style="margin:0">debe </span><span style="font-size:20px;font-weight:900;color:#dc2626">${mulPesos(p.saldo)}</span>`:'<span style="font-size:18px;font-weight:900;color:#16a34a">✅ Pagado</span>'}</div></div>
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center">${[...p.mods].map(modTag).join('')}<span class="hint" style="margin:0">🚗 ${mulEsc([...p.carros].join(', '))}</span></div>
+        <div style="height:8px;border-radius:6px;background:var(--line);margin-top:8px;overflow:hidden"><div style="height:100%;width:${pag}%;background:#16a34a"></div></div>
+        <div class="hint" style="margin:6px 0 0">Pagado ${mulPesos(p.total-p.saldo)} de ${mulPesos(p.total)} (${pag}%) · ${mulEsc(mulPlanTxt(p))}${pr?` · ${pr.toca?'<strong style="color:#dc2626">📅 ya toca</strong>':'próximo: <strong>'+fCorta(pr.fecha)+'</strong>'}`:''}</div></div>`; };
+    if(!P.length) return nada('No hay multas registradas.');
+    return deben.map(card).join('') + (pagados.length ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:800;padding:6px 0">✅ Ya pagaron todo (${pagados.length})</summary>${pagados.map(card).join('')}</details>` : '');
+  }
+  if(mulTab==='carro'){
+    const g = {}; todas.forEach(m=>{ const k = (m.placa||'Sin placa').toUpperCase(); const c = g[k] = g[k] || {placa:k, carro:m.carro||'', mod:m.mod, gente:{}, multa:0, ref:0};
+      if(m.tipo==='multa'){ c.multa += mulSaldo(m); const pk = mulPersona(m.conductor)||'(sin asignar)'; c.gente[pk] = m.conductor ? mulNombreBonito(m.conductor) : 'Sin conductor asignado'; } else c.ref += mulSaldo(m); });
+    const xs = Object.values(g).filter(c=>ok(c.placa, c.carro, c.mod, Object.values(c.gente).join(' '))).sort((a,b)=>(b.multa+b.ref)-(a.multa+a.ref));
+    if(!xs.length) return nada('No hay carros registrados.');
+    return xs.map(c=>`<div class="card" style="padding:12px 14px;border-left:8px solid ${mulModColor(c.mod)}">
+      <div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:16px;font-weight:900">🚗 ${mulEsc(c.carro)} <span class="tag">${mulEsc(c.placa)}</span></div><div style="margin-top:4px">${modTag(c.mod)}</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+        <div style="padding:8px;border-radius:10px;background:rgba(220,38,38,.1)"><div class="hint" style="margin:0">Multas pendientes</div><strong style="color:${c.multa>0?'#dc2626':'#16a34a'}">${c.multa>0?mulPesos(c.multa):'✅ $0'}</strong></div>
+        <div style="padding:8px;border-radius:10px;background:rgba(124,58,237,.1)"><div class="hint" style="margin:0">Refrendo (empresa)</div><strong style="color:${c.ref>0?'#7c3aed':'#16a34a'}">${c.ref>0?mulPesos(c.ref):'✅ $0'}</strong></div></div>
+      ${Object.keys(c.gente).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${Object.entries(c.gente).map(([k,n])=>`<button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulAbierto='${mulEsc(k)}';renderMul();window.scrollTo(0,0)">👷 ${mulEsc(n)} ›</button>`).join('')}</div>`:''}</div>`).join('');
+  }
+  const rs = refs.filter(m=>ok(m.placa, m.carro, m.mod, m.concepto)).sort((a,b)=>mulSaldo(b)-mulSaldo(a));
+  if(!rs.length) return nada('No hay refrendos ni adeudos registrados.');
+  return rs.map(m=>`<div class="card" style="padding:12px 14px;border-left:8px solid ${mulSaldo(m)>0?'#7c3aed':'#16a34a'}">
+      <div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><strong>🚗 ${mulEsc(m.carro)} <span class="tag">${mulEsc(m.placa)}</span></strong><div class="hint" style="margin:4px 0 0">${modTag(m.mod)} ${mulEsc(m.concepto||'Adeudos y refrendos')}${m.fecha?' · '+fCorta(m.fecha):''}</div></div>
+      <div style="text-align:right;flex:none"><div style="font-size:18px;font-weight:900;color:${mulSaldo(m)>0?'#7c3aed':'#16a34a'}">${mulSaldo(m)>0?mulPesos(mulSaldo(m)):'✅ Pagado'}</div></div></div>
+      <div class="row" style="gap:6px;margin-top:8px">${mulSaldo(m)>0?`<button class="btn small" onclick="mulPago={tipo:'ref',id:'${m.id}',monto:'${mulSaldo(m)}',forma:'empresa',fecha:fechaHoyLocal(),nota:''};renderMul()">✅ Ya se pagó</button>`:''}<button class="btn small" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulEditar('${m.id}')">✏️ Editar</button></div></div>`).join('');
+}
+function mulPersonaPintar(){
+  const p = mulPersonas().find(x=>x.k===mulAbierto) || (mulMod='', mulPersonas().find(x=>x.k===mulAbierto));
+  if(!p){ mulAbierto=''; return renderMul(); }
+  const pr = mulProximo(p), sug = p.plan && Number(p.plan.monto) ? Math.min(p.saldo, Number(p.plan.monto)) : '';
+  const abonos = p.multas.flatMap(m=>(m.abonos||[]).map(a=>Object.assign({m}, a))).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  const fr = p.plan ? p.plan.frec : '';
+  $('#main').innerHTML = `<button class="btn small" style="margin-bottom:10px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulAbierto='';renderMul()">‹ Volver</button>
+    <div class="card" style="border-top:6px solid ${p.saldo>0?'#dc2626':'#16a34a'}">
+      <div style="font-size:20px;font-weight:900">👷 ${mulEsc(p.nombre)}</div><div class="hint" style="margin:2px 0 8px">${[...p.mods].join(', ')} · 🚗 ${mulEsc([...p.carros].join(', '))}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;text-align:center">
+        <div style="padding:8px;border-radius:10px;background:var(--bg,rgba(0,0,0,.04))"><div class="hint" style="margin:0">Total</div><strong>${mulPesos(p.total)}</strong></div>
+        <div style="padding:8px;border-radius:10px;background:rgba(22,163,74,.12)"><div class="hint" style="margin:0">Pagado</div><strong style="color:#16a34a">${mulPesos(p.total-p.saldo)}</strong></div>
+        <div style="padding:8px;border-radius:10px;background:rgba(220,38,38,.12)"><div class="hint" style="margin:0">Debe</div><strong style="color:#dc2626">${mulPesos(p.saldo)}</strong></div></div>
+      <div style="margin-top:10px;padding:10px;border-radius:12px;border:1px solid var(--line)"><strong>📅 ¿Cada cuándo se le descuenta?</strong><div class="hint" style="margin:2px 0 0">Lo decides tú. Solo sirve para que la app te recuerde; no descuenta nada sola.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${Object.entries(MUL_FREC).map(([k,v])=>`<button onclick="mulPlanFrec='${k}';document.querySelectorAll('.mulfr').forEach(b=>b.style.background='transparent');this.style.background='#2563eb33'" class="mulfr" style="cursor:pointer;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:${fr===k?'#2563eb33':'transparent'};color:var(--ink);font:inherit;font-weight:700">${v[0]}</button>`).join('')}</div>
+        <div class="row" style="gap:6px;margin-top:6px"><input id="mul-plan-monto" type="number" inputmode="decimal" placeholder="¿Cuánto cada vez? Ej. 500" value="${p.plan&&p.plan.monto?p.plan.monto:''}" style="flex:1;margin:0"><button class="btn small" onclick="mulGuardarPlan('${mulEsc(p.k)}')">Guardar plan</button></div>
+        <div class="hint" style="margin:6px 0 0">${pr?(pr.toca?'<strong style="color:#dc2626">📅 Ya toca descontar</strong> (se registra a mano con ➖ cuando se haga)':'Próximo descuento: <strong>'+fCorta(pr.fecha)+'</strong>'):(p.plan && !(p.plan.frec==='libre' && !Number(p.plan.monto)) ? mulEsc(mulPlanTxt(p))+'.' : 'Todavía no tiene plan: elige cada cuándo y cuánto, y toca Guardar plan.')}</div></div>
+      ${p.saldo>0?`<div style="display:grid;gap:6px;margin-top:10px">
+        <button class="btn" style="background:#2563eb;min-height:50px" onclick="mulPago={tipo:'persona',k:'${mulEsc(p.k)}',monto:'${sug}',forma:'descuento',fecha:fechaHoyLocal(),nota:''};renderMul()">➖ Registrar descuento${sug?' ('+mulPesos(sug)+')':''}</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px"><button class="btn" style="background:#16a34a" onclick="mulPago={tipo:'persona',k:'${mulEsc(p.k)}',monto:'${p.saldo}',forma:'fuera',fecha:fechaHoyLocal(),nota:''};renderMul()">💵 Pagó por fuera</button><button class="btn" style="background:#7c3aed" onclick="mulPago={tipo:'persona',k:'${mulEsc(p.k)}',monto:'${p.saldo}',forma:'empresa',fecha:fechaHoyLocal(),nota:''};renderMul()">🏢 La paga la empresa</button></div></div>`:''}
+    </div>
+    <div class="card"><h3 style="margin-top:0">🚔 Multas (${p.multas.length})</h3>
+      ${p.multas.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).map(m=>`<div style="padding:10px 0;border-bottom:1px solid var(--line)"><div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><strong>${mulEsc(m.concepto||'Multa')}</strong><div class="hint" style="margin:2px 0 0">${m.fecha?fCorta(m.fecha)+' · ':''}🚗 ${mulEsc(m.carro)} ${mulEsc(m.placa)} · <span style="color:${mulModColor(m.mod)};font-weight:800">${mulEsc(m.mod)}</span>${m.folio?' · Folio '+mulEsc(m.folio):''}</div>${(m.ajustes||[]).map(a=>`<div class="hint" style="margin:2px 0 0;color:#b45309">✏️ Monto cambió de ${mulPesos(a.de)} a ${mulPesos(a.a)} (${mulEsc(a.motivo||'')})</div>`).join('')}</div>
+        <div style="text-align:right;flex:none"><div style="font-weight:900;color:${mulSaldo(m)>0?'#dc2626':'#16a34a'}">${mulSaldo(m)>0?'debe '+mulPesos(mulSaldo(m)):'✅ pagada'}</div><div class="hint" style="margin:0">de ${mulPesos(m.monto)}</div></div></div>
+        <button class="btn small" style="margin-top:6px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulEditar('${m.id}')">✏️ Editar</button></div>`).join('')}
+      <button class="btn small" style="margin-top:10px" onclick="mulNueva('multa', '${mulEsc(p.k)}')">➕ Otra multa para ${mulEsc(p.nombre)}</button></div>
+    <div class="card"><h3 style="margin-top:0">🧾 Pagos y descuentos</h3>${abonos.length?abonos.map(a=>`<div class="movitem"><span>${fCorta(a.fecha)} · <strong style="color:${(MUL_FORMA[a.forma]||MUL_FORMA.descuento)[1]}">${(MUL_FORMA[a.forma]||MUL_FORMA.descuento)[0]}</strong>${a.nota?' · '+mulEsc(a.nota):''}<div class="hint" style="margin:0">${mulEsc(a.m.concepto||'Multa')} · ${mulEsc(a.m.placa)}</div></span><span style="text-align:right;flex:none"><strong>${mulPesos(a.monto)}</strong><br><button class="btn small" style="padding:4px 8px;margin-top:4px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulAbEditar('${a.m.id}','${a.id}')">✏️</button> <button class="btn small" style="padding:4px 8px;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="mulAbBorrar('${a.m.id}','${a.id}')">🗑️</button></span></div>`).join(''):'<p class="hint" style="margin:0">Todavía no hay pagos ni descuentos.</p>'}</div>`;
+}
+let mulPlanFrec = null;
+async function mulGuardarPlan(k){
+  const p = mulPersonas().find(x=>x.k===k) || (mulMod='', mulPersonas().find(x=>x.k===k)); if(!p) return;
+  const frec = mulPlanFrec || (p.plan&&p.plan.frec) || 'libre', monto = Number(document.getElementById('mul-plan-monto').value)||0;
+  const plan = {frec, monto, desde:(p.plan&&p.plan.desde)||fechaHoyLocal()};
+  try{ for(const m of p.multas.filter(x=>mulSaldo(x)>0)){ await db.collection('multas').doc(m.id).update({plan}); m.plan = plan; } mulPlanFrec = null; toast('✅ Plan guardado'); renderMul(); }catch(e){ alert('Error: '+e.message); }
+}
+function mulPagoPintar(){
+  const x = mulPago; const ed = x.tipo==='edit'; const p = x.tipo==='persona' ? mulPersonas().find(o=>o.k===x.k) : null; const m = x.tipo==='ref' ? mulCache.find(o=>o.id===x.id) : (ed ? mulCache.find(o=>o.id===x.mid) : null);
+  if(!p && !m){ mulPago = null; return renderMul(); }
+  const ab0 = ed ? (m.abonos||[]).find(a=>a.id===x.aid) : null; const max = p ? p.saldo : (mulSaldo(m) + (ab0 ? Number(ab0.monto)||0 : 0));
+  $('#main').innerHTML = `<div class="card" style="border-top:6px solid ${(MUL_FORMA[x.forma]||MUL_FORMA.descuento)[1]}"><h3 style="margin-top:0">${ed?'✏️ Corregir pago o descuento':(MUL_FORMA[x.forma]||MUL_FORMA.descuento)[0]}</h3>
+    <p class="hint">${ed?`${mulEsc(m.concepto||'Multa')} · 🚗 ${mulEsc(m.placa)} · como máximo <strong>${mulPesos(max)}</strong>`:p?`👷 <strong>${mulEsc(p.nombre)}</strong> debe <strong>${mulPesos(max)}</strong>. Se abona a las multas más viejas primero.`:`🚗 ${mulEsc(m.carro)} ${mulEsc(m.placa)} · pendiente <strong>${mulPesos(max)}</strong>`}</p>
+    ${p||(ed&&m.tipo==='multa')?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${Object.entries(MUL_FORMA).map(([k,v])=>`<button onclick="mulPago.forma='${k}';renderMul()" style="cursor:pointer;padding:8px 10px;border-radius:10px;border:2px solid ${x.forma===k?v[1]:'var(--line)'};background:${x.forma===k?v[1]:'transparent'};color:${x.forma===k?'#fff':'var(--ink)'};font:inherit;font-weight:700">${v[0]}</button>`).join('')}</div>`:''}
+    <label class="hint">Cantidad</label><input id="mul-p-monto" type="number" inputmode="decimal" value="${x.monto}" oninput="mulPago.monto=this.value" style="font-size:22px;font-weight:900">
+    <label class="hint">Fecha</label><input id="mul-p-fecha" type="date" value="${x.fecha}" oninput="mulPago.fecha=this.value">
+    <label class="hint">Nota (opcional)</label><input id="mul-p-nota" placeholder="Ej. nómina del 15 de nov" value="${mulEsc(x.nota)}" oninput="mulPago.nota=this.value">
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px" onclick="mulPagoGuardar()">💾 Guardar</button>
+    <button class="btn" style="width:100%;margin-top:6px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulPago=null;renderMul()">Cancelar</button></div>`;
+}
+async function mulPagoGuardar(){
+  const x = mulPago; let monto = Math.round((Number(x.monto)||0)*100)/100; if(!(monto>0)) return alert('Escribe la cantidad.');
+  const por = getCurrentUserEmail?getCurrentUserEmail():'';
+  if(x.tipo==='edit'){
+    const m = mulCache.find(o=>o.id===x.mid); const a0 = m && (m.abonos||[]).find(a=>a.id===x.aid); if(!a0) return alert('Ya no existe ese pago.');
+    const max = mulSaldo(m) + (Number(a0.monto)||0); if(monto > max + 0.005) return alert(`Es más de lo que se debe en esa multa (${mulPesos(max)}). No se puede abonar de más.`);
+    const abonos = m.abonos.map(a=>a.id!==x.aid ? a : Object.assign({}, a, {monto, fecha:x.fecha||a.fecha, forma:x.forma||a.forma, nota:String(x.nota||'').trim(), editado:{por, en:new Date().toISOString(), antes:a.monto}}));
+    try{ await db.collection('multas').doc(m.id).update({abonos}); m.abonos = abonos; mulPago = null; toast('✅ Corregido'); renderMul(); }catch(e){ alert('Error: '+e.message); }
+    return;
+  }
+  let lista = x.tipo==='persona' ? (mulPersonas().find(o=>o.k===x.k)||{multas:[]}).multas.filter(m=>mulSaldo(m)>0).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')) : mulCache.filter(o=>o.id===x.id);
+  const deuda = lista.reduce((t,m)=>t+mulSaldo(m),0);
+  if(monto > deuda + 0.005) return alert(`Es más de lo que debe (${mulPesos(deuda)}). No se puede abonar de más.`);
+  try{
+    for(const m of lista){ if(monto<=0) break; const a = Math.min(monto, mulSaldo(m)); if(a<=0) continue;
+      const ab = {id:cryptoId(), fecha:x.fecha||fechaHoyLocal(), monto:Math.round(a*100)/100, forma:x.forma, nota:String(x.nota||'').trim(), por, en:new Date().toISOString()};
+      const abonos = (m.abonos||[]).concat([ab]); await db.collection('multas').doc(m.id).update({abonos}); m.abonos = abonos; monto = Math.round((monto-a)*100)/100; }
+    mulPago = null; toast('✅ Guardado'); renderMul();
+  }catch(e){ alert('Error: '+e.message); }
+}
+function mulAbEditar(mid, aid){ const m = mulCache.find(o=>o.id===mid), a = m && (m.abonos||[]).find(o=>o.id===aid); if(!a) return; mulPago = {tipo:'edit', mid, aid, monto:String(a.monto), forma:a.forma||'descuento', fecha:a.fecha||fechaHoyLocal(), nota:a.nota||''}; renderMul(); window.scrollTo(0,0); }
+async function mulAbBorrar(mid, aid){
+  const m = mulCache.find(o=>o.id===mid), a = m && (m.abonos||[]).find(o=>o.id===aid); if(!a) return;
+  if(!confirm(`¿Borrar este ${(MUL_FORMA[a.forma]||MUL_FORMA.descuento)[0].replace(/^\S+\s/,'').toLowerCase()} de ${mulPesos(a.monto)} (${fCorta(a.fecha)})?\n\nLa deuda vuelve a subir esa cantidad.`)) return;
+  const abonos = m.abonos.filter(o=>o.id!==aid);
+  try{ await db.collection('multas').doc(m.id).update({abonos}); m.abonos = abonos; toast('🗑️ Borrado'); renderMul(); }catch(e){ alert('Error: '+e.message); }
+}
+function mulNueva(tipo, personaK){
+  const p = personaK ? mulPersonas().find(o=>o.k===personaK) : null;
+  mulForm = {tipo, mod: p ? [...p.mods][0] : (mulMod||''), placa:'', carro:'', conductor: p ? p.nombre : '', fecha:fechaHoyLocal(), concepto:'', folio:'', monto:'', frec: (p&&p.plan&&p.plan.frec)||'libre', porDesc:(p&&p.plan&&p.plan.monto)||''};
+  renderMul(); window.scrollTo(0,0);
+}
+function mulEditar(id){ const m = mulCache.find(x=>x.id===id); if(!m) return; mulForm = {id, tipo:m.tipo, mod:m.mod||'', placa:m.placa||'', carro:m.carro||'', conductor:m.conductor||'', fecha:m.fecha||'', concepto:m.concepto||'', folio:m.folio||'', monto:String(m.monto||''), frec:(m.plan&&m.plan.frec)||'libre', porDesc:(m.plan&&m.plan.monto)||''}; renderMul(); window.scrollTo(0,0); }
+function mulFormPintar(){
+  const f = mulForm, multa = f.tipo==='multa';
+  const V = (vehCache && vehCache.vehs) ? vehCache.vehs.filter(v=>!f.mod || v.modulo===f.mod) : [];
+  const conocidos = [...new Set((mulCache||[]).map(m=>m.conductor).filter(Boolean).map(mulNombreBonito).concat(V.map(v=>v.instalador).filter(Boolean)))];
+  const placas = [...new Set((mulCache||[]).filter(m=>!f.mod||m.mod===f.mod).map(m=>m.placa+'|'+(m.carro||'')).concat(V.map(v=>v.placas+'|'+(v.carro||''))))].filter(x=>x.split('|')[0]);
+  $('#main').innerHTML = `<div class="card" style="border-top:6px solid ${multa?'#b91c1c':'#7c3aed'}"><h3 style="margin-top:0">${f.id?'✏️ Editar':'➕ Nueva'} ${multa?'multa':'refrendo / adeudo del carro'}</h3>
+    ${multa?'':'<p class="hint">Los refrendos y adeudos del carro los paga la empresa: solo se registran para control.</p>'}
+    <label class="hint">Módulo</label><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">${MODULOS.map(m=>`<button onclick="mulForm.mod='${m.nombre}';renderMul()" style="cursor:pointer;padding:8px 10px;border-radius:10px;border:2px solid ${m.color};background:${f.mod===m.nombre?m.color:'transparent'};color:${f.mod===m.nombre?'#fff':'var(--ink)'};font:inherit;font-weight:800">${m.nombre}</button>`).join('')}</div>
+    <label class="hint">Carro (placas)</label><input list="mul-placas" placeholder="Ej. SRJ018B" value="${mulEsc(f.placa)}" oninput="mulForm.placa=this.value.toUpperCase();const o=[...document.querySelectorAll('#mul-placas option')].find(x=>x.value===mulForm.placa);if(o){mulForm.carro=o.dataset.c;document.getElementById('mul-carro').value=o.dataset.c;}">
+    <datalist id="mul-placas">${placas.map(x=>{ const [pl,c] = x.split('|'); return `<option value="${mulEsc(pl)}" data-c="${mulEsc(c)}">${mulEsc(c)}</option>`; }).join('')}</datalist>
+    <label class="hint">Carro (marca / color)</label><input id="mul-carro" placeholder="Ej. March gris 2019" value="${mulEsc(f.carro)}" oninput="mulForm.carro=this.value">
+    ${multa?`<label class="hint">Conductor ese día (a quién se le carga)</label><input list="mul-cond" placeholder="Ej. Ángel" value="${mulEsc(f.conductor)}" oninput="mulForm.conductor=this.value"><datalist id="mul-cond">${conocidos.map(c=>`<option value="${mulEsc(c)}">`).join('')}</datalist>`:''}
+    <div class="row" style="gap:8px"><div style="flex:1"><label class="hint">Fecha</label><input type="date" value="${f.fecha}" oninput="mulForm.fecha=this.value"></div><div style="flex:1"><label class="hint">Monto</label><input type="number" inputmode="decimal" value="${mulEsc(f.monto)}" oninput="mulForm.monto=this.value" style="font-weight:900"></div></div>
+    <label class="hint">${multa?'Motivo':'Concepto'}</label><input placeholder="${multa?'Ej. Exceso de velocidad':'Ej. Refrendo 2026'}" value="${mulEsc(f.concepto)}" oninput="mulForm.concepto=this.value">
+    ${multa?`<label class="hint">Folio (opcional)</label><input value="${mulEsc(f.folio)}" oninput="mulForm.folio=this.value">
+    <label class="hint">¿Cada cuánto se le descuenta?</label><div style="display:flex;flex-wrap:wrap;gap:6px">${Object.entries(MUL_FREC).map(([k,v])=>`<button onclick="mulForm.frec='${k}';renderMul()" style="cursor:pointer;padding:8px 10px;border-radius:10px;border:2px solid ${f.frec===k?'#2563eb':'var(--line)'};background:${f.frec===k?'#2563eb':'transparent'};color:${f.frec===k?'#fff':'var(--ink)'};font:inherit;font-weight:700">${v[0]}</button>`).join('')}</div>
+    <label class="hint">¿Cuánto en cada descuento? (opcional)</label><input type="number" inputmode="decimal" placeholder="Ej. 500" value="${mulEsc(f.porDesc)}" oninput="mulForm.porDesc=this.value">`:''}
+    <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:${multa?'#b91c1c':'#7c3aed'}" onclick="mulGuardar()">💾 Guardar</button>
+    ${f.id?`<button class="btn" style="width:100%;margin-top:6px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="mulBorrar('${f.id}')">🗑️ Borrar</button>`:''}
+    <button class="btn" style="width:100%;margin-top:6px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulForm=null;renderMul()">Cancelar</button></div>`;
+}
+async function mulGuardar(){
+  const f = mulForm; const monto = Math.round((Number(f.monto)||0)*100)/100;
+  if(!f.mod) return alert('Elige el módulo.'); if(!String(f.placa).trim()) return alert('Escribe las placas del carro.'); if(!(monto>0)) return alert('Escribe el monto.');
+  if(f.tipo==='multa' && !String(f.conductor).trim() && !confirm('No escribiste a quién se le carga. ¿Guardar como "Sin conductor asignado"?')) return;
+  const datos = {modulo:'_direccion', mod:f.mod, tipo:f.tipo, placa:String(f.placa).trim().toUpperCase(), carro:String(f.carro).trim(), conductor:f.tipo==='multa'?String(f.conductor).trim():'', fecha:f.fecha||'', concepto:String(f.concepto).trim(), folio:String(f.folio||'').trim(), monto};
+  if(f.tipo==='multa') datos.plan = {frec:f.frec||'quincenal', monto:Number(f.porDesc)||0, desde:f.fecha||fechaHoyLocal()};
+  try{
+    if(f.id){ const m = mulCache.find(x=>x.id===f.id); if(m && mulPagado(m) > monto + 0.005) return alert(`Ya se pagaron ${mulPesos(mulPagado(m))}: el monto no puede ser menor.`); if(m && Math.abs((Number(m.monto)||0)-monto)>0.005) datos.ajustes = (m.ajustes||[]).concat([{fecha:fechaHoyLocal(), de:m.monto, a:monto, por:getCurrentUserEmail?getCurrentUserEmail():'', motivo:'editado a mano', en:new Date().toISOString()}]); await db.collection('multas').doc(f.id).update(datos); Object.assign(m||{}, datos); }
+    else { const id = cryptoId(); const doc = Object.assign(datos, {abonos:[], alta:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():''}); await db.collection('multas').doc(id).set(doc); mulCache.push({id, ...doc}); }
+    mulForm = null; toast('✅ Guardado'); renderMul();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function mulBorrar(id){
+  const m = mulCache.find(x=>x.id===id); if(!m) return;
+  if(!confirm(`¿Borrar ${m.tipo==='multa'?'la multa':'el adeudo'} de ${mulPesos(m.monto)} (${m.placa})?${mulPagado(m)?'\n\nYa tiene '+mulPesos(mulPagado(m))+' pagados; también se borran.':''}`)) return;
+  try{ await db.collection('multas').doc(id).update({borrada:true, borradaEn:new Date().toISOString()}); mulCache = mulCache.filter(x=>x.id!==id); mulForm = null; renderMul(); }catch(e){ alert('Error: '+e.message); }
+}
+// --- Excel (SheetJS se carga solo cuando se usa) ---
+function mulXlsx(){ return window.XLSX ? Promise.resolve(window.XLSX) : new Promise((ok, mal)=>{ const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; s.onload = ()=>ok(window.XLSX); s.onerror = ()=>mal(new Error('No se pudo cargar el lector de Excel. Revisa tu conexión a internet.')); document.head.appendChild(s); }); }
+function mulImportarElegir(){ const i = document.createElement('input'); i.type = 'file'; i.accept = '.xlsx,.xls'; i.onchange = ()=>{ if(i.files[0]) mulImportarLeer(i.files[0]); }; i.click(); }
+async function mulImportarLeer(file){
+  try{
+    const X = await mulXlsx(); const wb = X.read(await file.arrayBuffer(), {type:'array', cellDates:true});
+    const ws = wb.Sheets[wb.SheetNames[0]]; const rows = X.utils.sheet_to_json(ws, {header:1, raw:true, defval:null});
+    const h = rows.findIndex(r=>r.some(c=>String(c||'').trim().toUpperCase()==='MODULO')); if(h<0) return alert('No encontré la columna MODULO en el archivo.');
+    const H = rows[h].map(c=>String(c||'').replace(/\s+/g,' ').trim().toUpperCase()), col = re => H.findIndex(c=>re.test(c));
+    const sub = (rows[h+1]||[]).map(c=>String(c||'').trim().toUpperCase()), cM = col(/^M[OÓ]DULO$/), cC = col(/^CONDUCTOR$/), cA = col(/ADEUDOS/), cMu = col(/^MULTAS?$/);
+    const cV = sub.indexOf('MARCA')>=0 ? sub.indexOf('MARCA') : col(/^VEH[IÍ]CULO$/), cP = sub.indexOf('PLACA')>=0 ? sub.indexOf('PLACA') : (col(/^PLACAS?$/)>=0 ? col(/^PLACAS?$/) : cV+1);
+    if(cM<0 || cC<0 || cMu<0 || cV<0) return alert('El archivo no tiene las columnas esperadas (MODULO, VEHICULO, CONDUCTOR, MULTA).');
+    const filas = [];
+    rows.slice(h+1).forEach(r=>{ const mod = String(r[cM]||'').trim(); if(!mod || /OBSERVACIONES/i.test(mod)) return; const mm = MODULOS.find(x=>x.nombre.toLowerCase()===mod.toLowerCase()); if(!mm) return;
+      const carro = String(r[cV]||'').trim(), placa = String(r[cP]||'').trim().toUpperCase(), cond = String(r[cC]||'').trim(), ad = cA>=0 ? Number(r[cA])||0 : 0, mu = Number(r[cMu])||0;
+      if(placa) filas.push({mod:mm.nombre, carro, placa, conductor: MUL_SIN.includes(cond.toLowerCase()) ? '' : cond, nota: MUL_SIN.includes(cond.toLowerCase()) && cond ? cond : '', ad, mu}); });
+    if(!filas.length) return alert('No encontré carros en el archivo.');
+    mulImp = {archivo:file.name, fecha:fechaHoyLocal(), filas, dec:{}}; renderMul(); window.scrollTo(0,0);
+  }catch(e){ alert('No se pudo leer el archivo: '+e.message); }
+}
+// Al volver a importar (Excel nuevo) se compara carro por carro contra lo que hay en la app.
+// Lo que no existe se agrega; si un monto cambió NO se toca solo: Dirección decide en cada renglón.
+function mulImpCmp(f, tipo){
+  const xl = tipo==='multa' ? f.mu : f.ad, ex = (mulCache||[]).filter(m=>m.tipo===tipo && m.placa===f.placa), app = Math.round(ex.reduce((t,m)=>t+mulSaldo(m),0)*100)/100;
+  if(!ex.length) return {estado: xl>0 ? 'nuevo' : 'nada', xl, app:0, ex};
+  return {estado: Math.abs(app-xl)<0.01 ? 'igual' : 'cambio', xl, app, ex};
+}
+function mulImpPintar(){
+  const x = mulImp, F = x.filas, dec = x.dec;
+  const filas = F.map(f=>({f, mu:mulImpCmp(f,'multa'), ad:mulImpCmp(f,'refrendo')})).filter(o=>o.mu.estado!=='nada' || o.ad.estado!=='nada');
+  const cuenta = e => filas.reduce((t,o)=>t+(o.mu.estado===e)+(o.ad.estado===e),0), nNuevo = cuenta('nuevo'), nCambio = cuenta('cambio'), nIgual = cuenta('igual');
+  const nAct = filas.reduce((t,o)=>t+(o.mu.estado==='cambio' && dec[o.f.placa+'|multa']==='si')+(o.ad.estado==='cambio' && dec[o.f.placa+'|refrendo']==='si'),0);
+  const celda = (o, tipo) => { const c = o[tipo==='multa'?'mu':'ad'], col = tipo==='multa' ? '#dc2626' : '#7c3aed', nom = tipo==='multa' ? 'Multa' : 'Refrendo', k = o.f.placa+'|'+tipo;
+    if(c.estado==='nada') return '';
+    if(c.estado==='nuevo') return `<div style="margin-top:4px"><span style="font-weight:900;color:${col}">${nom} ${mulPesos(c.xl)}</span> <span style="padding:1px 7px;border-radius:7px;background:#16a34a;color:#fff;font-weight:800;font-size:12px">NUEVO</span></div>`;
+    if(c.estado==='igual') return `<div style="margin-top:4px;opacity:.6">${nom} ${mulPesos(c.xl)} <span class="hint">· sin cambio</span></div>`;
+    const si = dec[k]==='si';
+    return `<div style="margin-top:6px;padding:8px;border-radius:10px;border:2px solid #d97706;background:rgba(217,119,6,.08)"><strong>${nom} cambió:</strong> en la app debe <strong>${mulPesos(c.app)}</strong>, el Excel dice <strong>${mulPesos(c.xl)}</strong>
+      <div style="display:flex;gap:6px;margin-top:6px"><button onclick="mulImp.dec['${k}']='no';renderMul()" style="cursor:pointer;flex:1;padding:8px;border-radius:10px;border:2px solid ${!si?'#4b5563':'var(--line)'};background:${!si?'#4b5563':'transparent'};color:${!si?'#fff':'var(--ink)'};font:inherit;font-weight:800">Dejar como está</button>
+      <button onclick="mulImp.dec['${k}']='si';renderMul()" style="cursor:pointer;flex:1;padding:8px;border-radius:10px;border:2px solid ${si?'#d97706':'var(--line)'};background:${si?'#d97706':'transparent'};color:${si?'#fff':'var(--ink)'};font:inherit;font-weight:800">Poner ${mulPesos(c.xl)}</button></div></div>`; };
+  $('#main').innerHTML = `<div class="card" style="border-top:6px solid #0e7490"><h3 style="margin-top:0">📥 Importar del Excel</h3><p class="hint">${mulEsc(x.archivo)}. Se compara carro por carro con lo que ya hay en la app. <strong>Nada se cambia solo:</strong> lo nuevo se agrega y lo que cambió lo decides tú.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"><span style="padding:4px 10px;border-radius:9px;background:rgba(22,163,74,.15);font-weight:800">🆕 ${nNuevo} nuevo(s)</span><span style="padding:4px 10px;border-radius:9px;background:rgba(217,119,6,.15);font-weight:800">✏️ ${nCambio} cambiaron</span><span style="padding:4px 10px;border-radius:9px;background:var(--line);font-weight:800">${nIgual} sin cambio</span></div>
+    <label class="hint">Fecha de estos saldos</label><input type="date" value="${x.fecha}" oninput="mulImp.fecha=this.value">
+    <div style="margin-top:8px">${filas.map(o=>{ const f = o.f; return `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div><span style="color:${mulModColor(f.mod)};font-weight:800">${mulEsc(f.mod)}</span> · ${mulEsc(mulNombreBonito(f.carro))} <span class="tag">${mulEsc(f.placa)}</span></div>
+        <div style="margin-top:2px">👷 ${f.conductor?'<strong>'+mulEsc(mulNombreBonito(f.conductor))+'</strong>':(f.mu?`<strong class="neg">Sin asignar${f.nota?' (carro en '+mulEsc(f.nota.toLowerCase())+')':''}</strong>`:'<span class="hint">—</span>')}</div>${celda(o,'multa')}${celda(o,'refrendo')}</div>`; }).join('')}</div>
+    ${filas.some(o=>o.mu.estado==='nuevo' && !o.f.conductor)?'<p class="hint">⚠️ Las multas <strong>sin asignar</strong> quedan en "Sin conductor asignado". Después ábrelas con ✏️ Editar y pon a quién se le cargan.</p>':''}
+    ${nCambio?'<p class="hint">"Poner" ajusta la deuda a lo que dice el Excel sin borrar los pagos que ya registraste; queda anotado el cambio.</p>':''}
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:#0e7490" onclick="mulImportar()" ${nNuevo+nAct?'':'disabled'}>📥 Guardar: ${nNuevo} nuevo(s)${nAct?' y '+nAct+' cambio(s)':''}</button>
+    <button class="btn" style="width:100%;margin-top:6px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulImp=null;renderMul()">Cancelar</button></div>`;
+}
+async function mulImportar(){
+  const x = mulImp, por = getCurrentUserEmail?getCurrentUserEmail():''; let n = 0, c = 0;
+  const fTxt = x.fecha.split('-').reverse().join('/');
+  try{
+    for(const f of x.filas){
+      const base = {modulo:'_direccion', mod:f.mod, placa:f.placa, carro:mulNombreBonito(f.carro), fecha:x.fecha, folio:'', abonos:[], origen:'excel', alta:new Date().toISOString(), creadoPor:por};
+      for(const tipo of ['multa','refrendo']){
+        const k = mulImpCmp(f, tipo);
+        if(k.estado==='nuevo'){
+          const d = tipo==='multa' ? Object.assign({}, base, {tipo, conductor:f.conductor, concepto:'Saldo de multas del Excel al '+fTxt+(f.nota?' · carro en '+f.nota.toLowerCase():''), monto:f.mu, plan:null})
+                                   : Object.assign({}, base, {tipo, conductor:'', concepto:'Adeudos y refrendos pendientes', monto:f.ad});
+          const id = cryptoId(); await db.collection('multas').doc(id).set(d); mulCache.push({id, ...d}); n++;
+        } else if(k.estado==='cambio' && x.dec[f.placa+'|'+tipo]==='si'){
+          // Sube: se suma al registro más nuevo. Baja: se resta de los más nuevos primero, sin bajar de lo ya pagado.
+          let delta = Math.round((k.xl - k.app)*100)/100;
+          const regs = k.ex.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'') || (b.alta||'').localeCompare(a.alta||''));
+          for(const m of regs){ if(Math.abs(delta)<0.005) break;
+            const cambio = delta>0 ? delta : -Math.min(-delta, mulSaldo(m)); if(Math.abs(cambio)<0.005) continue;
+            const monto = Math.round(((Number(m.monto)||0)+cambio)*100)/100, ajustes = (m.ajustes||[]).concat([{fecha:x.fecha, de:m.monto, a:monto, por, motivo:'Excel '+fTxt, en:new Date().toISOString()}]);
+            await db.collection('multas').doc(m.id).update({monto, ajustes}); m.monto = monto; m.ajustes = ajustes; delta = Math.round((delta-cambio)*100)/100; }
+          c++;
+        }
+      }
+    }
+    mulImp = null; toast(`✅ ${n} nuevo(s)${c?', '+c+' actualizado(s)':''}`); renderMul();
+  }catch(e){ alert('Error al importar: '+e.message+(n||c?`\n\nYa se habían guardado ${n+c}; si lo vuelves a importar, esos ya no se repiten.`:'')); }
+}
+async function mulExportar(){
+  try{
+    const X = await mulXlsx(); const g = {};
+    (mulCache||[]).forEach(m=>{ const k = m.placa||'—'; const c = g[k] = g[k] || {mod:m.mod, carro:m.carro, placa:m.placa, cond:new Set(), ad:0, mu:0}; if(m.tipo==='multa'){ c.mu += mulSaldo(m); if(m.conductor && mulSaldo(m)>0) c.cond.add(mulNombreBonito(m.conductor)); } else c.ad += mulSaldo(m); });
+    const orden = MODULOS.map(m=>m.nombre), filas = Object.values(g).sort((a,b)=>orden.indexOf(a.mod)-orden.indexOf(b.mod));
+    const aoa = [['CLOSETS VERA'],['CONTROL LOGÍSTICO DE VEHÍCULOS · MULTAS Y ADEUDOS'],['Fecha:', new Date().toLocaleDateString('es-MX')],[],['MÓDULO','VEHÍCULO','PLACA','CONDUCTOR (multas pendientes)','ADEUDOS Y REFRENDOS PTE','MULTAS PENDIENTES','TOTAL']];
+    filas.forEach(c=>aoa.push([c.mod, c.carro, c.placa, [...c.cond].join(', '), c.ad||0, c.mu||0, (c.ad||0)+(c.mu||0)]));
+    aoa.push([], ['TOTAL','','','', filas.reduce((t,c)=>t+c.ad,0), filas.reduce((t,c)=>t+c.mu,0), filas.reduce((t,c)=>t+c.ad+c.mu,0)]);
+    const pagos = [['FECHA','MÓDULO','CONDUCTOR','PLACA','MULTA','FORMA','MONTO','NOTA']];
+    (mulCache||[]).forEach(m=>(m.abonos||[]).forEach(a=>pagos.push([a.fecha, m.mod, m.conductor?mulNombreBonito(m.conductor):(m.tipo==='refrendo'?'Empresa':''), m.placa, m.concepto, (MUL_FORMA[a.forma]||['']) [0].replace(/^\S+\s/,''), a.monto, a.nota||''])));
+    const wb = X.utils.book_new(); const w1 = X.utils.aoa_to_sheet(aoa); w1['!cols'] = [{wch:14},{wch:20},{wch:11},{wch:26},{wch:16},{wch:16},{wch:12}];
+    X.utils.book_append_sheet(wb, w1, 'Carros'); X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(pagos), 'Pagos y descuentos');
+    X.writeFile(wb, `multas-carros-${fechaHoyLocal()}.xlsx`);
+  }catch(e){ alert('No se pudo generar el Excel: '+e.message); }
+}
+// v269: PDF de multas (pedido por el usuario): sencillo, una tabla por módulo, y al final los pagos.
+async function generarMulPDF(soloMod){
+  if(!esAdmin()) return;
+  try{ if(!mulCache) await mulCargar(); }catch(e){ return alert('No se pudo cargar: '+e.message); }
+  const filtro = soloMod!==undefined ? soloMod : mulMod;
+  const mods = filtro ? [filtro] : MODULOS.map(m=>m.nombre);
+  const hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  const ROJ=[185,28,28], MOR=[124,58,237], VER=[22,128,74], GRI=[107,114,128];
+  const rgb = h => { const x = String(h).replace('#',''); return [0,2,4].map(i=>parseInt(x.substr(i,2),16)); };
+  const fCor = d => d ? new Date(d+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'}) : '-';
+  const S = herrPdfBase('Multas y adeudos de carros', `${filtro||'Todos los módulos'} · al ${hoy}`, ROJ), doc = S.doc;
+  const todas = (mulCache||[]).filter(m=>mods.includes(m.mod)), multas = todas.filter(m=>m.tipo==='multa'), refs = todas.filter(m=>m.tipo==='refrendo');
+  const totMon = multas.reduce((t,m)=>t+(Number(m.monto)||0),0), totM = multas.reduce((t,m)=>t+mulSaldo(m),0), totR = refs.reduce((t,m)=>t+mulSaldo(m),0);
+  S.kpis([[mulPesos(totMon),'total de multas',GRI],[mulPesos(totMon-totM),'ya pagado o descontado',VER],[mulPesos(totM),'falta cobrar (multas)',ROJ],[mulPesos(totR),'refrendos (paga la empresa)',MOR]]);
+  // Cómo leer el reporte
+  const guia = ['Multas: se le cargan a quien manejaba el carro ese día y se le descuentan por partes.',
+    'Total = lo que fue la multa. Pagado = lo descontado o pagado hasta hoy. Debe = lo que falta cobrarle.',
+    'Refrendo = adeudos y refrendos del carro. Los paga la empresa; no se le descuentan a nadie.',
+    'Cada cuándo se le descuenta = lo que tú decidas para esa persona (ej. $500 cada 15 días). "Sin definir" = todavía no se acuerda. Los descuentos no son automáticos: se registran a mano.'];
+  doc.setFontSize(7.8); const gl = guia.flatMap(g=>doc.splitTextToSize(String('- '+g), S.W-6));
+  doc.setFillColor(248,248,250); doc.setDrawColor(220,222,228); doc.rect(S.L, S.y, S.W, 6+gl.length*3.8, 'FD');
+  doc.setFont(undefined,'bold'); doc.setFontSize(8.6); doc.setTextColor(55,65,81); doc.text('Cómo leer este reporte', S.L+3, S.y+4.6); doc.setFont(undefined,'normal'); doc.setFontSize(7.8);
+  gl.forEach((g,i)=>doc.text(String(g), S.L+3, S.y+9+i*3.8)); doc.setTextColor(0,0,0); S.y += 10+gl.length*3.8;
+  const cols = [{t:'Carro',w:38},{t:'Conductor',w:32},{t:'Total\nmultas',w:22},{t:'Pagado',w:22},{t:'Debe',w:22},{t:'Refrendo\n(empresa)',w:22},{t:'Cada cuándo se\nle descuenta',w:24}];
+  mods.forEach(md=>{
+    const xs = todas.filter(m=>m.mod===md), C = rgb(mulModColor(md));
+    const debe = xs.filter(m=>m.tipo==='multa').reduce((t,m)=>t+mulSaldo(m),0), ref = xs.filter(m=>m.tipo==='refrendo').reduce((t,m)=>t+mulSaldo(m),0);
+    if(S.y > S.pageH-45){ doc.addPage(); S.y = 15; }
+    S.banda(md, xs.length ? `Debe ${mulPesos(debe)} en multas · refrendos ${mulPesos(ref)}` : 'Sin multas ni adeudos', C);
+    if(!xs.length) return;
+    // un renglón por carro y conductor; el refrendo va en el primer renglón del carro
+    const carros = {}; xs.forEach(m=>{ const c = carros[m.placa] = carros[m.placa] || {carro:`${m.carro||''}\n${m.placa||''}`.trim(), gente:{}, ref:0}; if(m.tipo==='multa'){ const k = mulPersona(m.conductor)||'(sin asignar)'; (c.gente[k] = c.gente[k] || []).push(m); } else { c.ref += mulSaldo(m); c.tieneRef = true; } });
+    const filas = []; let tT=0, tP=0, tD=0, tR=0;
+    Object.values(carros).sort((a,b)=>Object.values(b.gente).flat().reduce((t,m)=>t+mulSaldo(m),0)-Object.values(a.gente).flat().reduce((t,m)=>t+mulSaldo(m),0)).forEach(c=>{
+      const gs = Object.values(c.gente); if(!gs.length) gs.push(null);
+      gs.forEach((ms, i)=>{ const T = ms ? ms.reduce((t,m)=>t+(Number(m.monto)||0),0) : 0, D = ms ? ms.reduce((t,m)=>t+mulSaldo(m),0) : 0, R = i===0 ? c.ref : 0; tT+=T; tP+=T-D; tD+=D; tR+=R;
+        const pl = ms && ms.find(m=>m.plan && mulSaldo(m)>0);
+        filas.push([i===0 ? {t:c.carro, b:true} : '', ms ? (ms[0].conductor ? mulNombreBonito(ms[0].conductor) : {t:'Sin asignar', col:ROJ, b:true}) : {t:'-', col:GRI},
+          ms ? mulPesos(T) : '-', ms ? {t:mulPesos(T-D), col:VER} : '-', ms ? (D>0 ? {t:mulPesos(D), b:true, col:ROJ} : {t:'Pagado', b:true, col:VER}) : '-',
+          R>0 ? {t:mulPesos(R), col:MOR, b:true} : (i===0 && c.tieneRef ? {t:'Pagado', col:VER} : '-'),
+          D>0 ? mulPlanCorto(pl ? pl.plan : null) : '-']); }); });
+    filas.push([{t:'Total '+md, b:true}, '', {t:mulPesos(tT), b:true}, {t:mulPesos(tP), b:true, col:VER}, {t:mulPesos(tD), b:true, col:ROJ}, {t:mulPesos(tR), b:true, col:MOR}, '']);
+    S.tabla(cols, filas, C);
+  });
+  if(mods.length>1){
+    S.banda('Total de todos los módulos', '', ROJ);
+    S.tabla([{t:'Módulo',w:38},{t:'Total multas',w:36},{t:'Pagado',w:36},{t:'Debe',w:36},{t:'Refrendos',w:36}],
+      [...mods.map(md=>{ const xs = todas.filter(m=>m.mod===md), mm = xs.filter(m=>m.tipo==='multa'), T = mm.reduce((t,m)=>t+(Number(m.monto)||0),0), D = mm.reduce((t,m)=>t+mulSaldo(m),0), R = xs.filter(m=>m.tipo==='refrendo').reduce((t,m)=>t+mulSaldo(m),0);
+        return [{t:md, b:true, col:rgb(mulModColor(md))}, mulPesos(T), {t:mulPesos(T-D), col:VER}, {t:mulPesos(D), col:ROJ, b:true}, {t:mulPesos(R), col:MOR}]; }),
+       [{t:'Total', b:true}, {t:mulPesos(totMon), b:true}, {t:mulPesos(totMon-totM), b:true, col:VER}, {t:mulPesos(totM), b:true, col:ROJ}, {t:mulPesos(totR), b:true, col:MOR}]], ROJ);
+  }
+  const ab = todas.flatMap(m=>(m.abonos||[]).map(a=>({a, m}))).sort((x,y)=>(y.a.fecha||'').localeCompare(x.a.fecha||''));
+  if(ab.length){
+    S.banda('Pagos y descuentos registrados', `${ab.length} · ${mulPesos(ab.reduce((t,x)=>t+(Number(x.a.monto)||0),0))}`, VER);
+    S.tabla([{t:'Fecha',w:24},{t:'Módulo',w:24},{t:'Quién',w:30},{t:'Carro',w:22},{t:'Cómo',w:36},{t:'Nota',w:24},{t:'Monto',w:22}],
+      ab.map(({a, m})=>[fCor(a.fecha), {t:m.mod, col:rgb(mulModColor(m.mod)), b:true}, m.tipo==='refrendo'?'Empresa':(m.conductor?mulNombreBonito(m.conductor):'Sin asignar'), m.placa||'-', {t:(MUL_FORMA[a.forma]||MUL_FORMA.descuento)[0].replace(/^\S+\s/,''), col:rgb((MUL_FORMA[a.forma]||MUL_FORMA.descuento)[1]), b:true}, a.nota||'-', {t:mulPesos(a.monto), b:true}]), VER);
+  }
+  await S.fin(`Multas_carros_${(filtro||'todos').replace(/\W+/g,'_')}_${fechaHoyLocal()}.pdf`, 'Closets Vera · Multas de carros');
+}
+generarMulPDF = unaSolaVez('generarMulPDF', generarMulPDF);
+mulPagoGuardar = unaSolaVez('mulPagoGuardar', mulPagoGuardar); mulGuardar = unaSolaVez('mulGuardar', mulGuardar); mulImportar = unaSolaVez('mulImportar', mulImportar); mulGuardarPlan = unaSolaVez('mulGuardarPlan', mulGuardarPlan); mulBorrar = unaSolaVez('mulBorrar', mulBorrar); mulAbBorrar = unaSolaVez('mulAbBorrar', mulAbBorrar);
