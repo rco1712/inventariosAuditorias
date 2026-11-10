@@ -16177,6 +16177,7 @@ async function renderMul(){
         <button class="btn" style="background:#7c3aed" onclick="mulNueva('refrendo')">➕ Refrendo / adeudo</button>
         <button class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulImportarElegir()">📥 Importar Excel</button>
         <button class="btn" style="background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="mulExportar()">📊 Descargar Excel</button>
+      <button class="btn" style="grid-column:1/-1;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="generarMulPDF()">📄 Descargar PDF${mulMod?' de '+mulMod:' (todos los módulos)'}</button>
       </div></div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${chip('', 'Todos', '#4b5563')}${MODULOS.map(m=>chip(m.nombre, m.nombre, m.color)).join('')}</div>
     <div style="display:flex;gap:6px;margin-bottom:10px">${tab('persona','👷 Por persona')}${tab('carro','🚗 Por carro')}${tab('ref','🏢 Refrendos')}</div>
@@ -16345,4 +16346,56 @@ async function mulExportar(){
     X.writeFile(wb, `multas-carros-${fechaHoyLocal()}.xlsx`);
   }catch(e){ alert('No se pudo generar el Excel: '+e.message); }
 }
+// v269: PDF de multas (pedido por el usuario). Respeta el módulo elegido arriba (o todos).
+async function generarMulPDF(){
+  if(!esAdmin()) return;
+  try{ if(!mulCache) await mulCargar(); }catch(e){ return alert('No se pudo cargar: '+e.message); }
+  const mods = mulMod ? [mulMod] : MODULOS.map(m=>m.nombre);
+  const hoy = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  const ROJ=[185,28,28], MOR=[124,58,237], VER=[22,128,74], GRI=[107,114,128];
+  const rgb = h => { const x = String(h).replace('#',''); return [0,2,4].map(i=>parseInt(x.substr(i,2),16)); };
+  const fCor = d => d ? new Date(d+'T12:00:00').toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'}) : '-';
+  const S = herrPdfBase('Multas y adeudos de carros', `${mulMod||'Todos los módulos'} · ${hoy}`, ROJ);
+  const todas = (mulCache||[]).filter(m=>mods.includes(m.mod)), multas = todas.filter(m=>m.tipo==='multa'), refs = todas.filter(m=>m.tipo==='refrendo');
+  const totM = multas.reduce((t,m)=>t+mulSaldo(m),0), pagM = multas.reduce((t,m)=>t+mulPagado(m),0), totR = refs.reduce((t,m)=>t+mulSaldo(m),0);
+  const guardaMod = mulMod; mulMod = ''; const P = mulPersonas(); mulMod = guardaMod;
+  S.kpis([[mulPesos(totM),'multas por cobrar',ROJ],[mulPesos(pagM),'ya pagado o descontado',VER],[mulPesos(totR),'refrendos (empresa)',MOR],[String(P.filter(p=>p.saldo>0 && p.multas.some(m=>mods.includes(m.mod))).length),'personas con saldo',ROJ]]);
+  if(mods.length>1){
+    S.banda('Resumen por módulo', mulPesos(totM+totR), ROJ);
+    S.tabla([{t:'Módulo',w:46},{t:'Multas por cobrar',w:46},{t:'Refrendos pendientes',w:46},{t:'Total',w:44}],
+      [...mods.map(md=>{ const xs = todas.filter(m=>m.mod===md), a = xs.filter(m=>m.tipo==='multa').reduce((t,m)=>t+mulSaldo(m),0), b = xs.filter(m=>m.tipo==='refrendo').reduce((t,m)=>t+mulSaldo(m),0), c = rgb(mulModColor(md));
+        return [{t:md, col:c, b:true}, mulPesos(a), mulPesos(b), {t:mulPesos(a+b), b:true, col:c}]; }),
+       [{t:'Total', b:true}, {t:mulPesos(totM), b:true}, {t:mulPesos(totR), b:true}, {t:mulPesos(totM+totR), b:true}]], ROJ);
+  }
+  mods.forEach(md=>{
+    const xs = todas.filter(m=>m.mod===md); if(!xs.length && mods.length>1) return;
+    const C = rgb(mulModColor(md)), mm = xs.filter(m=>m.tipo==='multa'), rr = xs.filter(m=>m.tipo==='refrendo');
+    S.seccion(md, `multas por cobrar ${mulPesos(mm.reduce((t,m)=>t+mulSaldo(m),0))} · refrendos ${mulPesos(rr.reduce((t,m)=>t+mulSaldo(m),0))}`, C, false);
+    if(!xs.length){ S.vacio('Sin multas ni adeudos registrados.'); return; }
+    const gente = {}; mm.forEach(m=>{ const k = mulPersona(m.conductor)||'(sin asignar)'; (gente[k] = gente[k] || []).push(m); });
+    const filas = Object.entries(gente).map(([k, ms])=>({k, ms, nombre: ms[0].conductor ? mulNombreBonito(ms[0].conductor) : 'Sin conductor asignado', total: ms.reduce((t,m)=>t+(Number(m.monto)||0),0), saldo: ms.reduce((t,m)=>t+mulSaldo(m),0)})).sort((a,b)=>b.saldo-a.saldo);
+    if(filas.length){
+      S.banda('Multas por persona', `${filas.length} persona(s)`, C);
+      S.tabla([{t:'Conductor',w:36},{t:'Carro',w:40},{t:'Multas',w:24},{t:'Pagado',w:24},{t:'Debe',w:24},{t:'Plan de descuento',w:34}],
+        filas.map(f=>{ const pl = f.ms.find(m=>m.plan && mulSaldo(m)>0); const pp = {plan: pl ? pl.plan : null};
+          return [{t:f.nombre, b:true, col:f.k==='(sin asignar)'?ROJ:null}, [...new Set(f.ms.map(m=>`${m.carro||''} ${m.placa||''}`.trim()))].join('\n'), mulPesos(f.total), {t:mulPesos(f.total-f.saldo), col:VER}, f.saldo>0?{t:mulPesos(f.saldo), b:true, col:ROJ}:{t:'Pagado', b:true, col:VER}, f.saldo>0?mulPlanTxt(pp):'-']; }), C);
+      S.tabla([{t:'Fecha',w:22},{t:'Conductor',w:30},{t:'Carro',w:34},{t:'Motivo',w:52},{t:'Monto',w:22},{t:'Debe',w:22}],
+        mm.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).map(m=>[fCor(m.fecha), m.conductor?mulNombreBonito(m.conductor):{t:'Sin asignar', col:ROJ}, `${m.carro||''} ${m.placa||''}`.trim(), (m.concepto||'Multa')+(m.folio?'\nFolio '+m.folio:''), mulPesos(m.monto), mulSaldo(m)>0?{t:mulPesos(mulSaldo(m)), b:true, col:ROJ}:{t:'Pagada', col:VER, b:true}]), C);
+    }
+    if(rr.length){
+      S.banda('Refrendos y adeudos (los paga la empresa)', mulPesos(rr.reduce((t,m)=>t+mulSaldo(m),0)), MOR);
+      S.tabla([{t:'Carro',w:48},{t:'Concepto',w:64},{t:'Monto',w:30},{t:'Pendiente',w:40}],
+        rr.map(m=>[`${m.carro||''} ${m.placa||''}`.trim(), m.concepto||'Adeudos y refrendos', mulPesos(m.monto), mulSaldo(m)>0?{t:mulPesos(mulSaldo(m)), b:true, col:MOR}:{t:'Pagado', b:true, col:VER}]), MOR);
+    }
+    const ab = xs.flatMap(m=>(m.abonos||[]).map(a=>({a, m}))).sort((x,y)=>(y.a.fecha||'').localeCompare(x.a.fecha||''));
+    if(ab.length){
+      S.banda('Pagos y descuentos', `${ab.length} movimiento(s) · ${mulPesos(ab.reduce((t,x)=>t+(Number(x.a.monto)||0),0))}`, VER);
+      S.tabla([{t:'Fecha',w:22},{t:'Quién',w:32},{t:'Carro',w:30},{t:'Forma',w:40},{t:'Nota',w:34},{t:'Monto',w:24}],
+        ab.map(({a, m})=>[fCor(a.fecha), m.tipo==='refrendo'?'Empresa':(m.conductor?mulNombreBonito(m.conductor):'Sin asignar'), m.placa||'-', {t:(MUL_FORMA[a.forma]||MUL_FORMA.descuento)[0].replace(/^\S+\s/,''), col:rgb((MUL_FORMA[a.forma]||MUL_FORMA.descuento)[1]), b:true}, a.nota||'-', {t:mulPesos(a.monto), b:true}]), VER);
+    }
+  });
+  if(!todas.length) S.vacio('No hay multas ni adeudos registrados.');
+  await S.fin(`Multas_carros_${(mulMod||'todos').replace(/\W+/g,'_')}_${fechaHoyLocal()}.pdf`, 'Closets Vera · Multas de carros');
+}
+generarMulPDF = unaSolaVez('generarMulPDF', generarMulPDF);
 mulPagoGuardar = unaSolaVez('mulPagoGuardar', mulPagoGuardar); mulGuardar = unaSolaVez('mulGuardar', mulGuardar); mulImportar = unaSolaVez('mulImportar', mulImportar); mulGuardarPlan = unaSolaVez('mulGuardarPlan', mulGuardarPlan); mulBorrar = unaSolaVez('mulBorrar', mulBorrar);
