@@ -1430,6 +1430,7 @@ function renderHome(){
   $('#main').innerHTML = `
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${ccHomeBannerHtml()}
+    ${hcFaltaHtml()}
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
     ${prestHomeHtml()}
@@ -12341,7 +12342,7 @@ function renderCierre(){
   const cp = cortesPendientes();
   const conMaterial = hojas.filter(it=>{ const f=calcFormulaConPendientes(it.id); return f.completas>0.0005 || (f.autoCortes||0)>0 || !vacioCierre(cierreVals[it.id]); });
   const visibles = cierreTodasHojas ? hojas : conMaterial;
-  $('#main').innerHTML = `<div class="card">
+  $('#main').innerHTML = `${hcFaltaHtml()}<div class="card">
       <div style="font-size:17px;font-weight:800">📝 Cierre del turno · ${modulo()}</div>
       ${modoCierreConteo() ? cierrePasosHtml() : ''}
       <p class="hint">Tubos, bridas, correderas, jaladeras, bisagras, espejos, rieles, sistemas y bastidores <strong>ya se descontaron solos</strong> con las instalaciones y garantías. Aquí solo va lo demás.</p>
@@ -13905,6 +13906,7 @@ function describirLote(ms){
   if(tipos.includes('garantia')) return 'Garantía';
   if(ms.some(m=>m.motivo==='hojaCorteDesperdicio')) return '✂️ Desperdicio del corte (hoja del cortador)';
   if(ms.some(m=>m.motivo==='hojaCorteMerma')) return '✂️ Merma de la hoja de corte';
+  if(ms.some(m=>m.motivo==='hojaCorteRetBasura')) return '✂️ Retazo que se tiró (hoja del cortador)';
   if(ms.some(m=>m.motivo==='deSobrante')) return 'Sobrante transformado';
   if(ms.some(m=>m.motivo==='piezasEncontradas')) return 'Piezas cortadas encontradas';
   if(ms.some(m=>m.motivo==='regresoInstalacion')) return 'Regreso de modelo completo';
@@ -15376,7 +15378,7 @@ function pzpArmTxt(a){ try{ return describirArmado(a).replace(/ · corredera (no
 // Movimientos oficiales que mueven material CORTADO y que la prueba necesita en piezas (signo: +1 entra, -1 sale).
 function pzpEsOtro(m){
   if(!esHojaId(m.itemId) || !cuentaEnInventario(m)) return 0;
-  if(m.motivo==='hojaCorteDesperdicio') return 0; // v273: el inventario de piezas ya resta ese desperdicio por su cuenta
+  if(m.motivo==='hojaCorteDesperdicio' || m.motivo==='hojaCorteRetBasura') return 0; // v273: el inventario de piezas ya resta ese desperdicio por su cuenta
   if(m.tipo==='garantia' || m.tipo==='sobrante') return -1;
   if(m.tipo==='devolucion') return 1;
   if(m.tipo==='merma' && m.lado==='cortado') return -1;
@@ -15660,6 +15662,31 @@ function hcCfgDe(mod){
   if(_hcCfg[mod]===undefined){ _hcCfg[mod] = null; db.collection('piezasPrueba').doc('cfg_'+mod).get().then(d=>{ _hcCfg[mod] = d && d.data ? d.data() : false; if(current==='home') renderHome(); }).catch(()=>{ _hcCfg[mod] = false; }); }
   return _hcCfg[mod] || null;
 }
+// v273 (pedido por el usuario): asegurar que la hoja de corte se capture TODOS los días con corte. Si un día con corte
+// (desde el día después del conteo) no tiene su hoja, el coordinador lo ve arriba en su Inicio y en su cierre hasta
+// que la capture, y Dirección lo ve en su Inicio.
+let _hcDias = {};
+function hcDiasCon(mod){
+  const c = _hcDias[mod];
+  if(!c || Date.now()-c.t > 60000){ _hcDias[mod] = Object.assign({}, c||{fechas:null}, {t:Date.now()});
+    db.collection('piezasPrueba').where('modulo','==',mod).get().then(sn=>{ _hcDias[mod] = {t:Date.now(), fechas:new Set(sn.docs.map(d=>d.data()).filter(x=>x.tipo==='dia' && x.hojaCoord).map(x=>x.fecha))}; if(current==='home') renderHome(); if(current==='cierre') renderCierre(); }).catch(()=>{}); }
+  return (_hcDias[mod]||{}).fechas || null;
+}
+function hcFaltantes(mod){
+  mod = mod || modulo(); const cfg = hcCfgDe(mod); if(!cfg || !cfg.activo || !cfg.hojaCoord) return [];
+  const base = (auditorias||[]).find(a=>a.id===cfg.auditoriaId); if(!base) return [];
+  const desde = diaLocal(base.fecha), hay = hcDiasCon(mod); if(!hay) return [];
+  const dias = new Set((movs||[]).filter(m=>m.tipo==='corte' && m.modulo===mod && m.estado!=='rechazado' && !m.anulado && esHojaId(m.itemId) && m.fecha && diaLocal(m.fecha) > desde).map(m=>diaLocal(m.fecha)));
+  return [...dias].filter(d=>!hay.has(d)).sort();
+}
+function hcFaltaHtml(){
+  if(!esCoordinador()) return '';
+  const fs = hcFaltantes(); if(!fs.length) return '';
+  return `<div class="card" style="background:linear-gradient(135deg,#b91c1c,#dc2626);color:#fff;border:0"><div style="font-size:12px;font-weight:800;opacity:.9">FALTA CAPTURAR</div>
+    <div style="font-size:18px;font-weight:900;margin-top:3px">✂️ Hoja de corte del ${fs.map(pzpFmtDia).join(', ')}</div>
+    <div style="font-size:14px;margin-top:5px;opacity:.95">Ese día hubo corte en tu cierre. Copia la hoja del cortador para que tu inventario cuadre.</div>
+    <button onclick="hcFecha='${fs[0]}';hcCap=null;pzpD=null;irA('hcorte')" style="all:unset;cursor:pointer;display:block;box-sizing:border-box;width:100%;background:#fff;color:#b91c1c;border-radius:12px;padding:12px;text-align:center;font-weight:900;margin-top:12px">Capturar la del ${pzpFmtDia(fs[0])} →</button></div>`;
+}
 function hcActivo(mod){ const c = hcCfgDe(mod||modulo()); return !!(c && c.activo && c.hojaCoord); }
 const hcBorrKey = (mod, f) => 'hcBorr_'+mod+'_'+f;
 function hcBorrGuardar(){ try{ if(hcCap) localStorage.setItem(hcBorrKey(modulo(), hcCap.fecha), JSON.stringify({ts:new Date().toISOString(), cap:hcCap})); }catch(e){} }
@@ -15871,7 +15898,23 @@ async function hcDesperdicioSync(mod, f){
       await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:desH, nota, fecha:new Date().toISOString(), estado:'pendiente', creadoPor:quien, hojaCorte:{fecha:f, desperdicio:true}});
       map[id] = movId; cambio = true;
     }
-    if(cambio) await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).update({desperdicioMov:map});
+    // Retazo que se tiró: lo que quedó de un retazo usado ("basura") y lo que sobró de una pieza recortada ("basura").
+    const mapB = Object.assign({}, doc.basuraMov||{}); let cambioB = false; const basura = {};
+    const aS = l => (l||[]).reduce((t,r)=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return t + (P ? (Number(r.q)||0)*pzpArea(P.dim) : 0); }, 0);
+    (doc.retFilas||[]).forEach(rf=>{ if(rf.resto!=='basura') return; const b = (Number(rf.w)||0)*(Number(rf.h)||0) - aS(rf.salio); if(b>0) basura[rf.itemId] = (basura[rf.itemId]||0) + b; });
+    (doc.recortes||[]).forEach(rc=>{ if(rc.resto==='retazo') return; const P = PIEZAS_AUDIT.find(x=>x.key===rc.k); if(!P) return; const b = (Number(rc.q)||0)*pzpArea(P.dim) - aS(rc.salio); if(b>0) basura[rc.itemId] = (basura[rc.itemId]||0) + b; });
+    const idsB = new Set([...Object.keys(basura), ...Object.keys(mapB)]);
+    for(const id of idsB){ const it = CATALOGO.find(i=>i.id===id); if(!it) continue; const q = Math.round((basura[id]||0)/PZP_A*100)/100;
+      const nota = `Retazo que se tiró el ${pzpFmtDia(f)} (lo que quedó de retazos usados y de piezas recortadas): ${fmtNum(q)} hoja(s)`;
+      const prevId = mapB[id];
+      if(prevId){ const m0 = await db.collection('movimientos').doc(prevId).get(); const m = m0 && m0.data ? m0.data() : null;
+        if(m && m.estado==='pendiente'){ if(Math.abs((Number(m.cantidad)||0)-q)>0.004){ if(q>0.004) await db.collection('movimientos').doc(prevId).update({cantidad:q, nota, editadoEn:new Date().toISOString()}); else { await db.collection('movimientos').doc(prevId).delete(); delete mapB[id]; cambioB = true; } } continue; }
+        if(m && m.estado!=='rechazado') continue; }
+      if(!(q>0.004)) continue;
+      const movId = cryptoId();
+      await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteRetBasura', cantidad:q, nota, fecha:new Date().toISOString(), estado:'pendiente', creadoPor:quien, hojaCorte:{fecha:f, retBasura:true}});
+      mapB[id] = movId; cambioB = true; }
+    if(cambio || cambioB) await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).update(Object.assign({}, cambio?{desperdicioMov:map}:{}, cambioB?{basuraMov:mapB}:{}));
   }catch(e){ console.warn('desperdicio', e); }
 }
 async function hcGuardar(){
@@ -16573,7 +16616,7 @@ async function pzpInicio(){
     const m = $('#main'); if(!m) return;
     const hoyAct = MODULOS.filter(x=>conteoCierreHoy(x.nombre)).map(x=>x.nombre); const pendAud = (await cpzAudsTodos()).filter(cpzPendiente).length;
     if(current!=='home' || document.getElementById('pzp-home')) return;
-    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #0e7490;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>🧩 Conteo de piezas</strong><div class="hint" style="margin:0">${hoyAct.length?'🟢 Conteo hoy en '+hoyAct.join(', '):'Sin conteo activado hoy'}${pendAud?` · <b style="color:#b3742c">${pendAud} conteo(s) por decidir</b>`:''}<br>✂️ Inventario de piezas: ${on.length?'activo en '+on.join(', '):'apagado'} · solo tú lo ves</div></div><button class="btn small" style="background:#0e7490" onclick="setView('cpz')">Abrir</button></div>`);
+    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #0e7490;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>🧩 Conteo de piezas</strong><div class="hint" style="margin:0">${hoyAct.length?'🟢 Conteo hoy en '+hoyAct.join(', '):'Sin conteo activado hoy'}${pendAud?` · <b style="color:#b3742c">${pendAud} conteo(s) por decidir</b>`:''}<br>✂️ Inventario de piezas: ${on.length?'activo en '+on.join(', '):'apagado'} · solo tú lo ves${(()=>{ const f = on.map(m=>({m, d:hcFaltantes(m)})).filter(x=>x.d.length); return f.length ? `<div style="margin-top:4px;font-weight:800;color:#dc2626">⚠️ Falta hoja de corte: ${f.map(x=>x.m+' ('+x.d.map(pzpFmtDia).join(', ')+')').join(' · ')}</div>` : ''; })()}</div></div><button class="btn small" style="background:#0e7490" onclick="setView('cpz')">Abrir</button></div>`);
   }catch(e){}
 }
 (function(){
