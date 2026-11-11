@@ -12458,6 +12458,7 @@ async function guardarCierre(){
     cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null; corrCalc = {n:{}, e:{}};
     // v272: en el cierre con conteo no se dice "guardado": sigue el paso 4 como un paso más del cierre.
     _cierreLocal = fechaHoyLocal()+'|'+mod;
+    if(hcActivo(mod)) setTimeout(()=>hcDesperdicioSync(mod, fechaHoyLocal()), 1500); // v273: con el corte del cierre ya se sabe el desperdicio de la hoja de hoy
     if(conteoSigue){ audPaso = 0; auditCat = '__piezas'; irA('aud'); window.scrollTo(0,0); return; }
     toast('✅ Cierre del turno guardado.'+(hojasDeMas.length?'<br><small>Las hojas de más las revisa Dirección.</small>':''));
     setView('home');
@@ -15373,6 +15374,7 @@ function pzpArmTxt(a){ try{ return describirArmado(a).replace(/ · corredera (no
 // Movimientos oficiales que mueven material CORTADO y que la prueba necesita en piezas (signo: +1 entra, -1 sale).
 function pzpEsOtro(m){
   if(!esHojaId(m.itemId) || !cuentaEnInventario(m)) return 0;
+  if(m.motivo==='hojaCorteDesperdicio') return 0; // v273: el inventario de piezas ya resta ese desperdicio por su cuenta
   if(m.tipo==='garantia' || m.tipo==='sobrante') return -1;
   if(m.tipo==='devolucion') return 1;
   if(m.tipo==='merma' && m.lado==='cortado') return -1;
@@ -15833,6 +15835,43 @@ function hcRender(){
     ${cuerpo}
     <div class="card"><button class="btn" style="width:100%;min-height:54px;font-size:16px;background:#0e7490" onclick="hcGuardar()">💾 Guardar hoja de corte del ${pzpFmtDia(hcFecha)}</button></div>`;
 }
+// v273 (pedido por el usuario): el desperdicio del corte (orillas, tiras, sierra) que mide la hoja del cortador se
+// manda como MERMA del cortado, PENDIENTE de que Dirección la apruebe, para que el inventario oficial no se infle.
+// Solo cuando el cierre de ese día ya dijo cuántas hojas se cortaron y coincide con la hoja del cortador. Si la hoja
+// se corrige, la merma pendiente se actualiza; una ya aprobada no se toca.
+async function hcDesperdicioSync(mod, f){
+  try{
+    const d = await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).get(); const doc = d && d.data ? d.data() : null;
+    if(!doc || !doc.hojaCoord) return;
+    if(!pzpD || pzpD.mod!==mod) await pzpCargar(mod);
+    const R = pzpCalcular(pzpD, f); const cortes = (R && R.porDia[f] && R.porDia[f].cortes) || {};
+    const map = Object.assign({}, doc.desperdicioMov||{}); let cambio = false;
+    const quien = getCurrentUserEmail?getCurrentUserEmail():'';
+    for(const id of Object.keys(doc.corte||{})){
+      const cc = doc.corte[id]||{}, H = Number(cortes[id])||0; if(!(H>0) || !cc.sobroRet) continue;
+      if(Number(cc.hojasPapel)>0 && Math.abs(Number(cc.hojasPapel)-H)>0.01) continue; // no cuadra con el cierre: no se descuenta, se avisa
+      let A = 0; (cc.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P) A += (Number(r.q)||0)*pzpArea(P.dim); });
+      (cc.otras||[]).forEach(r=>{ A += (Number(r.q)||0)*(Number(r.w)||0)*(Number(r.h)||0); }); A += (Number(cc.puertasOtroDia)||0)*PZP_A;
+      const resto = H*PZP_A - A; if(resto < 0) continue; // no cabe: es error de captura, no desperdicio
+      const aR = Math.min(resto, (cc.retazos||[]).reduce((t,x)=>t+(Number(x.w)||0)*(Number(x.h)||0)*(Number(x.q)||0),0));
+      const desH = Math.round((resto - aR)/PZP_A*100)/100;
+      const it = CATALOGO.find(i=>i.id===id); if(!it) continue;
+      const alto = desH/H > 0.15;
+      const nota = `Desperdicio del corte del ${pzpFmtDia(f)} (orillas, tiras y sierra): ${fmtNum(H)} hoja(s) cortadas · piezas ${pzpH(A)} · retazo ${pzpH(aR)} → ${fmtNum(desH)} hoja(s)${alto?' · ⚠️ es mucho: revisa la hoja antes de aprobar':''}`;
+      const prevId = map[id];
+      if(prevId){
+        const m0 = await db.collection('movimientos').doc(prevId).get(); const m = m0 && m0.data ? m0.data() : null;
+        if(m && m.estado==='pendiente'){ if(Math.abs((Number(m.cantidad)||0)-desH)>0.004){ if(desH>0.004) await db.collection('movimientos').doc(prevId).update({cantidad:desH, nota, editadoEn:new Date().toISOString()}); else { await db.collection('movimientos').doc(prevId).delete(); delete map[id]; cambio = true; } } continue; }
+        if(m && m.estado!=='rechazado') continue; // ya aprobada: no se toca
+      }
+      if(!(desH>0.004)) continue;
+      const movId = cryptoId();
+      await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:desH, nota, fecha:new Date().toISOString(), estado:'pendiente', creadoPor:quien, hojaCorte:{fecha:f, desperdicio:true}});
+      map[id] = movId; cambio = true;
+    }
+    if(cambio) await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).update({desperdicioMov:map});
+  }catch(e){ console.warn('desperdicio', e); }
+}
 async function hcGuardar(){
   const mod = modulo(), f = hcFecha, c = hcCap; if(!c) return;
   const corte = {}; Object.keys(c.corte||{}).forEach(id=>{ const x = c.corte[id]; const piezas = (x.piezas||[]).filter(r=>r.q>0), otras = (x.otras||[]).filter(r=>r.q>0);
@@ -15857,7 +15896,7 @@ async function hcGuardar(){
     const doc = Object.assign({}, prev, {tipo:'dia', modulo:mod, fecha:f, corte:Object.assign({}, prev.corte||{}, corte), retFilas:c.retFilas||[], recortes:c.recortes||[], mermas:c.mermas||[], otros, puertasTodo:true, hojaCoord:true, hojaCortador:c.hojaCortador||'', hojaPor:quien, hojaGuardado:ahora, guardado:prev.guardado||ahora, por:prev.por||quien});
     delete doc.id;
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).set(doc);
-    hcBorrBorrar(f); toast('✅ Hoja de corte guardada'); await pzpCargar(mod); hcCap = null; hcRender(); window.scrollTo(0,0);
+    hcBorrBorrar(f); toast('✅ Hoja de corte guardada'); await pzpCargar(mod); await hcDesperdicioSync(mod, f); hcCap = null; hcRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
 async function pzpArrancarDesde(mod, audId){
