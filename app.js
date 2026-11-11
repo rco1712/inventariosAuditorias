@@ -15572,7 +15572,7 @@ function pzpResumen(R){
 function pzpEsAdmin(){ return esAdmin(); }
 async function pzpAbrir(){
   if(!esAdmin()){ setView('home'); return; }
-  $('#main').innerHTML = '<div class="card">Cargando la prueba…</div>';
+  $('#main').innerHTML = '<div class="card">Cargando el inventario de piezas…</div>';
   if(!pzpMod) pzpMod = modulo() || MODULOS[0].nombre;
   await pzpCargar(pzpMod);
   if(!pzpFecha) pzpFecha = fechaHoyLocal();
@@ -15636,7 +15636,7 @@ function pzpModulosHtml(){
     const dias = on && x.auditoriaId ? (()=>{ const a = sel ? D.auds.find(y=>y.id===x.auditoriaId) : null; return a ? ' · desde '+fCorta(diaLocal(a.fecha)) : ''; })() : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--line)">
       <button class="btn small" style="flex:1;text-align:left;min-height:44px;${sel?'':'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="pzpElegirMod('${m.nombre}')">${m.nombre}${sel?' ✓':''}</button>
-      <span style="min-width:96px;text-align:center;font-size:12px;font-weight:800;padding:5px 8px;border-radius:999px;${on?'background:#f3edff;color:#6d28d9':'background:var(--bg);color:var(--sub)'}">${on?'🧪 Prueba'+dias:'Apagada'}</span></div>`; };
+      <span style="min-width:96px;text-align:center;font-size:12px;font-weight:800;padding:5px 8px;border-radius:999px;${on?'background:#f3edff;color:#6d28d9':'background:var(--bg);color:var(--sub)'}">${on?'✂️ Activo'+dias:'Apagado'}</span></div>`; };
   const hist = (c.historial||[]).slice(-4).reverse();
   return `<div class="card"><h3>Módulos</h3>
     <p class="hint" style="margin-top:0">Toca un módulo para verlo. Encender o apagar pide tu PIN de administrador.</p>
@@ -15646,8 +15646,8 @@ function pzpModulosHtml(){
       <label class="hint" style="display:block;margin-top:6px">Conteo inicial (auditoría con piezas y armados)</label>
       <select id="pzp-aud" style="margin-top:4px" ${c.activo?'disabled':''}>${auds.length ? auds.map(a=>`<option value="${a.id}" ${a.id===c.auditoriaId?'selected':''}>${new Date(a.fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · ${(a.piezasContadas||[]).length} piezas · ${(a.armadosContados||[]).length} armados${a.aplicada?' · aplicada':''}</option>`).join('') : '<option value="">No hay auditorías con piezas en este módulo</option>'}</select>
       ${c.activo
-        ? `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzpCambiar(false)">⏸ Apagar la prueba en ${D.mod}</button>`
-        : `<button class="btn small" style="width:100%;margin-top:8px;background:#7c3aed" ${auds.length?'':'disabled'} onclick="pzpCambiar(true)">🧪 Encender la prueba en ${D.mod}</button>`}
+        ? `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzpCambiar(false)">⏸ Apagar el inventario de piezas en ${D.mod}</button>`
+        : `<button class="btn small" style="width:100%;margin-top:8px;background:#7c3aed" ${auds.length?'':'disabled'} onclick="pzpCambiar(true)">✂️ Encender el inventario de piezas en ${D.mod}</button>`}
       <p class="hint">Apagar no borra nada: lo capturado se queda y al volver a encender sigue donde iba. Para cambiar el conteo inicial, primero apágala.</p>
       ${hist.length?`<div class="hint" style="margin:6px 0 0"><strong>Historial:</strong><br>${hist.map(x=>`${x.accion==='on'?'🧪 Encendida':'⏸ Apagada'} · ${new Date(x.en).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · ${String(x.por||'').split('@')[0]}`).join('<br>')}</div>`:''}
     </div></div>`;
@@ -15957,7 +15957,7 @@ async function pzpCambiar(encender){
   const mod = pzpD.mod, c = pzpD.cfg || {};
   const aud = encender ? ($('#pzp-aud')||{}).value : c.auditoriaId;
   if(encender && !aud) return alert('Primero haz una auditoría con piezas y armados en '+mod+'.');
-  const pin = prompt(`${encender?'🧪 ENCENDER':'⏸ APAGAR'} la prueba de piezas en ${mod}\n\nEscribe tu PIN de administrador:`);
+  const pin = prompt(`${encender?'✂️ ENCENDER':'⏸ APAGAR'} el inventario de piezas en ${mod}\n\nEscribe tu PIN de administrador:`);
   if(pin===null) return;
   if(String(pin).trim()!==String(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
   const conf = prompt(`Para confirmar, escribe el nombre del módulo: ${mod.toUpperCase()}`);
@@ -15967,7 +15967,7 @@ async function pzpCambiar(encender){
   const historial = (c.historial||[]).concat([{accion:encender?'on':'off', en:ahora, por:quien, auditoriaId:aud||null}]);
   try{
     await db.collection('piezasPrueba').doc('cfg_'+mod).set({tipo:'cfg', modulo:mod, activo:!!encender, auditoriaId:aud||null, fecha:ahora, por:quien, historial});
-    toast(encender ? '🧪 Prueba encendida en '+mod : '⏸ Prueba apagada en '+mod+' (no se borró nada)');
+    toast(encender ? '✂️ Inventario de piezas activo en '+mod : '⏸ Inventario de piezas apagado en '+mod+' (no se borró nada)');
     _pzpCfgs = null; await pzpCargar(mod); pzpRender();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -16016,8 +16016,8 @@ function pzpVieHtml(){
   if(pzpVieColor && !con.includes(pzpVieColor)) con.push(pzpVieColor);
   const hojas = CATALOGO.filter(i=>esHoja(i) && /^Melamina|^MDF/.test(i.nombre));
   let h = `<div style="margin-top:14px;padding:10px 12px;border-radius:12px;border:2px dashed #16a34a">
-    <div style="font-weight:800;color:#16a34a">♻️ Retazo de antes de la prueba</div>
-    <p class="hint" style="margin:2px 0 0">Para piezas que sacaron de un retazo que <strong>ya estaba</strong> antes de empezar la prueba (nunca se midió). Solo anotas las piezas; no te pide cuánto retazo había.</p>`;
+    <div style="font-weight:800;color:#16a34a">♻️ Retazo de antes del conteo</div>
+    <p class="hint" style="margin:2px 0 0">Para piezas que sacaron de un retazo que <strong>ya estaba</strong> antes del conteo (nunca se midió). Solo anotas las piezas; no te pide cuánto retazo había.</p>`;
   con.forEach(id=>{ h += `<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:6px"><strong>${pzpColor(id)}</strong> <span class="hint">· retazo de antes</span>${pzpListaPiezasHtml(id, v[id]||[], 'pzpVieQ', 'pzpVieAdd', `'${id}'`)}</div>`; });
   h += `<select style="margin-top:8px" onchange="pzpVieColorSel(this.value)"><option value="">+ Elegir color del retazo de antes…</option>${hojas.filter(i=>!con.includes(i.id)).map(i=>`<option value="${i.id}">${pzpColor(i.id)}</option>`).join('')}</select></div>`;
   return h;
@@ -16239,7 +16239,7 @@ function pzpCapturaHtml(){
   const est = pzpEstado();
   h += `<div style="position:sticky;bottom:0;z-index:5;background:var(--bg);padding:8px 0 16px;margin-bottom:8px">
     ${est.t==='ok'?`<div style="text-align:center;font-weight:800;color:#16a34a;margin-bottom:6px">✅ Todo guardado</div>`:est.t==='cambios'?`<div style="text-align:center;font-weight:800;color:#d97706;margin-bottom:6px">📝 Hay cambios sin guardar</div>`:`<div style="text-align:center;font-weight:800;color:#dc2626;margin-bottom:6px">📝 Todavía no está guardado</div>`}
-    <button class="btn" style="width:100%;min-height:52px;${est.t==='ok'?'background:#16a34a':est.t==='cambios'?'background:#d97706':''}" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':est.t==='ok'?'✅ Guardado · volver a guardar':est.t==='cambios'?'💾 Guardar cambios del '+pzpFmtDia(pzpFecha):'💾 Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button></div>`;
+    <button class="btn" style="width:100%;min-height:52px;${est.t==='ok'?'background:#16a34a':est.t==='cambios'?'background:#d97706':''}" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':est.t==='ok'?'✅ Guardado · volver a guardar':est.t==='cambios'?'💾 Guardar cambios del '+pzpFmtDia(pzpFecha):'💾 Guardar la hoja del '+pzpFmtDia(pzpFecha)}</button></div>`;
   return h;
 }
 function pzpArmFormHtml(){
@@ -16306,7 +16306,7 @@ async function pzpGuardar(){
   try{
     { const prev = (pzpD.dias||[]).find(x=>x.fecha===pzpFecha); if(prev) ['retFilas','puertasTodo','mermas','hojaCoord','hojaPor','hojaGuardado'].forEach(k=>{ if(prev[k]!==undefined && doc[k]===undefined) doc[k] = prev[k]; }); } // v273
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
-    toast('✅ Guardado: prueba del '+pzpFmtDia(pzpFecha)+' (no cambia tu inventario)');
+    toast('✅ Guardado: hoja del '+pzpFmtDia(pzpFecha)+' (no cambia el inventario oficial)');
     await pzpCargar(mod); pzpCap = null; pzpRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
@@ -16343,7 +16343,7 @@ function pzpResultadoHtml(){
     const malas = pc.filas.filter(f=>okPieza(f)===false); if(!okC || malas.length) todoBien = false;
     return `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
       <div class="row" style="justify-content:space-between"><strong style="font-size:15px">${pzpColor(id)}</strong><span style="font-weight:800;color:${okC?'var(--ok)':'var(--bad)'}">${okC?'✅':'⚠️'} ${dH>0?'+':''}${fmtNum(dH)} hojas</span></div>
-      ${((R.vie||{})[id]||0)>0.005*PZP_A?`<div class="hint" style="margin:2px 0;color:#16a34a">♻️ ${fmtNum(R.vie[id]/PZP_A)} hojas en piezas salieron de retazo de antes de la prueba (ya van en "Debe haber").</div>`:''}
+      ${((R.vie||{})[id]||0)>0.005*PZP_A?`<div class="hint" style="margin:2px 0;color:#16a34a">♻️ ${fmtNum(R.vie[id]/PZP_A)} hojas en piezas salieron de retazo de antes del conteo (ya van en "Debe haber").</div>`:''}
       ${Math.abs(ret)>0.005?`<div class="hint" style="margin:2px 0">Retazo según el inventario de piezas: ${fmtNum(ret)} hojas (la auditoría no cuenta retazo)</div>`:''}
       <div class="wrap-x"><table><tr><th>Pieza</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contado</th><th style="text-align:right">Dif.</th></tr>
       ${pc.filas.sort((a,b)=>b.n.area-a.n.area).map(f=>{ const ok = okPieza(f); return `<tr><td>${f.n.n}</td><td style="text-align:right">${f.p}</td><td style="text-align:right">${f.c}</td><td style="text-align:right;font-weight:800;color:${f.d===0?'var(--ok)':(ok===false?'var(--bad)':'var(--ink)')}">${f.d>0?'+':''}${f.d}</td></tr>`; }).join('')}
@@ -16359,7 +16359,7 @@ function pzpResumenHtml(){
   const rs = pzpResumen(R);
   const faltan = R.avisos.filter(a=>a.falta).length;
   return `<div class="card"><h3>¿Cuadran las piezas con las hojas?</h3>
-    <p class="hint" style="margin-top:0">Desde el conteo del ${new Date(R.base.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})} · ${R.dias.length} día(s) · ${faltan?`<span class="neg">${faltan} sin capturar</span>`:'todos capturados'}. Todo en hojas, medido por área real. "Oficial" es el cortado de la app (por rendimiento), solo de referencia: la prueba de verdad es el conteo final.</p>
+    <p class="hint" style="margin-top:0">Desde el conteo del ${new Date(R.base.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})} · ${R.dias.length} día(s) · ${faltan?`<span class="neg">${faltan} sin capturar</span>`:'todos capturados'}. Todo en hojas, medido por área real. "Oficial" es el cortado de la app (por rendimiento), solo de referencia: lo que manda es el conteo.</p>
     <div class="wrap-x"><table><tr><th>Material</th><th style="text-align:right">Piezas</th><th style="text-align:right">Retazo</th><th style="text-align:right">Desp.</th><th style="text-align:right">Oficial</th></tr>
     ${rs.map(x=>`<tr><td><strong>${x.nombre.replace('Melamina ','')}</strong>${x.apartado>0.005?`<div class="hint" style="margin:0">apartado puertas ${fmtNum(x.apartado)}</div>`:''}${x.viejo>0.005?`<div class="hint" style="margin:0;color:#16a34a">♻️ ${fmtNum(x.viejo)} de retazo de antes</div>`:''}${Math.abs(x.sinCap)>0.005?`<div class="hint" style="margin:0;color:var(--bad)">sin capturar ${fmtNum(x.sinCap)}</div>`:''}</td><td style="text-align:right">${fmtNum(x.sueltas+x.armados)}<div class="hint" style="margin:0">${fmtNum(x.armados)} armadas</div></td><td style="text-align:right" class="${x.retazo<-0.01?'neg':''}">${fmtNum(x.retazo)}</td><td style="text-align:right">${fmtNum(x.desperdicio)}</td><td style="text-align:right">${x.oficial===null?'—':fmtNum(x.oficial)}</td></tr>`).join('') || '<tr><td colspan="5" class="hint">Sin datos todavía.</td></tr>'}
     </table></div></div>`;
@@ -16517,7 +16517,7 @@ function pzpChkColorHtml(R, f){
   const grupos = pzpChkGrupos(c); c.gq = c.gq||{};
   if(grupos.length) h += `<div class="card">${paso(4, 'Armados que traen estas piezas adentro', 'Cuenta cuántos hay de cada uno, <strong>sin importar el color del frente</strong>. La app saca las piezas que traen.')}
     ${grupos.map(g=>{ const id = g.k.replace(/[^a-z0-9]/gi,'_'); return `<div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)"><div style="flex:1;min-width:0"><strong>${g.txt}</strong><div class="hint" style="margin:0">cada uno trae ${g.trae}</div></div>${btn(`pzpChkGMas('${g.k.replace(/'/g,"\\'")}',-1)`,'−')}<input id="pzpchkg-${id}" type="number" min="0" inputmode="numeric" placeholder="0" value="${c.gq[g.k] ?? (g.idxs.length===1 && c.arm[g.idxs[0]].grupo ? (c.arm[g.idxs[0]].q??'') : '')}" oninput="pzpChk.gq['${g.k.replace(/'/g,"\\'")}']=this.value" style="width:76px;flex:none;text-align:center;font-size:20px;font-weight:900;margin:0">${btn(`pzpChkGMas('${g.k.replace(/'/g,"\\'")}',1)`,'+')}</div>`; }).join('')}
-    <p class="hint">Si hay un armado con estas piezas que no está aquí, anótalo en la prueba del día (Armados) y vuelve.</p></div>`;
+    <p class="hint">Si hay un armado con estas piezas que no está aquí, anótalo en la hoja del día (Armados) y vuelve.</p></div>`;
   const idx = grupos;
   h += `<button class="btn" style="width:100%;min-height:52px;background:#0e7490;margin-bottom:24px" onclick="pzpChkGuardar()">💾 Guardar y comparar (${sel.length} pieza${sel.length===1?'':'s'}${idx.length?' + '+idx.length+' armado'+(idx.length===1?'':'s'):''})</button>`;
   return h;
@@ -16539,8 +16539,8 @@ function pzpChkHtml(){
       ${c.keys.map(k=>{ const N = R.N[k]; if(!N) return ''; return `<div class="row" style="justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap"><div style="flex:1;min-width:0"><strong>${pzpColor(N.itemId)} · ${N.n}</strong><div class="hint" style="margin:0">${N.dim} · solo las sueltas</div></div><input type="number" min="0" inputmode="numeric" placeholder="cuántas" value="${c.q[k]??''}" oninput="pzpChk.q['${k}']=this.value" style="width:100px;flex:none"></div>`; }).join('')}
       <select style="margin-top:8px" onchange="if(this.value){pzpChk.keys.push(this.value);pzpRender()}"><option value="">+ Agregar otra pieza a contar…</option>${Object.keys(R.N).filter(k=>!c.keys.includes(k) && (R.T[k]||0)>0).sort((a,b)=>(pzpColor(R.N[a].itemId)+R.N[a].n).localeCompare(pzpColor(R.N[b].itemId)+R.N[b].n)).map(k=>`<option value="${k}">${pzpColor(R.N[k].itemId)} · ${R.N[k].n} ${R.N[k].dim}</option>`).join('')}</select></div>
     <div class="card"><strong>2 · Armados (cuenta todos)</strong>
-      ${c.arm.length ? c.arm.map((x,i)=>`<div class="row" style="justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap"><div style="flex:1;min-width:0"><strong>${pzpArmTxt(Object.assign({cantidad:1}, x.a))}</strong></div><input type="number" min="0" inputmode="numeric" placeholder="cuántos" value="${x.q??''}" oninput="pzpChk.arm[${i}].q=this.value" style="width:100px;flex:none"></div>`).join('') : '<p class="hint">Según la prueba no hay armados.</p>'}
-      <p class="hint">Si hay un armado que no está en la lista, anótalo en la prueba del día (sección de armados) y vuelve aquí.</p></div>
+      ${c.arm.length ? c.arm.map((x,i)=>`<div class="row" style="justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:nowrap"><div style="flex:1;min-width:0"><strong>${pzpArmTxt(Object.assign({cantidad:1}, x.a))}</strong></div><input type="number" min="0" inputmode="numeric" placeholder="cuántos" value="${x.q??''}" oninput="pzpChk.arm[${i}].q=this.value" style="width:100px;flex:none"></div>`).join('') : '<p class="hint">Según el inventario de piezas no hay armados.</p>'}
+      <p class="hint">Si hay un armado que no está en la lista, anótalo en la hoja del día (sección de armados) y vuelve aquí.</p></div>
     <button class="btn" style="width:100%;min-height:52px;background:#0e7490;margin-bottom:24px" onclick="pzpChkGuardar()">💾 Guardar conteo y comparar</button>`;
     return h;
   }
@@ -16548,7 +16548,7 @@ function pzpChkHtml(){
   const armCont = {}; c.arm.forEach(x=>{ const q = Number(x.q)||0; if(q>0) pzpContArmado(Object.assign({}, x.a, {cantidad:q})).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); armCont[k] = (armCont[k]||0) + p.q; }); });
   const ant = (pzpD.chks||[]).filter(x=>x.fecha < f).sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
   const difAnt = k => { if(!ant) return null; const p = (ant.piezas||[]).find(x=>x.k===k); return p && p.dif!==undefined ? p.dif : null; };
-  h += `${!capt?`<div class="warn">⚠️ La prueba del ${pzpFmtDia(f)} todavía no está guardada: "debe haber" puede no estar completo. Guárdala y regresa aquí.</div>`:''}
+  h += `${!capt?`<div class="warn">⚠️ La hoja del ${pzpFmtDia(f)} todavía no está guardada: "debe haber" puede no estar completo. Guárdala y regresa aquí.</div>`:''}
     <div class="card"><strong>Piezas</strong><div class="wrap-x"><table><tr><th>Pieza</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contadas</th><th style="text-align:right">Dif.</th></tr>
     ${c.keys.map(k=>{ const N = R.N[k]; if(!N) return ''; const debe = R.T[k]||0, su = Number(c.q[k])||0, ea = armCont[k]||0, tot = su + ea, d = fmtNum(tot - debe), da = difAnt(k);
       return `<tr><td><strong>${pzpColor(N.itemId)} · ${N.n}</strong><div class="hint" style="margin:0">${N.dim}</div></td><td style="text-align:right">${fmtNum(debe)}<div class="hint" style="margin:0">${fmtNum(debe-(R.AC[k]||0))} sueltas${R.AC[k]?' + '+fmtNum(R.AC[k])+' arm.':''}</div></td><td style="text-align:right">${fmtNum(tot)}<div class="hint" style="margin:0">${fmtNum(su)} sueltas${ea?' + '+fmtNum(ea)+' arm.':''}</div></td>
@@ -16567,7 +16567,7 @@ function pzpChkHistHtml(){
   if(!cs.length) return '';
   return `<div class="card"><strong>Conteos anteriores</strong>${cs.map(c=>{ const mal = (c.piezas||[]).filter(p=>p.dif < -1), mas = (c.piezas||[]).filter(p=>p.dif > 1);
     return `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><strong>${pzpFmtDia(c.fecha)}</strong> · ${(c.piezas||[]).length} piezas · ${mal.length?`<span class="neg">⚠️ faltan en ${mal.length}: ${mal.map(p=>p.txt+' ('+p.dif+')').join(', ')}</span>`:'<span style="color:#16a34a">✅ sin faltantes</span>'}${mas.length?` · <span style="color:#d97706">de más en ${mas.length}</span>`:''}</div>`; }).join('')}
-    <p class="hint">La diferencia guardada es la del día que se contó. Si después corriges la prueba de ese día, abre el conteo para ver la comparación al día.</p></div>`;
+    <p class="hint">La diferencia guardada es la del día que se contó. Si después corriges la hoja de ese día, abre el conteo para ver la comparación al día.</p></div>`;
 }
 async function pzpChkGuardar(){
   const c = pzpChk, f = c.fecha, mod = pzpD.mod, R = pzpCalcular(pzpD, f); if(!R) return;
@@ -16587,7 +16587,7 @@ function pzpComoVaHtml(){
   const ch = (pzpD.chks||[]).slice().sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
   const chMal = ch ? (ch.piezas||[]).filter(p=>p.dif < -1).length : 0;
   const tile = (n, t, col, sub) => `<div style="flex:1;min-width:0;padding:10px;border-radius:12px;background:${col}1a;border:1px solid ${col}55;text-align:center"><div style="font-size:22px;font-weight:900;color:${col}">${n}</div><div style="font-size:12px;font-weight:700">${t}</div>${sub?`<div class="hint" style="margin:2px 0 0;font-size:11px">${sub}</div>`:''}</div>`;
-  let h = `<div class="card"><h3 style="margin-top:0">📊 Cómo va la prueba</h3>
+  let h = `<div class="card"><h3 style="margin-top:0">📊 Cómo va el inventario de piezas</h3>
     <div style="display:flex;gap:8px">
       ${tile(capt+' / '+R.dias.length, 'días capturados', faltan.length?'#d97706':'#16a34a', faltan.length?faltan.length+' por capturar':'al corriente')}
       ${tile(av.length, 'avisos', av.length?'#dc2626':'#16a34a', av.length?'revisar abajo':'todo en orden')}
