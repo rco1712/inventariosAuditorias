@@ -5519,31 +5519,52 @@ function cierreConteoDirHtml(a){
   const filas = ccFilasColor(a), sob = ccSobranteResumen(a);
   const dif = d => Math.abs(d)<0.005 ? '<b style="color:var(--ok)">✓</b>' : `<b style="color:${d<0?'var(--bad)':'#d97706'}">${d>0?'+':'−'}${fmtNum(Math.abs(d))}</b>`;
   const ret = (a.retazos||[]).filter(r=>r.clase!=='sobrante'), dan = a.danadas||[];
-  const estado = a.aplicada ? `<div class="tag pos" style="border-color:var(--ok)">✓ ${a.aplicadaComoBase?'Aplicado como base (sin deuda)':'Aplicado'}</div>` : a.noAplicada ? '<div class="tag">❌ No se aplicó</div>' : '<div class="tag" style="color:#b3742c;border-color:#b3742c">Esperando tu decisión</div>';
+  // v272: decidir por color (casillas): aplicar, aplicar como base o no aplicar solo los marcados.
+  const ap = new Set(a.aplicadosItems||[]), no = new Set(a.noAplicadosItems||[]), base = new Set(a.basesItems||[]);
+  const pendientes = filas.filter(f=>Math.abs(f.dif)>=0.005 && !ap.has(f.itemId) && !no.has(f.itemId)).map(f=>f.itemId);
+  const decidir = !a.aplicada && !a.noAplicada && pendientes.length>0;
+  if(!ccSel[a.id]) ccSel[a.id] = new Set(pendientes);
+  const sel = ccSel[a.id];
+  const estado = a.aplicada ? `<div class="tag pos" style="border-color:var(--ok)">✓ ${a.aplicadaComoBase?'Aplicado como base (sin deuda)':'Decidido'}</div>` : a.noAplicada ? '<div class="tag">❌ No se aplicó</div>' : ((a.aplicadosItems||[]).length||(a.noAplicadosItems||[]).length ? '<div class="tag" style="color:#b3742c;border-color:#b3742c">Faltan colores por decidir</div>' : '<div class="tag" style="color:#b3742c;border-color:#b3742c">Esperando tu decisión</div>');
   return `<div style="margin-top:10px;padding:12px;border-radius:14px;border:2px solid #7c3aed;background:rgba(124,58,237,.07)">
     <div style="font-weight:900;font-size:15px">🧩 Material cortado por color ${estado}</div>
     <p class="hint" style="margin:2px 0 6px">Las hojas completas se contaron en el cierre. Aquí: lo que dice la app de cortado contra piezas + armados + retazo + sobrante contados (en hojas).</p>
-    ${filas.length?`<table><tr><th>Color</th><th>App</th><th>Contado</th><th>Dif.</th></tr>${filas.map(f=>`<tr><td>${swatchHtml(f.nombre)}${f.color}</td><td>${fmtNum(f.app)}</td><td>${fmtNum(f.cont)}</td><td>${dif(f.dif)}</td></tr>`).join('')}</table>`:'<p class="hint">No hay material cortado ni en la app ni en el conteo.</p>'}
+    ${filas.length?`<table><tr>${decidir?'<th></th>':''}<th>Color</th><th>App</th><th>Contado</th><th>Dif.</th></tr>${filas.map(f=>{ const est = ap.has(f.itemId) ? `<span class="pos" style="font-weight:800">✓ ${base.has(f.itemId)?'base':'aplicado'}</span>` : no.has(f.itemId) ? '<span class="hint" style="margin:0">❌ no</span>' : (Math.abs(f.dif)<0.005 ? '' : '<span style="color:#b3742c;font-weight:700">pendiente</span>');
+      const pend = !ap.has(f.itemId) && !no.has(f.itemId) && Math.abs(f.dif)>=0.005;
+      return `<tr>${decidir?`<td>${pend?`<input type="checkbox" style="width:22px;height:22px;min-height:0;margin:0" ${sel.has(f.itemId)?'checked':''} onchange="ccSelToggle('${a.id}','${f.itemId}',this.checked)">`:''}</td>`:''}<td>${swatchHtml(f.nombre)}${f.color}${est&&(ap.size||no.size)?`<div style="font-size:11.5px">${est}</div>`:''}</td><td>${fmtNum(f.app)}</td><td>${fmtNum(f.cont)}</td><td>${dif(f.dif)}</td></tr>`; }).join('')}</table>`:'<p class="hint">No hay material cortado ni en la app ni en el conteo.</p>'}
     <div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(124,58,237,.12)"><b>📦 Sobrante</b> · contado ${sob.tc} hojas · la app tenía ${sob.ta} en ${ (a.sobrantesApp||[]).length} sobrante(s) abiertos${Number(sob.extra)>0.005?` · <b style="color:#d97706">no estaba en la app: +${sob.extra}</b>`:''}<div class="hint" style="margin:2px 0 0">Al aplicar, esos sobrantes abiertos se cierran solos (ya quedaron en el conteo).</div></div>
     ${ret.length?`<details style="margin-top:6px"><summary class="hint">♻️ Retazo y piezas a medida (${ret.length})</summary>${ret.map(r=>`<div class="hint" style="margin:2px 0">• ${r.cantidad} × ${r.desc||retDescribir(r)} ≈ ${fmtNum(r.hojas)} h</div>`).join('')}</details>`:''}
     ${(a.retazos||[]).some(r=>r.clase==='sobrante')?`<details style="margin-top:6px"><summary class="hint">📦 Sobrante contado</summary>${a.retazos.filter(r=>r.clase==='sobrante').map(r=>`<div class="hint" style="margin:2px 0">• ${r.cantidad} × ${r.desc||retDescribir(r)} ≈ ${fmtNum(r.hojas)} h</div>`).join('')}</details>`:''}
     ${dan.length?`<details style="margin-top:6px" open><summary class="hint" style="color:var(--bad)">💥 Piezas dañadas (${dan.length}) · no se suman</summary>${dan.map(r=>`<div class="hint" style="margin:2px 0">• ${r.cantidad} × ${r.desc||retDescribir(r)}${r.nota?' · '+herrEsc(r.nota):''} ≈ ${fmtNum(r.hojas)} h</div>`).join('')}</details>`:''}
     ${(a.posposAlContar||[]).length?`<p class="hint" style="margin-top:6px">📅 Al contar había ${[...new Set(a.posposAlContar.map(x=>x.calle))].length} calle(s) con instalación para otro día (se les pidió no contarlas): ${[...new Set(a.posposAlContar.map(x=>x.calle))].slice(0,6).map(herrEsc).join(' · ')}</p>`:''}
     ${a.resultadoCoord?`<p class="hint" style="margin-top:6px">📤 Resultado mandado al coordinador el ${new Date(a.resultadoCoord.fecha).toLocaleString('es-MX')}${a.respuestaCoord?` · 💬 respondió: “${herrEsc(a.respuestaCoord.texto)}”`:' · sin respuesta todavía'}</p>`:''}
-    ${!a.aplicada && !a.noAplicada ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
-      <button class="btn small" style="margin:0;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="aplicarAuditoriaUI('${a.id}')">✅ Aplicar</button>
-      <button class="btn small" style="margin:0;background:#0e7490" onclick="ccAplicarBase('${a.id}')">📌 Aplicar como base (sin deuda)</button>
+    ${decidir ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+      <div class="hint" style="width:100%;margin:0">Con los colores marcados (${[...sel].filter(x=>pendientes.includes(x)).length} de ${pendientes.length}): <a href="#" onclick="ccSelTodos('${a.id}',true);return false">todos</a> · <a href="#" onclick="ccSelTodos('${a.id}',false);return false">ninguno</a></div>
+      <button class="btn small" style="margin:0;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="ccAplicarSel('${a.id}',false)">✅ Aplicar</button>
+      <button class="btn small" style="margin:0;background:#0e7490" onclick="ccAplicarSel('${a.id}',true)">📌 Aplicar como base (sin deuda)</button>
       <button class="btn small" style="margin:0;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="ccNoAplicar('${a.id}')">❌ No aplicar</button></div>` : ''}
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
       <button class="btn small" style="margin:0;background:#2563eb" onclick="ccMandarResultado('${a.id}')">📤 Mandar resultado al coordinador</button>
       ${!a.aplicada ? `<button class="btn small" style="margin:0;background:#d97706" onclick="ccPedirRecuento('${a.id}')">🔁 Pedir que vuelva a contar hoy</button>` : ''}</div>
   </div>`;
 }
+const ccSel = {};
+function ccSelToggle(id, it, on){ const s = ccSel[id] || (ccSel[id] = new Set()); if(on) s.add(it); else s.delete(it); renderHist(); }
+function ccSelTodos(id, on){ const a = auditorias.find(x=>x.id===id); if(!a) return; ccSel[id] = new Set(on ? ccFilasColor(a).filter(f=>Math.abs(f.dif)>=0.005).map(f=>f.itemId) : []); renderHist(); }
+async function ccAplicarSel(id, base){ const a = auditorias.find(x=>x.id===id); if(!a) return; const sel = [...(ccSel[id]||[])];
+  if(!sel.length) return alert('Marca los colores que quieres aplicar.');
+  await aplicarAuditoria(id, a, {soloItems:sel, sinDeuda:!!base}); delete ccSel[id]; }
 async function ccAplicarBase(id){ const a = auditorias.find(x=>x.id===id); if(a) await aplicarAuditoria(id, a, {sinDeuda:true}); }
 async function ccNoAplicar(id){
   if(!esAdmin()) return; const a = auditorias.find(x=>x.id===id); if(!a || a.aplicada) return;
-  if(!confirm('❌ ¿No aplicar este conteo?\n\nEl inventario se queda como está. El conteo se guarda solo como registro.')) return;
-  try{ await db.collection('auditorias').doc(id).update({noAplicada:true, noAplicadaEn:new Date().toISOString(), noAplicadaPor:getCurrentUserEmail?getCurrentUserEmail():''}); toast('Guardado: no se aplica.'); renderHist(); }catch(e){ alert('Error: '+e.message); }
+  const ap = new Set(a.aplicadosItems||[]), no = new Set(a.noAplicadosItems||[]);
+  const pend = ccFilasColor(a).filter(f=>Math.abs(f.dif)>=0.005 && !ap.has(f.itemId) && !no.has(f.itemId)).map(f=>f.itemId);
+  const sel = [...(ccSel[id]||[])].filter(x=>pend.includes(x));
+  if(!sel.length) return alert('Marca los colores que NO quieres aplicar.');
+  if(!confirm(`❌ ¿No aplicar estos colores?\n\n${sel.map(x=>pzpColor(x)).join(', ')}\n\nSu inventario se queda como está. El conteo se guarda solo como registro.`)) return;
+  const quedan = pend.filter(x=>!sel.includes(x)), ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
+  const fin = quedan.length ? {} : (ap.size ? {aplicada:true, fechaAplicada:ahora, aplicadaPor:quien} : {noAplicada:true, noAplicadaEn:ahora, noAplicadaPor:quien});
+  try{ await db.collection('auditorias').doc(id).update({noAplicadosItems:[...no, ...sel], ...fin}); delete ccSel[id]; toast('Guardado: esos colores no se aplican.'); renderHist(); }catch(e){ alert('Error: '+e.message); }
 }
 async function ccPedirRecuento(id){
   const a = auditorias.find(x=>x.id===id); if(!a) return;
@@ -5901,12 +5922,20 @@ async function aplicarAuditoria(id, a, opts){
   if(hayHojaConCortado && !contoCortado && a.tipo!=='parcial'){
     ajustarCortado = confirm('Esta auditoría NO contó piezas cortadas ni armados, pero el inventario dice que sí hay material cortado.\n\nAceptar = ajustar también el cortado (quedará en 0 y lo que había se va a deuda).\nCancelar = ajustar SOLO las hojas completas y dejar el cortado como está.');
   }
-  const calc = calcularAjustesAuditoria(a, ajustarCortado), ajustes = calc.ajustes;
-  const faltantes = opts.sinDeuda ? [] : calc.faltantes; // v272: "Aplicar como base" = sin pasar faltantes a deuda
-  const sobCerrar = a.cierreConteo ? (a.sobrantesApp||[]) : [];
+  const calc = calcularAjustesAuditoria(a, ajustarCortado);
+  // v272 (pedido por el usuario): en el cierre con conteo se aplica por color; lo ya aplicado no se repite.
+  const yaAplic = new Set(a.aplicadosItems||[]), yaNo = new Set(a.noAplicadosItems||[]);
+  const solo = opts.soloItems ? new Set(opts.soloItems.filter(x=>!yaAplic.has(x) && !yaNo.has(x))) : null;
+  if(solo && !solo.size) return alert('Elige al menos un color que falte por decidir.');
+  const deEstos = x => !solo || solo.has(x.it.id);
+  const ajustes = calc.ajustes.filter(deEstos);
+  const faltantes = opts.sinDeuda ? [] : calc.faltantes.filter(deEstos); // "Aplicar como base" = sin pasar faltantes a deuda
+  const aplicTras = new Set([...yaAplic, ...(solo||[])]);
+  // Un sobrante abierto se cierra cuando ya se aplicaron todos sus colores.
+  const sobCerrar = a.cierreConteo ? (a.sobrantesApp||[]).filter(sb=>(sb.restante||[]).every(x=>aplicTras.has(x.itemId)) && !(a.sobrantesCerradosIds||[]).includes(sb.id)) : [];
   const reales = ajustes.filter(x=>x.total || x.completasDelta || x.cortadoDelta);
   const resumen = reales.slice(0,12).map(x=>`• ${x.it.nombre}: ${x.total>0?'+':''}${fmtNum(x.total)}${(x.completasDelta&&x.cortadoDelta)?` (compl. ${fmtNum(x.completasDelta)}, cort. ${fmtNum(x.cortadoDelta)})`:(x.cortadoDelta?' (cortado)':'')}`).join('\n') + (reales.length>12?`\n… y ${reales.length-12} más`:'');
-  if(!confirm(`${opts.sinDeuda?'📌 Aplicar COMO BASE (sin deuda) el ':'Aplicar '}${a.cierreConteo?'CIERRE CON CONTEO DE PIEZAS':(a.tipo==='melamina'?'auditoría de MELAMINA Y MDF':'auditoría')} del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:${a.tipo==='melamina'?'\n(Solo se mueven Melamina y MDF. Herrajes y lo demás NO se tocan.)':''}\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?${sobCerrar.length?`\n\n📦 Se cierran ${sobCerrar.length} sobrante(s) que la app tenía abiertos: ya se contaron en el conteo.`:''}${opts.sinDeuda?'\n\nLo que falte NO pasa a deuda.':''}`)) return;
+  if(!confirm(`${opts.sinDeuda?'📌 Aplicar COMO BASE (sin deuda) el ':'Aplicar '}${a.cierreConteo?'CIERRE CON CONTEO DE PIEZAS':(a.tipo==='melamina'?'auditoría de MELAMINA Y MDF':'auditoría')} del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:${a.tipo==='melamina'?'\n(Solo se mueven Melamina y MDF. Herrajes y lo demás NO se tocan.)':''}\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?${solo?`\n\n🎨 Solo estos colores: ${[...solo].map(x=>pzpColor(x)).join(', ')}`:''}${sobCerrar.length?`\n\n📦 Se cierran ${sobCerrar.length} sobrante(s) que la app tenía abiertos: ya se contaron en el conteo.`:''}${opts.sinDeuda?'\n\nLo que falte NO pasa a deuda.':''}`)) return;
   const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
   const fechaAjuste = new Date(new Date(a.fecha).getTime()+1).toISOString();
   const fechaStr = new Date(a.fecha).toLocaleDateString('es-MX');
@@ -5924,6 +5953,15 @@ async function aplicarAuditoria(id, a, opts){
     let sobCerrados = 0;
     for(const sb of sobCerrar){ try{ const d = await db.collection('sobrantes').doc(sb.id).get(); const x = d && d.data ? d.data() : null;
       if(x && x.estado==='abierto'){ await db.collection('sobrantes').doc(sb.id).update({estado:'cerrado', cerradoEn:new Date().toISOString(), cerradoPorDireccion:creadoPor, cerradoPorConteo:id, restante:{}}); sobCerrados++; } }catch(e){} }
+    if(solo){
+      const pend = ccFilasColor(a).filter(f=>Math.abs(f.dif)>=0.005).map(f=>f.itemId).filter(x=>!aplicTras.has(x) && !yaNo.has(x));
+      const ahora = new Date().toISOString();
+      await db.collection('auditorias').doc(id).update({aplicadosItems:[...aplicTras], ...(opts.sinDeuda?{basesItems:[...new Set([...(a.basesItems||[]), ...solo])]}:{}),
+        aplicPorColor:(a.aplicPorColor||[]).concat([{en:ahora, por:creadoPor, items:[...solo], base:!!opts.sinDeuda}]),
+        deudasCreadas:(Number(a.deudasCreadas)||0)+faltantes.length, ajustoCortado:ajustarCortado,
+        sobrantesCerradosIds:(a.sobrantesCerradosIds||[]).concat(sobCerrar.map(x=>x.id)), sobrantesCerrados:(Number(a.sobrantesCerrados)||0)+sobCerrados,
+        ...(pend.length ? {} : {aplicada:true, fechaAplicada:ahora, aplicadaPor:creadoPor})});
+    } else
     await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor, deudasCreadas:faltantes.length, ajustoCortado:ajustarCortado, ...(opts.sinDeuda?{aplicadaComoBase:true}:{}), ...(sobCerrar.length?{sobrantesCerrados:sobCerrados}:{})});
     alert(`Auditoría aplicada. ${reales.length} ajuste(s) al inventario${faltantes.length?` y ${faltantes.length} faltante(s) guardados como deuda`:''}.`);
     renderHist();
