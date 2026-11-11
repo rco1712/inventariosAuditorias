@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v271';
+const APP_VERSION = 'v272';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14509,10 +14509,14 @@ async function generarMaqPDF(mods, soloId){
     if(!servs.length){ S.vacio('Sin mantenimientos ni reparaciones registrados.'); return; }
     const pend = maqPend(x);
     if(pend.length) S.tabla([{t:'Pieza que falta o está dañada',w:62},{t:'Reportada',w:28},{t:'Estado',w:40},{t:'Detalle',w:52}], pend.map(r=>[{t:r.pieza+' ('+(MAQ_REP_QUE[r.que]||'')+')'+(r.urgente?' URGENTE':''), b:true, col:ROJ}, fCor(r.fecha)+(r.quien?'\n'+r.quien:''), r.estado==='pedida'?'Ya se pidió'+(r.fechaPedida?' '+fCor(r.fechaPedida):''):'Pendiente', r.nota||'—']), ROJ);
-    const ivaT = k => k==='con'?'\ncon IVA':k==='sin'?'\nsin IVA':'';
-    S.tabla([{t:'Fecha',w:22},{t:'Tipo',w:24},{t:'Quién lo hizo',w:32},{t:'Mano de obra',w:22},{t:'Piezas compradas',w:60},{t:'Total',w:22}],
-      servs.map(v=>[fCor(v.fecha), {t:v.tipo==='rep'?'Reparación':'Mantenimiento', col:v.tipo==='rep'?AMB:VER, b:true}, v.quien||'—', pesos(v.costo)+ivaT(maqIvaMO(v)),
-        [(v.piezas||[]).map(p=>`${p.n} ${pesos(p.costo)}`).join(', ')+((v.piezas||[]).length?ivaT(maqIvaPz(v)).replace('\n',' · '):''), v.nota?`Nota: ${v.nota}`:''].filter(Boolean).join('\n')||'—', {t:pesos(maqServTotal(v)), b:true}]), CM); };
+    // v272 (pedido por el usuario): mano de obra y piezas por separado, cada pieza en su renglón con su precio y el IVA aparte.
+    const ivaT = k => k==='con'?'con IVA':k==='sin'?'sin IVA':'';
+    S.tabla([{t:'Fecha',w:18},{t:'Tipo',w:21},{t:'Quién lo hizo',w:23},{t:'Mano de obra',w:22},{t:'Piezas compradas',w:50},{t:'Qué se le hizo',w:30},{t:'Total',w:18}],
+      servs.map(v=>{ const ps = v.piezas||[], tp = ps.reduce((a,p)=>a+(Number(p.costo)||0),0);
+        return [fCor(v.fecha), {t:v.tipo==='rep'?'Reparación':'Mantenimiento', col:v.tipo==='rep'?AMB:VER, b:true}, v.quien||'—',
+          pesos(v.costo)+(ivaT(maqIvaMO(v))?'\n'+ivaT(maqIvaMO(v)):''),
+          ps.length ? ps.map(p=>`- ${p.n}: ${pesos(p.costo)}`).join('\n')+`\nTotal piezas: ${pesos(tp)}`+(ivaT(maqIvaPz(v))?' ('+ivaT(maqIvaPz(v))+')':'') : '—',
+          v.nota||'—', {t:pesos(maqServTotal(v)), b:true}]; }), CM, 20); };
   if(una){ CM = maqModRgb(una.modulo); historial(una); }
   else mods.forEach((md, mi)=>{
     const xs = todas.filter(x=>x.modulo===md).sort((a,b)=>(a.tipo||'').localeCompare(b.tipo||''));
