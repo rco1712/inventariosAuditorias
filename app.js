@@ -746,6 +746,8 @@ function setView(v){
   if(v==='mul'){ mulCache=null; mulAbierto=''; mulForm=null; mulPago=null; mulImp=null; renderMul(); }
   if(v==='herrcuad') renderHerrCuad();
   if(v==='ccres') renderCcRes();
+  if(v==='cpz') renderCpz();
+  if(v==='cpzrev') renderCpzRev();
 }
 
 let invCat = null, invDetalle = false;
@@ -5186,7 +5188,7 @@ function conteoAdminCardHtml(){
     return `<div class="movitem"><span style="min-width:0"><span class="invname">${m.nombre}</span><span style="display:block;margin-top:2px">${estado}</span></span>
       ${abierto ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="abrirConteo(['${m.nombre}'],false)">Cerrar</button>` : `<button class="btn small" onclick="abrirConteo(['${m.nombre}'],true)">Abrir hoy</button>`}</div>`;
   }).join('');
-  return cierreConteoAdminHtml() + `<details class="card" id="conteo-admin" ${Object.keys(conteoMap).some(k=>conteoAbiertoHoy(k)&&!conteoCierreHoy(k))?'open':''}>
+  return `<details class="card" id="conteo-admin" ${Object.keys(conteoMap).some(k=>conteoAbiertoHoy(k)&&!conteoCierreHoy(k))?'open':''}>
     <summary><strong>📋 Conteo del almacén para coordinadores</strong></summary>
     <p class="hint">Abre el conteo y el coordinador verá <strong>"Conteo del almacén"</strong> en su Inicio <strong>solo hoy</strong>. Cuenta a ciegas y, al enviarlo, se cierra. Te llega al Historial para que lo uses como stock inicial.</p>
     <button class="btn" style="width:100%;margin-bottom:8px" onclick="abrirConteo(MODULOS.map(m=>m.nombre),true)">Abrir hoy en los 5 módulos</button>
@@ -5218,7 +5220,7 @@ async function cierreConteoDiaFijo(d){
   const nuevos = actual.includes(d) ? actual.filter(x=>x!==d) : actual.concat([d]).sort();
   const nom = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][d];
   if(!confirm(actual.includes(d) ? `¿Quitar el ${nom} como día fijo del cierre con conteo?` : `¿Poner el ${nom} como día fijo?\n\nCada ${nom}, en todos los módulos, el cierre del turno llevará el conteo de piezas.`)) return;
-  try{ for(const m of MODULOS) await db.collection('conteoAbierto').doc(m.nombre).set({...(conteoMap[m.nombre]||{modulo:m.nombre}), modulo:m.nombre, diasFijos:nuevos}); toast('✅ Día fijo guardado.'); if(current==='conteo') renderConteoDir(); else renderAud(); }
+  try{ for(const m of MODULOS) await db.collection('conteoAbierto').doc(m.nombre).set({...(conteoMap[m.nombre]||{modulo:m.nombre}), modulo:m.nombre, diasFijos:nuevos}); toast('✅ Día fijo guardado.'); if(current==='cpz') renderCpz(); else if(current==='conteo') renderConteoDir(); else renderAud(); }
   catch(e){ alert('Error: '+e.message); }
 }
 async function abrirConteo(mods, abrir, enCierre){
@@ -5232,6 +5234,7 @@ async function abrirConteo(mods, abrir, enCierre){
         : {...prev, modulo:m, abierto:false, cerrado:new Date().toISOString(), cerradoPor:quien, ...(conteoDiaFijoHoy(prev)?{saltadoDia:hoy}:{})});
     }
     toast(abrir ? (enCierre ? '✅ Cierre con conteo activado para hoy.' : '✅ Conteo abierto para hoy.') : 'Conteo cerrado.');
+    if(current==='cpz'){ setTimeout(renderCpz, 300); }
     if(current==='conteo') renderConteoDir(); else renderAud();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -5549,11 +5552,47 @@ function cierreConteoDirHtml(a){
   </div>`;
 }
 const ccSel = {};
-function ccSelToggle(id, it, on){ const s = ccSel[id] || (ccSel[id] = new Set()); if(on) s.add(it); else s.delete(it); renderHist(); }
-function ccSelTodos(id, on){ const a = auditorias.find(x=>x.id===id); if(!a) return; ccSel[id] = new Set(on ? ccFilasColor(a).filter(f=>Math.abs(f.dif)>=0.005).map(f=>f.itemId) : []); renderHist(); }
+function ccRefrescar(){ if(current==='cpzrev') renderCpzRev(); else renderHist(); }
+function ccSelToggle(id, it, on){ const s = ccSel[id] || (ccSel[id] = new Set()); if(on) s.add(it); else s.delete(it); ccRefrescar(); }
+function ccSelTodos(id, on){ const a = auditorias.find(x=>x.id===id); if(!a) return; ccSel[id] = new Set(on ? ccFilasColor(a).filter(f=>Math.abs(f.dif)>=0.005).map(f=>f.itemId) : []); ccRefrescar(); }
 async function ccAplicarSel(id, base){ const a = auditorias.find(x=>x.id===id); if(!a) return; const sel = [...(ccSel[id]||[])];
   if(!sel.length) return alert('Marca los colores que quieres aplicar.');
   await aplicarAuditoria(id, a, {soloItems:sel, sinDeuda:!!base}); delete ccSel[id]; }
+// ===== v272 (pedido por el usuario): «🧩 Conteo de piezas», un lugar aparte (no en Auditoría) para Dirección =====
+// 1 · Activar (hoy por módulo o día fijo) · 2 · Revisar lo que contaron (por módulo) · 3 · Inventario de piezas.
+let _cpzAuds = null, _cpzAudsT = 0;
+async function cpzAudsTodos(){
+  if(_cpzAuds && Date.now()-_cpzAudsT < 30000) return _cpzAuds;
+  try{ const sn = await db.collection('auditorias').get(); _cpzAuds = sn.docs.map(d=>({id:d.id, ...d.data()})).filter(a=>a.cierreConteo); _cpzAudsT = Date.now(); }catch(e){ _cpzAuds = _cpzAuds || []; }
+  return _cpzAuds;
+}
+function cpzPendiente(a){ return !a.aplicada && !a.noAplicada; }
+async function renderCpz(){
+  if(!esAdmin()){ setView('home'); return; }
+  $('#main').innerHTML = '<div class="card">Cargando…</div>';
+  const auds = await cpzAudsTodos(); if(current!=='cpz') return;
+  const filas = MODULOS.map(m=>{ const xs = auds.filter(a=>a.modulo===m.nombre).sort((x,y)=>(y.fecha||'').localeCompare(x.fecha||'')); const pend = xs.filter(cpzPendiente).length, ult = xs[0];
+    return `<div class="movitem"><span style="min-width:0"><span class="invname">${m.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">${ult?'Último conteo: '+new Date(ult.fecha).toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'}):'Sin conteos todavía'}${pend?` · <b style="color:#b3742c">${pend} por decidir</b>`:''}</span></span>
+      ${xs.length?`<button class="btn small" style="background:${pend?'#d97706':'#7c3aed'}" onclick="entrarModulo('${m.nombre}','cpzrev')">${pend?'Revisar':'Ver'} →</button>`:''}</div>`; }).join('');
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #0e7490"><div style="font-size:18px;font-weight:900">🧩 Conteo de piezas</div>
+      <p class="hint" style="margin:4px 0 0">Todo en un solo lugar: activas el conteo, revisas lo que contaron y ves el inventario de piezas.</p></div>
+    <div class="hint" style="margin:14px 4px 0;font-weight:900;font-size:14px;color:#0e7490">1 · ACTIVAR EL CONTEO</div>
+    ${cierreConteoAdminHtml().replace('<details class="card" id="cierre-conteo-admin"','<details open class="card" id="cierre-conteo-admin"')}
+    <div class="hint" style="margin:14px 4px 0;font-weight:900;font-size:14px;color:#7c3aed">2 · REVISAR LO QUE CONTARON</div>
+    <div class="card"><div class="movlist">${filas}</div></div>
+    <div class="hint" style="margin:14px 4px 0;font-weight:900;font-size:14px;color:#16a34a">3 · INVENTARIO DE PIEZAS</div>
+    <div class="card" style="display:flex;align-items:center;gap:10px"><div style="flex:1"><strong>✂️ Inventario de piezas</strong><div class="hint" style="margin:0">Cuántas piezas debe haber en cada módulo, día por día, con PDF.</div></div><button class="btn small" style="background:#16a34a" onclick="setView('pzp')">Abrir</button></div>`;
+}
+function renderCpzRev(){
+  if(!esAdmin()){ setView('home'); return; }
+  const xs = (auditorias||[]).filter(a=>a.cierreConteo && a.modulo===modulo()).sort((x,y)=>(y.fecha||'').localeCompare(x.fecha||''));
+  const chips = MODULOS.map(m=>`<button class="chip ${m.nombre===modulo()?'on':''}" style="flex:none" onclick="entrarModulo('${m.nombre}','cpzrev')">${m.nombre}</button>`).join('');
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #7c3aed"><div class="row" style="justify-content:space-between;gap:8px"><div style="font-size:17px;font-weight:900">🧩 Conteos de ${modulo()}</div><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="setView('cpz')">← Conteo de piezas</button></div>
+      <div style="display:flex;gap:6px;overflow-x:auto;margin-top:8px">${chips}</div></div>
+    ${xs.length ? xs.map(a=>`<div class="card"><div class="row" style="justify-content:space-between;gap:8px"><div><strong>${new Date(a.fecha).toLocaleString('es-MX',{weekday:'long', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'})}</strong><div class="hint" style="margin:0">Contó: ${herrEsc(a.auditor||'')}</div></div>
+        <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="reporteAuditoriaUI('${a.id}')">📄 PDF</button></div>${cierreConteoDirHtml(a)}</div>`).join('')
+      : '<div class="card"><p class="hint" style="margin:0">Este módulo todavía no tiene conteos de piezas.</p></div>'}`;
+}
 async function ccAplicarBase(id){ const a = auditorias.find(x=>x.id===id); if(a) await aplicarAuditoria(id, a, {sinDeuda:true}); }
 async function ccNoAplicar(id){
   if(!esAdmin()) return; const a = auditorias.find(x=>x.id===id); if(!a || a.aplicada) return;
@@ -5564,7 +5603,7 @@ async function ccNoAplicar(id){
   if(!confirm(`❌ ¿No aplicar estos colores?\n\n${sel.map(x=>pzpColor(x)).join(', ')}\n\nSu inventario se queda como está. El conteo se guarda solo como registro.`)) return;
   const quedan = pend.filter(x=>!sel.includes(x)), ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
   const fin = quedan.length ? {} : (ap.size ? {aplicada:true, fechaAplicada:ahora, aplicadaPor:quien} : {noAplicada:true, noAplicadaEn:ahora, noAplicadaPor:quien});
-  try{ await db.collection('auditorias').doc(id).update({noAplicadosItems:[...no, ...sel], ...fin}); delete ccSel[id]; toast('Guardado: esos colores no se aplican.'); renderHist(); }catch(e){ alert('Error: '+e.message); }
+  try{ await db.collection('auditorias').doc(id).update({noAplicadosItems:[...no, ...sel], ...fin}); delete ccSel[id]; toast('Guardado: esos colores no se aplican.'); ccRefrescar(); }catch(e){ alert('Error: '+e.message); }
 }
 async function ccPedirRecuento(id){
   const a = auditorias.find(x=>x.id===id); if(!a) return;
@@ -5582,7 +5621,7 @@ async function ccMandarResultado(id){
   const lineas = filas.map(f=>({color:f.color, dif:fmtNum(f.dif)}));
   const nota = prompt(`📤 Resultado para ${a.modulo}:\n\n${lineas.length?lineas.map(l=>`• ${l.color}: ${l.dif<0?'faltan':'sobran'} ${fmtNum(Math.abs(l.dif))} hojas de material cortado`).join('\n'):'• Todo cuadra'}\n\nMensaje para el coordinador (opcional):`, '');
   if(nota===null) return;
-  try{ await db.collection('auditorias').doc(id).update({resultadoCoord:{fecha:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():'', lineas, nota:String(nota).trim()}}); toast('📤 Resultado mandado.'); renderHist(); }catch(e){ alert('Error: '+e.message); }
+  try{ await db.collection('auditorias').doc(id).update({resultadoCoord:{fecha:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():'', lineas, nota:String(nota).trim()}}); toast('📤 Resultado mandado.'); ccRefrescar(); }catch(e){ alert('Error: '+e.message); }
 }
 // Coordinador: resultado que le mandó Dirección y su respuesta; "Mis conteos" con su PDF de respaldo.
 function ccResultadoPendiente(){ return esCoordinador() ? (auditorias||[]).filter(a=>a.cierreConteo && a.resultadoCoord && !a.respuestaCoord && a.modulo===modulo()) : []; }
@@ -5650,7 +5689,7 @@ function renderHist(){
           ${a.aplicada?`<div class="tag pos" style="border-color:var(--ok)">✓ ${a.conteoInicial?'Es el stock inicial':(a.complemento?'Sumado al stock inicial':'Aplicada al inventario')}</div>`:`<div class="tag" style="color:#b3742c;border-color:#b3742c">${a.conteoInicial||a.complemento?'Esperando tu aprobación':'Sin aplicar'}</div>`}</div>
         ${a.complemento ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).length} artículo(s) a sumar</div>` : a.conteoInicial ? `<div style="font-weight:700;color:var(--brand)">${(a.resultados||[]).filter(r=>Math.abs(Number(r.fisico)||0)>0.005).length} artículo(s) con existencia</div>` : `<div class="${a.totalDiff?'neg':'pos'}" style="font-weight:700">${a.totalDiff} discrepancia(s)</div>`}
       </div>
-      ${a.cierreConteo ? cierreConteoDirHtml(a) : ''}
+      ${a.cierreConteo && esAdmin() ? `<button class="btn" style="width:100%;margin-top:8px;background:#7c3aed" onclick="setView('cpzrev')">🧩 Revisar en «Conteo de piezas» →</button>` : ''}
       <div class="row" style="justify-content:flex-end;margin-top:8px;gap:8px">
         <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="${a.conteoInicial?`conteoPdfUI('${a.id}')`:`reporteAuditoriaUI('${a.id}')`}">📄 ${a.conteoInicial?'PDF del conteo':'Reporte PDF'}</button>
         ${!a.aplicada && esAdmin() && !a.cierreConteo ? (a.complemento ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="sumarComplementoUI('${a.id}')">➕ Sumar al stock inicial</button>` : a.conteoInicial ? `<button class="btn small" style="background:linear-gradient(135deg,#1f9d55,#178045)" onclick="usarConteoComoInicialUI('${a.id}')">✅ Usar como stock inicial</button>` : `<button class="btn small" onclick="aplicarAuditoriaUI('${a.id}')">Aplicar al inventario</button>`) : ''}
@@ -5964,7 +6003,7 @@ async function aplicarAuditoria(id, a, opts){
     } else
     await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor, deudasCreadas:faltantes.length, ajustoCortado:ajustarCortado, ...(opts.sinDeuda?{aplicadaComoBase:true}:{}), ...(sobCerrar.length?{sobrantesCerrados:sobCerrados}:{})});
     alert(`Auditoría aplicada. ${reales.length} ajuste(s) al inventario${faltantes.length?` y ${faltantes.length} faltante(s) guardados como deuda`:''}.`);
-    renderHist();
+    if(current==='cpzrev') renderCpzRev(); else renderHist();
   }catch(e){ alert('Error al aplicar: '+e.message); }
 }
 
@@ -11392,7 +11431,7 @@ function audIrConteo(){ irA('conteo'); }
 // pendientes y alertas, la Auditoría y lo de Dirección. Para ver un inventario, auditar o capturar
 // "como coordinador" entra a un módulo; arriba sale "📍 Módulo · ‹ Volver a Dirección".
 let dirModo = true;
-const VISTAS_MODULO = ['rinst','inv','mov','mermaarm','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped'];
+const VISTAS_MODULO = ['rinst','inv','mov','mermaarm','inst','gar','cierre','tubos','sob','gas','pend','pzenc','ini','hist','aud','herr','ferrec','movhist','ped','cpzrev'];
 function enDirModo(){ return esAdmin() && dirModo; }
 async function entrarModulo(n, v){
   dirModo = false;
@@ -16214,7 +16253,9 @@ async function pzpInicio(){
     const C = await pzpCfgTodos(); const on = MODULOS.filter(m=>C[m.nombre] && C[m.nombre].activo).map(m=>m.nombre);
     if(current!=='home' || document.getElementById('pzp-home')) return;
     const m = $('#main'); if(!m) return;
-    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #7c3aed;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>✂️ Inventario de piezas</strong><div class="hint" style="margin:0">${on.length?'Activo en '+on.join(', '):'Apagado en todos los módulos'} · solo tú lo ves</div></div><button class="btn small" onclick="setView('pzp')">Abrir</button></div>`);
+    const hoyAct = MODULOS.filter(x=>conteoCierreHoy(x.nombre)).map(x=>x.nombre); const pendAud = (await cpzAudsTodos()).filter(cpzPendiente).length;
+    if(current!=='home' || document.getElementById('pzp-home')) return;
+    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #0e7490;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>🧩 Conteo de piezas</strong><div class="hint" style="margin:0">${hoyAct.length?'🟢 Conteo hoy en '+hoyAct.join(', '):'Sin conteo activado hoy'}${pendAud?` · <b style="color:#b3742c">${pendAud} conteo(s) por decidir</b>`:''}<br>✂️ Inventario de piezas: ${on.length?'activo en '+on.join(', '):'apagado'} · solo tú lo ves</div></div><button class="btn small" style="background:#0e7490" onclick="setView('cpz')">Abrir</button></div>`);
   }catch(e){}
 }
 (function(){
