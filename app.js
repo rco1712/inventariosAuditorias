@@ -239,7 +239,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v271';
+const APP_VERSION = 'v272';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -14233,6 +14233,16 @@ function maqServTotal(v){ return (Number(v.costo)||0)+(v.piezas||[]).reduce((a,p
 // v252 (pedido por el usuario): IVA, datos de compra, lo que trae la máquina y reportes de piezas que faltan.
 const MAQ_IVA = {con:['🧾 Con IVA','#2563eb'], sin:['💵 Sin IVA','#64748b']};
 const maqIvaTag = iva => MAQ_IVA[iva] ? `<span class="tag" style="color:${MAQ_IVA[iva][1]};border-color:${MAQ_IVA[iva][1]};margin:0">${MAQ_IVA[iva][0]}</span>` : '';
+// v272 (pedido por el usuario): el IVA va por separado para la mano de obra y para las piezas. Los registros viejos
+// solo tenían "iva" para todo; si no tienen el dato separado, se usa ese.
+const maqIvaMO = v => v.ivaMO!==undefined ? v.ivaMO : (v.iva||'');
+const maqIvaPz = v => v.ivaPz!==undefined ? v.ivaPz : (v.iva||'');
+async function maqServIva(mid, sid, campo, val){
+  const x = maqCache.find(m=>m.id===mid); if(!x) return;
+  const servicios = (x.servicios||[]).map(v=>{ if(v.id!==sid) return v; const n = Object.assign({}, v, {ivaMO:maqIvaMO(v), ivaPz:maqIvaPz(v)}); n[campo] = n[campo]===val ? '' : val; return n; });
+  try{ await db.collection('maquinas').doc(x.id).update({servicios}); x.servicios = servicios; toast('💾 IVA corregido'); maqFichaPintar(); }catch(e){ alert('Error: '+e.message); }
+}
+const maqIvaChips = (v, mid, campo) => Object.keys(MAQ_IVA).map(k=>{ const on = (campo==='ivaMO'?maqIvaMO(v):maqIvaPz(v))===k; return `<button onclick="maqServIva('${mid}','${v.id}','${campo}','${k}')" style="all:unset;cursor:pointer;font-size:12px;font-weight:800;padding:2px 8px;border-radius:999px;margin-left:4px;border:1px solid ${on?MAQ_IVA[k][1]:'var(--line)'};color:${on?MAQ_IVA[k][1]:'var(--sub)'}${on?';background:rgba(37,99,235,.08)':''}">${on?'✓ ':''}${MAQ_IVA[k][0]}</button>`; }).join('');
 const MAQ_REP_QUE = {falta:'Falta', danada:'Dañada', desgastada:'Desgastada'};
 const MAQ_REP_EST = {pendiente:['⏳ Pendiente','#dc2626'], pedida:['📦 Ya se pidió','#d97706'], resuelta:['✅ Resuelta','#16a34a']};
 const maqPend = x => (x.reportes||[]).filter(r=>r.estado!=='resuelta');
@@ -14340,9 +14350,10 @@ function maqFichaPintar(){
   const um = maqUltimo(x,'mant'), ur = maqUltimo(x,'rep');
   const serv = v => `<div style="padding:10px 12px;border-radius:12px;border:1px solid ${v.tipo==='rep'?'#d97706':'#16a34a'};margin-top:8px">
       <div class="row" style="justify-content:space-between;gap:8px"><strong>${v.tipo==='rep'?'🛠️ Reparación':'🔧 Mantenimiento'} · ${fCorta(v.fecha)}</strong><strong>${maqPesos(maqServTotal(v))}</strong></div>
-      <div class="hint" style="margin:2px 0 0">👤 ${maqEsc(v.quien||'—')} · cobró ${maqPesos(v.costo)} ${maqIvaTag(v.iva)}</div>
+      <div class="hint" style="margin:2px 0 0">👤 ${maqEsc(v.quien||'—')}</div>
+      <div style="margin-top:3px;font-size:13px">🧑‍🔧 Mano de obra <strong>${maqPesos(v.costo)}</strong>${maqIvaChips(v, x.id, 'ivaMO')}</div>
       ${(v.resuelve||[]).length?`<div style="margin-top:3px;font-size:13px;color:#16a34a">✅ Resolvió: ${maqEsc((v.resuelve||[]).map(id=>((x.reportes||[]).find(r=>r.id===id)||{}).pieza).filter(Boolean).join(', '))}</div>`:''}
-      ${(v.piezas||[]).length?`<div style="margin-top:4px;font-size:13px">🔩 Piezas: ${(v.piezas||[]).map(p=>`${maqEsc(p.n)} <strong>${maqPesos(p.costo)}</strong>`).join(' · ')}</div>`:''}
+      ${(v.piezas||[]).length?`<div style="margin-top:4px;font-size:13px">🔩 Piezas: ${(v.piezas||[]).map(p=>`${maqEsc(p.n)} <strong>${maqPesos(p.costo)}</strong>`).join(' · ')}${maqIvaChips(v, x.id, 'ivaPz')}</div>`:''}
       ${v.nota?`<div class="hint" style="margin:4px 0 0">📝 ${maqEsc(v.nota)}</div>`:''}
       <button class="btn small" style="margin-top:6px;padding:3px 10px;min-height:0;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="maqServBorrar('${x.id}','${v.id}')">🗑️ Borrar</button></div>`;
   $('#main').innerHTML = `
@@ -14423,7 +14434,7 @@ async function maqRepBorrar(mid, rid){
   const reportes = x.reportes.filter(y=>y.id!==rid);
   try{ await db.collection('maquinas').doc(x.id).update({reportes}); x.reportes = reportes; maqFichaPintar(); }catch(e){ alert('Error: '+e.message); }
 }
-function maqServNuevo(tipo){ maqServ = {tipo, fecha:fechaHoyLocal(), quien:'', costo:'', piezas:tipo==='rep'?[{n:'',costo:''}]:[], nota:'', iva:'', resuelve:[]}; maqFichaPintar(); setTimeout(()=>{ const el=document.getElementById('maq-serv'); if(el) el.scrollIntoView({behavior:'smooth'}); },50); }
+function maqServNuevo(tipo){ maqServ = {tipo, fecha:fechaHoyLocal(), quien:'', costo:'', piezas:tipo==='rep'?[{n:'',costo:''}]:[], nota:'', ivaMO:'', ivaPz:'', resuelve:[]}; maqFichaPintar(); setTimeout(()=>{ const el=document.getElementById('maq-serv'); if(el) el.scrollIntoView({behavior:'smooth'}); },50); }
 function maqServPintar(){
   const el = document.getElementById('maq-serv'); if(!el || !maqServ) return; const s = maqServ, rep = s.tipo==='rep', c = rep?'#d97706':'#16a34a';
   const quienes = [...new Set((maqCache||[]).flatMap(m=>(m.servicios||[]).map(v=>v.quien)).filter(Boolean))];
@@ -14439,8 +14450,10 @@ function maqServPintar(){
     <label class="hint" style="display:block;margin-top:10px">🔩 Piezas que se compraron ${rep?'':'(si se cambió algo)'}</label>
     ${s.piezas.map((p,i)=>`<div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap"><input placeholder="Pieza (ej. banda, resistencia)" value="${maqEsc(p.n)}" oninput="maqServ.piezas[${i}].n=this.value" style="flex:1;min-width:0"><input type="number" min="0" inputmode="decimal" placeholder="$" value="${p.costo}" oninput="maqServ.piezas[${i}].costo=this.value;maqServTot()" style="width:90px;min-width:90px"><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;padding:4px 10px" onclick="maqServ.piezas.splice(${i},1);maqServPintar()">✕</button></div>`).join('')}
     <button class="btn small" style="margin-top:6px;background:transparent;color:${c};border:1px solid ${c};box-shadow:none" onclick="maqServ.piezas.push({n:'',costo:''});maqServPintar()">➕ Agregar pieza</button>
-    <label class="hint" style="display:block;margin-top:10px">¿Lo que cobraron incluye IVA?</label>
-    <div class="chips" style="margin-top:4px">${Object.keys(MAQ_IVA).map(k=>`<button class="chip ${s.iva===k?'on':''}" onclick="maqServ.iva=maqServ.iva==='${k}'?'':'${k}';maqServPintar()">${MAQ_IVA[k][0]}</button>`).join('')}</div>
+    <label class="hint" style="display:block;margin-top:10px">🧾 ¿La <b>mano de obra</b> incluye IVA?</label>
+    <div class="chips" style="margin-top:4px">${Object.keys(MAQ_IVA).map(k=>`<button class="chip ${s.ivaMO===k?'on':''}" onclick="maqServ.ivaMO=maqServ.ivaMO==='${k}'?'':'${k}';maqServPintar()">${MAQ_IVA[k][0]}</button>`).join('')}</div>
+    <label class="hint" style="display:block;margin-top:10px">🧾 ¿Las <b>piezas</b> incluyen IVA?</label>
+    <div class="chips" style="margin-top:4px">${Object.keys(MAQ_IVA).map(k=>`<button class="chip ${s.ivaPz===k?'on':''}" onclick="maqServ.ivaPz=maqServ.ivaPz==='${k}'?'':'${k}';maqServPintar()">${MAQ_IVA[k][0]}</button>`).join('')}</div>
     ${(()=>{ const x = maqCache.find(m=>m.id===maqAbierta), pend = x ? maqPend(x) : []; if(!pend.length) return '';
       return `<label class="hint" style="display:block;margin-top:10px">¿Con esto se resolvió alguna pieza reportada?</label>${pend.map(r=>`<label class="row" style="gap:8px;margin-top:4px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${(s.resuelve||[]).includes(r.id)?'checked':''} onchange="maqServ.resuelve=this.checked?[...(maqServ.resuelve||[]),'${r.id}']:(maqServ.resuelve||[]).filter(z=>z!=='${r.id}')"> ${maqEsc(r.pieza)} <span class="hint" style="margin:0">(reportada ${fCorta(r.fecha)})</span></label>`).join('')}`; })()}
     <input placeholder="Nota (opcional): qué se le hizo" value="${maqEsc(s.nota)}" oninput="maqServ.nota=this.value" style="margin-top:10px">
@@ -14454,7 +14467,7 @@ async function maqServGuardar(){
   if(!s.fecha) return alert('Escribe la fecha.'); if(!String(s.quien).trim()) return alert('Escribe quién lo hizo.');
   const piezas = s.piezas.filter(p=>String(p.n).trim() || Number(p.costo)>0).map(p=>({n:String(p.n).trim()||'Pieza', costo:Number(p.costo)||0}));
   if(s.tipo==='rep' && !piezas.length && !(Number(s.costo)>0) && !confirm('No escribiste piezas ni costo. ¿Guardar así?')) return;
-  const v = {id:cryptoId(), tipo:s.tipo, fecha:s.fecha, quien:String(s.quien).trim(), costo:Number(s.costo)||0, piezas, nota:String(s.nota||'').trim(), iva:s.iva||'', resuelve:(s.resuelve||[]).slice(), por:getCurrentUserEmail?getCurrentUserEmail():'', creado:new Date().toISOString()};
+  const v = {id:cryptoId(), tipo:s.tipo, fecha:s.fecha, quien:String(s.quien).trim(), costo:Number(s.costo)||0, piezas, nota:String(s.nota||'').trim(), ivaMO:s.ivaMO||'', ivaPz:piezas.length?(s.ivaPz||''):'', resuelve:(s.resuelve||[]).slice(), por:getCurrentUserEmail?getCurrentUserEmail():'', creado:new Date().toISOString()};
   const servicios = [...(x.servicios||[]), v];
   const reportes = (x.reportes||[]).map(r=>(s.resuelve||[]).includes(r.id) ? Object.assign({}, r, {estado:'resuelta', fechaResuelta:s.fecha, servicioId:v.id}) : r);
   try{ await db.collection('maquinas').doc(x.id).update({servicios, reportes}); x.servicios = servicios; x.reportes = reportes; maqServ = null; toast('💾 Guardado'); maqFichaPintar(); window.scrollTo(0,0); }catch(e){ alert('Error: '+e.message); }
@@ -14496,9 +14509,14 @@ async function generarMaqPDF(mods, soloId){
     if(!servs.length){ S.vacio('Sin mantenimientos ni reparaciones registrados.'); return; }
     const pend = maqPend(x);
     if(pend.length) S.tabla([{t:'Pieza que falta o está dañada',w:62},{t:'Reportada',w:28},{t:'Estado',w:40},{t:'Detalle',w:52}], pend.map(r=>[{t:r.pieza+' ('+(MAQ_REP_QUE[r.que]||'')+')'+(r.urgente?' URGENTE':''), b:true, col:ROJ}, fCor(r.fecha)+(r.quien?'\n'+r.quien:''), r.estado==='pedida'?'Ya se pidió'+(r.fechaPedida?' '+fCor(r.fechaPedida):''):'Pendiente', r.nota||'—']), ROJ);
-    S.tabla([{t:'Fecha',w:22},{t:'Tipo',w:24},{t:'Quién lo hizo',w:34},{t:'Cobró',w:18},{t:'Piezas compradas',w:62},{t:'Total',w:22}],
-      servs.map(v=>[fCor(v.fecha), {t:v.tipo==='rep'?'Reparación':'Mantenimiento', col:v.tipo==='rep'?AMB:VER, b:true}, v.quien||'—', pesos(v.costo)+(v.iva==='con'?'\ncon IVA':v.iva==='sin'?'\nsin IVA':''),
-        [(v.piezas||[]).map(p=>`${p.n} ${pesos(p.costo)}`).join(', '), v.nota?`Nota: ${v.nota}`:''].filter(Boolean).join('\n')||'—', {t:pesos(maqServTotal(v)), b:true}]), CM); };
+    // v272 (pedido por el usuario): mano de obra y piezas por separado, cada pieza en su renglón con su precio y el IVA aparte.
+    const ivaT = k => k==='con'?'con IVA':k==='sin'?'sin IVA':'';
+    S.tabla([{t:'Fecha',w:18},{t:'Tipo',w:21},{t:'Quién lo hizo',w:23},{t:'Mano de obra',w:22},{t:'Piezas compradas',w:50},{t:'Qué se le hizo',w:30},{t:'Total',w:18}],
+      servs.map(v=>{ const ps = v.piezas||[], tp = ps.reduce((a,p)=>a+(Number(p.costo)||0),0);
+        return [fCor(v.fecha), {t:v.tipo==='rep'?'Reparación':'Mantenimiento', col:v.tipo==='rep'?AMB:VER, b:true}, v.quien||'—',
+          pesos(v.costo)+(ivaT(maqIvaMO(v))?'\n'+ivaT(maqIvaMO(v)):''),
+          ps.length ? ps.map(p=>`- ${p.n}: ${pesos(p.costo)}`).join('\n')+`\nTotal piezas: ${pesos(tp)}`+(ivaT(maqIvaPz(v))?' ('+ivaT(maqIvaPz(v))+')':'') : '—',
+          v.nota||'—', {t:pesos(maqServTotal(v)), b:true}]; }), CM, 20); };
   if(una){ CM = maqModRgb(una.modulo); historial(una); }
   else mods.forEach((md, mi)=>{
     const xs = todas.filter(x=>x.modulo===md).sort((a,b)=>(a.tipo||'').localeCompare(b.tipo||''));
