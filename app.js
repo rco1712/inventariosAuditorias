@@ -15489,7 +15489,11 @@ function pzpCalcular(D, hasta, borrador){
     if(c) Object.keys(libre).forEach(id=>{
       const r = libre[id], cc = (c.corte||{})[id] || {};
       if(r < -1){ avisos.push({dia, id, t:pzpColor(id)+': lo anotado no cabe en lo que se cortó ('+pzpH(-r)+' hojas de más).'}); addA(ret, id, r); }
-      else if(r > 0){ if(cc.sobrante==='retazo') addA(ret, id, r); else addA(des, id, r); }
+      else if(r > 0){
+        // v273: en la hoja del coordinador solo es retazo lo que se MIDIÓ y se guardó; lo demás es desperdicio del corte
+        // (orillas, tiras angostas, el grosor de la sierra). Antes todo el sobrante se tomaba como retazo.
+        if(Array.isArray(cc.retazos)){ const aR = Math.min(r, cc.retazos.reduce((t,x)=>t+(Number(x.w)||0)*(Number(x.h)||0)*(Number(x.q)||0),0)); if(aR>0) addA(ret, id, aR); if(r-aR>0) addA(des, id, r-aR); }
+        else if(cc.sobrante==='retazo') addA(ret, id, r); else addA(des, id, r); }
     });
     if(c){
       const usoRet = {};
@@ -15711,6 +15715,11 @@ function hcPiezasHtml(id){
       : `<button onclick="hcOtra={id:'${id}', n:'Otra pieza', w:'', h:'', q:''};hcRender()" style="all:unset;cursor:pointer;display:block;padding:8px 0;font-weight:800;color:#2563eb">➕ Otra pieza (nombre y medida)</button>`}</div></div>`;
   return h;
 }
+function hcRetAgregar(id){ const w = Number((document.getElementById('hcr-w')||{}).value), h = Number((document.getElementById('hcr-h')||{}).value), q = Math.round(Number((document.getElementById('hcr-q')||{}).value)||1);
+  if(!(w>0 && h>0)) return alert('Escribe el ancho y el alto del retazo en cm.');
+  const ch = Math.min(w,h), la = Math.max(w,h); if(ch>122 || la>244) return alert('Una hoja mide 122×244. Revisa la medida.'); if(ch<10 || la<27) return alert('Eso es más chico que 10×27: es basura, no se guarda como retazo.');
+  const cc = hcCorte(id); (cc.retazos = cc.retazos||[]).push({w, h, q}); toast(`✔ Retazo ${fmtNum(w)}×${fmtNum(h)} × ${q} · ${pzpColor(id)}`); hcBorrGuardar(); hcRender(); }
+function hcRetQuitar(id, i){ const cc = hcCorte(id); if(!confirm('¿Quitar ese retazo?')) return; (cc.retazos||[]).splice(i,1); hcBorrGuardar(); hcRender(); }
 function hcOtraAgregar(){ const o = hcOtra; if(!o) return; const w = Number(o.w), hh = Number(o.h), q = Math.round(Number(o.q));
   if(!(w>0 && hh>0)) return alert('Escribe el ancho y el alto en cm.'); if(Math.min(w,hh)>122 || Math.max(w,hh)>244) return alert('Una hoja mide 122×244. Revisa la medida.'); if(!(q>0)) return alert('Escribe cuántas.');
   const cc = hcCorte(o.id); (cc.otras = cc.otras||[]).push({n:o.n||'Otra pieza', w, h:hh, q}); toast(`✔ ${q} × ${o.n} ${fmtNum(w)}×${fmtNum(hh)} · ${pzpColor(o.id)}`); hcOtra = null; hcBorrGuardar(); hcRender(); }
@@ -15729,9 +15738,13 @@ function hcColorHtml(id){
     </div>
     ${hcPiezasHtml(id)}
     <div style="background:#fff3cd;border:1px solid #f5d77a;border-radius:12px;padding:8px 12px;margin-top:10px;color:#1f2937"><b>Lo que SOBRÓ</b>
-      ${H>0?`<div style="height:10px;border-radius:6px;background:#e5e7eb;overflow:hidden;margin-top:6px"><div style="height:100%;width:${pct}%;background:${resto<-1?'#dc2626':'#2563eb'}"></div></div><div style="font-size:12.5px;margin-top:3px">${resto<-1?`⛔ Lo anotado (${pzpH(A)} hojas) no cabe en ${fmtNum(H)} hoja(s).`:`Anotado ${pzpH(A)} de ${fmtNum(H)} hoja(s) · sobran ${pzpH(Math.max(0,resto))}`}</div>`:''}
-      <div style="display:flex;gap:6px;align-items:center;margin-top:6px"><input placeholder="medida (ej. 40×120)" value="${herrEsc(cc.sobranteMedida||'')}" onchange="hcSet('${id}','sobranteMedida',this.value)" style="flex:1;min-width:0;margin:0">
-        ${[['retazo','♻️ Retazo','#16a34a'],['desperdicio','🗑️ Basura','#64748b']].map(([k,t,col])=>`<button class="btn small" style="margin:0;${(cc.sobrante||'desperdicio')===k?`background:${col}`:'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="hcSet('${id}','sobrante','${k}')">${t}</button>`).join('')}</div></div>`;
+      ${H>0?`<div style="height:10px;border-radius:6px;background:#e5e7eb;overflow:hidden;margin-top:6px"><div style="height:100%;width:${pct}%;background:${resto<-1?'#dc2626':'#2563eb'}"></div></div><div style="font-size:12.5px;margin-top:3px">${resto<-1?`⛔ Lo anotado (${pzpH(A)} hojas) no cabe en ${fmtNum(H)} hoja(s).`:`Piezas: ${pzpH(A)} de ${fmtNum(H)} hoja(s)`}</div>`:''}
+      <div style="font-size:13px;font-weight:800;margin-top:8px">♻️ Retazo que se guardó (mídelo; solo de 10×27 o más)</div>
+      ${(cc.retazos||[]).map((r,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:4px 0"><span style="flex:1;font-weight:800">${fmtNum(r.w)}×${fmtNum(r.h)} × ${r.q}</span><button onclick="hcRetQuitar('${id}',${i})" style="all:unset;cursor:pointer;color:#b91c1c;font-weight:800">Quitar</button></div>`).join('')}
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px"><input id="hcr-w" type="number" inputmode="decimal" placeholder="ancho" style="flex:1;min-width:0;margin:0"><b>×</b><input id="hcr-h" type="number" inputmode="decimal" placeholder="alto" style="flex:1;min-width:0;margin:0"><input id="hcr-q" type="number" inputmode="numeric" placeholder="cuántos" style="width:70px;margin:0"><button class="btn small" style="margin:0;background:#16a34a" onclick="hcRetAgregar('${id}')">+</button></div>
+      ${H>0&&resto>-1?(()=>{ const aR = Math.min(Math.max(0,resto), (cc.retazos||[]).reduce((t,x)=>t+x.w*x.h*x.q,0)); const d = Math.max(0,resto)-aR;
+        return `<div style="margin-top:8px;font-size:13px;line-height:1.45">♻️ Retazo: <b>${pzpH(aR)}</b> hojas<br>🗑️ Desperdicio del corte (orillas, tiras y sierra): <b>${pzpH(d)}</b> hojas${d/(H*PZP_A)>0.15?' <span style="color:#b45309;font-weight:800">· es mucho: revisa que no falten piezas por anotar</span>':''}</div>`; })():''}
+      <div style="font-size:12px;opacity:.8;margin-top:4px">Si no se guardó retazo, no pongas nada: lo que sobra se toma como desperdicio.</div></div>`;
 }
 function hcHoja2Html(){
   const hojas = CATALOGO.filter(i=>esHoja(i) && /^Melamina|^MDF/.test(i.nombre));
@@ -15817,7 +15830,7 @@ async function hcGuardar(){
   const mod = modulo(), f = hcFecha, c = hcCap; if(!c) return;
   const corte = {}; Object.keys(c.corte||{}).forEach(id=>{ const x = c.corte[id]; const piezas = (x.piezas||[]).filter(r=>r.q>0), otras = (x.otras||[]).filter(r=>r.q>0);
     if(!piezas.length && !otras.length && !(Number(x.hojasPapel)>0) && !(Number(x.puertasOtroDia)>0)) return;
-    corte[id] = {piezas, otras, hojasPapel:Number(x.hojasPapel)||0, puertasOtroDia:Number(x.puertasOtroDia)||0, puertasDir:x.puertasDir||'', sobrante:x.sobrante||'desperdicio', sobranteMedida:x.sobranteMedida||''}; });
+    corte[id] = {piezas, otras, hojasPapel:Number(x.hojasPapel)||0, puertasOtroDia:Number(x.puertasOtroDia)||0, puertasDir:x.puertasDir||'', sobrante:(x.retazos||[]).length?'retazo':'desperdicio', retazos:(x.retazos||[]).filter(r=>r.w>0&&r.h>0&&r.q>0)}; });
   // Avisos antes de guardar: lo que no cabe y la diferencia con el cierre
   const cortes = hcCortesCierre(), malos = [], dif = [];
   Object.keys(corte).forEach(id=>{ const H = Number(cortes[id])>0 ? Number(cortes[id]) : corte[id].hojasPapel; if(H>0 && hcAreaColor(id) > H*PZP_A + 1) malos.push(pzpColor(id));
