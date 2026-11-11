@@ -15480,7 +15480,7 @@ function pzpResumen(R){
 function pzpEsAdmin(){ return esAdmin(); }
 async function pzpAbrir(){
   if(!esAdmin()){ setView('home'); return; }
-  $('#main').innerHTML = '<div class="card">Cargando la prueba…</div>';
+  $('#main').innerHTML = '<div class="card">Cargando el inventario de piezas…</div>';
   if(!pzpMod) pzpMod = modulo() || MODULOS[0].nombre;
   await pzpCargar(pzpMod);
   if(!pzpFecha) pzpFecha = fechaHoyLocal();
@@ -15509,7 +15509,7 @@ function pzpRender(){
   // v259 (pedido por el usuario): arriba, solo lo necesario; encender/apagar queda escondido en "⚙️".
   const C = _pzpCfgs || {};
   let h = `<div class="card" style="border:2px solid #7c3aed;padding:12px 14px">
-    <div style="font-size:17px;font-weight:800">🧪 Prueba de piezas · ${D.mod}</div>
+    <div style="font-size:17px;font-weight:800">✂️ Inventario de piezas · ${D.mod}</div>
     <p class="hint" style="margin:2px 0 0">Solo Dirección. <strong>No cambia nada del inventario real</strong>; el coordinador no ve esto.${activo && D.cfg.auditoriaId ? (()=>{ const a = D.auds.find(y=>y.id===D.cfg.auditoriaId); return a ? ` Empezó con el conteo del <strong>${fCorta(diaLocal(a.fecha))}</strong>.` : ''; })() : ''}</p>
     <div style="display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px">${MODULOS.map(m=>{ const on = !!(C[m.nombre] && C[m.nombre].activo), sel = m.nombre===D.mod;
       return `<button class="chip ${sel?'on':''}" style="flex:none;white-space:nowrap" onclick="pzpElegirMod('${m.nombre}')">${on?'🟣 ':'⚪ '}${m.nombre}</button>`; }).join('')}</div>
@@ -15540,7 +15540,7 @@ function pzpModulosHtml(){
     const dias = on && x.auditoriaId ? (()=>{ const a = sel ? D.auds.find(y=>y.id===x.auditoriaId) : null; return a ? ' · desde '+fCorta(diaLocal(a.fecha)) : ''; })() : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--line)">
       <button class="btn small" style="flex:1;text-align:left;min-height:44px;${sel?'':'background:var(--bg);color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="pzpElegirMod('${m.nombre}')">${m.nombre}${sel?' ✓':''}</button>
-      <span style="min-width:96px;text-align:center;font-size:12px;font-weight:800;padding:5px 8px;border-radius:999px;${on?'background:#f3edff;color:#6d28d9':'background:var(--bg);color:var(--sub)'}">${on?'🧪 Prueba'+dias:'Apagada'}</span></div>`; };
+      <span style="min-width:96px;text-align:center;font-size:12px;font-weight:800;padding:5px 8px;border-radius:999px;${on?'background:#f3edff;color:#6d28d9':'background:var(--bg);color:var(--sub)'}">${on?'✂️ Activo'+dias:'Apagado'}</span></div>`; };
   const hist = (c.historial||[]).slice(-4).reverse();
   return `<div class="card"><h3>Módulos</h3>
     <p class="hint" style="margin-top:0">Toca un módulo para verlo. Encender o apagar pide tu PIN de administrador.</p>
@@ -15550,8 +15550,8 @@ function pzpModulosHtml(){
       <label class="hint" style="display:block;margin-top:6px">Conteo inicial (auditoría con piezas y armados)</label>
       <select id="pzp-aud" style="margin-top:4px" ${c.activo?'disabled':''}>${auds.length ? auds.map(a=>`<option value="${a.id}" ${a.id===c.auditoriaId?'selected':''}>${new Date(a.fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · ${(a.piezasContadas||[]).length} piezas · ${(a.armadosContados||[]).length} armados${a.aplicada?' · aplicada':''}</option>`).join('') : '<option value="">No hay auditorías con piezas en este módulo</option>'}</select>
       ${c.activo
-        ? `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzpCambiar(false)">⏸ Apagar la prueba en ${D.mod}</button>`
-        : `<button class="btn small" style="width:100%;margin-top:8px;background:#7c3aed" ${auds.length?'':'disabled'} onclick="pzpCambiar(true)">🧪 Encender la prueba en ${D.mod}</button>`}
+        ? `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="pzpCambiar(false)">⏸ Apagar el inventario de piezas en ${D.mod}</button>`
+        : `<button class="btn small" style="width:100%;margin-top:8px;background:#7c3aed" ${auds.length?'':'disabled'} onclick="pzpCambiar(true)">✂️ Encender el inventario de piezas en ${D.mod}</button>`}
       <p class="hint">Apagar no borra nada: lo capturado se queda y al volver a encender sigue donde iba. Para cambiar el conteo inicial, primero apágala.</p>
       ${hist.length?`<div class="hint" style="margin:6px 0 0"><strong>Historial:</strong><br>${hist.map(x=>`${x.accion==='on'?'🧪 Encendida':'⏸ Apagada'} · ${new Date(x.en).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · ${String(x.por||'').split('@')[0]}`).join('<br>')}</div>`:''}
     </div></div>`;
@@ -15562,7 +15562,7 @@ async function pzpCambiar(encender){
   const mod = pzpD.mod, c = pzpD.cfg || {};
   const aud = encender ? ($('#pzp-aud')||{}).value : c.auditoriaId;
   if(encender && !aud) return alert('Primero haz una auditoría con piezas y armados en '+mod+'.');
-  const pin = prompt(`${encender?'🧪 ENCENDER':'⏸ APAGAR'} la prueba de piezas en ${mod}\n\nEscribe tu PIN de administrador:`);
+  const pin = prompt(`${encender?'✂️ ENCENDER':'⏸ APAGAR'} el inventario de piezas en ${mod}\n\nEscribe tu PIN de administrador:`);
   if(pin===null) return;
   if(String(pin).trim()!==String(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
   const conf = prompt(`Para confirmar, escribe el nombre del módulo: ${mod.toUpperCase()}`);
@@ -15572,7 +15572,7 @@ async function pzpCambiar(encender){
   const historial = (c.historial||[]).concat([{accion:encender?'on':'off', en:ahora, por:quien, auditoriaId:aud||null}]);
   try{
     await db.collection('piezasPrueba').doc('cfg_'+mod).set({tipo:'cfg', modulo:mod, activo:!!encender, auditoriaId:aud||null, fecha:ahora, por:quien, historial});
-    toast(encender ? '🧪 Prueba encendida en '+mod : '⏸ Prueba apagada en '+mod+' (no se borró nada)');
+    toast(encender ? '✂️ Inventario de piezas activo en '+mod : '⏸ Inventario de piezas apagado en '+mod+' (no se borró nada)');
     _pzpCfgs = null; await pzpCargar(mod); pzpRender();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -15844,7 +15844,7 @@ function pzpCapturaHtml(){
   const est = pzpEstado();
   h += `<div style="position:sticky;bottom:0;z-index:5;background:var(--bg);padding:8px 0 16px;margin-bottom:8px">
     ${est.t==='ok'?`<div style="text-align:center;font-weight:800;color:#16a34a;margin-bottom:6px">✅ Todo guardado</div>`:est.t==='cambios'?`<div style="text-align:center;font-weight:800;color:#d97706;margin-bottom:6px">📝 Hay cambios sin guardar</div>`:`<div style="text-align:center;font-weight:800;color:#dc2626;margin-bottom:6px">📝 Todavía no está guardado</div>`}
-    <button class="btn" style="width:100%;min-height:52px;${est.t==='ok'?'background:#16a34a':est.t==='cambios'?'background:#d97706':''}" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':est.t==='ok'?'✅ Guardado · volver a guardar':est.t==='cambios'?'💾 Guardar cambios del '+pzpFmtDia(pzpFecha):'💾 Guardar la prueba de '+pzpFmtDia(pzpFecha)}</button></div>`;
+    <button class="btn" style="width:100%;min-height:52px;${est.t==='ok'?'background:#16a34a':est.t==='cambios'?'background:#d97706':''}" ${noCabe?'disabled':''} onclick="pzpGuardar()">${noCabe?'Corrige lo que no cabe para guardar':est.t==='ok'?'✅ Guardado · volver a guardar':est.t==='cambios'?'💾 Guardar cambios del '+pzpFmtDia(pzpFecha):'💾 Guardar la hoja del '+pzpFmtDia(pzpFecha)}</button></div>`;
   return h;
 }
 function pzpArmFormHtml(){
@@ -15910,7 +15910,7 @@ async function pzpGuardar(){
   const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, retViejo:vie, retTirar:[...(c.retTirar||[])], recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
-    toast('✅ Guardado: prueba del '+pzpFmtDia(pzpFecha)+' (no cambia tu inventario)');
+    toast('✅ Guardado: hoja del '+pzpFmtDia(pzpFecha)+' (no cambia el inventario oficial)');
     await pzpCargar(mod); pzpCap = null; pzpRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
@@ -16045,7 +16045,7 @@ async function pzpDebePDF(){
       ks.map(k=>{ const x = pzpFlujo(R, k), su = fmtNum(x.debe - x.arm);
         return [String(R.N[k].n)+' '+String(R.N[k].dim), fm(x.ini), {t:x.cort?'+'+fmtNum(x.cort):'-', col:VER}, {t:x.inst?String(fmtNum(x.inst)):'-', col:ROJ}, x.otros?(x.otros>0?'+':'')+String(fmtNum(x.otros)):'-', {t:String(fmtNum(x.debe)), b:true}, {t:String(su)+' / '+String(fmtNum(x.arm)), col:su<0?ROJ:undefined}]; }), MOR);
   });
-  await S.fin(`Piezas_debe_haber_${pzpD.mod}.pdf`, 'Closets Vera · Prueba de piezas (no cambia el inventario oficial)');
+  await S.fin(`Piezas_debe_haber_${pzpD.mod}.pdf`, 'Closets Vera · Inventario de piezas (no cambia el inventario oficial)');
 }
 
 // Conteo rápido: cada día se cuentan pocas piezas (rotando) y TODOS los armados; de los armados contados
@@ -16187,7 +16187,7 @@ function pzpComoVaHtml(){
   const ch = (pzpD.chks||[]).slice().sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
   const chMal = ch ? (ch.piezas||[]).filter(p=>p.dif < -1).length : 0;
   const tile = (n, t, col, sub) => `<div style="flex:1;min-width:0;padding:10px;border-radius:12px;background:${col}1a;border:1px solid ${col}55;text-align:center"><div style="font-size:22px;font-weight:900;color:${col}">${n}</div><div style="font-size:12px;font-weight:700">${t}</div>${sub?`<div class="hint" style="margin:2px 0 0;font-size:11px">${sub}</div>`:''}</div>`;
-  let h = `<div class="card"><h3 style="margin-top:0">📊 Cómo va la prueba</h3>
+  let h = `<div class="card"><h3 style="margin-top:0">📊 Cómo va el inventario de piezas</h3>
     <div style="display:flex;gap:8px">
       ${tile(capt+' / '+R.dias.length, 'días capturados', faltan.length?'#d97706':'#16a34a', faltan.length?faltan.length+' por capturar':'al corriente')}
       ${tile(av.length, 'avisos', av.length?'#dc2626':'#16a34a', av.length?'revisar abajo':'todo en orden')}
@@ -16214,7 +16214,7 @@ async function pzpInicio(){
     const C = await pzpCfgTodos(); const on = MODULOS.filter(m=>C[m.nombre] && C[m.nombre].activo).map(m=>m.nombre);
     if(current!=='home' || document.getElementById('pzp-home')) return;
     const m = $('#main'); if(!m) return;
-    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #7c3aed;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>🧪 Piezas (prueba)</strong><div class="hint" style="margin:0">${on.length?'Encendida en '+on.join(', '):'Apagada en todos los módulos'} · solo tú la ves</div></div><button class="btn small" onclick="setView('pzp')">Abrir</button></div>`);
+    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #7c3aed;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>✂️ Inventario de piezas</strong><div class="hint" style="margin:0">${on.length?'Activo en '+on.join(', '):'Apagado en todos los módulos'} · solo tú lo ves</div></div><button class="btn small" onclick="setView('pzp')">Abrir</button></div>`);
   }catch(e){}
 }
 (function(){
