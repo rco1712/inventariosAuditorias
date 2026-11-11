@@ -13903,6 +13903,8 @@ function describirLote(ms){
   if(ms.some(m=>m.pedidoId)) return 'Material recibido de un pedido';
   if(tipos.includes('instalacion')) return 'Instalación';
   if(tipos.includes('garantia')) return 'Garantía';
+  if(ms.some(m=>m.motivo==='hojaCorteDesperdicio')) return '✂️ Desperdicio del corte (hoja del cortador)';
+  if(ms.some(m=>m.motivo==='hojaCorteMerma')) return '✂️ Merma de la hoja de corte';
   if(ms.some(m=>m.motivo==='deSobrante')) return 'Sobrante transformado';
   if(ms.some(m=>m.motivo==='piezasEncontradas')) return 'Piezas cortadas encontradas';
   if(ms.some(m=>m.motivo==='regresoInstalacion')) return 'Regreso de modelo completo';
