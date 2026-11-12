@@ -15594,6 +15594,7 @@ function pzpCalcular(D, hasta, borrador){
     info.otros.forEach(m=>{
       const s = pzpEsOtro(m), q = pzpOtroQ(m), o = (c && (c.otros||{})[m.id]) || pzpOtroAuto(D, m);
       if(!o){ addA(sinCap, m.itemId, s*q*PZP_A); return; }
+      if(o.modo==='puertaSob'){ let a = q*PZP_A; const dp = Math.min(a, Math.max(0, pend[m.itemId]||0)); if(dp>0){ pend[m.itemId] -= dp; a -= dp; } if(a>0) addA(ret, m.itemId, -a); return; }
       if(o.extraRet) addA(ret, m.itemId, s*o.extraRet); // v250: piezas a la medida (puertas) que regresaron o se apartaron
       let aBase = 0;
       if(o.modo==='retazo'){ addA(ret, m.itemId, s*q*PZP_A); aBase = q*PZP_A; }
@@ -16109,6 +16110,8 @@ function pzpOtroModo(mid, modo){ pzpOtro(mid).modo = modo; pzpRender(); }
 // instalación COMPLETA de ese color (si fue parcial o una parte se fue a merma, se pregunta).
 function pzpOtroAuto(D, m){
   if(!m || !m.instalacionId) return null;
+  // v274: lo que sobró de las hojas de puertas y se mandó a sobrantes sale de lo apartado para puertas de ese color.
+  if(m.tipo==='sobrante' && m.motivo==='sobranteCortePuertas') return {modo:'puertaSob', auto:true};
   // v274 (pedido por el usuario): la merma de una instalación que regresó también sabe qué piezas eran.
   const okMot = (m.tipo==='devolucion' && m.motivo==='regresoInstalacion') || (m.tipo==='sobrante' && (m.motivo==='regresoSobrante' || m.motivo==='cambioSobrante')) || (m.tipo==='merma' && m.motivo==='regresoMerma');
   if(!okMot) return null;
@@ -16123,6 +16126,7 @@ function pzpOtroAuto(D, m){
   return {modo:'piezas', piezas, extraRet, auto:true, calle:l.calle||''};
 }
 function pzpAutoTxt(a){
+  if(a && a.modo==='puertaSob') return 'Sobrante del corte de puertas (sale de lo apartado para puertas)';
   const t = (a.piezas||[]).map(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return fmtNum(r.q)+' '+(P?P.label:r.k); });
   if(a.extraRet>0) t.push(pzpH(a.extraRet)+' hojas de puerta (a la medida)');
   return t.join(' · ') || '—';
