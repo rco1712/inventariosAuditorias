@@ -4811,17 +4811,21 @@ function renderAudArmadosHtml(){
   if(f.tipo==='puerta_espejo') herr += caja('🪞 Puerta de espejo', '#1fa5b3', armSiNoHtml('peBisagras', f.peBisagras, 'Bisagras (1.5)') + armSiNoHtml('peJaladera', f.peJaladera, 'Jaladera') + armSiNoHtml('conEspejo', f.conEspejo, 'Espejo'));
   if(f.tipo==='puerta_zapatera') herr += caja('👟 Puerta de zapatera', '#2f9e5e', armSiNoHtml('peBisagras', f.peBisagras, 'Bisagras (1.5)') + armSiNoHtml('peJaladera', f.peJaladera, 'Jaladera'));
   if(herr) herr = `<label class="hint" style="display:block;margin-top:12px;font-weight:700">🔩 ¿Qué herrajes trae puestos? (uno por uno)</label>${herr}`;
+  // v273 (pedido por el usuario): en el cierre con conteo solo cuentan las piezas (melamina y MDF); los herrajes
+  // ya se contaron en el paso 3 y no cambian las piezas, así que no se preguntan.
+  if(modoCierreConteo()) herr = '';
   const extTxt = usaCorr && f.corr!==false && !esMax ? `<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.ext?'checked':''} onchange="auditArmadoForm.ext=this.checked;renderAud()"> Las correderas son de extensión</label>` : (usaCorr && esMax ? '<p class="hint">Max: siempre lleva corredera de extensión.</p>' : '');
+  const extFin = modoCierreConteo() ? '' : extTxt;
   const fondo = (esCajonera||f.tipo==='cajonera_espejo') ? `<label class="row" style="margin-top:10px;gap:8px;font-size:14px"><input type="checkbox" style="width:auto;min-height:0" ${f.sinFondo?'checked':''} onchange="auditArmadoForm.sinFondo=this.checked;renderAud()"> Todavía no tiene el fondo de MDF</label>` : '';
   const prev = armPreviewHtml();
   return `<div class="card">
     <h3>🗄️ Armados</h3>
-    <p class="hint">Toca lo que encontraste. <b>Abajo te salen sus colores y herrajes</b> para que los elijas ⬇️</p>
+    <p class="hint">Toca lo que encontraste. <b>Abajo te salen sus colores${modoCierreConteo()?'':' y herrajes'}</b> para que los elijas ⬇️</p>
     ${grupos}
   </div>
   <div class="card" id="arm-paso2" style="border-top:7px solid ${fam.c}">
     <div style="font-weight:900;color:${fam.c};font-size:15px">${fam.ic} ${(ARM_OPCIONES[sel]||{}).t||''}${esCajonera?(f.conCajones?' · completa con sus cajones':' · sin cajones'):''}</div>
-    ${como}${colores}${herr}${extTxt}${fondo}
+    ${como}${colores}${herr}${extFin}${fondo}
     <label class="hint" style="display:block;margin-top:12px;font-weight:700">¿Cuántas?</label>
     <input type="number" min="0" inputmode="numeric" style="margin-top:4px;font-size:20px;font-weight:900" value="${f.cantidad}" oninput="auditArmadoForm.cantidad=this.value;const el=document.getElementById('arm-prev');if(el)el.innerHTML=armPreviewHtml(true)">
     <div id="arm-prev">${prev}</div>
@@ -4861,6 +4865,7 @@ function armPreviewHtml(){
   ps.forEach(p=>{ const her = esPiezaHerraje(p.nombre) || /^Corredera|^Espejo$/.test(p.nombre); const mdf = /MDF/.test(p.nombre);
     const g = her ? '🔩 Herrajes' : (mdf ? '🟫 MDF' : (p.colorDestino||'—')); const k = p.nombre.replace(/ \(.*\)$/,'')+(p.dim&&p.dim!=='—'&&!her?' '+p.dim.replace(' cm',''):'');
     (grupos[g] = grupos[g]||{})[k] = (grupos[g][k]||0) + p.cantidad; });
+  if(modoCierreConteo()) delete grupos['🔩 Herrajes'];
   const orden = Object.keys(grupos).sort((x,y)=>(x.startsWith('🔩')?2:x.startsWith('🟫')?1:0)-(y.startsWith('🔩')?2:y.startsWith('🟫')?1:0));
   return `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(37,99,235,.08);border:1px solid rgba(37,99,235,.35);font-size:13.5px;line-height:1.5"><b>La app cuenta:</b>${orden.map(g=>`<div><b>${g.startsWith('🔩')||g.startsWith('🟫')?g:swatchHtml('Melamina '+g)+' '+g}:</b> ${Object.keys(grupos[g]).map(k=>fmtNum(grupos[g][k])+' '+k).join(' · ')}</div>`).join('')}</div>`;
 }
