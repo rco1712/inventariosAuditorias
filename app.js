@@ -5667,11 +5667,14 @@ function ccHomeBannerHtml(){
     ? card('#b45309','#d97706','TU CIERRE DE HOY','📝 Tu cierre está incompleto','Faltan los pasos 4 a 7: piezas, armados, retazo y sobrante.','Seguir con el paso 4 →',"irA('aud')")
     : card('#0e7490','#2563eb','HOY AL CERRAR','🧩 Cierre del turno de hoy','Hoy tu cierre lleva 7 pasos: el de siempre y, al final, cuentas todo lo que tienes en el módulo.','Empezar →',"irA('cierre')");
   if(ccResultadoPendiente().length) return card('#1d4ed8','#2563eb','DIRECCIÓN','📬 Resultado de tu cierre','Dirección revisó tu conteo. Ábrelo y contesta.','Ver resultado →',"irA('ccres')");
+  // v273: acceso fijo a "Mis conteos" (su respaldo en PDF), aunque no haya resultado pendiente.
+  if((auditorias||[]).some(a=>a.cierreConteo && a.modulo===modulo())) return `<div class="card" onclick="irA('ccres')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 14px"><span style="font-size:22px">🗂️</span><span style="flex:1"><b>Mis conteos de piezas</b><span class="hint" style="display:block;margin:0">Lo que contaste, con fecha y hora, en PDF</span></span><b style="font-size:20px">›</b></div>`;
   return '';
 }
 function renderCcRes(){
   const xs = ccResultadoPendiente();
-  $('#main').innerHTML = (xs.length ? xs.map(ccResultadoHtml).join('') : '<div class="card"><p class="hint" style="margin:0">No tienes resultados pendientes.</p></div>') + ccMisConteosHtml();
+  const mis = ccMisConteosHtml();
+  $('#main').innerHTML = (xs.length ? xs.map(ccResultadoHtml).join('') : (mis ? '' : '<div class="card"><p class="hint" style="margin:0">No tienes resultados pendientes.</p></div>')) + mis;
 }
 function ccMisConteosHtml(){
   const xs = (auditorias||[]).filter(a=>a.cierreConteo && a.modulo===modulo()).slice(0,6);
