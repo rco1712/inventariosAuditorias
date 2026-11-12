@@ -4550,7 +4550,7 @@ function consumoDePool(pool){
 const RET_CLASES = {
   retazo:  {t:'Retazo', ic:'♻️', c:'#16a34a', s:'Pedazo que sirve, de 10×27 o más'},
   medida:  {t:'Pieza a medida', ic:'📐', c:'#d97706', s:'Fijo, puerta, marco, pared falsa, repisa…'},
-  sobrante:{t:'Sobrante', ic:'📦', c:'#7c3aed', s:'Lo que tienes de sobrante, esté o no en la app'},
+  sobrante:{t:'Sobrante', ic:'📦', c:'#7c3aed', s:'Solo el sobrante que tienes registrado en la app'},
   danada:  {t:'Dañada', ic:'💥', c:'#dc2626', s:'Rota o mal cortada, ya no sirve'}
 };
 const RET_COLORES = () => MEL_COLORES.concat(['MDF 3mm','MDF 5mm']);
@@ -4571,14 +4571,42 @@ function retHojasTotal(r){
   const g = P.tipo==='mdf' ? AUD_GRUPO_MDF : r.color;
   return piezasAConsumo([{nombre:P.nombre, cantidad:Number(r.cantidad)||0, dim:P.dim, colorDestino:g, estado:'ok'}], g).reduce((s,x)=>s+(Number(x.cantidad)||0),0);
 }
+// v273 (pedido por el usuario): en el cierre con conteo solo se cuenta el sobrante REGISTRADO en la app
+// (lo demás ya se cortó en piezas). Se enseña la lista para que sepan cuál es, sin cantidades.
+let _retSobApp = {};
+function retSobColor(itemId){ const it = CATALOGO.find(i=>i.id===itemId); if(!it || !AUD_CATS_MEL.includes(it.cat)) return null; return String(it.nombre).replace(/^Melamina /,''); }
+function retSobAppLista(){
+  const m = modulo();
+  if(_retSobApp[m]===undefined){ _retSobApp[m] = null;
+    db.collection('sobrantes').get().then(sn=>{ _retSobApp[m] = sn.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.modulo===m && x.estado==='abierto')
+      .map(x=>({id:x.id, fecha:x.fecha||'', calle:x.calle||'', nota:x.nota||'', colores:[...new Set(Object.keys(x.restante||{}).filter(k=>Number(x.restante[k])>0.0005).map(retSobColor).filter(Boolean))]}))
+      .filter(x=>x.colores.length).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+      if(current==='aud') renderAud(); }).catch(()=>{ _retSobApp[m] = []; });
+  }
+  return _retSobApp[m];
+}
+function retSobAppHtml(lista){
+  if(lista===null) return '<p class="hint" style="margin-top:8px">Buscando tu sobrante registrado…</p>';
+  const fch = f => { try{ return new Date(f).toLocaleDateString('es-MX',{day:'numeric', month:'short'}); }catch(e){ return ''; } };
+  return `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(124,58,237,.09);border:1px solid rgba(124,58,237,.45);font-size:13.5px;line-height:1.45">
+    <b>📦 Tu sobrante registrado en la app (${lista.length}):</b>
+    ${lista.map(x=>`<div style="margin-top:4px">• <b>${x.colores.map(herrEsc).join(', ')}</b> · ${fch(x.fecha)}${x.calle?' · '+herrEsc(x.calle):''}${x.nota?' · '+herrEsc(String(x.nota).replace(/ \(ancho×alto\)/,'').slice(0,70)):''}</div>`).join('')}
+    <div style="margin-top:6px">Cuenta <b>solo lo que queda de estos</b>. El sobrante que no está en la app <b>no se cuenta aquí</b>: si ya lo cortaste en piezas, va en el paso 4.</div></div>`;
+}
 function retSet(campo, val){ auditRetazoForm[campo] = val; if(campo==='nombre' && PZ_MEDIDA_NOMBRES[val]){ const [w,h] = PZ_MEDIDA_NOMBRES[val]; auditRetazoForm.ancho = String(w); auditRetazoForm.alto = String(h); } renderAud(); }
 function renderAudRetazoHtml(){
-  const f = auditRetazoForm, C = RET_CLASES[f.clase] || RET_CLASES.retazo;
+  const f = auditRetazoForm;
+  const sobLista = modoCierreConteo() ? retSobAppLista() : undefined;
+  const sinSob = Array.isArray(sobLista) && !sobLista.length && !auditRetazos.some(r=>r.clase==='sobrante');
+  if(sinSob && f.clase==='sobrante'){ f.clase = 'retazo'; }
+  const C = RET_CLASES[f.clase] || RET_CLASES.retazo;
+  const sobColores = (f.clase==='sobrante' && Array.isArray(sobLista) && sobLista.length) ? [...new Set(sobLista.flatMap(x=>x.colores))] : null;
+  if(sobColores && !sobColores.includes(f.color)) f.color = sobColores[0];
   const esMDF = String(f.color).startsWith('MDF');
   const conLista = (f.clase==='sobrante'||f.clase==='danada') && f.modo==='lista';
   const btn = (on, t, js, col) => `<button type="button" onclick="${js}" style="all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:10px;margin:3px 4px 3px 0;font-weight:800;font-size:13.5px;${on?`background:${col};color:#fff;outline:3px solid var(--ink);outline-offset:1px`:`border:2px solid ${col};color:${col}`}">${t}</button>`;
-  const clases = Object.keys(RET_CLASES).map(k=>{ const c = RET_CLASES[k]; return btn(f.clase===k, `${c.ic} ${c.t}`, `retSet('clase','${k}')`, c.c); }).join('');
-  const colores = RET_COLORES().map(x=>{ const on = x===f.color; const sw = x.startsWith('MDF') ? '#a0785a' : (SWATCH_COLOR[x]||'#ccc');
+  const clases = Object.keys(RET_CLASES).filter(k=>!(k==='sobrante' && sinSob)).map(k=>{ const c = RET_CLASES[k]; return btn(f.clase===k, `${c.ic} ${c.t}`, `retSet('clase','${k}')`, c.c); }).join('');
+  const colores = (sobColores || RET_COLORES()).map(x=>{ const on = x===f.color; const sw = x.startsWith('MDF') ? '#a0785a' : (SWATCH_COLOR[x]||'#ccc');
     return `<button type="button" onclick="retSet('color','${x}')" style="all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 5px;margin:3px 3px 0 0;border-radius:20px;font-size:13px;font-weight:${on?900:700};border:${on?'3px solid var(--ink)':'1px solid var(--line)'}"><span style="width:20px;height:20px;border-radius:50%;border:1px solid #9ca3af;background:${sw}"></span>${x}</button>`; }).join('');
   const piezasSel = PIEZAS_AUDIT.filter(x=>x.tipo===(esMDF?'mdf':'mel'));
   const numIn = (campo, ph, w) => `<input type="number" min="0" inputmode="decimal" placeholder="${ph}" value="${f[campo]||''}" style="flex:${w||1};min-width:0;margin:0;font-size:18px;font-weight:900;text-align:center" oninput="auditRetazoForm.${campo}=this.value">`;
@@ -4597,6 +4625,7 @@ function renderAudRetazoHtml(){
     <p class="hint">Junta en un solo lugar tu retazo, tu sobrante y lo dañado, y cuéntalo aquí. ${modoCierreConteo()?'':'Se suma al material cortado de su color.'}</p>
     <label class="hint" style="display:block;margin-top:8px;font-weight:700">¿Qué vas a agregar?</label><div>${clases}</div>
     <p class="hint" style="margin-top:4px;color:${C.c};font-weight:700">${C.ic} ${C.s}</p>
+    ${f.clase==='sobrante' && sobLista!==undefined ? retSobAppHtml(sobLista) : ''}
   </div>
   <div class="card" style="border-top:7px solid ${C.c}">
     <div style="font-weight:900;color:${C.c};font-size:15px">${C.ic} ${C.t.toUpperCase()}</div>
@@ -4625,6 +4654,8 @@ function agregarRetazo(){
     if(chico<3) return alert('Revisa la medida: parece que está en metros o le falta un número. Va en centímetros.');
     r.ancho = w; r.alto = h; if(f.clase!=='retazo'){ r.modo = 'medida'; if(f.clase==='medida') r.nombre = f.nombre || 'Otra pieza'; }
   }
+  if(f.clase==='sobrante' && modoCierreConteo()){ const sl = retSobAppLista();
+    if(Array.isArray(sl) && !sl.some(x=>x.colores.includes(f.color))) return alert('Solo se cuenta el sobrante registrado en la app, y de ese color no tienes.\n\nSi ya lo cortaste en piezas, va en el paso 4.'); }
   if(f.clase==='danada' && f.nota) r.nota = String(f.nota).trim();
   if(q>200 && !confirm(`⚠️ ¿Seguro?\n\nEscribiste ${q} de: ${retDescribir(r)}.\n\nEs mucho; revisa que no sobre un cero.`)) return;
   const h = retHojas(r);
@@ -4788,7 +4819,7 @@ function renderAudArmadosHtml(){
   const prev = armPreviewHtml();
   return `<div class="card">
     <h3>🗄️ Armados</h3>
-    <p class="hint">Toca lo que encontraste. Cada grupo tiene su color.</p>
+    <p class="hint">Toca lo que encontraste. <b>Abajo te salen sus colores y herrajes</b> para que los elijas ⬇️</p>
     ${grupos}
   </div>
   <div class="card" id="arm-paso2" style="border-top:7px solid ${fam.c}">
