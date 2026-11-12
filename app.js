@@ -125,7 +125,10 @@ const MODULOS = [
 // Fecha de hoy en hora local (AAAA-MM-DD).
 function fechaHoyLocal(){ return new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10); }
 // ¿Dirección abrió el conteo del almacén HOY para este módulo? (se cierra solo al cambiar el día)
-function conteoAbiertoHoy(mod){ const c = conteoMap[mod||modulo()]; const hoy = fechaHoyLocal(); return !!(c && ((c.abierto && c.fechaDia===hoy) || (conteoDiaFijoHoy(c) && c.enviadoDia!==hoy && c.saltadoDia!==hoy))); }
+function conteoAbiertoHoy(mod){ const c = conteoMap[mod||modulo()]; const hoy = fechaHoyLocal(); return !!(c && ((c.abierto && c.fechaDia===hoy) || ccActivoHoy(c))); }
+// v273: el cierre con conteo se activa con cierreDia (y abierto:false) para que una app vieja sin actualizar
+// NO le enseñe al coordinador el "Conteo del almacén" de antes: solo ve su cierre de siempre.
+function ccActivoHoy(c){ const hoy = fechaHoyLocal(); return !!(c && (c.cierreDia===hoy || conteoDiaFijoHoy(c)) && c.enviadoDia!==hoy && c.saltadoDia!==hoy); }
 // v272: día fijo de la semana para el cierre con conteo (0=domingo … 6=sábado); se activa solo.
 function conteoDiaFijoHoy(c){ return !!(c && Array.isArray(c.diasFijos) && c.diasFijos.includes(new Date().getDay())); }
 // Modo conteo del coordinador: puede capturar la auditoría, pero a ciegas (sin ver el teórico).
@@ -134,7 +137,7 @@ function modoConteoCoord(){ return esCoordinador() && conteoAbiertoHoy(); }
 // un solo cierre del turno de 7 pasos: 1-3 el cierre de siempre (se guarda igual que hoy) y 4-7 piezas,
 // armados, retazo y sobrante. Los pasos 4-7 solo comparan Melamina y MDF y no mueven nada hasta que
 // Dirección aplica el conteo.
-function conteoCierreHoy(mod){ const c = conteoMap[mod||modulo()]; const hoy = fechaHoyLocal(); return conteoAbiertoHoy(mod) && !!(c && ((c.abierto && c.fechaDia===hoy && c.enCierre) || (!(c.abierto && c.fechaDia===hoy) && conteoDiaFijoHoy(c)))); }
+function conteoCierreHoy(mod){ const c = conteoMap[mod||modulo()]; const hoy = fechaHoyLocal(); return !!(c && (ccActivoHoy(c) || (c.abierto && c.fechaDia===hoy && c.enCierre))); }
 function modoCierreConteo(){ return esCoordinador() && conteoCierreHoy(); }
 
 
@@ -5202,8 +5205,8 @@ function cierreConteoAdminHtml(){
   const dias = (()=>{ const ds = MODULOS.map(m=>(conteoMap[m.nombre]||{}).diasFijos||[]); return ds.find(d=>d.length)||[]; })();
   const filas = MODULOS.map(m=>{ const c = conteoMap[m.nombre]||{}; const act = conteoCierreHoy(m.nombre);
     const recibido = c.enviadoDia===hoy || (c.auditoriaId && c.fechaDia===hoy && !c.abierto);
-    const estado = act ? `<span class="tag" style="color:#16a34a;border-color:#16a34a">🟢 Activo hoy${conteoDiaFijoHoy(c)&&!(c.abierto&&c.fechaDia===hoy)?' (día fijo)':''}</span>` : (recibido ? '<span class="tag pos" style="border-color:var(--ok)">✓ Recibido hoy</span>' : '<span class="tag">No activo hoy</span>');
-    return `<div class="movitem"><span style="min-width:0"><span class="invname">${m.nombre}</span><span style="display:block;margin-top:2px">${estado}</span></span>
+    const estado = act ? `<span class="tag" style="color:#16a34a;border-color:#16a34a">🟢 Activo hoy${conteoDiaFijoHoy(c)&&c.cierreDia!==hoy?' (día fijo)':''}</span>` : (recibido ? '<span class="tag pos" style="border-color:var(--ok)">✓ Recibido hoy</span>' : '<span class="tag">No activo hoy</span>');
+    return `<div class="movitem"><span style="min-width:0"><span class="invname">${m.nombre}</span><span style="display:block;margin-top:2px">${estado}</span>${ccVersionesHtml(m.nombre)}</span>
       ${act ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="abrirConteo(['${m.nombre}'],false)">Quitar hoy</button>` : (recibido ? '' : `<button class="btn small" style="background:#0e7490" onclick="abrirConteo(['${m.nombre}'],true,true)">Activar hoy</button>`)}</div>`; }).join('');
   return `<details class="card" id="cierre-conteo-admin" ${MODULOS.some(m=>conteoCierreHoy(m.nombre))?'open':''} style="border:2px solid #0e7490">
     <summary><strong>🧩 Cierre con conteo de piezas</strong></summary>
@@ -5213,6 +5216,16 @@ function cierreConteoAdminHtml(){
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${CC_DIAS.map(([d,t])=>{ const on = dias.includes(d); return `<button class="btn small" style="margin:0;min-width:44px;${on?'background:#0e7490':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="cierreConteoDiaFijo(${d})">${on?'✓ ':''}${t}</button>`; }).join('')}</div>
     <p class="hint" style="margin-top:4px">${dias.length?'Cada '+dias.map(d=>['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][d]).join(' y ')+'.':'Sin día fijo: solo cuando tú lo actives.'}</p>
   </details>`;
+}
+// v273: versión de la app de los coordinadores de cada módulo (para el cierre con conteo necesitan la nueva).
+function ccVersionesHtml(mod){
+  const hace7 = new Date(Date.now()-7*864e5).toISOString();
+  const xs = (_dirVers||[]).filter(v=>v.rol==='coordinador' && v.modulo===mod && (v.fecha||'')>hace7);
+  if(!xs.length) return '';
+  const viejos = xs.filter(v=>numVersion(v.version||'v0') < numVersion(APP_VERSION));
+  return viejos.length
+    ? `<span style="display:block;margin-top:3px;font-size:12.5px;font-weight:800;color:#b45309">⚠️ Sin actualizar: ${viejos.map(v=>herrEsc(String(v.email||v.id).split('@')[0])+' ('+herrEsc(v.version||'?')+')').join(', ')}. Mientras no actualice, solo verá su cierre de siempre.</span>`
+    : '<span class="hint" style="display:block;margin:3px 0 0;font-size:12.5px">📱 Coordinador con la app al día</span>';
 }
 async function cierreConteoDiaFijo(d){
   if(!esAdmin()) return;
@@ -5230,8 +5243,9 @@ async function abrirConteo(mods, abrir, enCierre){
     const quien = getCurrentUserEmail?getCurrentUserEmail():'', hoy = fechaHoyLocal();
     for(const m of mods){
       const prev = conteoMap[m]||{}, base = {modulo:m}; if(Array.isArray(prev.diasFijos)) base.diasFijos = prev.diasFijos;
-      await db.collection('conteoAbierto').doc(m).set(abrir ? {...base, abierto:true, enCierre:!!enCierre, fechaDia:hoy, abiertoPor:quien, fecha:new Date().toISOString()}
-        : {...prev, modulo:m, abierto:false, cerrado:new Date().toISOString(), cerradoPor:quien, ...(conteoDiaFijoHoy(prev)?{saltadoDia:hoy}:{})});
+      await db.collection('conteoAbierto').doc(m).set(abrir ? (enCierre ? {...base, abierto:false, enCierre:true, cierreDia:hoy, fechaDia:hoy, abiertoPor:quien, fecha:new Date().toISOString()}
+          : {...base, abierto:true, fechaDia:hoy, abiertoPor:quien, fecha:new Date().toISOString()})
+        : {...prev, modulo:m, abierto:false, cierreDia:null, cerrado:new Date().toISOString(), cerradoPor:quien, ...(conteoDiaFijoHoy(prev)?{saltadoDia:hoy}:{})});
     }
     toast(abrir ? (enCierre ? '✅ Cierre con conteo activado para hoy.' : '✅ Conteo abierto para hoy.') : 'Conteo cerrado.');
     if(current==='cpz'){ setTimeout(renderCpz, 300); }
@@ -5571,6 +5585,8 @@ async function renderCpz(){
   if(!esAdmin()){ setView('home'); return; }
   $('#main').innerHTML = '<div class="card">Cargando…</div>';
   const auds = await cpzAudsTodos(); if(current!=='cpz') return;
+  try{ _dirVers = (await db.collection('versiones').get()).docs.map(d=>({id:d.id,...d.data()})); }catch(e){}
+  if(current!=='cpz') return;
   const filas = MODULOS.map(m=>{ const xs = auds.filter(a=>a.modulo===m.nombre).sort((x,y)=>(y.fecha||'').localeCompare(x.fecha||'')); const pend = xs.filter(cpzPendiente).length, ult = xs[0];
     return `<div class="movitem"><span style="min-width:0"><span class="invname">${m.nombre}</span><span class="hint" style="display:block;margin:2px 0 0">${ult?'Último conteo: '+new Date(ult.fecha).toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'}):'Sin conteos todavía'}${pend?` · <b style="color:#b3742c">${pend} por decidir</b>`:''}</span></span>
       ${xs.length?`<button class="btn small" style="background:${pend?'#d97706':'#7c3aed'}" onclick="entrarModulo('${m.nombre}','cpzrev')">${pend?'Revisar':'Ver'} →</button>`:''}</div>`; }).join('');
@@ -5612,7 +5628,7 @@ async function ccPedirRecuento(id){
 }
 async function abrirConteoSinConfirmar(mods){
   try{ const quien = getCurrentUserEmail?getCurrentUserEmail():'', hoy = fechaHoyLocal();
-    for(const m of mods){ const prev = conteoMap[m]||{}; await db.collection('conteoAbierto').doc(m).set({modulo:m, ...(Array.isArray(prev.diasFijos)?{diasFijos:prev.diasFijos}:{}), abierto:true, enCierre:true, fechaDia:hoy, abiertoPor:quien, fecha:new Date().toISOString(), recuento:true}); }
+    for(const m of mods){ const prev = conteoMap[m]||{}; await db.collection('conteoAbierto').doc(m).set({modulo:m, ...(Array.isArray(prev.diasFijos)?{diasFijos:prev.diasFijos}:{}), abierto:false, enCierre:true, cierreDia:hoy, fechaDia:hoy, abiertoPor:quien, fecha:new Date().toISOString(), recuento:true}); }
     toast('✅ Listo: le aparece para volver a contar hoy.'); }catch(e){ alert('Error: '+e.message); }
 }
 async function ccMandarResultado(id){
