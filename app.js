@@ -15513,8 +15513,11 @@ function pzpCalcular(D, hasta, borrador){
     .map(l=>({l, dia:(l.pospuesta && l.pospuesta.primero) || l.fechaDia || diaLocal(l.fecha)})).filter(x=>!hasta || x.dia <= hasta);
   insts.forEach(x=>dias.add(x.dia));
   const capt = {};
-  D.dias.forEach(c=>{ if(c.fecha >= d0 && (!hasta || c.fecha <= hasta)){ capt[c.fecha] = c; dias.add(c.fecha); } });
-  if(borrador && borrador.fecha && (!hasta || borrador.fecha <= hasta)){ capt[borrador.fecha] = borrador; dias.add(borrador.fecha); }
+  // v274 (pedido por el usuario): si el arranque es un cierre con conteo (al final del día), la hoja de ese mismo día
+  // ya quedó dentro del conteo: no se suma otra vez. Se cuenta desde el día siguiente.
+  const dIni = c => base.cierreConteo ? c.fecha > d0 : c.fecha >= d0;
+  D.dias.forEach(c=>{ if(dIni(c) && (!hasta || c.fecha <= hasta)){ capt[c.fecha] = c; dias.add(c.fecha); } });
+  if(borrador && borrador.fecha && dIni(borrador) && (!hasta || borrador.fecha <= hasta)){ capt[borrador.fecha] = borrador; dias.add(borrador.fecha); }
   const lista = [...dias].sort();
   const porDia = {};
   lista.forEach(dia=>{
@@ -16106,7 +16109,8 @@ function pzpOtroModo(mid, modo){ pzpOtro(mid).modo = modo; pzpRender(); }
 // instalación COMPLETA de ese color (si fue parcial o una parte se fue a merma, se pregunta).
 function pzpOtroAuto(D, m){
   if(!m || !m.instalacionId) return null;
-  const okMot = (m.tipo==='devolucion' && m.motivo==='regresoInstalacion') || (m.tipo==='sobrante' && (m.motivo==='regresoSobrante' || m.motivo==='cambioSobrante'));
+  // v274 (pedido por el usuario): la merma de una instalación que regresó también sabe qué piezas eran.
+  const okMot = (m.tipo==='devolucion' && m.motivo==='regresoInstalacion') || (m.tipo==='sobrante' && (m.motivo==='regresoSobrante' || m.motivo==='cambioSobrante')) || (m.tipo==='merma' && m.motivo==='regresoMerma');
   if(!okMot) return null;
   const l = ((D && D.logs) || []).find(x=>x.id===m.instalacionId); if(!l) return null;
   const cons = (l.consumo||[]).filter(c=>c.itemId===m.itemId).reduce((t,c)=>t+(Number(c.cantidad)||0),0);
