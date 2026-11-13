@@ -15496,7 +15496,7 @@ function pzpCalcular(D, hasta, borrador){
   const base = D.cfg && D.auds.find(a=>a.id===D.cfg.auditoriaId); if(!base) return null;
   // v231: `hasta` puede ser una hora exacta (conteo final entre semana): solo cuenta lo capturado ANTES de esa hora.
   const hastaT = (hasta && hasta.length>10) ? hasta : null; if(hastaT) hasta = diaLocal(hastaT);
-  const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, vie = {}, avisos = [];
+  const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, vie = {}, avisos = [], mermaPz = {};
   const addA = (o, id, v) => { o[id] = (o[id]||0) + v; };
   // v258 (pedido por el usuario): F lleva de dónde vino cada movimiento de piezas, para el reporte
   // "iniciaste con tantas, cortaste tantas, se fueron tantas en instalaciones, debe haber tantas".
@@ -15609,8 +15609,17 @@ function pzpCalcular(D, hasta, borrador){
         const resto = aO - aS;
         if(resto < -1) avisos.push({dia, id, t:pzpColor(id)+': de '+rc.q+' '+P.label+' no caben las piezas anotadas.'});
         else if(resto > 0){ if(rc.resto==='retazo') addA(ret, id, resto); else addA(des, id, resto); } });
+      // v274 (pedido por el usuario): la merma de la hoja de corte solo mueve el inventario de piezas (no crea
+      // movimiento en el inventario oficial). Las viejas con movId se siguen leyendo por su movimiento.
+      (c.mermas||[]).forEach(r=>{ if(r.movId) return; const id = r.itemId, P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!id || !P || !(r.q>0)) return;
+        add(id, P.dim, -r.q, P.nombre, 'salida'); addA(mermaPz, id, r.q*pzpArea(P.dim));
+        if(r.dest==='aprov'){ let aAp = 0; (r.salio||[]).forEach(x=>{ const Q = PIEZAS_AUDIT.find(z=>z.key===x.k); if(Q && x.q>0){ add(id, Q.dim, x.q, Q.nombre, 'recorte'); aAp += x.q*pzpArea(Q.dim); } });
+          addA(mermaPz, id, -aAp); } });
     }
     info.otros.forEach(m=>{
+      // v274 (pedido por el usuario): con la hoja de corte, la merma de piezas la dice la hoja del cortador; la merma
+      // de siempre del inventario oficial (sin instalación) no se vuelve a restar aquí.
+      if(D.cfg && D.cfg.hojaCoord && m.tipo==='merma' && m.lado==='cortado' && !m.instalacionId && m.motivo!=='hojaCorteMerma') return;
       const s = pzpEsOtro(m), q = pzpOtroQ(m), o = (c && (c.otros||{})[m.id]) || pzpOtroAuto(D, m);
       if(!o){ addA(sinCap, m.itemId, s*q*PZP_A); return; }
       if(o.modo==='puertaSob'){ let a = q*PZP_A; const dp = Math.min(a, Math.max(0, pend[m.itemId]||0)); if(dp>0){ pend[m.itemId] -= dp; a -= dp; } if(a>0) addA(ret, m.itemId, -a); return; }
@@ -15738,7 +15747,7 @@ async function pzpElegirMod(m){ pzpMod = m; pzpCap = null; pzpFinalId = null; aw
 // ===== v273: Hoja de corte del cortador, capturada por el coordinador =====
 // Igual a la hoja de papel (mismos renglones, mismo orden, mismos colores). Se guarda en el día de la prueba
 // de piezas ('piezasPrueba', doc dia_<módulo>_<fecha>) para que el inventario de piezas la tome. No mueve el
-// inventario oficial (en hojas). Solo la merma crea su salida, pendiente de que Dirección la apruebe.
+// inventario oficial (en hojas). v274: nada de la hoja (ni la merma) mueve el inventario oficial.
 let hcFecha = null, hcCap = null, hcColor = null, hcTab = 'mel', hcRF = null, hcRC = null, hcMR = null, hcOtra = null, _hcCfg = {};
 function hcCfgDe(mod){
   if(_hcCfg[mod]===undefined){ _hcCfg[mod] = null; db.collection('piezasPrueba').doc('cfg_'+mod).get().then(d=>{ _hcCfg[mod] = d && d.data ? d.data() : false; if(current==='home') renderHome(); }).catch(()=>{ _hcCfg[mod] = false; }); }
@@ -15889,7 +15898,7 @@ function hcHoja2Html(){
         <label class="hint" style="display:block;margin-top:6px">Lo que sobró</label><div style="display:flex;gap:6px">${[['retazo','♻️ Retazo'],['desperdicio','🗑️ Basura']].map(([k,t])=>`<button class="btn small" style="flex:1;margin:0;${hcRC.resto===k?'':'background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none'}" onclick="hcRC.resto='${k}';hcRender()">${t}</button>`).join('')}</div>
         <div style="display:flex;gap:6px;margin-top:8px"><button class="btn" style="flex:1;margin:0;background:#2563eb" onclick="hcRCGuardar()">Agregar renglón</button><button class="btn small" style="margin:0;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="hcRC=null;hcRender()">Cancelar</button></div></div>`
       : `<div class="add" style="margin-top:8px;cursor:pointer" onclick="hcRC={itemId:'${(itemByName('Melamina Blanco')||{}).id}', k:'pared', q:'1', salio:[], resto:'desperdicio'};hcRender()">➕ Agregar renglón</div>`}</div>`;
-  h += `<div class="card">${titulo('MERMA (mal cortada o dañada)')}<p class="hint" style="margin:4px 0 0">Se manda a Dirección para que la apruebe, como cualquier merma.</p>
+  h += `<div class="card">${titulo('MERMA (mal cortada o dañada)')}<p class="hint" style="margin:4px 0 0">Se guarda con la hoja de corte.</p>
     ${(hcCap.mermas||[]).map((r,i)=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return `<div class="movitem" style="padding-left:10px;box-shadow:inset 4px 0 0 #dc2626"><span style="min-width:0"><b>${pzpColor(r.itemId)} · ${r.q} ${P?hcNom(P):r.k}</b><span class="hint" style="display:block;margin:2px 0 0">${herrEsc(r.nota||'')}${r.nota?' · ':''}${r.dest==='aprov'?'se aprovechó: '+(salioTxt(r.salio)||'—'):'se tiró'}${r.movId?' · enviada':''}</span></span>${r.movId?'':`<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="hcQuitar('mermas',${i})">Quitar</button>`}</div>`; }).join('')}
     ${hcMR ? `<div style="border:2px solid #dc2626;border-radius:12px;padding:10px;margin-top:8px"><label class="hint">Color</label><select style="margin-top:2px" onchange="hcMR.itemId=this.value;hcMR.k=(pzpPiezasDe(this.value)[0]||{}).key;hcMR.salio=[];hcRender()">${optsColor(hcMR.itemId)}</select>
         <label class="hint" style="display:block;margin-top:6px">Pieza y cuántas</label><div style="display:flex;gap:6px"><select style="flex:1;min-width:0;margin:0" onchange="hcMR.k=this.value">${optsPieza(hcMR.itemId, hcMR.k)}</select><input type="number" inputmode="numeric" value="${hcMR.q||''}" placeholder="cuántas" oninput="hcMR.q=this.value" style="width:80px;margin:0"></div>
@@ -15912,7 +15921,7 @@ function hcRCGuardar(){ const o = hcRC, q = Math.round(Number(o.q)||0), P = PIEZ
   hcCap.recortes.push({itemId:o.itemId, k:o.k, q, salio:o.salio, resto:o.resto}); hcRC = null; hcBorrGuardar(); toast('✔ Renglón agregado'); hcRender(); }
 function hcMRGuardar(){ const o = hcMR, q = Math.round(Number(o.q)||0), P = PIEZAS_AUDIT.find(x=>x.key===o.k); if(!P || !(q>0)) return alert('Elige la pieza y cuántas.');
   if(o.dest==='aprov' && hcAreaSalio(o.salio) > q*pzpArea(P.dim) + 1) return alert('Lo aprovechado no cabe en lo que se dañó. Revisa.');
-  hcCap.mermas.push({id:cryptoId(), itemId:o.itemId, k:o.k, q, nota:String(o.nota||'').trim(), dest:o.dest, salio:o.dest==='aprov'?(o.salio||[]):[]}); hcMR = null; hcBorrGuardar(); toast('✔ Merma agregada · se manda al guardar'); hcRender(); }
+  hcCap.mermas.push({id:cryptoId(), itemId:o.itemId, k:o.k, q, nota:String(o.nota||'').trim(), dest:o.dest, salio:o.dest==='aprov'?(o.salio||[]):[]}); hcMR = null; hcBorrGuardar(); toast('✔ Merma agregada · se guarda con la hoja'); hcRender(); }
 function hcQuitar(campo, i){ if(!confirm('¿Quitar ese renglón?')) return; hcCap[campo].splice(i,1); hcBorrGuardar(); hcRender(); }
 function hcRender(){
   if(!pzpD || pzpD.mod!==modulo()){ hcAbrir(); return; }
@@ -15951,6 +15960,7 @@ function hcRender(){
 // Solo cuando el cierre de ese día ya dijo cuántas hojas se cortaron y coincide con la hoja del cortador. Si la hoja
 // se corrige, la merma pendiente se actualiza; una ya aprobada no se toca.
 async function hcDesperdicioSync(mod, f){
+  return; // v274 (pedido por el usuario): el inventario de piezas va aparte; ya no manda mermas al inventario oficial.
   try{
     const d = await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).get(); const doc = d && d.data ? d.data() : null;
     if(!doc || !doc.hojaCoord) return;
@@ -16014,12 +16024,9 @@ async function hcGuardar(){
   const prev = (pzpD.dias||[]).find(x=>x.fecha===f) || {};
   const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
   try{
-    // Mermas nuevas: su salida (merma del cortado) va pendiente a Dirección, y la prueba ya sabe qué piezas son.
+    // v274 (pedido por el usuario): la merma de la hoja de corte ya NO crea movimiento en el inventario oficial;
+    // queda guardada en la hoja y solo la descuenta el inventario de piezas.
     const otros = Object.assign({}, prev.otros||{});
-    for(const r of (c.mermas||[])){ if(r.movId) continue; const it = CATALOGO.find(i=>i.id===r.itemId), P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!it || !P) continue;
-      const movId = cryptoId(), hojas = fmtNum(r.q*pzpArea(P.dim)/PZP_A);
-      await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteMerma', cantidad:hojas, nota:`Hoja de corte: ${r.q} ${P.label.replace(PZ_SUF_CADA,'')} ${P.dim}`+(r.nota?' · '+r.nota:'')+(r.dest==='aprov'?' · se aprovechó':' · se tiró'), fecha:ahora, estado: esAdmin()?'aprobado':'pendiente', creadoPor:quien, hojaCorte:{fecha:f, k:r.k, q:r.q}});
-      r.movId = movId; otros[movId] = {modo:'piezas', piezas:[{k:r.k, q:r.q}], dest:r.dest==='aprov'?'aprov':null, aprov:r.salio||[], restoAprov:'desperdicio', extraRet:0}; }
     const doc = Object.assign({}, prev, {tipo:'dia', modulo:mod, fecha:f, corte:Object.assign({}, prev.corte||{}, corte), retFilas:c.retFilas||[], recortes:c.recortes||[], mermas:c.mermas||[], otros, puertasTodo:true, hojaCoord:true, hojaCortador:c.hojaCortador||'', hojaPor:quien, hojaGuardado:ahora, guardado:prev.guardado||ahora, por:prev.por||quien});
     delete doc.id;
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).set(doc);
