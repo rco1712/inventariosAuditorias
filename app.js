@@ -252,7 +252,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v273';
+const APP_VERSION = 'v274';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -12119,6 +12119,34 @@ const HORA_RECORDATORIO_CIERRE = 16; // el turno termina 4:30 pm: desde las 4 pm
 // Se trabaja de lunes a sábado; el domingo no se recuerda.
 function esHoraDeCierre(){ const d=new Date(); return d.getDay()!==0 && d.getHours()>=HORA_RECORDATORIO_CIERRE; }
 let cierreVals = {}, cierreBuscar = '', cierreCat = 'Cintilla';
+// v274 (pedido por el usuario): si el coordinador se sale de la app a medio cierre (cierra la app, se le apaga
+// el teléfono, cambia de aplicación y el teléfono la recarga), al volver se recupera lo que llevaba capturado.
+// Se guarda en el mismo teléfono, por módulo y por día; se borra al guardar el cierre. Un borrador de otro día no se carga.
+function cierreBorradorKey(){ return 'borradorCierre_'+modulo(); }
+function cierreHayCaptura(){
+  if(Object.keys(cierreVals).some(k=>!vacioCierre(cierreVals[k]))) return true;
+  if(Object.keys(herrConf).some(k=>herrConf[k] && herrConf[k].ok!==undefined)) return true;
+  return ['n','e'].some(k=>Object.values(corrCalc[k]||{}).some(v=>v!=='' && v!==undefined && v!==null));
+}
+let _cierreBorT = null;
+function cierreBorradorGuardar(){
+  clearTimeout(_cierreBorT);
+  _cierreBorT = setTimeout(()=>{ try{
+    if(current!=='cierre' || !modulo()) return;
+    if(!cierreHayCaptura()){ localStorage.removeItem(cierreBorradorKey()); return; }
+    localStorage.setItem(cierreBorradorKey(), JSON.stringify({dia:fechaHoyLocal(), mod:modulo(), vals:cierreVals, herrConf, corrCalc, t:Date.now()}));
+  }catch(e){} }, 250);
+}
+function cierreBorradorBorrar(){ try{ localStorage.removeItem(cierreBorradorKey()); }catch(e){} }
+function cierreBorradorCargar(){
+  if(cierreHayCaptura()) return false;
+  try{ const b = JSON.parse(localStorage.getItem(cierreBorradorKey())||'null'); if(!b) return false;
+    if(b.dia!==fechaHoyLocal() || b.mod!==modulo()){ cierreBorradorBorrar(); return false; }
+    cierreVals = b.vals||{}; herrConf = b.herrConf||{}; corrCalc = {n:(b.corrCalc||{}).n||{}, e:(b.corrCalc||{}).e||{}};
+    return cierreHayCaptura();
+  }catch(e){ return false; }
+}
+try{ ['input','change','click'].forEach(ev=>document.addEventListener(ev, ()=>{ if(current==='cierre') cierreBorradorGuardar(); }, true)); }catch(e){}
 let _cierreLocal = ''; // v272: el cierre recién guardado cuenta aunque todavía no llegue la lista de movimientos
 function cierreHechoHoy(){
   const hoy = fechaHoyLocal();
@@ -12389,6 +12417,7 @@ function dibujarMovsDiaPDF(doc, R, D, o){
   return y;
 }
 function renderCierre(){
+  if(!esSoloLectura() && cierreBorradorCargar()) setTimeout(()=>toast('📝 Recuperé lo que llevabas capturado hoy.'), 60);
   corrAutoJuntar();
   if(!cierrePrestOk){ cierrePrestOk = true; cargarPrestamos().then(()=>{ const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
@@ -12510,7 +12539,7 @@ async function guardarCierre(){
     try{ await db.collection('cierres').doc(cryptoId()).set({modulo:mod, fecha, dia:fechaHoyLocal(), creadoPor, nota,
       cortes:cortes.map(c=>({nombre:c.it.nombre, q:c.q})), hojasDeMas:hojasDeMas.map(x=>({nombre:x.it.nombre, q:x.deMas})),
       consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length, herrajes, herrNo:herrNo.length}); }catch(e){}
-    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null; corrCalc = {n:{}, e:{}};
+    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null; corrCalc = {n:{}, e:{}}; cierreBorradorBorrar();
     // v272: en el cierre con conteo no se dice "guardado": sigue el paso 4 como un paso más del cierre.
     _cierreLocal = fechaHoyLocal()+'|'+mod;
     if(conteoSigue){ audPaso = 0; auditCat = '__piezas'; irA('aud'); window.scrollTo(0,0); return; }
