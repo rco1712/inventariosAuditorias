@@ -5622,7 +5622,26 @@ function cierreConteoDirHtml(a){
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
       <button class="btn small" style="margin:0;background:#2563eb" onclick="ccMandarResultado('${a.id}')">📤 Mandar resultado al coordinador</button>
       ${!a.aplicada ? `<button class="btn small" style="margin:0;background:#d97706" onclick="ccPedirRecuento('${a.id}')">🔁 Pedir que vuelva a contar hoy</button>` : ''}</div>
+    ${ccArranqueHtml(a)}
   </div>`;
+}
+// v274 (pedido por el usuario): arrancar el inventario de piezas y la hoja de corte desde este conteo
+// SIN aplicarlo al inventario oficial (no crea movimientos ni deudas; el inventario se queda como está).
+function ccArranqueHtml(a){
+  if(_pzpCfgs===null){ pzpCfgTodos().then(x=>{ _pzpCfgs = x; ccRefrescar(); }).catch(()=>{}); return ''; }
+  const c = (_pzpCfgs||{})[a.modulo] || {};
+  if(c.activo && c.auditoriaId===a.id && c.hojaCoord) return `<p class="hint" style="margin:10px 0 0;padding:8px 10px;border-radius:10px;background:rgba(14,116,144,.1);border:1px solid rgba(14,116,144,.4)">✂️ <b>El inventario de piezas y la hoja de corte de ${herrEsc(a.modulo)} ya arrancaron desde este conteo.</b>${a.aplicada||(a.aplicadosItems||[]).length?'':' El inventario oficial no se tocó.'}</p>`;
+  return `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;border:1px dashed #0e7490">
+    <div class="hint" style="margin:0 0 6px">¿El conteo no cuadra y no lo quieres aplicar todavía? Puedes arrancar con él <b>solo</b> el inventario de piezas y la hoja de corte. <b>El inventario oficial no se toca</b> (no crea movimientos ni deudas).</div>
+    <button class="btn small" style="margin:0;background:#0e7490" onclick="ccArrancarSinAplicar('${a.id}')">✂️ Arrancar inventario de piezas y hoja de corte (sin aplicar)</button></div>`;
+}
+async function ccArrancarSinAplicar(id){
+  if(!esAdmin()) return;
+  const a = (auditorias||[]).find(x=>x.id===id) || (_cpzAuds||[]).find(x=>x.id===id); if(!a) return alert('No encontré ese conteo.');
+  if(!confirm(`✂️ Arrancar el inventario de piezas de ${a.modulo} desde este conteo, SIN aplicarlo al inventario.\n\n• El inventario oficial se queda exactamente igual (no se crean movimientos ni deudas).\n• Desde mañana el coordinador captura la Hoja de corte.\n• El conteo sigue pendiente: lo puedes aplicar, aplicar por colores o no aplicar después.\n\n¿Continuar?`)) return;
+  await pzpArrancarDesde(a.modulo, id);
+  try{ await db.collection('auditorias').doc(id).update({piezasArrancoSinAplicar:new Date().toISOString()}); }catch(e){}
+  _pzpCfgs = null; ccRefrescar();
 }
 const ccSel = {};
 function ccRefrescar(){ if(current==='cpzrev') renderCpzRev(); else renderHist(); }
@@ -6082,7 +6101,7 @@ async function aplicarAuditoria(id, a, opts){
     await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor, deudasCreadas:faltantes.length, ajustoCortado:ajustarCortado, ...(opts.sinDeuda?{aplicadaComoBase:true}:{}), ...(sobCerrar.length?{sobrantesCerrados:sobCerrados}:{})});
     alert(`Auditoría aplicada. ${reales.length} ajuste(s) al inventario${faltantes.length?` y ${faltantes.length} faltante(s) guardados como deuda`:''}.`);
     // v273: el conteo aplicado es el arranque del inventario de piezas y de la hoja de corte del coordinador.
-    if(a.cierreConteo && !(a.aplicadosItems||[]).length && confirm(`✂️ ¿Empezar desde este conteo el inventario de piezas de ${a.modulo}?\n\nDesde aquí, el coordinador captura la Hoja de corte del cortador y la app lleva las piezas (sin mover el inventario oficial, que sigue en hojas).`)) await pzpArrancarDesde(a.modulo, id);
+    if(a.cierreConteo && !(a.aplicadosItems||[]).length && !((_pzpCfgs||{})[a.modulo] && _pzpCfgs[a.modulo].auditoriaId===id && _pzpCfgs[a.modulo].hojaCoord) && confirm(`✂️ ¿Empezar desde este conteo el inventario de piezas de ${a.modulo}?\n\nDesde aquí, el coordinador captura la Hoja de corte del cortador y la app lleva las piezas (sin mover el inventario oficial, que sigue en hojas).`)) await pzpArrancarDesde(a.modulo, id);
     if(current==='cpzrev') renderCpzRev(); else renderHist();
   }catch(e){ alert('Error al aplicar: '+e.message); }
 }
