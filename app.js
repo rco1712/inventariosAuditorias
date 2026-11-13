@@ -252,7 +252,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v274';
+const APP_VERSION = 'v275';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5802,6 +5802,7 @@ function renderHist(){
       ${(a.reconteos||[]).length ? `<div style="margin-top:8px">${a.reconteos.map(rc=>`<p class="hint" style="margin:2px 0">🔍 Reconteo de ${rc.cat} (${new Date(rc.fecha).toLocaleString()}): ${rc.ok?'<span class="pos">✅ coincidió con la auditoría</span>':`<span class="neg">⚠️ no coincidió</span>${rc.corrigio?' · <strong>auditoría corregida</strong>':''}`}</p>`).join('')}</div>` : ''}
       ${a.conteoInicial||a.complemento ? resumenHojasConteoHtml(a) : ''}
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
+      ${audPiezasHtml(a)}
       <div id="ad-${a.id}" style="display:none;margin-top:8px" class="wrap-x">
         ${(()=>{ const fila = r=>`<tr><td>${r.nombre}${r.capturado===false&&Math.abs(Number(r.teorico))>0.005?' <span class="tag">no contado</span>':''}</td><td>${fmtNum(r.teorico)}</td><td>${fmtNum(r.fisico)}${r.hojasEnPiezas&&r.teoricoCompletas===undefined?`<div class="hint" style="margin-top:3px">${fmtNum(r.hojasCompletas)} sueltas/completas + ${fmtNum(r.hojasEnPiezas)} en piezas/armados</div>`:''}</td><td class="${r.diff<0?'neg':(r.diff>0?'pos':'')}">${r.diff>0?'+':''}${fmtNum(r.diff)}</td></tr>${detalleLadosHtml(r)}`;
           if(a.complemento) return `<h3>Lo que se suma al stock inicial</h3><table><tr><th>Artículo</th><th>Contado</th></tr>${a.resultados.map(r=>`<tr><td>${r.nombre}</td><td>${fmtNum(r.fisico)} ${r.unidad||''}${r.fisicoCortado?`<div class="hint" style="margin-top:3px">${fmtNum(r.fisicoCompletas)} completas + ${fmtNum(r.fisicoCortado)} en piezas/armados</div>`:''}</td></tr>`).join('')}</table>`;
@@ -5821,6 +5822,43 @@ function renderHist(){
         ${(a.correderas||[]).map(b=>`<p class="hint">${b.etiqueta}: total <strong>${fmtNum(b.totalJuegos!==undefined?b.totalJuegos:b.pares)} juego(s)</strong> (${fmtNum(b.hembras)} hembra(s) + ${fmtNum(b.machos)} macho(s)${b.juegosSueltos?` + ${fmtNum(b.juegosSueltos)} sueltos`:''})${b.hembrasSinPareja?` · <span class="neg">${fmtNum(b.hembrasSinPareja)} hembra(s) sin macho</span>`:''}${b.machosSinPareja?` · <span class="neg">${fmtNum(b.machosSinPareja)} macho(s) sin hembra</span>`:''}</p>`).join('')}
       </div>
     </div>`).join('');
+}
+
+// ===== v275 · Sistema de piezas: arranque desde una auditoría y comparación pieza por pieza =====
+// Pedido por el usuario: el nuevo sistema arranca desde SU auditoría (hojas completas + piezas + armados +
+// retazo medido). Las auditorías siguientes se comparan pieza por pieza contra lo que debe haber.
+// Nada de esto crea movimientos: el inventario oficial solo cambia si Dirección aplica la auditoría, como hoy.
+function audPzConto(a){ return !!((a.piezasContadas||[]).length || (a.armadosContados||[]).length); }
+function audPiezasHtml(a){
+  if(!esAdmin() || a.conteoInicial || a.complemento || a.cierreConteo || !audPzConto(a)) return '';
+  if(_pzpCfgs===null){ pzpCfgTodos().then(x=>{ _pzpCfgs = x; if(current==='hist') renderHist(); }).catch(()=>{}); return ''; }
+  const c = (_pzpCfgs||{})[a.modulo] || {};
+  const caja = (borde, cont) => `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;border:1px ${borde} #0e7490;background:rgba(14,116,144,.06)">${cont}</div>`;
+  if(c.activo && c.auditoriaId===a.id) return caja('solid', `<strong>✂️ Arranque del sistema de piezas de ${herrEsc(a.modulo)}</strong>
+    <div class="hint" style="margin:4px 0 0">Desde esta auditoría, el cortado de ${herrEsc(a.modulo)} se lleva en piezas${c.modo==='real'?'':' <b>(en práctica: el inventario oficial no cambia)</b>'}. Las auditorías siguientes se comparan pieza por pieza.</div>`);
+  const base = c.activo && c.auditoriaId ? (auditorias||[]).find(x=>x.id===c.auditoriaId) : null;
+  if(base && (a.fecha||'') > (base.fecha||'')) return caja('solid', `<button class="btn small" style="margin:0;background:#0e7490" onclick="audPzComparar('${a.id}')">🔍 Comparar pieza por pieza</button>
+    <div class="hint" style="margin:6px 0 0">Contra lo que debe haber desde la auditoría de arranque del ${fCorta(diaLocal(base.fecha))}.</div><div id="audpz-${a.id}"></div>`);
+  if(c.activo && c.auditoriaId && !base) return '';
+  return caja('dashed', `<div class="hint" style="margin:0 0 6px">Esta auditoría contó piezas, armados y retazo. Puedes usarla como <b>punto de partida del sistema de piezas</b> de ${herrEsc(a.modulo)}. No crea movimientos ni deudas: el inventario oficial solo cambia si aplicas la auditoría, como siempre.</div>
+    <button class="btn small" style="margin:0;background:#0e7490" onclick="audPzArrancar('${a.id}')">✂️ Arrancar el sistema de piezas desde esta auditoría</button>`);
+}
+async function audPzArrancar(id){
+  if(!esAdmin()) return;
+  const a = (auditorias||[]).find(x=>x.id===id); if(!a) return;
+  const c = (_pzpCfgs||{})[a.modulo] || {};
+  if(!confirm(`✂️ Arrancar el sistema de piezas de ${a.modulo} desde la auditoría del ${new Date(a.fecha).toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}.\n\n• Lo contado (piezas, armados y retazo) queda como punto de partida.\n• Empieza en PRÁCTICA: el inventario oficial no cambia.\n• Desde el siguiente día, el coordinador captura la hoja de corte.${c.activo?'\n\n⚠️ '+a.modulo+' ya tenía un arranque anterior: se reemplaza por esta auditoría (no se borra nada).':''}\n\n¿Continuar?`)) return;
+  const pin = prompt('Escribe tu PIN de administrador:'); if(pin===null) return;
+  if(String(pin).trim()!==String(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
+  await pzpArrancarDesde(a.modulo, id, 'auditoria');
+  _pzpCfgs = null; renderHist();
+}
+async function audPzComparar(id){
+  const a = (auditorias||[]).find(x=>x.id===id), el = document.getElementById('audpz-'+id); if(!a || !el) return;
+  el.innerHTML = '<p class="hint">Calculando…</p>';
+  try{ const D = await pzpCargar(a.modulo); const fin = D.auds.find(x=>x.id===id) || a;
+    el.innerHTML = pzpCompararHtml(D, fin) || '<p class="hint">No hay con qué comparar todavía.</p>'; }
+  catch(e){ el.innerHTML = '<p class="hint neg">No se pudo calcular: '+herrEsc(e.message)+'</p>'; }
 }
 
 // ===== Reporte de auditoría en PDF (confirmado por el usuario) =====
@@ -16036,11 +16074,12 @@ async function hcGuardar(){
     hcBorrBorrar(f); toast('✅ Hoja de corte guardada'); await pzpCargar(mod); await hcDesperdicioSync(mod, f); hcCap = null; hcRender(); window.scrollTo(0,0);
   }catch(e){ alert('Error al guardar: '+e.message); }
 }
-async function pzpArrancarDesde(mod, audId){
+async function pzpArrancarDesde(mod, audId, desde){
   try{ const d = await db.collection('piezasPrueba').doc('cfg_'+mod).get(); const c = d && d.data ? d.data() : {};
     const ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
-    const historial = (c.historial||[]).concat([{accion:'on', en:ahora, por:quien, auditoriaId:audId, desde:'cierreConteo'}]);
-    await db.collection('piezasPrueba').doc('cfg_'+mod).set({tipo:'cfg', modulo:mod, activo:true, auditoriaId:audId, fecha:ahora, por:quien, historial, hojaCoord:true});
+    const historial = (c.historial||[]).concat([{accion:'on', en:ahora, por:quien, auditoriaId:audId, desde:desde||'cierreConteo'}]);
+    // v275: "modo" del sistema de piezas. Arranca en práctica: el inventario oficial (en hojas) no se toca.
+    await db.collection('piezasPrueba').doc('cfg_'+mod).set({tipo:'cfg', modulo:mod, activo:true, auditoriaId:audId, fecha:ahora, por:quien, historial, hojaCoord:true, modo:'practica'});
     _pzpCfgs = null; toast('✂️ Inventario de piezas de '+mod+' arranca desde este conteo.');
   }catch(e){ alert('No se pudo arrancar el inventario de piezas: '+e.message); }
 }
@@ -16408,7 +16447,7 @@ async function pzpGuardar(){
 }
 // Resultado: el conteo final (otra auditoría con piezas) contra lo que dice la prueba. Es lo que dice si funciona.
 function pzpTotalesAud(a){
-  const T = {}, N = {};
+  const T = {}, N = {}, ret = {};
   const add = (itemId, dim, q, n) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNorm(dim), n:pzpNombre(dim, n), area:pzpArea(dim)}; };
   (a.piezasContadas||[]).forEach(pc=>{ const P = piezaAuditDeLabel(pc.pieza, pc.dim);
     const it = pzpItemDeGrupo(pc.grupo, P ? P.nombre : ''); if(it) add(it.id, pc.dim, Number(pc.cantidad)||0, P ? P.nombre : pc.pieza); });
@@ -16416,8 +16455,10 @@ function pzpTotalesAud(a){
   // v273: en el cierre con conteo, el sobrante contado como pieza y las piezas a medida también son piezas
   (a.retazos||[]).forEach(r=>{ const q = Number(r.cantidad)||0; if(!(q>0)) return; const it = itemByName(String(r.color).startsWith('MDF') ? r.color : 'Melamina '+r.color); if(!it) return;
     const P = r.modo==='lista' ? PIEZAS_AUDIT.find(x=>x.key===r.key) : null;
-    if(P) add(it.id, P.dim, q, P.nombre); else if(r.clase==='medida' && Number(r.ancho)>0 && Number(r.alto)>0) add(it.id, fmtNum(r.ancho)+'×'+fmtNum(r.alto), q, r.nombre||'Pieza a medida'); });
-  return {T, N};
+    if(P) add(it.id, P.dim, q, P.nombre); else if(r.clase==='medida' && Number(r.ancho)>0 && Number(r.alto)>0) add(it.id, fmtNum(r.ancho)+'×'+fmtNum(r.alto), q, r.nombre||'Pieza a medida');
+    // v275 (sistema de piezas): el retazo medido (ancho×alto) también se compara, por área.
+    else if(r.clase!=='sobrante' && r.clase!=='danada' && Number(r.ancho)>0 && Number(r.alto)>0) ret[it.id] = (ret[it.id]||0) + q*Number(r.ancho)*Number(r.alto); });
+  return {T, N, ret, contoRetazo:Array.isArray(a.retazos)};
 }
 const PZP_PRINCIPALES = ['pared','entrepano','maletero','frente','zoclo'];
 function pzpResultadoHtml(){
@@ -16425,30 +16466,51 @@ function pzpResultadoHtml(){
   const finales = pzpAudsBase(D).filter(a=>(a.fecha||'') > base.fecha);
   if(!finales.length) return `<div class="card"><h3>🔍 Conteo contra lo que debe haber</h3><p class="hint">Cuando el módulo haga su siguiente <strong>cierre con conteo</strong>, aquí sale pieza por pieza: lo que debe haber contra lo que contaron.</p></div>`;
   if(!pzpFinalId || !finales.some(a=>a.id===pzpFinalId)) pzpFinalId = finales[0].id;
-  const fin = finales.find(a=>a.id===pzpFinalId), R = pzpCalcular(D, fin.fecha); if(!R) return '';
+  const fin = finales.find(a=>a.id===pzpFinalId);
+  return `<div class="card"><h3>🔍 Conteo contra lo que debe haber (pieza por pieza)</h3>
+    <select onchange="pzpFinalId=this.value;pzpRender()">${finales.map(a=>`<option value="${a.id}" ${a.id===pzpFinalId?'selected':''}>Conteo del ${new Date(a.fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</option>`).join('')}</select>
+    ${pzpCompararHtml(D, fin)}</div>`;
+}
+// v275 (sistema de piezas, pedido por el usuario): la comparación pieza por pieza de un conteo/auditoría contra
+// lo que debe haber según el inventario de piezas. La usan "Conteo de piezas" y el Historial de auditorías.
+function pzpCompararHtml(D, fin){
+  const base = D.auds.find(a=>a.id===D.cfg.auditoriaId); if(!base) return '';
+  const R = pzpCalcular(D, fin.fecha); if(!R) return '';
   const C = pzpTotalesAud(fin), keys = new Set([...Object.keys(R.T), ...Object.keys(C.T)]), N = Object.assign({}, R.N, C.N);
   const porColor = {};
+  if(C.contoRetazo) new Set([...Object.keys(R.ret), ...Object.keys(C.ret)]).forEach(id=>{ if(Math.abs(R.ret[id]||0)+Math.abs(C.ret[id]||0) > 0.005*PZP_A) porColor[id] = porColor[id] || {filas:[], ap:0, ac:0}; });
   keys.forEach(k=>{ const n = N[k]; const p = R.T[k]||0, c = C.T[k]||0; if(Math.abs(p)+Math.abs(c)<0.0005) return;
     const pc = porColor[n.itemId] = porColor[n.itemId] || {filas:[], ap:0, ac:0};
     pc.ap += p*n.area; pc.ac += c*n.area; pc.filas.push({k, n, p:fmtNum(p), c:fmtNum(c), d:fmtNum(c-p)}); });
   const okPieza = f => { const P = PIEZAS_AUDIT.find(x=>pzpNorm(x.dim)===f.n.dim); if(!P || !PZP_PRINCIPALES.includes(P.key)) return null; return Math.abs(f.d) <= Math.max(2, Math.abs(f.p)*0.05); };
   const dias = R.dias.length, faltan = R.avisos.filter(a=>a.falta).length;
   let todoBien = faltan===0;
-  const tarjetas = Object.keys(porColor).sort((a,b)=>pzpColor(a).localeCompare(pzpColor(b))).map(id=>{
-    const pc = porColor[id], dH = (pc.ac - pc.ap)/PZP_A, ret = (R.ret[id]||0)/PZP_A, okC = Math.abs(dH) <= 0.25;
+  // v275: arriba los colores con diferencia; en cada color solo se ven los renglones que no cuadran
+  // (los que cuadran quedan en "Ver las que cuadran"), para que no sea una lista enorme.
+  const filaHtml = f => { const ok = okPieza(f); return `<tr><td>${f.n.n}</td><td style="text-align:right">${f.p}</td><td style="text-align:right">${f.c}</td><td style="text-align:right;font-weight:800;color:${f.d===0?'var(--ok)':(ok===false?'var(--bad)':'var(--ink)')}">${f.d>0?'+':''}${f.d}</td></tr>`; };
+  const cab = '<tr><th>Pieza</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contado</th><th style="text-align:right">Dif.</th></tr>';
+  const items = Object.keys(porColor).map(id=>{
+    const pc = porColor[id], ret = (R.ret[id]||0)/PZP_A, retC = ((C.ret||{})[id]||0)/PZP_A;
+    const dH = (pc.ac - pc.ap)/PZP_A + (C.contoRetazo ? retC - ret : 0), okC = Math.abs(dH) <= 0.25;
     const malas = pc.filas.filter(f=>okPieza(f)===false); if(!okC || malas.length) todoBien = false;
-    return `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
+    const dRet = C.contoRetazo && (Math.abs(ret)+Math.abs(retC))>0.005 ? fmtNum(retC-ret) : 0;
+    const conDif = pc.filas.filter(f=>f.d!==0).sort((a,b)=>b.n.area-a.n.area), iguales = pc.filas.filter(f=>f.d===0).sort((a,b)=>b.n.area-a.n.area);
+    const limpio = !conDif.length && !dRet;
+    const retFila = C.contoRetazo && (Math.abs(ret)+Math.abs(retC))>0.005 ? `<tr><td>♻️ Retazo <span class="hint">(hojas)</span></td><td style="text-align:right">${fmtNum(ret)}</td><td style="text-align:right">${fmtNum(retC)}</td><td style="text-align:right;font-weight:800;color:${Math.abs(dRet)<=0.1?'var(--ok)':'var(--ink)'}">${dRet>0?'+':''}${dRet}</td></tr>` : '';
+    const html = limpio ? `<div class="row" style="justify-content:space-between;border-top:1px solid var(--line);padding:7px 0"><span><strong>${pzpColor(id)}</strong> <span class="hint">· ${iguales.length} pieza(s)</span></span><span style="font-weight:800;color:var(--ok)">✅ todo cuadra</span></div>`
+      : `<div style="border-top:2px solid var(--line);margin-top:10px;padding-top:8px">
       <div class="row" style="justify-content:space-between"><strong style="font-size:15px">${pzpColor(id)}</strong><span style="font-weight:800;color:${okC?'var(--ok)':'var(--bad)'}">${okC?'✅':'⚠️'} ${dH>0?'+':''}${fmtNum(dH)} hojas</span></div>
       ${((R.vie||{})[id]||0)>0.005*PZP_A?`<div class="hint" style="margin:2px 0;color:#16a34a">♻️ ${fmtNum(R.vie[id]/PZP_A)} hojas en piezas salieron de retazo de antes del conteo (ya van en "Debe haber").</div>`:''}
-      ${Math.abs(ret)>0.005?`<div class="hint" style="margin:2px 0">Retazo según el inventario de piezas: ${fmtNum(ret)} hojas (la auditoría no cuenta retazo)</div>`:''}
-      <div class="wrap-x"><table><tr><th>Pieza</th><th style="text-align:right">Debe haber</th><th style="text-align:right">Contado</th><th style="text-align:right">Dif.</th></tr>
-      ${pc.filas.sort((a,b)=>b.n.area-a.n.area).map(f=>{ const ok = okPieza(f); return `<tr><td>${f.n.n}</td><td style="text-align:right">${f.p}</td><td style="text-align:right">${f.c}</td><td style="text-align:right;font-weight:800;color:${f.d===0?'var(--ok)':(ok===false?'var(--bad)':'var(--ink)')}">${f.d>0?'+':''}${f.d}</td></tr>`; }).join('')}
-      </table></div></div>`; }).join('');
-  return `<div class="card"><h3>🔍 Conteo contra lo que debe haber (pieza por pieza)</h3>
-    <select onchange="pzpFinalId=this.value;pzpRender()">${finales.map(a=>`<option value="${a.id}" ${a.id===pzpFinalId?'selected':''}>Conteo del ${new Date(a.fecha).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</option>`).join('')}</select>
-    <div style="margin-top:10px;padding:12px;border-radius:12px;font-weight:800;${todoBien?'background:#e8f6ee;color:#145c33;border:1px solid #9fd8b6':'background:#fdecec;color:#8a1f1b;border:1px solid #f0a9a6'}">${todoBien?'✅ CUADRA: el sistema por piezas funcionó en '+D.mod:'⚠️ NO CUADRA todavía: revisa los renglones en rojo'}</div>
-    <p class="hint">Del ${fCorta(diaLocal(base.fecha))} al ${fCorta(diaLocal(fin.fecha))} · ${dias} día(s) con movimiento · ${faltan?`<span class="neg">${faltan} sin capturar</span>`:'todos capturados'}. Cuadra si: cada color ±0.25 hojas · piezas principales ±2 o 5%.</p>
-    ${tarjetas || '<p class="hint">Sin piezas que comparar.</p>'}</div>`;
+      ${!C.contoRetazo && Math.abs(ret)>0.005?`<div class="hint" style="margin:2px 0">Retazo según el inventario de piezas: ${fmtNum(ret)} hojas (este conteo no midió retazo)</div>`:''}
+      <div class="wrap-x"><table>${cab}${conDif.map(filaHtml).join('')}${retFila}</table></div>
+      ${iguales.length?`<details style="margin-top:4px"><summary class="hint">Ver las ${iguales.length} pieza(s) que cuadran</summary><div class="wrap-x"><table>${cab}${iguales.map(filaHtml).join('')}</table></div></details>`:''}</div>`;
+    return {id, limpio, html};
+  });
+  const tarjetas = items.filter(x=>!x.limpio).sort((a,b)=>pzpColor(a.id).localeCompare(pzpColor(b.id))).map(x=>x.html).join('')
+    + (items.some(x=>x.limpio) ? `<div style="margin-top:12px">${items.filter(x=>x.limpio).sort((a,b)=>pzpColor(a.id).localeCompare(pzpColor(b.id))).map(x=>x.html).join('')}</div>` : '');
+  return `<div style="margin-top:10px;padding:12px;border-radius:12px;font-weight:800;${todoBien?'background:#e8f6ee;color:#145c33;border:1px solid #9fd8b6':'background:#fdecec;color:#8a1f1b;border:1px solid #f0a9a6'}">${todoBien?'✅ CUADRA: el sistema por piezas funcionó en '+D.mod:'⚠️ NO CUADRA todavía: revisa los renglones en rojo'}</div>
+    <p class="hint">Del ${fCorta(diaLocal(base.fecha))} al ${fCorta(diaLocal(fin.fecha))} · ${dias} día(s) con movimiento · ${faltan?`<span class="neg">${faltan} sin capturar</span>`:'todos capturados'}. Cuadra si: cada color ±0.25 hojas${C.contoRetazo?' (piezas + retazo)':''} · piezas principales ±2 o 5%.</p>
+    ${tarjetas || '<p class="hint">Sin piezas que comparar.</p>'}`;
 }
 function pzpResumenHtml(){
   const R = pzpCalcular(pzpD); if(!R) return '';
