@@ -5203,12 +5203,13 @@ async function saveAudit(){
       Object.assign(doc, {fecha:viejo.fecha, tipo:viejo.tipo||doc.tipo, creadoPor:viejo.creadoPor||doc.creadoPor, correcciones:viejo.correcciones||[],
         ediciones:(viejo.ediciones||[]).concat([{fecha:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():'', cambios}])});
       if(viejo.conteoInicial) doc.conteoInicial = true;
-      if(viejo.cierreConteo){ ['cierreConteo','completasDelCierre','sobrantesApp','posposAlContar'].forEach(k=>{ if(viejo[k]!==undefined) doc[k] = viejo[k]; });
+      if(viejo.cierreConteo){ ['cierreConteo','completasDelCierre','sobrantesApp','posposAlContar','sobrantesResp','sobrantesNoTiene','piezasArrancoSinAplicar'].forEach(k=>{ if(viejo[k]!==undefined) doc[k] = viejo[k]; });
         doc.retazos = auditRetazos.filter(r=>r.clase!=='danada').map(r=>Object.assign({}, r, {desc:retDescribir(r), hojas:fmtNum(retHojasTotal(r))}));
         doc.danadas = auditRetazos.filter(r=>r.clase==='danada').map(r=>Object.assign({}, r, {desc:retDescribir(r), hojas:fmtNum(retHojasTotal(r))})); }
       if(!doc.piezasContadas) doc.piezasContadas = []; if(!doc.armadosContados) doc.armadosContados = [];
     }
     await db.collection('auditorias').doc(audId).set(doc);
+    const eraCierreConteo = !!doc.cierreConteo && !!audEdit; // v274: corrección de un cierre con conteo: no se pregunta aplicar
     audEdit = null;
     auditCapturas={}; auditPiezas={}; auditArmados=[]; auditRetazos=[]; auditSobResp={}; auditDesglose={}; audHUlt={}; audHCorr=null; auditMelFuera=[]; audAuditor=''; audHechas={}; audPaso=0; auditCat='Melamina';
     borrarBorradorAud();
@@ -5230,7 +5231,8 @@ async function saveAudit(){
     }
     if(esAdmin() && tipo==='conteo'){
       if(confirm('¿Usar este conteo como el STOCK INICIAL de '+doc.modulo+' ahora?\n\nTambién lo puedes hacer después desde el Historial.')) await usarConteoComoInicial(audId, {...doc, id:audId});
-    } else if(esAdmin() && confirm('¿Aplicar esta auditoría al inventario ahora?\n\nEl inventario quedará igual a lo contado y lo que haya faltado se guarda como DEUDA en Historial → Faltantes (deuda).\n\nTambién puedes aplicarla después desde el Historial.')){
+    } else if(eraCierreConteo){ toast('✅ Conteo corregido. No se aplicó al inventario.'); }
+    else if(esAdmin() && confirm('¿Aplicar esta auditoría al inventario ahora?\n\nEl inventario quedará igual a lo contado y lo que haya faltado se guarda como DEUDA en Historial → Faltantes (deuda).\n\nTambién puedes aplicarla después desde el Historial.')){
       await aplicarAuditoria(audId, {...doc, id:audId});
     }
   }catch(e){ alert('Error: '+e.message); }
