@@ -5866,14 +5866,42 @@ function audPiezasHtml(a){
   return caja('dashed', `<div class="hint" style="margin:0 0 6px">Esta auditoría contó piezas, armados y retazo. Puedes usarla como <b>punto de partida del sistema de piezas</b> de ${herrEsc(a.modulo)}. Arrancar no crea movimientos: desde el día siguiente, la merma del corte de la hoja de corte se descuenta del cortado.</div>
     <button class="btn small" style="margin:0;background:#0e7490" onclick="audPzArrancar('${a.id}')">✂️ Arrancar el sistema de piezas desde esta auditoría</button>`);
 }
+// v276: hojas que vale lo contado en una auditoría (piezas, armados, piezas de la lista en retazo), con la receta o
+// con medida + sierra. El retazo medido y lo demás por área no cambian entre las dos formas.
+function audHojasPiezas(a, porMedida){
+  const conv = porMedida ? piezasAConsumoMedida : piezasAConsumoReceta, pool = [];
+  (a.piezasContadas||[]).forEach(pc=>{ const P = piezaAuditDeLabel(pc.pieza, pc.dim); if(!P) return;
+    pool.push({nombre:P.nombre, cantidad:Number(pc.cantidad)||0, dim:P.dim, colorDestino:pc.grupo, estado:'ok'}); });
+  (a.armadosContados||[]).forEach(x=>{ try{ piezasDeArmado(x).forEach(p=>pool.push(p)); }catch(e){} });
+  (a.retazos||[]).forEach(r=>{ if(r.clase==='danada') return; const P = retPiezaLista(r); if(!P) return;
+    pool.push({nombre:P.nombre, cantidad:Number(r.cantidad)||0, dim:P.dim, colorDestino:P.tipo==='mdf' ? AUD_GRUPO_MDF : r.color, estado:'ok'}); });
+  const porColor = {}, out = {}; pool.forEach(p=>{ (porColor[p.colorDestino] = porColor[p.colorDestino]||[]).push(p); });
+  Object.keys(porColor).forEach(c=>{ conv(porColor[c], c).forEach(r=>{ if(esHojaId(r.itemId)) out[r.itemId] = (out[r.itemId]||0) + (Number(r.cantidad)||0); }); });
+  return out;
+}
+// Al arrancar: lo contado en el cortado se vuelve a valuar con medida + sierra (solo cambia la parte de piezas).
+async function audRevaluarMedida(a){
+  if(a.valorMedida) return;
+  const viejo = audHojasPiezas(a, false), nuevo = audHojasPiezas(a, true);
+  const res = (a.resultados||[]).map(r=>{ const d = fmtNum((nuevo[r.itemId]||0) - (viejo[r.itemId]||0)); if(!d || r.cortadoNoContado || r.fisicoCortado===undefined) return r;
+    const x = Object.assign({}, r); x.fisicoCortado = fmtNum(Number(r.fisicoCortado)+d); x.diffCortado = fmtNum(Number(r.diffCortado)+d);
+    x.fisico = fmtNum(Number(r.fisico)+d); x.diff = fmtNum(Number(r.diff)+d); if(r.hojasEnPiezas!==undefined) x.hojasEnPiezas = fmtNum(Number(r.hojasEnPiezas)+d); x.ajusteMedida = d; return x; });
+  await db.collection('auditorias').doc(a.id).update({resultados:res, valorMedida:true, resultadosReceta:a.resultados||[]});
+  Object.assign(a, {resultados:res, valorMedida:true});
+}
 async function audPzArrancar(id){
   if(!esAdmin()) return;
   const a = (auditorias||[]).find(x=>x.id===id); if(!a) return;
   const c = (_pzpCfgs||{})[a.modulo] || {};
-  if(!confirm(`✂️ Arrancar el sistema de piezas de ${a.modulo} desde la auditoría del ${new Date(a.fecha).toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}.\n\n• Lo contado (piezas, armados y retazo) queda como punto de partida.\n• Empieza en REAL: lo que se tire al cortar se descuenta del cortado (hasta 10 % se aprueba solo; más, te llega a ti).\n• Desde el siguiente día, el coordinador captura la hoja de corte después de su cierre.\n• Hazlo DESPUÉS del cierre del turno de ese día.${c.activo?'\n\n⚠️ '+a.modulo+' ya tenía un arranque anterior: se reemplaza por esta auditoría (no se borra nada).':''}\n\n¿Continuar?`)) return;
+  // v276: candado del orden. La auditoría se aplica DESPUÉS de arrancar, para que lo contado se convierta a hojas
+  // con medida + sierra (si se aplica antes, se convierte con la receta vieja y el arranque nace descuadrado).
+  if(a.aplicada) return alert(`Esta auditoría ya se aplicó al inventario.\n\nEl orden es: 1) guardar la auditoría, 2) arrancar el sistema de piezas, 3) aplicarla.\n\nVuelve a abrirla para corregir (🔓) y sigue ese orden, o haz el arranque desde la próxima auditoría.`);
+  if(!confirm(`✂️ Arrancar el sistema de piezas de ${a.modulo} desde la auditoría del ${new Date(a.fecha).toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}.\n\n• Lo contado (piezas, armados y retazo) queda como punto de partida.\n• Empieza en REAL: lo que se tire al cortar se descuenta del cortado (hasta 10 % se aprueba solo; más, te llega a ti).\n• Desde el siguiente día, el coordinador captura la hoja de corte después de su cierre.\n• Hazlo DESPUÉS del cierre del turno de ese día y ANTES de aplicar la auditoría.${c.activo?'\n\n⚠️ '+a.modulo+' ya tenía un arranque anterior: se reemplaza por esta auditoría (no se borra nada).':''}\n\n¿Continuar?`)) return;
   const pin = prompt('Escribe tu PIN de administrador:'); if(pin===null) return;
   if(String(pin).trim()!==String(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
   await pzpArrancarDesde(a.modulo, id, 'auditoria');
+  _hcCfg = {};
+  try{ await audRevaluarMedida(a); }catch(e){ alert('Ojo: no se pudo revaluar la auditoría con medida + sierra: '+e.message); }
   _pzpCfgs = null; renderHist();
 }
 async function audPzModo(mod, modo){
@@ -6121,6 +6149,10 @@ async function aplicarAuditoriaUI(id){
   await aplicarAuditoria(id, a);
 }
 async function aplicarAuditoria(id, a, opts){
+  const _vm = _valMedidaMod; _valMedidaMod = (a && a.modulo) || _vm;
+  try{ return await aplicarAuditoriaBase(id, a, opts); } finally { _valMedidaMod = _vm; }
+}
+async function aplicarAuditoriaBase(id, a, opts){
   opts = opts || {};
   if(!esAdmin()) return alert('Solo Dirección puede aplicar una auditoría al inventario.');
   if(a.aplicada) return alert('Esta auditoría ya se aplicó.');
@@ -7061,7 +7093,42 @@ function combinarParedEntrepano(piezas){
 }
 
 // Convierte piezas -> consumo real de artículos de CATALOGO (solo donde el rendimiento está confirmado)
+// v276 (pedido por el usuario, revisado a fondo): en los módulos con el sistema de piezas en REAL, cada pieza vale lo
+// que MIDE MÁS SU SIERRA (medio centímetro por lado): (ancho+0.5)×(alto+0.5) ÷ (122×244). Así 1 hoja siempre es
+// 1 hoja (piezas + retazo + merma del corte) y nada se cobra dos veces (p. ej. la tira que queda de los frentes).
+// En estructura sale casi igual que la receta (pared 0.261 vs 0.262; entrepaño 0.0714 = 0.0714). Puertas, fijos,
+// marcos y paredes falsas (a la medida) se quedan con su cálculo de siempre. Los demás módulos, con la receta.
+let _valMedidaMod = null; // para pruebas / casos donde el módulo no es el actual
+function valPorMedida(mod){
+  mod = mod || _valMedidaMod || (typeof modulo==='function' ? modulo() : '');
+  if(!mod || typeof hcCfgDe!=='function') return false;
+  const c = hcCfgDe(mod); return !!(c && c.activo && c.modo==='real');
+}
+function pzValorMedida(dim){
+  const m = String(dim||'').match(/([\d.]+)\s*×\s*([\d.]+)/); if(!m) return 0;
+  const a = Number(m[1]), b = Number(m[2]); if(!(a>0 && b>0)) return 0;
+  const c = Math.min(a,b), l = Math.max(a,b);
+  return Math.min(c+0.5, 122)*Math.min(l+0.5, 244) / (122*244);
+}
 function piezasAConsumo(piezas, color){
+  return valPorMedida() ? piezasAConsumoMedida(piezas, color) : piezasAConsumoReceta(piezas, color);
+}
+function piezasAConsumoMedida(piezas, color){
+  // Pieza por pieza: el color/artículo lo decide la receta; la cantidad, la medida + sierra. Lo que no se puede
+  // valuar así (puertas y demás a la medida, piezas sin medida) se calcula JUNTO con la receta de siempre.
+  const out = {}, add = (id, q) => { out[id] = (out[id]||0) + q; }, resto = [];
+  (piezas||[]).forEach(p=>{
+    const v = pzValorMedida(p.dim), aLaMedida = PZP_A_LA_MEDIDA.some(n=>String(p.nombre||'').startsWith(n));
+    if(aLaMedida || !(v>0) || typeof p.cantidad!=='number'){ resto.push(p); return; }
+    const r = piezasAConsumoReceta([p], color) || [];
+    const hojas = r.filter(x=>esHojaId(x.itemId) && Number(x.cantidad)>0);
+    if(hojas.length!==1){ resto.push(p); return; }
+    add(hojas[0].itemId, p.cantidad*v); r.filter(x=>x!==hojas[0]).forEach(x=>add(x.itemId, Number(x.cantidad)||0));
+  });
+  if(resto.length) (piezasAConsumoReceta(resto, color)||[]).forEach(x=>add(x.itemId, Number(x.cantidad)||0));
+  return Object.keys(out).filter(k=>out[k]>1e-9).map(k=>({itemId:k, cantidad:Math.round(out[k]*10000)/10000}));
+}
+function piezasAConsumoReceta(piezas, color){
   const consumoMap = {}; // itemId -> cantidad
   const addConsumo = (itemNombre, cantidad) => {
     const it = itemByName(itemNombre);
@@ -16606,7 +16673,8 @@ function pzpCompararHtml(D, fin){
   if(C.contoRetazo) new Set([...Object.keys(R.ret), ...Object.keys(C.ret)]).forEach(id=>{ if(Math.abs(R.ret[id]||0)+Math.abs(C.ret[id]||0) > 0.005*PZP_A) porColor[id] = porColor[id] || {filas:[], ap:0, ac:0}; });
   keys.forEach(k=>{ const n = N[k]; const p = R.T[k]||0, c = C.T[k]||0; if(Math.abs(p)+Math.abs(c)<0.0005) return;
     const pc = porColor[n.itemId] = porColor[n.itemId] || {filas:[], ap:0, ac:0};
-    pc.ap += p*n.area; pc.ac += c*n.area; pc.filas.push({k, n, p:fmtNum(p), c:fmtNum(c), d:fmtNum(c-p)}); });
+    const vA = (pzValorMedida(n.dim)*PZP_A) || n.area; // v276: misma valuación que el inventario (medida + sierra)
+    pc.ap += p*vA; pc.ac += c*vA; pc.filas.push({k, n, p:fmtNum(p), c:fmtNum(c), d:fmtNum(c-p)}); });
   const okPieza = f => { const P = PIEZAS_AUDIT.find(x=>pzpNorm(x.dim)===f.n.dim); if(!P || !PZP_PRINCIPALES.includes(P.key)) return null; return Math.abs(f.d) <= Math.max(2, Math.abs(f.p)*0.05); };
   const dias = R.dias.length, faltan = R.avisos.filter(a=>a.falta).length;
   let todoBien = faltan===0;
