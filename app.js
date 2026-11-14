@@ -6616,9 +6616,9 @@ const PIEZAS_AUDIT = [
   {key:'puertitamax', tipo:'mel', nombre:'Puertita de cajonera',     dim:PUERTITA_CAJONERA['max'].dim, label:'Puertita de cajonera Max (cuenta cada una, no el par)',         rinde:PUERTITA_CAJONERA['max'].porHoja+' por hoja'},
   {key:'entzapg',     tipo:'mel', nombre:'Entrepaño zapatera grande', dim:'57×40 cm',  label:'Entrepaño de zapatera grande 57×40', rinde:'12 por hoja'},
   {key:'tapazapg',    tipo:'mel', nombre:'Tapa zapatera grande',     dim:'60×40 cm',    label:'Tapa de zapatera grande 60×40', rinde:'12 por hoja'},
-  {key:'zoclozapg',   tipo:'mel', nombre:'Zóclo zapatera grande',    dim:'57×10 cm',    label:'Zóclo de zapatera grande 57×10', rinde:'48 por hoja'},
+  {key:'zoclozapg',   tipo:'mel', nombre:'Zóclo zapatera grande',    dim:'57×10 cm',    label:'Zóclo de zapatera grande 57×10', rinde:'46 por hoja'},
   {key:'puertazap',   tipo:'mel', nombre:'Puerta de zapatera',       dim:'172×30 cm',   label:'Puerta de zapatera',       rinde:'Corte combinado (igual que en despiece)'},
-  {key:'zoclo',       tipo:'mel', nombre:'Zóclo normal',             dim:'10×52 cm',    label:'Zóclo 10×52',              rinde:'48 por hoja'},
+  {key:'zoclo',       tipo:'mel', nombre:'Zóclo normal',             dim:'10×52 cm',    label:'Zóclo 10×52',              rinde:'50 por hoja'},
   {key:'zoclomax',    tipo:'mel', nombre:'Zóclo Max',                dim:'12×58 cm',    label:'Zóclo Max 12×58',          rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
   {key:'paredmax',    tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×185 cm',   label:'Pared Max 40×185',         rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
   {key:'entmaxlargo', tipo:'mel', nombre:'Pieza Max suelta',         dim:'40×58 cm',    label:'Entrepaño Max largo 40×58',rinde:'Por área: estructura de cajonera Max completa = 1 hoja'},
@@ -9625,7 +9625,8 @@ function _colocarPiezaEnLibres(libres, idx, pw, ph){
 // da 1) o es una pieza chica que normalmente comparte hoja con otras del mismo tipo.
 // v197 (confirmado por el usuario con el despiece por hoja): con sierra de 5 mm caben menos que
 // el cálculo sin sierra. Estas medidas usan lo que de verdad sale de una hoja de 122×244.
-const POR_HOJA_CONFIRMADO = {'10×244':11, '12×58':39, '10×27':100, '12×27':84};
+// v276 (pedido por el usuario): zóclos ajustados a lo que de verdad cabe en una hoja con sierra (10×52: 50; 57×10: 46).
+const POR_HOJA_CONFIRMADO = {'10×244':11, '12×58':39, '10×27':100, '12×27':84, '10×52':50, '10×57':46};
 function porHojaConfirmado(a, b){ const k = Math.min(a,b)+'×'+Math.max(a,b); return POR_HOJA_CONFIRMADO[k] || 0; }
 const FRENTES_MAX_POR_HOJA = 23;
 function piezasPorHojaIndividual(anchoPieza, altoPieza, anchoHoja, altoHoja){
