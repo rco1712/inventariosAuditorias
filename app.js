@@ -3161,10 +3161,27 @@ async function renderAlmacen(){
   }
   const tab = (k, t) => `<button class="${herrAlmTab===k?'active':''}" onclick="herrAlmTab='${k}';herrAbierta='';${R}">${t}</button>`;
   const lista = (xs, vacio) => xs.length ? xs.map(t=>herrToolHtml(t,{render:R})).join('') : `<p class="hint">${vacio}</p>`;
+  const listaJ = (xs, vacio, colQ) => {
+    if(!xs.length) return `<p class="hint">${vacio}</p>`;
+    const sw = `<div style="display:flex;border:1.5px solid #0e7490;border-radius:10px;overflow:hidden;margin:10px 0 4px">${[[true,'Juntas'],[false,'Una por una']].map(([v,tx])=>`<button style="flex:1;padding:8px;border:0;font-weight:800;font-size:13.5px;${herrAlmJuntas===v?'background:#0e7490;color:#fff':'background:transparent;color:#0e7490'}" onclick="herrAlmJuntas=${v};herrGrupoAb='';herrAbierta='';${R}">${tx}</button>`).join('')}</div>`;
+    if(!herrAlmJuntas) return sw + lista(xs, vacio);
+    const g = new Map();
+    xs.forEach(t=>{ const k = [t.nombre||'', t.marca||'Genérico', String(t.color||'').toLowerCase(), t.tipo||''].join('|'); if(!g.has(k)) g.set(k, []); g.get(k).push(t); });
+    const grupos = [...g.entries()].sort((a,b)=>herrCuenta(b[1])-herrCuenta(a[1]) || a[0].localeCompare(b[0]));
+    return sw + grupos.map(([k, ts])=>{
+      if(ts.length===1) return herrToolHtml(ts[0], {render:R});
+      const ab = herrGrupoAb===k, t0 = ts[0], kk = encodeURIComponent(k).replace(/'/g,'%27');
+      return `<div style="border:1.5px solid ${ab?'#0e7490':'var(--line)'};border-radius:12px;padding:10px 12px;margin-top:8px">
+        <div role="button" onclick="herrGrupoAb=${ab?"''":`decodeURIComponent('${kk}')`};herrAbierta='';${R}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer">
+          <span><strong style="font-size:15px">${herrEsc(t0.nombre)}</strong> ${herrChipMarca(t0.marca)}<span class="hint" style="margin:0">${herrEsc(t0.color||'')}</span>
+            <div class="hint" style="margin:3px 0 0">${ab?'▾ Ocultar':'▸ Ver una por una'}</div></span>
+          <span style="background:${colQ};color:#fff;border-radius:999px;padding:4px 12px;font-weight:900;font-size:15px;white-space:nowrap">× ${herrCuenta(ts)}</span></div>
+        ${ab?`<div style="margin-top:6px">${ts.map(t=>herrToolHtml(t,{render:R})).join('')}</div>`:''}</div>`; }).join('');
+  };
   const regRow = (x, entra) => `<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(x.nombre)}</strong>${x.q>1?' × '+x.q:''} ${herrChipMarca(x.marca)}<span class="hint" style="margin:0">${herrEsc(x.color||'')}</span></div><div class="hint" style="margin:0">${herrFecha(x.f)} · ${entra?'de '+herrEsc(x.de):'➜ '+herrEsc(x.a)} · ${herrEsc(x.mot)}</div></div>`;
   let cuerpo = '';
-  if(herrAlmTab==='buenas') cuerpo = `<div class="card" style="border-left:5px solid var(--ok)"><strong style="color:var(--ok)">🟢 Buenas · listas para entregar (${herrCuenta(buenas)})</strong>${lista(buenas,'No hay herramienta buena en el almacén.')}</div>`;
-  else if(herrAlmTab==='danadas') cuerpo = `<div class="card" style="border-left:5px solid var(--bad)"><strong style="color:var(--bad)">🔴 Dañadas (${herrCuenta(danadas)})</strong><p class="hint" style="margin:2px 0 0">Toca una: 🔧 Se reparó o 🗑️ Merma.</p>${lista(danadas,'No hay herramienta dañada.')}</div>`;
+  if(herrAlmTab==='buenas') cuerpo = `<div class="card" style="border-left:5px solid var(--ok)"><strong style="color:var(--ok)">🟢 Buenas · listas para entregar (${herrCuenta(buenas)})</strong>${listaJ(buenas,'No hay herramienta buena en el almacén.','#16a34a')}</div>`;
+  else if(herrAlmTab==='danadas') cuerpo = `<div class="card" style="border-left:5px solid var(--bad)"><strong style="color:var(--bad)">🔴 Dañadas (${herrCuenta(danadas)})</strong><p class="hint" style="margin:2px 0 0">Toca una: 🔧 Se reparó o 🗑️ Merma.</p>${listaJ(danadas,'No hay herramienta dañada.','#dc2626')}</div>`;
   else if(herrAlmTab==='recibir') cuerpo = `<div class="card" style="border-left:5px solid #0891b2"><strong>🚚 Por recibir (${porRec.length})</strong><p class="hint" style="margin:2px 0 0">Lo que los coordinadores mandaron de regreso. Toca "Ya la recibí" cuando la tengas.</p>${porRec.length?porRec.map(m=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(m.datos.desc)}</strong>${m.datos.cantidad>1?' × '+m.datos.cantidad:''} <span class="tag" style="${m.datos.estadoVuelta==='descompuesta'?'color:var(--bad);border-color:var(--bad)':'color:var(--ok);border-color:var(--ok)'}">${m.datos.estadoVuelta==='descompuesta'?'Dañada':'Sirve'}</span></div><div class="hint" style="margin:0">De <strong>${herrEsc(m.modulo)}</strong>${m.datos.quien?' · la tenía '+herrEsc(m.datos.quien):''} · ${herrEsc(herrMotTxt(HERR_REG_MOT,m.datos.motivo,m.datos.nota))} · ${herrFecha(m.fecha)}</div><button class="btn" style="width:100%;margin-top:6px;background:var(--ok)" onclick="herrRecibir('${m.id}')">✅ Ya la recibí</button></div>`).join(''):'<p class="hint">No hay nada en camino.</p>'}</div>`;
   else if(herrAlmTab==='prest'){ const mods = [...new Set(prest.map(t=>t.modulo))];
     cuerpo = mods.length ? mods.map(md=>{ const xs = prest.filter(t=>t.modulo===md); return `<div class="card" style="border-left:5px solid #1d4ed8"><div class="row" style="justify-content:space-between"><strong>📍 ${herrEsc(md)}</strong><span class="hint" style="margin:0">${herrCuenta(xs)} herramienta(s)</span></div>${xs.map(t=>`<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(t.nombre)}</strong>${(t.cantidad||1)>1?' × '+t.cantidad:''} ${herrChipMarca(t.marca)}${t.enCamino?' <span class="tag" style="color:#38bdf8;border-color:#38bdf8">🚚 En camino</span>':''}</div><div class="hint" style="margin:0">${t.lugar==='porasignar'?'📥 Por asignar':'➜ '+herrEsc(herrDondeTxt(t))} · salió ${herrFecha(t.origenFecha||t.desde)} · ${herrEsc(herrOrigenTxt(t))}</div></div>`).join('')}</div>`; }).join('') : '<div class="card hint">Todavía no has prestado herramienta a los módulos.</div>'; }
@@ -3228,6 +3245,9 @@ async function herrGuardarEntrega(){
 const FER_CATS = ['Herrajes','Stickers','PVC','Cintilla','Pegamento'];
 const FER_COL = {Herrajes:'#ca8a04', Stickers:'#db2777', PVC:'#2563eb', Cintilla:'#7c3aed', Pegamento:'#059669'};
 const FER_IC = {Herrajes:'🔩', Stickers:'🏷️', PVC:'🧻', Cintilla:'🎞️', Pegamento:'🧴'};
+// v275 (pedido por el usuario): en el almacén las herramientas iguales (mismo nombre, marca, color y tipo)
+// se ven juntas con su cantidad; al tocar el grupo se ven una por una. Solo cambia la vista: no se fusiona nada.
+let herrAlmJuntas = true, herrGrupoAb = '';
 let herrAlmSec = 'herr', ferTab = 'stock', ferForm = null, ferEnv = null, ferHist = '';
 // Artículos que se manejan por caja (confirmado por el usuario: algunos stickers): se marca una vez
 // cuántas piezas trae la caja; se captura en cajas + sueltas y todo se guarda en piezas. Al módulo
@@ -12183,6 +12203,34 @@ const HORA_RECORDATORIO_CIERRE = 16; // el turno termina 4:30 pm: desde las 4 pm
 // Se trabaja de lunes a sábado; el domingo no se recuerda.
 function esHoraDeCierre(){ const d=new Date(); return d.getDay()!==0 && d.getHours()>=HORA_RECORDATORIO_CIERRE; }
 let cierreVals = {}, cierreBuscar = '', cierreCat = 'Cintilla';
+// v274 (pedido por el usuario): si el coordinador se sale de la app a medio cierre (cierra la app, se le apaga
+// el teléfono, cambia de aplicación y el teléfono la recarga), al volver se recupera lo que llevaba capturado.
+// Se guarda en el mismo teléfono, por módulo y por día; se borra al guardar el cierre. Un borrador de otro día no se carga.
+function cierreBorradorKey(){ return 'borradorCierre_'+modulo(); }
+function cierreHayCaptura(){
+  if(Object.keys(cierreVals).some(k=>!vacioCierre(cierreVals[k]))) return true;
+  if(Object.keys(herrConf).some(k=>herrConf[k] && herrConf[k].ok!==undefined)) return true;
+  return ['n','e'].some(k=>Object.values(corrCalc[k]||{}).some(v=>v!=='' && v!==undefined && v!==null));
+}
+let _cierreBorT = null;
+function cierreBorradorGuardar(){
+  clearTimeout(_cierreBorT);
+  _cierreBorT = setTimeout(()=>{ try{
+    if(current!=='cierre' || !modulo()) return;
+    if(!cierreHayCaptura()){ localStorage.removeItem(cierreBorradorKey()); return; }
+    localStorage.setItem(cierreBorradorKey(), JSON.stringify({dia:fechaHoyLocal(), mod:modulo(), vals:cierreVals, herrConf, corrCalc, t:Date.now()}));
+  }catch(e){} }, 250);
+}
+function cierreBorradorBorrar(){ try{ localStorage.removeItem(cierreBorradorKey()); }catch(e){} }
+function cierreBorradorCargar(){
+  if(cierreHayCaptura()) return false;
+  try{ const b = JSON.parse(localStorage.getItem(cierreBorradorKey())||'null'); if(!b) return false;
+    if(b.dia!==fechaHoyLocal() || b.mod!==modulo()){ cierreBorradorBorrar(); return false; }
+    cierreVals = b.vals||{}; herrConf = b.herrConf||{}; corrCalc = {n:(b.corrCalc||{}).n||{}, e:(b.corrCalc||{}).e||{}};
+    return cierreHayCaptura();
+  }catch(e){ return false; }
+}
+try{ ['input','change','click'].forEach(ev=>document.addEventListener(ev, ()=>{ if(current==='cierre') cierreBorradorGuardar(); }, true)); }catch(e){}
 let _cierreLocal = ''; // v272: el cierre recién guardado cuenta aunque todavía no llegue la lista de movimientos
 function cierreHechoHoy(){
   const hoy = fechaHoyLocal();
@@ -12453,6 +12501,7 @@ function dibujarMovsDiaPDF(doc, R, D, o){
   return y;
 }
 function renderCierre(){
+  if(!esSoloLectura() && cierreBorradorCargar()) setTimeout(()=>toast('📝 Recuperé lo que llevabas capturado hoy.'), 60);
   corrAutoJuntar();
   if(!cierrePrestOk){ cierrePrestOk = true; cargarPrestamos().then(()=>{ const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
@@ -12574,7 +12623,7 @@ async function guardarCierre(){
     try{ await db.collection('cierres').doc(cryptoId()).set({modulo:mod, fecha, dia:fechaHoyLocal(), creadoPor, nota,
       cortes:cortes.map(c=>({nombre:c.it.nombre, q:c.q})), hojasDeMas:hojasDeMas.map(x=>({nombre:x.it.nombre, q:x.deMas})),
       consumibles:salidas.length, consDeMas:deMas.map(x=>x.it.nombre), hojasContadas:hojasContadas.length, herrajes, herrNo:herrNo.length}); }catch(e){}
-    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null; corrCalc = {n:{}, e:{}};
+    cierreVals = {}; cierreBuscar = ''; herrConf = {}; herrHoyLogs = null; corrCalc = {n:{}, e:{}}; cierreBorradorBorrar();
     // v272: en el cierre con conteo no se dice "guardado": sigue el paso 4 como un paso más del cierre.
     _cierreLocal = fechaHoyLocal()+'|'+mod;
     if(hcActivo(mod)) setTimeout(()=>hcDesperdicioSync(mod, fechaHoyLocal()), 1500); // v273: con el corte del cierre ya se sabe el desperdicio de la hoja de hoy
