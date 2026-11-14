@@ -14092,7 +14092,8 @@ function describirLote(ms){
   if(ms.some(m=>m.pedidoId)) return 'Material recibido de un pedido';
   if(tipos.includes('instalacion')) return 'Instalación';
   if(tipos.includes('garantia')) return 'Garantía';
-  if(ms.some(m=>m.motivo==='hojaCorteDesperdicio')) return '✂️ Desperdicio del corte (hoja del cortador)';
+  if(ms.some(m=>m.motivo==='hojaCorteDesperdicio')) return '✂️ Merma del corte (hoja del cortador)';
+  if(ms.some(m=>m.motivo==='hojaCorteAjuste')) return '✂️ Ajuste del corte a favor (hoja del cortador)';
   if(ms.some(m=>m.motivo==='hojaCorteMerma')) return '✂️ Merma de la hoja de corte';
   if(ms.some(m=>m.motivo==='hojaCorteRetBasura')) return '✂️ Retazo que se tiró (hoja del cortador)';
   if(ms.some(m=>m.motivo==='deSobrante')) return 'Sobrante transformado';
@@ -15566,7 +15567,7 @@ function pzpArmTxt(a){ try{ return describirArmado(a).replace(/ · corredera (no
 // Movimientos oficiales que mueven material CORTADO y que la prueba necesita en piezas (signo: +1 entra, -1 sale).
 function pzpEsOtro(m){
   if(!esHojaId(m.itemId) || !cuentaEnInventario(m)) return 0;
-  if(m.motivo==='hojaCorteDesperdicio' || m.motivo==='hojaCorteRetBasura') return 0; // v273: el inventario de piezas ya resta ese desperdicio por su cuenta
+  if(m.motivo==='hojaCorteDesperdicio' || m.motivo==='hojaCorteRetBasura' || m.motivo==='hojaCorteAjuste') return 0; // v273: el inventario de piezas ya resta ese desperdicio por su cuenta
   if(m.tipo==='garantia' || m.tipo==='sobrante') return -1;
   if(m.tipo==='devolucion') return 1;
   if(m.tipo==='merma' && m.lado==='cortado') return -1;
@@ -16100,9 +16101,14 @@ function hcRender(){
 // Solo cuando el cierre de ese día ya dijo cuántas hojas se cortaron y coincide con la hoja del cortador. Si la hoja
 // se corrige, la merma pendiente se actualiza; una ya aprobada no se toca.
 async function hcDesperdicioSync(mod, f){
-  // v276 (pedido por el usuario): en PRÁCTICA la hoja no toca el inventario oficial. En REAL, lo que se tiró al cortar
-  // se descuenta del cortado como «merma del corte»: si es 10 % o menos de lo cortado se aprueba sola; si es más,
-  // queda pendiente para Dirección. Es el ÚNICO camino de esa merma (la hoja ya no captura mermas).
+  // v276 (pedido por el usuario, revisado a fondo): en REAL, la hoja de corte deja el CORTADO oficial igual a lo que
+  // físicamente salió, valuado con el MISMO rendimiento con el que lo descuentan las instalaciones:
+  //   valor que sale = piezas (con su rendimiento de receta) + retazo útil (por área)
+  //   valor que entra = hojas cortadas (+ retazo usado / pieza recortada de la Hoja 2)
+  // Si sale MENOS (se tiró algo) ➜ «Merma del corte»: hasta 10 % de lo cortado se aprueba sola; más, Dirección.
+  // Si sale MÁS (ej. 24 frentes + 4 zóclos de una hoja, o el retazo que sí sirve) ➜ «Ajuste del corte» a favor,
+  // SIEMPRE lo aprueba Dirección. Un solo movimiento por color y día; corregir la hoja corrige ese movimiento.
+  // En PRÁCTICA no se toca nada.
   const cfgM = (pzpD && pzpD.mod===mod && pzpD.cfg) || hcCfgDe(mod) || {};
   if(cfgM.modo!=='real') return;
   try{
@@ -16110,54 +16116,58 @@ async function hcDesperdicioSync(mod, f){
     if(!doc || !doc.hojaCoord) return;
     if(!pzpD || pzpD.mod!==mod) await pzpCargar(mod);
     const R = pzpCalcular(pzpD, f); const cortes = (R && R.porDia[f] && R.porDia[f].cortes) || {};
-    const map = Object.assign({}, doc.desperdicioMov||{}); let cambio = false;
+    const map = Object.assign({}, doc.desperdicioMov||{}, doc.basuraMov||{}); let cambio = !!doc.basuraMov;
     const quien = getCurrentUserEmail?getCurrentUserEmail():'';
+    const eqL = (id, l) => hcEquivA(id, {piezas:(l||[]).map(r=>({k:r.k, q:Number(r.q)||0}))});
+    const arL = l => (l||[]).reduce((t,r)=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return t + (P ? (Number(r.q)||0)*pzpArea(P.dim) : 0); }, 0);
+    const D = {}, Hc = {}, txt = {}, malo = {};
+    const addD = (id, v, t) => { D[id] = (D[id]||0) + v; (txt[id] = txt[id]||[]).push(t); };
     for(const id of Object.keys(doc.corte||{})){
       const cc = doc.corte[id]||{}, H = Number(cortes[id])||0; if(!(H>0) || !cc.sobroRet) continue;
-      if(Number(cc.hojasPapel)>0 && Math.abs(Number(cc.hojasPapel)-H)>0.01) continue; // no cuadra con el cierre: no se descuenta, se avisa
-      // v276 (MUY importante, sin descuentos de más): las piezas se valúan con el MISMO rendimiento con el que las
-      // descuenta una instalación (ej. 24 frentes = 1 hoja, 3 paredes + 3 entrepaños = 1 hoja). Así, si una hoja dio
-      // lo que dice la receta, la merma del corte es 0 y la instalación descuenta la hoja completa una sola vez.
-      // Solo lo que no tiene rendimiento confirmado (piezas a la medida) se valúa por área.
-      const A = hcEquivA(id, cc);
-      let resto = H*PZP_A - A; if(resto < -0.02*PZP_A) continue; // no cabe: es error de captura, no desperdicio
-      resto = Math.max(0, resto); // si cuadra exacto (o casi), la merma es 0 y una merma anterior de esa hoja se borra
-      const aR = Math.min(resto, (cc.retazos||[]).reduce((t,x)=>t+(Number(x.w)||0)*(Number(x.h)||0)*(Number(x.q)||0),0));
-      const desH = Math.round((resto - aR)/PZP_A*100)/100;
+      if(Number(cc.hojasPapel)>0 && Math.abs(Number(cc.hojasPapel)-H)>0.01){ malo[id] = true; continue; } // no cuadra con el cierre
+      const aRet = cc.sobroRet==='si' ? (cc.retazos||[]).reduce((t,x)=>t+(Number(x.w)||0)*(Number(x.h)||0)*(Number(x.q)||0),0) : 0;
+      // Revisión física: lo anotado tiene que caber en las hojas cortadas (por área real).
+      let areaReal = aRet; (cc.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(P) areaReal += (Number(r.q)||0)*pzpArea(P.dim); });
+      (cc.otras||[]).forEach(r=>{ areaReal += (Number(r.q)||0)*(Number(r.w)||0)*(Number(r.h)||0); }); areaReal += (Number(cc.puertasOtroDia)||0)*PZP_A;
+      if(areaReal > H*PZP_A*1.01){ malo[id] = true; continue; }
+      Hc[id] = H; const V = hcEquivA(id, cc) + aRet;
+      addD(id, V - H*PZP_A, `${fmtNum(H)} hoja(s) cortadas · salió ${pzpH(V)} (piezas con su rendimiento${aRet>0?' + retazo '+pzpH(aRet):''})`);
+    }
+    (doc.retFilas||[]).forEach(rf=>{ const R0 = (Number(rf.w)||0)*(Number(rf.h)||0); if(!(R0>0)) return;
+      const E = eqL(rf.itemId, rf.salio), aP = arL(rf.salio), queda = rf.resto==='basura' ? 0 : Math.max(0, R0 - aP);
+      addD(rf.itemId, E + queda - R0, `retazo ${fmtNum(rf.w)}×${fmtNum(rf.h)} usado${rf.resto==='basura'?' (lo demás a la basura)':''}`); });
+    (doc.recortes||[]).forEach(rc=>{ const P = PIEZAS_AUDIT.find(x=>x.key===rc.k); if(!P) return; const q = Number(rc.q)||0;
+      const Ep = eqL(rc.itemId, [{k:rc.k, q}]), E = eqL(rc.itemId, rc.salio), queda = rc.resto==='retazo' ? Math.max(0, q*pzpArea(P.dim) - arL(rc.salio)) : 0;
+      addD(rc.itemId, E + queda - Ep, `${q} ${hcNom(P)} recortada(s)`); });
+    const ids = new Set([...Object.keys(D), ...Object.keys(map)]);
+    for(const id of ids){
+      if(malo[id]) continue; // hoja con error de captura: no se toca nada hasta que la corrijan
       const it = CATALOGO.find(i=>i.id===id); if(!it) continue;
-      const alto = desH/H > 0.10;
-      const nota = `Desperdicio del corte del ${pzpFmtDia(f)} (orillas, tiras y sierra): ${fmtNum(H)} hoja(s) cortadas · piezas ${pzpH(A)} · retazo ${pzpH(aR)} → ${fmtNum(desH)} hoja(s)${alto?' · ⚠️ es mucho: revisa la hoja antes de aprobar':''}`;
+      const v = Math.round(((D[id]||0)/PZP_A)*100)/100, H = Hc[id]||0;
+      const esMerma = v < -0.004, esAjuste = v > 0.004, q = Math.abs(v);
+      const autoOk = esMerma && H>0 && q/H <= 0.10 + 1e-9;
+      const nota = `${esAjuste?'Ajuste del corte (salió más de lo que dice la receta)':'Merma del corte (lo que se tiró al cortar)'} del ${pzpFmtDia(f)}: ${(txt[id]||[]).join(' · ')} → ${esAjuste?'+':'−'}${fmtNum(q)} hoja(s)${autoOk?' · aprobada sola (10 % o menos)':''}${esMerma&&!autoOk&&H>0?' · ⚠️ más de 10 %: revisa la hoja antes de aprobar':''}`;
+      const datos = esAjuste ? {tipo:'ajuste', motivo:'hojaCorteAjuste', cantidad:q, completasDelta:0, cortadoDelta:q} : {tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:q};
       const prevId = map[id];
       if(prevId){
         const m0 = await db.collection('movimientos').doc(prevId).get(); const m = m0 && m0.data ? m0.data() : null;
-        const autoOk = desH/H <= 0.10 + 1e-9;
-        // pendiente, o aprobada sola (autoAprob): si se corrige la hoja, se corrige la merma. Una que aprobó Dirección no se toca.
-        if(m && (m.estado==='pendiente' || m.autoAprob)){ if(Math.abs((Number(m.cantidad)||0)-desH)>0.004 || (m.estado==='aprobado')!==autoOk){ if(desH>0.004) await db.collection('movimientos').doc(prevId).update({cantidad:desH, nota, editadoEn:new Date().toISOString(), estado:autoOk?'aprobado':'pendiente', autoAprob:autoOk}); else { await db.collection('movimientos').doc(prevId).delete(); delete map[id]; cambio = true; } } continue; }
-        if(m && m.estado!=='rechazado') continue; // ya aprobada por Dirección: no se toca
+        if(m && m.estado!=='rechazado' && !(m.estado==='pendiente' || m.autoAprob)) continue; // ya la aprobó Dirección: no se toca
+        if(m && m.estado!=='rechazado'){
+          const igual = m.tipo===datos.tipo && Math.abs((Number(m.cantidad)||0)-q)<=0.004 && (m.estado==='aprobado')===autoOk;
+          if(igual) continue;
+          if(!(esMerma||esAjuste)){ await db.collection('movimientos').doc(prevId).delete(); delete map[id]; cambio = true; continue; }
+          await db.collection('movimientos').doc(prevId).set(Object.assign({}, m, datos, {cantidad:q, nota, editadoEn:new Date().toISOString(), estado:autoOk?'aprobado':'pendiente', autoAprob:autoOk}, esAjuste?{}:{completasDelta:null, cortadoDelta:null}));
+          continue;
+        }
+        delete map[id]; cambio = true;
       }
-      if(!(desH>0.004)) continue;
-      const movId = cryptoId(), autoOk = desH/H <= 0.10 + 1e-9;
-      await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:desH, nota:nota+(autoOk?' · aprobada sola (10 % o menos)':''), fecha:new Date().toISOString(), estado:autoOk?'aprobado':'pendiente', autoAprob:autoOk, creadoPor:quien, hojaCorte:{fecha:f, desperdicio:true}});
+      if(!(esMerma||esAjuste)) continue;
+      const movId = cryptoId();
+      await db.collection('movimientos').doc(movId).set(Object.assign({modulo:mod, itemId:id, itemNombre:it.nombre}, datos, {nota, fecha:new Date().toISOString(), estado:autoOk?'aprobado':'pendiente', autoAprob:autoOk, creadoPor:quien, hojaCorte:{fecha:f}}));
       map[id] = movId; cambio = true;
     }
-    // Retazo que se tiró: lo que quedó de un retazo usado ("basura") y lo que sobró de una pieza recortada ("basura").
-    const mapB = Object.assign({}, doc.basuraMov||{}); let cambioB = false; const basura = {};
-    const aS = l => (l||[]).reduce((t,r)=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return t + (P ? (Number(r.q)||0)*pzpArea(P.dim) : 0); }, 0);
-    (doc.retFilas||[]).forEach(rf=>{ if(rf.resto!=='basura') return; const b = (Number(rf.w)||0)*(Number(rf.h)||0) - aS(rf.salio); if(b>0) basura[rf.itemId] = (basura[rf.itemId]||0) + b; });
-    (doc.recortes||[]).forEach(rc=>{ if(rc.resto==='retazo') return; const P = PIEZAS_AUDIT.find(x=>x.key===rc.k); if(!P) return; const b = (Number(rc.q)||0)*pzpArea(P.dim) - aS(rc.salio); if(b>0) basura[rc.itemId] = (basura[rc.itemId]||0) + b; });
-    const idsB = new Set([...Object.keys(basura), ...Object.keys(mapB)]);
-    for(const id of idsB){ const it = CATALOGO.find(i=>i.id===id); if(!it) continue; const q = Math.round((basura[id]||0)/PZP_A*100)/100;
-      const nota = `Retazo que se tiró el ${pzpFmtDia(f)} (lo que quedó de retazos usados y de piezas recortadas): ${fmtNum(q)} hoja(s)`;
-      const prevId = mapB[id];
-      if(prevId){ const m0 = await db.collection('movimientos').doc(prevId).get(); const m = m0 && m0.data ? m0.data() : null;
-        if(m && m.estado==='pendiente'){ if(Math.abs((Number(m.cantidad)||0)-q)>0.004){ if(q>0.004) await db.collection('movimientos').doc(prevId).update({cantidad:q, nota, editadoEn:new Date().toISOString()}); else { await db.collection('movimientos').doc(prevId).delete(); delete mapB[id]; cambioB = true; } } continue; }
-        if(m && m.estado!=='rechazado') continue; }
-      if(!(q>0.004)) continue;
-      const movId = cryptoId();
-      await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteRetBasura', cantidad:q, nota, fecha:new Date().toISOString(), estado:'pendiente', creadoPor:quien, hojaCorte:{fecha:f, retBasura:true}});
-      mapB[id] = movId; cambioB = true; }
-    if(cambio || cambioB) await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).update(Object.assign({}, cambio?{desperdicioMov:map}:{}, cambioB?{basuraMov:mapB}:{}));
-  }catch(e){ console.warn('desperdicio', e); }
+    if(cambio) await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).update({desperdicioMov:map, basuraMov:null});
+  }catch(e){ console.warn('merma del corte', e); }
 }
 async function hcGuardar(){
   const mod = modulo(), f = hcFecha, c = hcCap; if(!c) return;
