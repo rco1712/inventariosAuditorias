@@ -252,7 +252,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v277';
+const APP_VERSION = 'v278';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8118,7 +8118,11 @@ function verifPintar(){
   const chips = diasTodos.slice(-8).map(d=>{ const n = sinRev.filter(l=>(diaValorInst(l))===d).length, rojo = n && verifDiasAtras(d)>VERIF_DIAS_ROJO;
     return `<button class="chip ${d===verifDia?'on':''}" style="${rojo&&d!==verifDia?'border-color:#dc2626;color:#dc2626':''}" onclick="verifDia='${d}';verifPanel=null;verifPintar()">${nomDia(d)}${n?` · ${n}`:' ✓'}</button>`; }).join('');
   const delDia = todas.filter(l=>(diaValorInst(l))===verifDia);
-  const pend = delDia.filter(verifPorRevisar), hechas = delDia.filter(l=>!verifPorRevisar(l));
+  // v278 (pedido por el usuario): las del mismo domicilio salen juntas, ordenadas por calle (A→Z) y luego por hora.
+  const calleK = l => String(l.calle||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[.,#]/g,' ').replace(/\s+/g,' ').trim();
+  const porCalle = (a,b) => { const ka = calleK(a), kb = calleK(b); if(!ka !== !kb) return ka ? -1 : 1; return ka.localeCompare(kb,'es',{numeric:true}) || String(a.fecha||'').localeCompare(String(b.fecha||'')); };
+  const pend = delDia.filter(verifPorRevisar).sort(porCalle), hechas = delDia.filter(l=>!verifPorRevisar(l)).sort(porCalle);
+  const nCalle = {}; pend.forEach(l=>{ const k = calleK(l); if(k) nCalle[k] = (nCalle[k]||0)+1; });
   const rojo = pend.length && verifDiasAtras(verifDia)>VERIF_DIAS_ROJO;
   const btn = (id, acc, t, c) => `<button class="btn small" style="min-height:44px;padding:6px 8px;${verifPanel&&verifPanel.id===id&&verifPanel.acc===acc?`background:${c}`:`background:transparent;color:${c};border:1.5px solid ${c};box-shadow:none`}" onclick="verifAccion('${id}','${acc}')">${t}</button>`;
   const tarjeta = l => { const M = MODULOS.find(m=>m.nombre===l.modulo)||{color:'#666'};
@@ -8155,7 +8159,9 @@ function verifPintar(){
     ${verifReinstHtml(verifMod)}
     ${verifEsperandoHtml(verifMod)}
     ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste las de ${verifMod} de este día.</strong>${sinRev.length?`<p class="hint" style="margin:4px 0 0">Faltan ${sinRev.length} de otro(s) día(s): elígelos arriba.</p>`:''}${sigMod?`<button class="btn" style="width:100%;margin-top:10px;background:${(MODULOS.find(m=>m.nombre===sigMod)||{}).color||'var(--brand)'}" onclick="verifMod='${sigMod}';verifDia='';verifPanel=null;verifPintar();window.scrollTo(0,0)">Siguiente: ${sigMod} (${sinRevAll.filter(l=>l.modulo===sigMod).length}) ›</button>`:''}</div>` : ''}
-    ${pend.map(tarjeta).join('')}
+    ${pend.map((l,i)=>{ const k = calleK(l), prev = i>0 ? calleK(pend[i-1]) : null;
+      const cab = k && nCalle[k]>1 && k!==prev ? `<div style="margin:14px 2px 4px;font-weight:900;font-size:14px;color:#0e7490">📍 ${escCalle(l.calle)} · ${nCalle[k]} instalaciones en este domicilio</div>` : '';
+      return cab + tarjeta(l); }).join('')}
     ${pend.length>1 || (pend.length===1 && hechas.length) ? `${verifTodasEnCurso?`<button class="btn" disabled style="width:100%;min-height:54px;background:#0e7490;opacity:.8">⏳ Verificando… no lo toques otra vez</button>`:`<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás de ${verifMod} sí se instalaron (${pend.length})</button>`}` : ''}
     ${hechas.length?`<div class="card" style="padding:12px"><strong>Ya revisadas · ${hechas.length}</strong>${hechas.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">${l.modulo}${(l.verif||{}).nota?' · “'+l.verif.nota+'”':''}</span><span style="display:block;margin-top:4px">${verifEstadoTxt(l)}</span></span>${(l.verif||{}).estado==='ok'?`<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDeshacer('${l.id}')">Deshacer</button>`:''}</div>`).join('')}</div>`:''}`;
 }
