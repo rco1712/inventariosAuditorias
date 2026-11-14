@@ -3722,8 +3722,8 @@ function renderMov(){
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint" style="font-weight:800">¿Qué se dañó?</label>
       <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes…','#e0791a'],['armado','📦','Mueble armado','Cajonera, cajón, espejo…','#7c3aed']].map(([k,ic,t,sub,c])=>`<button onclick="${k==='armado'?`maf=null;irA('mermaarm')`:`movLado='${k}';renderMov()`}" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
       ${movLado==='cortado'?`<button class="btn" style="margin-top:10px;width:100%;min-height:50px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="pzSetModo('merma');irA('pzenc')">✂️ Contar las piezas dañadas (entrepaños, zóclos, paredes…)</button>${hcActivo()?'<p class="hint" style="margin:6px 0 0;color:#c2410c;font-weight:700">✂️ En tu módulo ya se lleva el inventario de piezas: usa este botón y anota qué piezas eran.</p>':'<p class="hint" style="margin:6px 0 0">La app convierte las piezas a hojas. O escribe abajo las hojas directo si ya las sabes.</p>'}`:''}</div>` : ''}
-    <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
-    <div class="movlist" id="mv-lista"></div>
+    ${catHoja && movTipo==='merma' && movLado==='cortado' && hcActivo() ? '' : `<p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
+    <div class="movlist" id="mv-lista"></div>`}
     ${movTipo==='merma'?fotoPickerHtml('merma','Foto de lo dañado (opcional)'):''}
     <input id="mv-nota" placeholder="Nota (opcional)" style="margin-top:12px">
     <button class="btn" id="mv-guardar" style="margin-top:12px;width:100%;min-height:54px;font-size:16px" onclick="registrarMovLote()">Revisar y guardar</button>
@@ -5857,23 +5857,35 @@ function audPiezasHtml(a){
   if(c.activo && !c.modo) c = {};
   const caja = (borde, cont) => `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;border:1px ${borde} #0e7490;background:rgba(14,116,144,.06)">${cont}</div>`;
   if(c.activo && c.auditoriaId===a.id) return caja('solid', `<strong>✂️ Arranque del sistema de piezas de ${herrEsc(a.modulo)}</strong>
-    <div class="hint" style="margin:4px 0 0">Desde esta auditoría, el cortado de ${herrEsc(a.modulo)} se lleva en piezas${c.modo==='real'?'':' <b>(en práctica: el inventario oficial no cambia)</b>'}. Las auditorías siguientes se comparan pieza por pieza.</div>`);
+    <div class="hint" style="margin:4px 0 0">Desde esta auditoría, el cortado de ${herrEsc(a.modulo)} se lleva en piezas. ${c.modo==='real'?'<b>REAL:</b> lo que se tira al cortar se descuenta del inventario (hasta 10 % se aprueba solo; más, te llega a ti).':'<b>PRÁCTICA:</b> el inventario oficial no cambia.'} Las auditorías siguientes se comparan pieza por pieza.</div>
+    <button class="btn small" style="margin:8px 0 0;background:transparent;color:#0e7490;border:1px solid #0e7490;box-shadow:none" onclick="audPzModo('${herrEsc(a.modulo)}','${c.modo==='real'?'practica':'real'}')">${c.modo==='real'?'🎓 Pasar a práctica':'✂️ Pasar a real'} (PIN)</button>`);
   const base = c.activo && c.auditoriaId ? (auditorias||[]).find(x=>x.id===c.auditoriaId) : null;
   if(base && (a.fecha||'') > (base.fecha||'')) return caja('solid', `<button class="btn small" style="margin:0;background:#0e7490" onclick="audPzComparar('${a.id}')">🔍 Comparar pieza por pieza</button>
     <div class="hint" style="margin:6px 0 0">Contra lo que debe haber desde la auditoría de arranque del ${fCorta(diaLocal(base.fecha))}.</div><div id="audpz-${a.id}"></div>`);
   if(c.activo && c.auditoriaId && !base) return '';
-  return caja('dashed', `<div class="hint" style="margin:0 0 6px">Esta auditoría contó piezas, armados y retazo. Puedes usarla como <b>punto de partida del sistema de piezas</b> de ${herrEsc(a.modulo)}. No crea movimientos ni deudas: el inventario oficial solo cambia si aplicas la auditoría, como siempre.</div>
+  return caja('dashed', `<div class="hint" style="margin:0 0 6px">Esta auditoría contó piezas, armados y retazo. Puedes usarla como <b>punto de partida del sistema de piezas</b> de ${herrEsc(a.modulo)}. Arrancar no crea movimientos: desde el día siguiente, la merma del corte de la hoja de corte se descuenta del cortado.</div>
     <button class="btn small" style="margin:0;background:#0e7490" onclick="audPzArrancar('${a.id}')">✂️ Arrancar el sistema de piezas desde esta auditoría</button>`);
 }
 async function audPzArrancar(id){
   if(!esAdmin()) return;
   const a = (auditorias||[]).find(x=>x.id===id); if(!a) return;
   const c = (_pzpCfgs||{})[a.modulo] || {};
-  if(!confirm(`✂️ Arrancar el sistema de piezas de ${a.modulo} desde la auditoría del ${new Date(a.fecha).toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}.\n\n• Lo contado (piezas, armados y retazo) queda como punto de partida.\n• Empieza en PRÁCTICA: el inventario oficial no cambia.\n• Desde el siguiente día, el coordinador captura la hoja de corte.${c.activo?'\n\n⚠️ '+a.modulo+' ya tenía un arranque anterior: se reemplaza por esta auditoría (no se borra nada).':''}\n\n¿Continuar?`)) return;
+  if(!confirm(`✂️ Arrancar el sistema de piezas de ${a.modulo} desde la auditoría del ${new Date(a.fecha).toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}.\n\n• Lo contado (piezas, armados y retazo) queda como punto de partida.\n• Empieza en REAL: lo que se tire al cortar se descuenta del cortado (hasta 10 % se aprueba solo; más, te llega a ti).\n• Desde el siguiente día, el coordinador captura la hoja de corte después de su cierre.\n• Hazlo DESPUÉS del cierre del turno de ese día.${c.activo?'\n\n⚠️ '+a.modulo+' ya tenía un arranque anterior: se reemplaza por esta auditoría (no se borra nada).':''}\n\n¿Continuar?`)) return;
   const pin = prompt('Escribe tu PIN de administrador:'); if(pin===null) return;
   if(String(pin).trim()!==String(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
   await pzpArrancarDesde(a.modulo, id, 'auditoria');
   _pzpCfgs = null; renderHist();
+}
+async function audPzModo(mod, modo){
+  if(!esAdmin()) return;
+  if(!confirm(modo==='real' ? `✂️ Pasar ${mod} a REAL.\n\nDesde ahora, lo que se tire al cortar (según la hoja de corte) se descuenta del cortado.\n¿Continuar?` : `🎓 Pasar ${mod} a PRÁCTICA.\n\nLas hojas de corte siguen, pero ya no descuentan nada del inventario oficial. Lo ya descontado se queda.\n¿Continuar?`)) return;
+  const pin = prompt('Escribe tu PIN de administrador:'); if(pin===null) return;
+  if(String(pin).trim()!==String(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
+  try{ const d = await db.collection('piezasPrueba').doc('cfg_'+mod).get(); const c = d && d.data ? d.data() : null; if(!c || !c.activo) return alert('Ese módulo no tiene arrancado el sistema de piezas.');
+    const ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
+    await db.collection('piezasPrueba').doc('cfg_'+mod).set(Object.assign({}, c, {modo, historial:(c.historial||[]).concat([{accion:'modo_'+modo, en:ahora, por:quien}])}));
+    _pzpCfgs = null; _hcCfg = {}; toast(modo==='real'?'✂️ '+mod+' en REAL':'🎓 '+mod+' en práctica'); renderHist();
+  }catch(e){ alert('No se pudo cambiar: '+e.message); }
 }
 async function audPzComparar(id){
   const a = (auditorias||[]).find(x=>x.id===id), el = document.getElementById('audpz-'+id); if(!a || !el) return;
@@ -16079,7 +16091,11 @@ function hcRender(){
 // Solo cuando el cierre de ese día ya dijo cuántas hojas se cortaron y coincide con la hoja del cortador. Si la hoja
 // se corrige, la merma pendiente se actualiza; una ya aprobada no se toca.
 async function hcDesperdicioSync(mod, f){
-  return; // v274 (pedido por el usuario): el inventario de piezas va aparte; ya no manda mermas al inventario oficial.
+  // v276 (pedido por el usuario): en PRÁCTICA la hoja no toca el inventario oficial. En REAL, lo que se tiró al cortar
+  // se descuenta del cortado como «merma del corte»: si es 10 % o menos de lo cortado se aprueba sola; si es más,
+  // queda pendiente para Dirección. Es el ÚNICO camino de esa merma (la hoja ya no captura mermas).
+  const cfgM = (pzpD && pzpD.mod===mod && pzpD.cfg) || hcCfgDe(mod) || {};
+  if(cfgM.modo!=='real') return;
   try{
     const d = await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).get(); const doc = d && d.data ? d.data() : null;
     if(!doc || !doc.hojaCoord) return;
@@ -16096,17 +16112,19 @@ async function hcDesperdicioSync(mod, f){
       const aR = Math.min(resto, (cc.retazos||[]).reduce((t,x)=>t+(Number(x.w)||0)*(Number(x.h)||0)*(Number(x.q)||0),0));
       const desH = Math.round((resto - aR)/PZP_A*100)/100;
       const it = CATALOGO.find(i=>i.id===id); if(!it) continue;
-      const alto = desH/H > 0.15;
+      const alto = desH/H > 0.10;
       const nota = `Desperdicio del corte del ${pzpFmtDia(f)} (orillas, tiras y sierra): ${fmtNum(H)} hoja(s) cortadas · piezas ${pzpH(A)} · retazo ${pzpH(aR)} → ${fmtNum(desH)} hoja(s)${alto?' · ⚠️ es mucho: revisa la hoja antes de aprobar':''}`;
       const prevId = map[id];
       if(prevId){
         const m0 = await db.collection('movimientos').doc(prevId).get(); const m = m0 && m0.data ? m0.data() : null;
-        if(m && m.estado==='pendiente'){ if(Math.abs((Number(m.cantidad)||0)-desH)>0.004){ if(desH>0.004) await db.collection('movimientos').doc(prevId).update({cantidad:desH, nota, editadoEn:new Date().toISOString()}); else { await db.collection('movimientos').doc(prevId).delete(); delete map[id]; cambio = true; } } continue; }
-        if(m && m.estado!=='rechazado') continue; // ya aprobada: no se toca
+        const autoOk = desH/H <= 0.10 + 1e-9;
+        // pendiente, o aprobada sola (autoAprob): si se corrige la hoja, se corrige la merma. Una que aprobó Dirección no se toca.
+        if(m && (m.estado==='pendiente' || m.autoAprob)){ if(Math.abs((Number(m.cantidad)||0)-desH)>0.004 || (m.estado==='aprobado')!==autoOk){ if(desH>0.004) await db.collection('movimientos').doc(prevId).update({cantidad:desH, nota, editadoEn:new Date().toISOString(), estado:autoOk?'aprobado':'pendiente', autoAprob:autoOk}); else { await db.collection('movimientos').doc(prevId).delete(); delete map[id]; cambio = true; } } continue; }
+        if(m && m.estado!=='rechazado') continue; // ya aprobada por Dirección: no se toca
       }
       if(!(desH>0.004)) continue;
-      const movId = cryptoId();
-      await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:desH, nota, fecha:new Date().toISOString(), estado:'pendiente', creadoPor:quien, hojaCorte:{fecha:f, desperdicio:true}});
+      const movId = cryptoId(), autoOk = desH/H <= 0.10 + 1e-9;
+      await db.collection('movimientos').doc(movId).set({modulo:mod, itemId:id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:desH, nota:nota+(autoOk?' · aprobada sola (10 % o menos)':''), fecha:new Date().toISOString(), estado:autoOk?'aprobado':'pendiente', autoAprob:autoOk, creadoPor:quien, hojaCorte:{fecha:f, desperdicio:true}});
       map[id] = movId; cambio = true;
     }
     // Retazo que se tiró: lo que quedó de un retazo usado ("basura") y lo que sobró de una pieza recortada ("basura").
@@ -16140,7 +16158,10 @@ async function hcGuardar(){
   Object.keys(corte).forEach(id=>{ const H = Number(cortes[id])>0 ? Number(cortes[id]) : corte[id].hojasPapel; if(H>0 && hcAreaColor(id) > H*PZP_A + 1) malos.push(pzpColor(id));
     if(Number(cortes[id])>0 && corte[id].hojasPapel>0 && Math.abs(Number(cortes[id])-corte[id].hojasPapel)>0.01) dif.push(`${pzpColor(id)}: cierre ${fmtNum(cortes[id])}, hoja ${fmtNum(corte[id].hojasPapel)}`); });
   if((malos.length || dif.length) && !confirm(`Revisa antes de guardar:\n\n${malos.length?'⛔ No cabe lo anotado en: '+malos.join(', ')+'\n':''}${dif.length?'⚠️ Hojas cortadas distintas:\n'+dif.join('\n'):''}\n\n¿Guardar así? A Dirección le llega el aviso.`)) return;
-  const prev = (pzpD.dias||[]).find(x=>x.fecha===f) || {};
+  // v276: se lee la hoja guardada directo de la base (no de la copia en memoria) para conservar qué mermas del
+  // corte ya se crearon (desperdicioMov / basuraMov): así una corrección actualiza esa merma y nunca crea otra.
+  let prev = (pzpD.dias||[]).find(x=>x.fecha===f) || {};
+  try{ const d0 = await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).get(); const x0 = d0 && d0.data ? d0.data() : null; if(x0) prev = Object.assign({}, prev, x0); }catch(e){}
   const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
   try{
     // v274 (pedido por el usuario): la merma de la hoja de corte ya NO crea movimiento en el inventario oficial;
@@ -16157,7 +16178,7 @@ async function pzpArrancarDesde(mod, audId, desde){
     const ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
     const historial = (c.historial||[]).concat([{accion:'on', en:ahora, por:quien, auditoriaId:audId, desde:desde||'cierreConteo'}]);
     // v275: "modo" del sistema de piezas. Arranca en práctica: el inventario oficial (en hojas) no se toca.
-    await db.collection('piezasPrueba').doc('cfg_'+mod).set({tipo:'cfg', modulo:mod, activo:true, auditoriaId:audId, fecha:ahora, por:quien, historial, hojaCoord:true, modo:'practica'});
+    await db.collection('piezasPrueba').doc('cfg_'+mod).set({tipo:'cfg', modulo:mod, activo:true, auditoriaId:audId, fecha:ahora, por:quien, historial, hojaCoord:true, modo:(desde==='auditoria'?'real':'practica')});
     _pzpCfgs = null; toast('✂️ Inventario de piezas de '+mod+' arranca desde este conteo.');
   }catch(e){ alert('No se pudo arrancar el inventario de piezas: '+e.message); }
 }
