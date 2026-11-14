@@ -252,7 +252,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v275';
+const APP_VERSION = 'v276';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3721,7 +3721,7 @@ function renderMov(){
     ${movCat==='Herrajes'||movBuscar?'<p class="hint">🔩 Correderas: <strong>"Juego"</strong> = hembra + macho juntos. <strong>"Sin pareja"</strong> = una sola pieza (solo hembra o solo macho).</p>':''}
     ${catHoja && movTipo==='merma' ? `<div style="margin-top:8px"><label class="hint" style="font-weight:800">¿Qué se dañó?</label>
       <div style="display:flex;gap:8px;margin-top:6px">${[['completas','📄','Hojas completas','Hojas enteras sin cortar','#2563eb'],['cortado','✂️','Piezas cortadas','Entrepaños, zóclos, paredes…','#e0791a'],['armado','📦','Mueble armado','Cajonera, cajón, espejo…','#7c3aed']].map(([k,ic,t,sub,c])=>`<button onclick="${k==='armado'?`maf=null;irA('mermaarm')`:`movLado='${k}';renderMov()`}" style="flex:1;cursor:pointer;text-align:left;border-radius:14px;padding:12px 10px;border:2px solid ${movLado===k?c:'var(--line)'};background:${movLado===k?c:'transparent'};color:${movLado===k?'#fff':'var(--ink)'}"><div style="font-size:22px">${ic}</div><div style="font-weight:900;font-size:15px;margin-top:2px">${t}</div><div style="font-size:12px;opacity:.85;margin-top:2px">${sub}</div></button>`).join('')}</div>
-      ${movLado==='cortado'?`<button class="btn" style="margin-top:10px;width:100%;min-height:50px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="pzSetModo('merma');irA('pzenc')">✂️ Contar las piezas dañadas (entrepaños, zóclos, paredes…)</button><p class="hint" style="margin:6px 0 0">La app convierte las piezas a hojas. O escribe abajo las hojas directo si ya las sabes.</p>`:''}</div>` : ''}
+      ${movLado==='cortado'?`<button class="btn" style="margin-top:10px;width:100%;min-height:50px;background:linear-gradient(135deg,#e0791a,#c0620f)" onclick="pzSetModo('merma');irA('pzenc')">✂️ Contar las piezas dañadas (entrepaños, zóclos, paredes…)</button>${hcActivo()?'<p class="hint" style="margin:6px 0 0;color:#c2410c;font-weight:700">✂️ En tu módulo ya se lleva el inventario de piezas: usa este botón y anota qué piezas eran.</p>':'<p class="hint" style="margin:6px 0 0">La app convierte las piezas a hojas. O escribe abajo las hojas directo si ya las sabes.</p>'}`:''}</div>` : ''}
     <p class="hint">Escribe la cantidad solo en lo que aplique. Lo que dejes vacío no se toca. Puedes cambiar de material o buscar otro artículo: lo que ya escribiste se conserva.</p>
     <div class="movlist" id="mv-lista"></div>
     ${movTipo==='merma'?fotoPickerHtml('merma','Foto de lo dañado (opcional)'):''}
@@ -5852,7 +5852,9 @@ function audPzConto(a){ return !!((a.piezasContadas||[]).length || (a.armadosCon
 function audPiezasHtml(a){
   if(!esAdmin() || a.conteoInicial || a.complemento || a.cierreConteo || !audPzConto(a)) return '';
   if(_pzpCfgs===null){ pzpCfgTodos().then(x=>{ _pzpCfgs = x; if(current==='hist') renderHist(); }).catch(()=>{}); return ''; }
-  const c = (_pzpCfgs||{})[a.modulo] || {};
+  let c = (_pzpCfgs||{})[a.modulo] || {};
+  // v276: la prueba vieja (antes del sistema nuevo, sin "modo") no cuenta como arranque: se puede arrancar encima.
+  if(c.activo && !c.modo) c = {};
   const caja = (borde, cont) => `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;border:1px ${borde} #0e7490;background:rgba(14,116,144,.06)">${cont}</div>`;
   if(c.activo && c.auditoriaId===a.id) return caja('solid', `<strong>✂️ Arranque del sistema de piezas de ${herrEsc(a.modulo)}</strong>
     <div class="hint" style="margin:4px 0 0">Desde esta auditoría, el cortado de ${herrEsc(a.modulo)} se lleva en piezas${c.modo==='real'?'':' <b>(en práctica: el inventario oficial no cambia)</b>'}. Las auditorías siguientes se comparan pieza por pieza.</div>`);
@@ -12501,6 +12503,7 @@ function dibujarMovsDiaPDF(doc, R, D, o){
   return y;
 }
 function renderCierre(){
+  { const fs = hcBloqueaCierre(); if(fs.length){ current = 'cierre'; $('#main').innerHTML = hcBloqueoHtml(fs); return; } }
   if(!esSoloLectura() && cierreBorradorCargar()) setTimeout(()=>toast('📝 Recuperé lo que llevabas capturado hoy.'), 60);
   corrAutoJuntar();
   if(!cierrePrestOk){ cierrePrestOk = true; cargarPrestamos().then(()=>{ const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
@@ -12567,6 +12570,7 @@ function cierrePasosHtml(){
     ${hecho ? `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(217,119,6,.14);border:1px solid #d97706"><b>📝 Tu cierre de hoy está incompleto</b><br><span class="hint" style="margin:0">Faltan los pasos 4 a 7.</span><button class="btn" style="width:100%;margin-top:8px;background:#d97706" onclick="irA('aud')">Seguir con el paso 4 →</button></div>` : ''}`;
 }
 async function guardarCierre(){
+  { const fs = hcBloqueaCierre(); if(fs.length) return alert('Falta la hoja de corte del '+fs.map(pzpFmtDia).join(', ')+'. Captúrala primero.'); }
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
   const herrIts = herrConfItems(), herrSin = herrIts.filter(it=>!herrConf[it.id] || herrConf[it.id].ok===undefined);
   if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre+(CORR_CALC[it.nombre]?' (llena todas las casillas de la calculadora; pon 0 si no tienes)':'')).join('\n')); }
@@ -13242,7 +13246,7 @@ function pzMedidasDetalle(){ return pzMedidas.map(m=>`${m.cantidad} × ${m.nombr
 function pzPool(){
   const pool = [];
   Object.keys(pzVals).forEach(g=>{ const c = pzVals[g]||{};
-    PIEZAS_AUDIT.filter(p=>c[p.key]>0).forEach(p=>pool.push({nombre:p.nombre, cantidad:c[p.key], dim:p.dim, colorDestino:g, estado:'ok', label:p.label, grupo:g})); });
+    PIEZAS_AUDIT.filter(p=>c[p.key]>0).forEach(p=>pool.push({nombre:p.nombre, cantidad:c[p.key], dim:p.dim, colorDestino:g, estado:'ok', label:p.label, grupo:g, key:p.key})); });
   return pool;
 }
 function pzConsumo(){
@@ -13562,8 +13566,11 @@ async function guardarMermaPiezas(cons, detalle){
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
     const nota = 'Merma de piezas'+(pzNota.trim()?' · '+pzNota.trim():'');
     const fotos = (fotosTmp.merma||[]).length;
+    // v276 (sistema de piezas): además del texto, se guarda qué piezas eran por color, para que el inventario
+    // de piezas las descuente solas (sin que Dirección tenga que repartirlas).
+    const pzPor = {}; if(!pzMedidas.length) pzPool().forEach(p=>{ (piezasAConsumo([Object.assign({}, p)], p.colorDestino)||[]).forEach(r=>{ if(!(r.cantidad>0)) return; const l = pzPor[r.itemId] = pzPor[r.itemId]||[]; const x = l.find(y=>y.k===p.key); if(x) x.q += p.cantidad; else l.push({k:p.key, q:p.cantidad}); }); });
     for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'mermaPiezas', cantidad:c.cantidad, nota, piezasDetalle:detalle, fecha, estado, loteId, creadoPor, ...(fotos?{fotos, fotosRef:loteId}:{})});
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'mermaPiezas', cantidad:c.cantidad, nota, piezasDetalle:detalle, ...(pzPor[it.id]?{piezasPz:pzPor[it.id]}:{}), fecha, estado, loteId, creadoPor, ...(fotos?{fotos, fotosRef:loteId}:{})});
     }
     if(fotos) await guardarFotos('merma', 'merma', loteId, modulo());
     pzVals = {}; pzNota = ''; pzMedidas = []; pzModo = 'enc';
@@ -15866,6 +15873,27 @@ function hcFaltaHtml(){
     <div style="font-size:14px;margin-top:5px;opacity:.95">Ese día hubo corte en tu cierre. Copia la hoja del cortador para que tu inventario cuadre.</div>
     <button onclick="hcFecha='${fs[0]}';hcCap=null;pzpD=null;irA('hcorte')" style="all:unset;cursor:pointer;display:block;box-sizing:border-box;width:100%;background:#fff;color:#b91c1c;border-radius:12px;padding:12px;text-align:center;font-weight:900;margin-top:12px">Capturar la del ${pzpFmtDia(fs[0])} →</button></div>`;
 }
+// v276 (decidido por el usuario): si falta la hoja de corte de un día anterior, el coordinador no puede hacer el
+// cierre de hoy hasta capturarla. Si el cortador no entregó el papel, Dirección lo desbloquea con su PIN (solo ese día).
+const hcDesbKey = mod => 'hcDesbloq_'+mod+'_'+fechaHoyLocal();
+function hcBloqueaCierre(){
+  if(!esCoordinador() || !hcActivo()) return [];
+  try{ if(localStorage.getItem(hcDesbKey(modulo()))==='1') return []; }catch(e){}
+  return hcFaltantes().filter(d=>d < fechaHoyLocal());
+}
+async function hcDesbloquear(){
+  const pin = prompt('🔓 Desbloquear el cierre de hoy sin la hoja de corte.\n\nSolo Dirección: escribe tu PIN.'); if(pin===null) return;
+  if(String(pin).trim()!==String(await getPinCero())) return alert('PIN incorrecto.');
+  try{ localStorage.setItem(hcDesbKey(modulo()), '1'); }catch(e){}
+  toast('🔓 Cierre desbloqueado por hoy.'); renderCierre();
+}
+function hcBloqueoHtml(fs){
+  return `<div class="card" style="background:linear-gradient(135deg,#b91c1c,#dc2626);color:#fff;border:0"><div style="font-size:12px;font-weight:800;opacity:.9">ANTES DE TU CIERRE</div>
+    <div style="font-size:19px;font-weight:900;margin-top:3px">✂️ Falta la hoja de corte del ${fs.map(pzpFmtDia).join(', ')}</div>
+    <div style="font-size:14px;margin-top:6px;opacity:.95">Captúrala primero (cópiala del papel del cortador). Después ya puedes hacer el cierre de hoy.</div>
+    <button onclick="hcFecha='${fs[0]}';hcCap=null;pzpD=null;irA('hcorte')" style="all:unset;cursor:pointer;display:block;box-sizing:border-box;width:100%;background:#fff;color:#b91c1c;border-radius:12px;padding:13px;text-align:center;font-weight:900;margin-top:12px">Capturar la del ${pzpFmtDia(fs[0])} →</button>
+    <button onclick="hcDesbloquear()" style="all:unset;cursor:pointer;display:block;box-sizing:border-box;width:100%;border:1px solid rgba(255,255,255,.7);color:#fff;border-radius:12px;padding:10px;text-align:center;font-weight:700;margin-top:8px;font-size:13.5px">🔓 El cortador no entregó la hoja (Dirección desbloquea)</button></div>`;
+}
 function hcActivo(mod){ const c = hcCfgDe(mod||modulo()); return !!(c && c.activo && c.hojaCoord); }
 const hcBorrKey = (mod, f) => 'hcBorr_'+mod+'_'+f;
 function hcBorrGuardar(){ try{ if(hcCap) localStorage.setItem(hcBorrKey(modulo(), hcCap.fecha), JSON.stringify({ts:new Date().toISOString(), cap:hcCap})); }catch(e){} }
@@ -16040,6 +16068,7 @@ function hcRender(){
     <div class="card" style="border-top:6px solid #0e7490"><div style="font-size:17px;font-weight:900">${swatchHtml(CATALOGO.find(i=>i.id===hcColor).nombre)} ${pzpColor(hcColor)}</div>${hcColorHtml(hcColor)}</div>`;
   $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:800">✂️ Hoja de corte · ${modulo()}</div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="date" value="${hcFecha}" min="${dMin}" max="${fechaHoyLocal()}" onchange="hcFecha=this.value;hcCap=null;hcRender()" style="width:auto;margin:0"><input placeholder="Cortador" value="${herrEsc(hcCap.hojaCortador||'')}" onchange="hcCap.hojaCortador=this.value;hcBorrGuardar()" style="flex:1;min-width:0;margin:0"></div>
+      ${cfg.modo!=='real'?'<div style="margin-top:8px;padding:8px 10px;border-radius:10px;border:2px dashed #7c3aed;background:rgba(124,58,237,.08);font-size:13px;font-weight:700;color:#6d28d9">🎓 Práctica: lo que captures aquí no cambia tu inventario.</div>':''}
       ${guardada?`<p class="hint" style="margin:6px 0 0;color:var(--ok)">✔ Hoja de este día guardada ${new Date(guardada.hojaGuardado).toLocaleString('es-MX',{hour:'numeric',minute:'2-digit'})}. Puedes corregirla y volver a guardar.</p>`:'<p class="hint" style="margin:6px 0 0">Copia la hoja del cortador renglón por renglón: mismo orden y mismos colores que el papel.</p>'}
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${tabs}</div></div>
     ${cuerpo}
@@ -16226,6 +16255,8 @@ function pzpOtroModo(mid, modo){ pzpOtro(mid).modo = modo; pzpRender(); }
 // coordinador; las piezas son las de esa instalación, así que se llenan solas. Solo cuando es la
 // instalación COMPLETA de ese color (si fue parcial o una parte se fue a merma, se pregunta).
 function pzpOtroAuto(D, m){
+  // v276: merma capturada contando piezas («Contar las piezas dañadas»): ya dice qué piezas eran.
+  if(m && m.tipo==='merma' && Array.isArray(m.piezasPz) && m.piezasPz.length) return {modo:'piezas', piezas:m.piezasPz.map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:0, auto:true};
   if(!m || !m.instalacionId) return null;
   // v274: lo que sobró de las hojas de puertas y se mandó a sobrantes sale de lo apartado para puertas de ese color.
   if(m.tipo==='sobrante' && m.motivo==='sobranteCortePuertas') return {modo:'puertaSob', auto:true};
