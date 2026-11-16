@@ -252,7 +252,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v279';
+const APP_VERSION = 'v280';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -12908,6 +12908,9 @@ async function guardarCierre(){
   { try{ await cargarPrestamos(); }catch(e){} const vs = cierreViajesPend();
     if(vs.length){ cierreViajesPintar(); const el = document.getElementById('cierre-viajes'); if(el) el.scrollIntoView({behavior:'smooth'});
       return alert('🚚 Primero recibe lo que te mandaron:\n\n'+vs.map(v=>'• '+v.de+': '+viajeLineasTxt(v)).join('\n')+'\n\nSi todavía no está en tu taller, toca "Todavía no llega".'); } }
+  { let a = null; try{ a = await coordAvisosInst(fechaHoyLocal()); }catch(e){}
+    if(a && a.pendDecidir){ coordAvisosPintarCierre(); const el = document.getElementById('cierre-avisos'); if(el) el.scrollIntoView({behavior:'smooth'});
+      return alert('🔒 Antes de tu cierre resuelve:\n\n'+a.pendCalles.map(c=>'• '+c).join('\n')+'\n\nToca "Decidir ahora".'); } }
   const herrIts = herrConfItems(), herrSin = herrIts.filter(it=>!herrConf[it.id] || herrConf[it.id].ok===undefined);
   if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre+(CORR_CALC[it.nombre]?' (llena todas las casillas de la calculadora; pon 0 si no tienes)':'')).join('\n')); }
   { const cz = ['n','e'].map(k=>corrResultado(k)); if(cz.every(r=>r.completo && r.juegos===0 && r.sobH===0 && r.sobM===0) && !confirm('🔩 En las dos calculadoras de correderas pusiste todo en 0.\n\n¿Seguro que no tienes ninguna corredera?')) return; }
@@ -15586,8 +15589,9 @@ async function coordAvisosInst(dia){
   const capDia = logs.filter(l=>(l.fechaDia||diaLocal(l.fecha))===dia && !l.cambioDe);
   const faltan = salen.filter(d=>!capDia.some(l=>calleEmpata(l.calle, d))).map(d=>[d.calle, d.numero].filter(Boolean).join(' '));
   const repOk = salen.length, repSalen = salen.length;
-  const pendDecidir = logs.filter(l=>l.verif && ((l.verif.estado==='no' && l.verif.puertas==='pendiente') || (l.verif.estado==='modelo' && !l.verif.resuelto))).length;
-  return {capt, repOk, repSalen, hayReporte:!!dirs.length, faltan, pendDecidir};
+  const pendL = logs.filter(l=>l.verif && ((l.verif.estado==='no' && l.verif.puertas==='pendiente') || (l.verif.estado==='modelo' && !l.verif.resuelto)));
+  const pendDecidir = pendL.length, pendCalles = pendL.map(l=>(l.calle||String(l.descripcion||'').split(' · ')[0]||'Instalación')+(l.verif.estado==='modelo'?' → captura el modelo real':' → decide a dónde va el material'));
+  return {capt, repOk, repSalen, hayReporte:!!dirs.length, faltan, pendDecidir, pendCalles};
 }
 // "Av. Hidalgo #245" y "hidalgo 245" son la misma dirección: se comparan sin acentos, signos ni "av/calle/col".
 function calleNorm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9ñ ]/g,' ').replace(/\b(av|ave|avenida|calle|c|col|colonia|no|num|numero|blvd|boulevard|priv|privada|fracc)\b/g,' ').replace(/\s+/g,' ').trim(); }
@@ -15635,10 +15639,17 @@ async function coordAvisosPintarCierre(){
   let a; try{ a = await coordAvisosInst(fechaHoyLocal()); }catch(e){ return; }
   const caja = (c, html) => `<div class="card" style="padding:12px;border:2px solid ${c};background:linear-gradient(0deg,${c}14,${c}14),var(--card)">${html}</div>`;
   const out = [];
-  // v209 (pedido por el usuario): el Reporte de instalaciones es independiente; ya no se compara en el cierre.
-  if(a.pendDecidir) out.push(caja('#b45309', `<strong>📦 Tienes ${a.pendDecidir} instalación${a.pendDecidir===1?'':'es'} rechazada${a.pendDecidir===1?'':'s'} sin decidir</strong>
-    <p class="hint" style="margin:4px 0 0">Dirección marcó que no se instaló. Su material sigue apartado: decide si se vuelve a instalar, regresa al inventario, va a sobrantes o a merma.</p>
-    <button class="btn" style="width:100%;margin-top:8px;background:#b45309" onclick="setView('home');window.scrollTo(0,0)">Decidir ahora</button>`));
+  // v280 (pedido por el usuario): al abrir el cierre se avisa lo pendiente.
+  // · Material de instalaciones sin decidir a dónde va: BLOQUEA (si el material ya está en el taller se contaría de más).
+  // · Instalaciones que salieron según el reporte de hoy y no se han registrado: solo AVISA.
+  if(a.pendDecidir) out.push(caja('#dc2626', `<strong>🔒 Antes de tu cierre resuelve ${a.pendDecidir===1?'esta instalación':'estas '+a.pendDecidir+' instalaciones'}</strong>
+    <div style="margin:4px 0 0">${a.pendCalles.map(c=>'• '+escCalle(c)).join('<br>')}</div>
+    <p class="hint" style="margin:4px 0 0">Dirección las revisó. Si no se instaló, decide si se vuelve a instalar, regresa al inventario, va a sobrantes o a merma (así no se cuenta dos veces). Si el modelo no coincide, captura el modelo real.</p>
+    <button class="btn" style="width:100%;margin-top:8px;background:#dc2626" onclick="setView('home');window.scrollTo(0,0)">Decidir ahora</button>`));
+  if(a.faltan && a.faltan.length) out.push(caja('#d97706', `<strong>📋 Según tu reporte de hoy, te falta registrar ${a.faltan.length} ${a.faltan.length===1?'instalación':'instalaciones'}</strong>
+    <div style="margin:4px 0 0">${a.faltan.map(c=>'• '+escCalle(c)).join('<br>')}</div>
+    <p class="hint" style="margin:4px 0 0">Si ya se instaló, regístrala antes de contar tu material. Puedes hacer tu cierre de todos modos.</p>
+    <button class="btn" style="width:100%;margin-top:8px;background:#d97706" onclick="irA('inst')">🔧 Registrar instalación</button>`));
   el.innerHTML = out.join('');
 }
 // ===== 🔩 Herrajes que no cuadran en el cierre del turno (v199) =====
