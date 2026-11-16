@@ -252,7 +252,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v280';
+const APP_VERSION = 'v281';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -11926,6 +11926,7 @@ async function entrarModulo(n, v){
 function volverDireccion(){ dirModo = true; renderModBar(); ajustarNavSticky(); setView('home'); window.scrollTo(0,0); }
 function irElegirModulo(v){ renderElegirModulo(v||'home'); window.scrollTo(0,0); }
 // Cómo va cada módulo, en pocas palabras (para los botones de "Entrar a un módulo").
+let _dirAprItems = [], _dirAprCargado = false, _aprBase = false;
 let _dirAprPorMod = null, _dirDeudas = null, _dirCargando = false, _dirCargadoT = 0;
 function modEstados(){
   const out = {}, hoy = fechaHoyLocal(), tarde = esHoraDeCierre();
@@ -12004,6 +12005,13 @@ async function cargarPendDir(forzar){
     const porMod = {}, lotesVistos = new Set();
     snapMov.docs.map(d=>d.data()).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ const k = m.loteId||Math.random(); if(lotesVistos.has(k)) return; lotesVistos.add(k); porMod[m.modulo] = (porMod[m.modulo]||0) + 1; });
     snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
+    { // v281: cada captura por aprobar, para avisarle a Dirección (en otro color) con módulo, qué es y cuándo.
+      const L = {}; snapMov.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ (L[m.loteId||m.id] = L[m.loteId||m.id] || []).push(m); });
+      _dirAprItems = Object.keys(L).map(k=>{ const ms = L[k]; return {id:'apr_'+k, cat:avisoCatLote(ms), modulo:ms[0].modulo, fecha:ms.map(m=>m.fecha||'').sort().pop(), titulo:describirLote(ms),
+          texto:(ms.length<=3 ? ms.map(m=>`${m.itemNombre||''} ${fmtNum(m.cantidad)}`).join(', ') : `${ms.length} artículos`)+(ms[0].creadoPor?' · '+String(ms[0].creadoPor).split('@')[0]:'')}; })
+        .concat(snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(instEnAprobaciones).map(l=>({id:'apr_inst_'+l.id, cat:'instalacion', modulo:l.modulo, fecha:l.fecha||'', titulo:'Instalación', texto:[l.calle, String(l.descripcion||'').split(' · ')[0]].filter(Boolean).join(' · ')})))
+        .sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+      _dirAprCargado = true; setTimeout(revisarAvisosNuevos, 0); }
     const deudas = snapDeu.docs.map(d=>d.data()).filter(x=>x.estado!=='saldada');
     const antes = JSON.stringify([_dirAprPorMod, _dirDeudas, _dirVerif, _dirRI, dupCache?dupCache.grupos.length:0]);
     _dirAprPorMod = porMod; _dirDeudas = deudas; _dirCargadoT = Date.now();
@@ -12977,6 +12985,8 @@ async function guardarCierre(){
     setView('home');
   }catch(e){ alert('Error: '+e.message); }
 }
+// v281: Dirección revisa cada 5 minutos si hay algo nuevo por aprobar (para el aviso del celular).
+setInterval(()=>{ try{ if(esAdmin() && !document.hidden) cargarPendDir(true); }catch(e){} }, 5*60*1000);
 let _cierreAvisado = null;
 setInterval(async ()=>{
   try{
@@ -14412,11 +14422,23 @@ async function borrarLotePendiente(loteId){
 // salidas, garantías…) y cuando le mandan material en camino. Dirección se entera cuando un módulo
 // marca un pedido como recibido. Se muestran en Inicio y, si se activan, como notificación del celular
 // mientras la app esté abierta o en segundo plano.
-function claveAvisos(){ return 'avisosVisto_'+modulo()+'_'+(getCurrentUserEmail?getCurrentUserEmail():''); }
+// v281 (pedido por el usuario): para Dirección las novedades son UNA sola lista, igual en todos los módulos y en
+// todos sus aparatos (antes cada módulo y cada celular llevaba su propio "Entendido" y salían avisos atrasados).
+function claveAvisos(){ const em = getCurrentUserEmail?getCurrentUserEmail():''; return esAdmin() ? 'avisosVisto_DIR_'+em : 'avisosVisto_'+modulo()+'_'+em; }
+const avisosDocId = () => 'avisosVisto_'+String(getCurrentUserEmail?getCurrentUserEmail():'').replace(/[^a-z0-9]/gi,'_');
+let _avisosSyncT = 0;
+async function avisosSincronizar(){
+  if(!esAdmin() || Date.now()-_avisosSyncT < 60000) return; _avisosSyncT = Date.now();
+  try{ const d = await db.collection('config').doc(avisosDocId()).get(); const r = ((d && d.data && d.data()) || {}).visto;
+    if(r && r > avisosVisto()){ localStorage.setItem(claveAvisos(), r); if(current==='home') (enDirModo()?renderHomeDir():renderHome()); } }catch(e){}
+}
+const AVISOS_DIAS = 3; // lo más viejo ya no se muestra como novedad
+const avisoCuando = f => { try{ const d = new Date(f), hoy = fechaHoyLocal(), dia = diaLocal(f); return (dia===hoy?'hoy':fCorta(dia))+' · '+d.toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'}); }catch(e){ return ''; } };
 function avisosVisto(){ try{ const v=localStorage.getItem(claveAvisos()); if(v) return v; const ahora=new Date().toISOString(); localStorage.setItem(claveAvisos(), ahora); return ahora; }catch(e){ return new Date(0).toISOString(); } }
 function describirLote(ms){
   const tipos = [...new Set(ms.map(m=>m.tipo))];
   if(ms.some(m=>m.pedidoId)) return 'Material recibido de un pedido';
+  if(ms.some(m=>m.motivo==='cierreCompletasDeMas')) return 'Hojas completas de más en su cierre';
   if(tipos.includes('instalacion')) return 'Instalación';
   if(tipos.includes('garantia')) return 'Garantía';
   if(ms.some(m=>m.motivo==='hojaCorteDesperdicio')) return '✂️ Merma del corte (hoja del cortador)';
@@ -14433,24 +14455,57 @@ function describirLote(ms){
   if(ms.some(m=>m.motivo==='tuboAhorrado')) return 'Tubos ahorrados';
   return tipos.map(t=>(TIPO_LABEL[t]||t)).join(' y ');
 }
+// v281 (pedido por el usuario): una sola lista; cada tipo con su color y ordenada por importancia.
+const AVISO_CAT = {
+  hojasDeMas: {t:'Hojas de más', c:'#dc2626', o:1, apr:true},
+  merma:      {t:'Merma',        c:'#ea580c', o:2, apr:true},
+  proveedor:  {t:'Proveedor',    c:'#16a34a', o:3, apr:true},
+  entrada:    {t:'Entrada',      c:'#15803d', o:4, apr:true},
+  sobrante:   {t:'Sobrante',     c:'#0d9488', o:5, apr:true},
+  garantia:   {t:'Garantía',     c:'#db2777', o:6, apr:true},
+  instalacion:{t:'Instalación',  c:'#2563eb', o:7, apr:true},
+  salida:     {t:'Salida',       c:'#9333ea', o:8, apr:true},
+  otro:       {t:'Por aprobar',  c:'#7c3aed', o:9, apr:true},
+  herrajes:   {t:'Herrajes',     c:'#d97706', o:10},
+  repetida:   {t:'Repetida',     c:'#a21caf', o:11},
+  recibio:    {t:'Recibió',      c:'#0891b2', o:12},
+  rechazado:  {t:'Rechazado',    c:'#dc2626', o:13},
+  aprobado:   {t:'Aprobado',     c:'#16a34a', o:14},
+  encamino:   {t:'En camino',    c:'#0891b2', o:15},
+  info:       {t:'Aviso',        c:'#64748b', o:20}
+};
+function avisoCatLote(ms){
+  if(ms.some(m=>m.motivo==='cierreCompletasDeMas')) return 'hojasDeMas';
+  if(ms.some(m=>m.pedidoId)) return 'proveedor';
+  const t = ms.map(m=>m.tipo);
+  if(t.includes('merma') || ms.some(m=>/merma|Desperdicio/i.test(m.motivo||''))) return 'merma';
+  if(t.includes('sobrante') || ms.some(m=>m.motivo==='deSobrante')) return 'sobrante';
+  if(t.includes('garantia') || t.includes('devolucion')) return 'garantia';
+  if(t.includes('entrada')) return 'entrada';
+  if(t.includes('salida')) return 'salida';
+  return 'otro';
+}
 function calcularAvisos(){
-  const visto = avisosVisto(); const out = [];
+  const visto0 = avisosVisto(), lim = new Date(Date.now()-AVISOS_DIAS*864e5).toISOString(), visto = visto0 > lim ? visto0 : lim; const out = [];
   if(!puedePedidos()){
     const lotes = {};
     movs.filter(m=>m.revisadoEn && m.revisadoEn>visto && (m.estado==='aprobado'||m.estado==='rechazado')).forEach(m=>{ (lotes[m.loteId||m.id]=lotes[m.loteId||m.id]||[]).push(m); });
     Object.keys(lotes).forEach(k=>{ const ms=lotes[k]; const ok=ms[0].estado==='aprobado';
-      out.push({id:'lote_'+k+'_'+ms[0].estado, fecha:ms[0].revisadoEn, ic: ok?'✅':'❌',
+      out.push({id:'lote_'+k+'_'+ms[0].estado, cat:ok?'aprobado':'rechazado', fecha:ms[0].revisadoEn, ic: ok?'✅':'❌',
         titulo: `Dirección ${ok?'aprobó':'rechazó'}: ${describirLote(ms)}`,
         texto: `${ms.length} artículo(s) · anotado el ${new Date(ms[0].fecha).toLocaleDateString('es-MX')}${ok?'':(ms.some(m=>m.tipo==='instalacion')?' · el material regresó al inventario':' · no se sumó ni se descontó')}`}); });
-    pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p) && p.fecha>visto).forEach(p=>out.push({id:'ped_'+p.id, fecha:p.fecha, ic:'🚚',
+    pedidos.filter(p=>p.modulo===modulo() && pedidoEnCamino(p) && p.fecha>visto).forEach(p=>out.push({id:'ped_'+p.id, cat:'encamino', fecha:p.fecha, ic:'🚚',
       titulo:'Viene material en camino', texto:`${p.items.length} artículo(s)${p.proveedor?' · '+p.proveedor:''}${p.fechaEstimada?' · llega aprox. '+fechaCorta(p.fechaEstimada):''}`}));
   } else {
-    pedidos.forEach(p=>recepcionesDe(p).forEach((r,idx)=>{ if(r.fecha>visto && (p.modulo!==modulo() || estadoRecepcion(r)==='pendiente')) out.push({id:'pedrec_'+p.id+'_'+idx, fecha:r.fecha, ic:'📦',
+    pedidos.forEach(p=>recepcionesDe(p).forEach((r,idx)=>{ if(r.fecha>visto && (p.modulo!==modulo() || estadoRecepcion(r)==='pendiente')) out.push({id:'pedrec_'+p.id+'_'+idx, cat:'recibio', fecha:r.fecha, ic:'📦',
       titulo:`${p.modulo} recibió material`, texto:'Revisa lo que llegó y apruébalo para sumarlo al inventario.'}); }));
-    if(esAdmin()) avisosRepCache.filter(c=>c.fecha>visto).forEach(c=>out.push({id:'rep_'+c.id, fecha:c.fecha, ic:'🔁',
+    if(esAdmin()) avisosRepCache.filter(c=>c.fecha>visto).forEach(c=>out.push({id:'rep_'+c.id, cat:'repetida', fecha:c.fecha, ic:'🔁',
       titulo:`${c.modulo}: entrada anotada dos veces`, texto:(c.items||[]).slice(0,4).map(x=>`${x.nombre} +${fmtNum(x.cantidad)} ${x.unidad||''}`).join(', ')+((c.items||[]).length>4?'…':'')+' · anula la repetida antes de su cierre'}));
-    if(esAdmin()) cierresCache.filter(c=>c.fecha>visto).forEach(c=>out.push({id:'cierre_'+c.id, fecha:c.fecha, ic:'📝',
-      titulo:`${c.modulo} hizo su cierre del turno`, texto:resumenCierreTxt(c)}));
+    // v281: los cierres normales ya están en "Cierres del turno de hoy"; aquí solo los que traen algo que revisar.
+    // Las hojas de más ya salen como "por aprobar"; del cierre aquí solo lo que no cuadra.
+    if(esAdmin()) cierresCache.filter(c=>c.fecha>visto && ((c.consDeMas||[]).length || c.herrNo)).forEach(c=>out.push({id:'cierre_'+c.id, cat:'herrajes', fecha:c.fecha, ic:'🔩',
+      titulo:`${c.modulo}: revisa su cierre del turno`, texto:resumenCierreTxt(c).split(' · ').filter(t=>/Tienen más|No cuadran/.test(t)).join(' · ')}));
+    if(esAdmin()) (_dirAprItems||[]).forEach(a=>out.push(Object.assign({ic:'', apr:true}, a, {titulo:`${a.modulo}: ${a.titulo}`})));
   }
   return out.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
 }
@@ -14496,18 +14551,33 @@ function cierresHoyHtml(){
   return `<details class="card" style="padding:12px" ${tarde?'open':''}><summary><strong>📝 Cierres del turno de hoy</strong><span class="tag" style="margin-left:auto">${hechos} de ${MODULOS.length}</span></summary><div class="movlist">${filas}</div></details>`;
 }
 function fechaCorta(d){ return new Date((String(d).length===10?d+'T12:00:00':d)).toLocaleDateString('es-MX',{day:'numeric',month:'short'}); }
+let _avisosAbierto = null;
 function avisosCardHtml(){
-  const av = calcularAvisos();
+  if(esAdmin()) avisosSincronizar();
+  const cat = a => AVISO_CAT[a.cat] || AVISO_CAT.info;
+  const todos = calcularAvisos().sort((a,b)=>(cat(a).o-cat(b).o) || (b.fecha||'').localeCompare(a.fecha||''));
+  const nApr = todos.filter(a=>a.apr).length, nInfo = todos.length - nApr;
   const permiso = (typeof Notification!=='undefined') ? Notification.permission : 'unsupported';
-  const botonPermiso = permiso==='default' ? `<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="activarNotificaciones()">🔔 Avisarme en el celular</button>` : '';
-  if(!av.length) return botonPermiso ? `<div class="card" style="padding:12px"><div class="pend"><div class="hint" style="margin:0">Activa los avisos para enterarte cuando Dirección apruebe o te manden material.</div>${botonPermiso}</div></div>` : '';
-  return `<div class="card" style="padding:12px;border:2px solid var(--brand)">
-    <div class="row" style="justify-content:space-between"><strong>🔔 Novedades (${av.length})</strong><button class="btn small" onclick="marcarAvisosVistos()">Entendido</button></div>
-    <div class="movlist" style="margin-top:8px">${av.slice(0,6).map(a=>`<div class="movitem"><span style="min-width:0"><span class="invname">${a.ic} ${a.titulo}</span><span class="hint" style="display:block;margin:2px 0 0">${a.texto}</span></span></div>`).join('')}</div>
-    ${av.length>6?`<p class="hint">… y ${av.length-6} más</p>`:''}${botonPermiso?`<div style="margin-top:8px">${botonPermiso}</div>`:''}
-  </div>`;
+  const botonPermiso = permiso==='default' ? `<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;margin-top:8px" onclick="activarNotificaciones()">🔔 Avisarme en el celular</button>` : '';
+  if(!todos.length) return botonPermiso ? `<div class="card" style="padding:12px"><div class="hint" style="margin:0">Activa los avisos para enterarte ${esAdmin()?'de lo que hay por aprobar':'cuando Dirección apruebe o te manden material'}.</div>${botonPermiso}</div>` : '';
+  const ir = a => a.apr ? "irA('apr')" : a.cat==='herrajes' ? "irA('herrcuad')" : a.cat==='recibio' ? "irA('apr')" : '';
+  const item = a => { const k = cat(a); return `<div onclick="${ir(a)}" style="display:flex;gap:10px;align-items:flex-start;padding:10px 10px 10px 12px;margin-top:8px;border-radius:12px;border:1px solid ${k.c}55;border-left:6px solid ${k.c};background:linear-gradient(0deg,${k.c}12,${k.c}12),var(--card);${ir(a)?'cursor:pointer':''}">
+      <div style="flex:1;min-width:0"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="background:${k.c};color:#fff;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:900">${k.t}${a.apr?' · por aprobar':''}</span></div>
+        <div style="font-weight:800;margin-top:4px">${a.ic?a.ic+' ':''}${a.titulo}</div><div class="hint" style="margin:2px 0 0">${a.texto||''}</div></div>
+      <span class="hint" style="margin:0;white-space:nowrap;font-weight:800;color:${k.c}">${avisoCuando(a.fecha)}</span></div>`; };
+  const cuenta = {}; todos.forEach(a=>{ const k = cat(a); cuenta[k.t] = cuenta[k.t] || {k, n:0}; cuenta[k.t].n++; });
+  const abierto = _avisosAbierto===null ? true : _avisosAbierto;
+  return `<details class="card" style="padding:12px;border:2px solid ${nApr?'#d97706':'var(--brand)'}" ${abierto?'open':''} ontoggle="_avisosAbierto=this.open">
+    <summary style="display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none"><strong style="font-size:16px">🔔 Notificaciones (${todos.length})</strong>${nApr?`<span style="background:#d97706;color:#fff;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:900">${nApr} por aprobar</span>`:''}</summary>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${Object.values(cuenta).map(x=>`<span style="border:1px solid ${x.k.c};color:${x.k.c};border-radius:999px;padding:2px 9px;font-size:12px;font-weight:800">${x.k.t} ${x.n}</span>`).join('')}</div>
+    ${todos.slice(0,25).map(item).join('')}${todos.length>25?`<p class="hint">… y ${todos.length-25} más</p>`:''}
+    <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">${nApr?`<button class="btn small" style="background:#d97706" onclick="irA('apr')">✅ Ir a aprobar</button>`:''}${nInfo?`<button class="btn small" onclick="marcarAvisosVistos()">Entendido (${nInfo} aviso${nInfo===1?'':'s'})</button>`:''}</div>
+    <p class="hint" style="margin:6px 0 0">Lo que es por aprobar se quita solo al aprobarlo o rechazarlo.${esAdmin()?' "Entendido" quita los avisos en todos tus aparatos y módulos.':''}</p>${botonPermiso}
+  </details>`;
 }
-function marcarAvisosVistos(){ try{ localStorage.setItem(claveAvisos(), new Date().toISOString()); }catch(e){} renderHome(); }
+function marcarAvisosVistos(){ const ahora = new Date().toISOString(); try{ localStorage.setItem(claveAvisos(), ahora); }catch(e){}
+  if(esAdmin()){ db.collection('config').doc(avisosDocId()).set({modulo:'_global', visto:ahora}).catch(()=>{}); }
+  (esAdmin() && enDirModo()) ? renderHomeDir() : renderHome(); }
 async function activarNotificaciones(){
   if(typeof Notification==='undefined') return alert('Este celular no permite avisos desde el navegador. En iPhone, primero instala la app en la pantalla de inicio.');
   const r = await Notification.requestPermission();
@@ -14519,14 +14589,16 @@ async function revisarAvisosNuevos(){
   if(!moduloActual) return;
   const av = calcularAvisos();
   if(_avisosNotificados===null){ _avisosNotificados = new Set(av.map(a=>a.id)); return; } // al abrir no se repite lo que ya se ve en Inicio
+  if(esAdmin() && _dirAprCargado && !_aprBase){ _aprBase = true; av.filter(a=>a.apr).forEach(a=>_avisosNotificados.add(a.id)); } // lo que ya estaba por aprobar no suena
   const nuevos = av.filter(a=>!_avisosNotificados.has(a.id));
   nuevos.forEach(a=>_avisosNotificados.add(a.id));
   if(!nuevos.length || typeof Notification==='undefined' || Notification.permission!=='granted') return;
   try{
     const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
     for(const a of nuevos.slice(0,3)){
-      const opts = {body:a.texto, icon:'icon-192.png', badge:'icon-192.png', tag:a.id};
-      if(reg && reg.showNotification) await reg.showNotification(a.ic+' '+a.titulo, opts); else new Notification(a.ic+' '+a.titulo, opts);
+      const k = AVISO_CAT[a.cat] || AVISO_CAT.info, tt = (a.apr?'🟠 ':(a.ic?a.ic+' ':''))+a.titulo;
+      const opts = {body:k.t+(a.apr?' · por aprobar':'')+' · '+(a.texto||'')+' · '+avisoCuando(a.fecha), icon:'icon-192.png', badge:'icon-192.png', tag:a.id};
+      if(reg && reg.showNotification) await reg.showNotification(tt, opts); else new Notification(tt, opts);
     }
   }catch(e){}
 }
