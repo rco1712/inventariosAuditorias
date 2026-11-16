@@ -12007,9 +12007,12 @@ async function cargarPendDir(forzar){
     snapLog.docs.map(d=>d.data()).filter(instEnAprobaciones).forEach(l=>{ porMod[l.modulo] = (porMod[l.modulo]||0) + 1; });
     { // v281: cada captura por aprobar, para avisarle a Dirección (en otro color) con módulo, qué es y cuándo.
       const L = {}; snapMov.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion' && !m.cambioModelo).forEach(m=>{ (L[m.loteId||m.id] = L[m.loteId||m.id] || []).push(m); });
-      _dirAprItems = Object.keys(L).map(k=>{ const ms = L[k]; return {id:'apr_'+k, cat:avisoCatLote(ms), modulo:ms[0].modulo, fecha:ms.map(m=>m.fecha||'').sort().pop(), titulo:describirLote(ms),
-          texto:(ms.length<=3 ? ms.map(m=>`${m.itemNombre||''} ${fmtNum(m.cantidad)}`).join(', ') : `${ms.length} artículos`)+(ms[0].creadoPor?' · '+String(ms[0].creadoPor).split('@')[0]:'')}; })
-        .concat(snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(instEnAprobaciones).map(l=>({id:'apr_inst_'+l.id, cat:'instalacion', modulo:l.modulo, fecha:l.fecha||'', titulo:'Instalación', texto:[l.calle, String(l.descripcion||'').split(' · ')[0]].filter(Boolean).join(' · ')})))
+      const uni = id => (CATALOGO.find(i=>i.id===id)||{}).unidad || '';
+      _dirAprItems = Object.keys(L).map(k=>{ const ms = L[k]; return {id:'apr_'+k, lote:k, cat:avisoCatLote(ms), modulo:ms[0].modulo, fecha:ms.map(m=>m.fecha||'').sort().pop(), titulo:describirLote(ms),
+          texto:(ms[0].creadoPor?'Capturó '+String(ms[0].creadoPor).split('@')[0]:'')+(ms.length>1?` · ${ms.length} artículos`:''),
+          det:ms.map(m=>({n:m.itemNombre||m.itemId, q:fmtNum(Number(m.cantidad)||0)+' '+uni(m.itemId), tipo:m.tipo})),
+          nota:[...new Set(ms.map(m=>String(m.nota||'').trim()).filter(Boolean))].slice(0,2).join(' · ')}; })
+        .concat(snapLog.docs.map(d=>({id:d.id,...d.data()})).filter(instEnAprobaciones).map(l=>({id:'apr_inst_'+l.id, inst:l.id, cat:'instalacion', modulo:l.modulo, fecha:l.fecha||'', titulo:'Instalación', texto:[l.calle, String(l.descripcion||'').split(' · ')[0]].filter(Boolean).join(' · ')})))
         .sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
       _dirAprCargado = true; setTimeout(revisarAvisosNuevos, 0); }
     const deudas = snapDeu.docs.map(d=>d.data()).filter(x=>x.estado!=='saldada');
@@ -14561,10 +14564,14 @@ function avisosCardHtml(){
   const botonPermiso = permiso==='default' ? `<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;margin-top:8px" onclick="activarNotificaciones()">🔔 Avisarme en el celular</button>` : '';
   if(!todos.length) return botonPermiso ? `<div class="card" style="padding:12px"><div class="hint" style="margin:0">Activa los avisos para enterarte ${esAdmin()?'de lo que hay por aprobar':'cuando Dirección apruebe o te manden material'}.</div>${botonPermiso}</div>` : '';
   const ir = a => a.apr ? "irA('apr')" : a.cat==='herrajes' ? "irA('herrcuad')" : a.cat==='recibio' ? "irA('apr')" : '';
-  const item = a => { const k = cat(a); return `<div onclick="${ir(a)}" style="display:flex;gap:10px;align-items:flex-start;padding:10px 10px 10px 12px;margin-top:8px;border-radius:12px;border:1px solid ${k.c}55;border-left:6px solid ${k.c};background:linear-gradient(0deg,${k.c}12,${k.c}12),var(--card);${ir(a)?'cursor:pointer':''}">
-      <div style="flex:1;min-width:0"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="background:${k.c};color:#fff;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:900">${k.t}${a.apr?' · por aprobar':''}</span></div>
+  const bt = (c, txt, js, lleno) => `<button class="btn small" style="flex:1;min-height:40px;white-space:nowrap;padding-left:6px;padding-right:6px;${lleno?`background:${c}`:`background:transparent;color:${c};border:1px solid ${c};box-shadow:none`}" onclick="event.stopPropagation();${js}">${txt}</button>`;
+  const item = a => { const k = cat(a), click = a.apr ? '' : ir(a); return `<div ${click?`onclick="${click}"`:''} style="padding:10px 10px 10px 12px;margin-top:8px;border-radius:12px;border:1px solid ${k.c}55;border-left:6px solid ${k.c};background:linear-gradient(0deg,${k.c}12,${k.c}12),var(--card);${click?'cursor:pointer':''}">
+      <div style="display:flex;gap:8px;align-items:flex-start"><div style="flex:1;min-width:0"><span style="background:${k.c};color:#fff;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:900">${k.t}${a.apr?' · por aprobar':''}</span>
         <div style="font-weight:800;margin-top:4px">${a.ic?a.ic+' ':''}${a.titulo}</div><div class="hint" style="margin:2px 0 0">${a.texto||''}</div></div>
-      <span class="hint" style="margin:0;white-space:nowrap;font-weight:800;color:${k.c}">${avisoCuando(a.fecha)}</span></div>`; };
+        <span class="hint" style="margin:0;white-space:nowrap;font-weight:800;color:${k.c}">${avisoCuando(a.fecha)}</span></div>
+      ${(a.det||[]).length?`<div style="margin-top:6px;padding:6px 10px;border-radius:10px;background:var(--card);border:1px solid var(--line)">${a.det.slice(0,8).map(d=>`<div class="row" style="justify-content:space-between;gap:8px;font-size:14px;padding:2px 0"><span>${d.n}</span><strong style="white-space:nowrap">${d.q}</strong></div>`).join('')}${a.det.length>8?`<div class="hint" style="margin:0">… y ${a.det.length-8} más</div>`:''}</div>`:''}
+      ${a.nota?`<div style="margin-top:6px;font-size:13.5px"><strong>📝 Nota:</strong> ${escCalle(a.nota)}</div>`:''}
+      ${a.apr?`<div class="row" style="gap:6px;margin-top:8px">${a.lote?bt('#16a34a','✅ Aprobar',`avisoAprobar('${a.lote}')`,true)+bt('#dc2626','❌ Rechazar',`avisoRechazar('${a.lote}')`):''}${bt('#64748b','🔍 '+(a.lote?'Ver':'Ver en Aprobaciones'),"irA('apr')")}</div>`:''}</div>`; };
   const cuenta = {}; todos.forEach(a=>{ const k = cat(a); cuenta[k.t] = cuenta[k.t] || {k, n:0}; cuenta[k.t].n++; });
   const abierto = _avisosAbierto===null ? true : _avisosAbierto;
   return `<details class="card" style="padding:12px;border:2px solid ${nApr?'#d97706':'var(--brand)'}" ${abierto?'open':''} ontoggle="_avisosAbierto=this.open">
@@ -14574,6 +14581,29 @@ function avisosCardHtml(){
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">${nApr?`<button class="btn small" style="background:#d97706" onclick="irA('apr')">✅ Ir a aprobar</button>`:''}${nInfo?`<button class="btn small" onclick="marcarAvisosVistos()">Entendido (${nInfo} aviso${nInfo===1?'':'s'})</button>`:''}</div>
     <p class="hint" style="margin:6px 0 0">Lo que es por aprobar se quita solo al aprobarlo o rechazarlo.${esAdmin()?' "Entendido" quita los avisos en todos tus aparatos y módulos.':''}</p>${botonPermiso}
   </details>`;
+}
+// v281 (pedido por el usuario): aprobar o rechazar desde la lista de notificaciones, viendo qué es.
+async function avisoAprobar(lote){
+  const a = (_dirAprItems||[]).find(x=>x.lote===lote); if(!a) return toast('Ya se aprobó o rechazó');
+  if(!confirm(`✅ ¿Aprobar?\n\n${a.modulo} · ${a.titulo}\n${(a.det||[]).map(d=>'• '+d.n+': '+d.q).join('\n')}${a.nota?'\n\nMotivo: '+a.nota:''}`)) return;
+  try{ await cambiarEstadoLote(lote,'aprobado'); _dirAprItems = _dirAprItems.filter(x=>x.lote!==lote); toast('✅ Aprobado'); }catch(e){ return alert('Error: '+e.message); }
+  avisosRefrescar();
+}
+async function avisoRechazar(lote){
+  const a = (_dirAprItems||[]).find(x=>x.lote===lote); if(!a) return toast('Ya se aprobó o rechazó');
+  if(!confirm(`❌ ¿Rechazar?\n\n${a.modulo} · ${a.titulo}\n${(a.det||[]).map(d=>'• '+d.n+': '+d.q).join('\n')}\n\nEl material NO se descontará ni se sumará al inventario.`)) return;
+  try{ const ids = (await db.collection('movimientos').get()).docs.map(d=>d.data()).filter(m=>m.loteId===lote && VERIF_MOT_REG.includes(m.motivo)).map(m=>m.instalacionId);
+    await cambiarEstadoLote(lote,'rechazado'); await verifReabrirSiSeRechaza(ids); _dirAprItems = _dirAprItems.filter(x=>x.lote!==lote); toast('❌ Rechazado'); }catch(e){ return alert('Error: '+e.message); }
+  avisosRefrescar();
+}
+function avisosRefrescar(){ if(current==='home') (esAdmin() && enDirModo() ? renderHomeDir() : renderHome()); cargarPendDir(true); }
+// Sonido con la app abierta: dos tonos para algo nuevo por aprobar; uno grave y largo para lo importante.
+let _avisoAudio = null;
+function avisoSonar(importante){
+  try{ _avisoAudio = _avisoAudio || new (window.AudioContext||window.webkitAudioContext)(); const ac = _avisoAudio, t0 = ac.currentTime;
+    const tono = (f, ini, dur) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0+ini); g.gain.exponentialRampToValueAtTime(0.35, t0+ini+0.03); g.gain.exponentialRampToValueAtTime(0.0001, t0+ini+dur); o.connect(g); g.connect(ac.destination); o.start(t0+ini); o.stop(t0+ini+dur+0.05); };
+    if(importante){ tono(392, 0, 0.35); tono(294, 0.4, 0.7); } else { tono(880, 0, 0.25); tono(660, 0.28, 0.4); }
+  }catch(e){}
 }
 function marcarAvisosVistos(){ const ahora = new Date().toISOString(); try{ localStorage.setItem(claveAvisos(), ahora); }catch(e){}
   if(esAdmin()){ db.collection('config').doc(avisosDocId()).set({modulo:'_global', visto:ahora}).catch(()=>{}); }
@@ -14592,12 +14622,14 @@ async function revisarAvisosNuevos(){
   if(esAdmin() && _dirAprCargado && !_aprBase){ _aprBase = true; av.filter(a=>a.apr).forEach(a=>_avisosNotificados.add(a.id)); } // lo que ya estaba por aprobar no suena
   const nuevos = av.filter(a=>!_avisosNotificados.has(a.id));
   nuevos.forEach(a=>_avisosNotificados.add(a.id));
+  if(nuevos.some(a=>a.apr)) avisoSonar(nuevos.some(a=>a.apr && (a.cat==='hojasDeMas' || a.cat==='merma')));
   if(!nuevos.length || typeof Notification==='undefined' || Notification.permission!=='granted') return;
   try{
     const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
     for(const a of nuevos.slice(0,3)){
       const k = AVISO_CAT[a.cat] || AVISO_CAT.info, tt = (a.apr?'🟠 ':(a.ic?a.ic+' ':''))+a.titulo;
-      const opts = {body:k.t+(a.apr?' · por aprobar':'')+' · '+(a.texto||'')+' · '+avisoCuando(a.fecha), icon:'icon-192.png', badge:'icon-192.png', tag:a.id};
+      const imp = a.apr && (a.cat==='hojasDeMas' || a.cat==='merma');
+      const opts = {body:k.t+(a.apr?' · por aprobar':'')+' · '+((a.det||[]).slice(0,3).map(d=>d.n+' '+d.q).join(', ')||a.texto||'')+' · '+avisoCuando(a.fecha), icon:'icon-192.png', badge:'icon-192.png', tag:a.id, vibrate: imp ? [500,200,500,200,500] : (a.apr ? [200,100,200] : [150])};
       if(reg && reg.showNotification) await reg.showNotification(tt, opts); else new Notification(tt, opts);
     }
   }catch(e){}
