@@ -252,7 +252,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v278';
+const APP_VERSION = 'v279';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -10203,6 +10203,18 @@ function grupoDeuda(itemId){ return esMelaminaId(itemId) ? 'Melamina' : itemId; 
 // crear documentos nuevos. Por eso cada paso (mandar, confirmar, cancelar) se guarda como un EVENTO nuevo
 // {evento:true, prestamoId, ...} y el estado del préstamo se calcula aquí juntando el préstamo + sus eventos.
 let prestEventos = [];
+// v279 (pedido por el usuario): al recibir se cuenta lo que llegó. Si llegó menos, la deuda es solo por lo que
+// llegó y lo que falta le llega a Dirección para que decida (nunca se le cobra al coordinador).
+function prestRecibidoTrasp(p, rec, fecha, ev){
+  if(rec===undefined || rec===null || !(Number(rec) < Number(p.cantidad)-1e-9)) return;
+  p.enviado = Number(p.cantidad); p.cantidad = fmtNum(Math.max(0, Number(rec)));
+  p.faltante = {cantidad:fmtNum(p.enviado - p.cantidad), enviado:p.enviado, fecha, mandado:p.fecha, de:p.origen, a:p.destino, itemId:p.itemId, itemNombre:p.itemNombre, unidad:p.unidad, decision:null, vEnv:(ev||{}).viajeEnv, vRec:(ev||{}).viajeRec};
+}
+function prestRecibidoEnvio(p, e, rec, fecha, ev){
+  if(rec===undefined || rec===null || !(Number(rec) < Number(e.cantidad)-1e-9)) return;
+  e.enviado = Number(e.cantidad); e.cantidad = fmtNum(Math.max(0, Number(rec)));
+  e.faltante = {cantidad:fmtNum(e.enviado - e.cantidad), enviado:e.enviado, fecha, mandado:e.fecha, de:p.destino, a:p.origen, itemId:e.itemId, itemNombre:e.itemNombre, unidad:p.unidad, decision:null, vEnv:(ev||{}).viajeEnv, vRec:(ev||{}).viajeRec};
+}
 function prestAplicarEventos(bases, evs){
   const porP = {}; evs.forEach(ev=>{ (porP[ev.prestamoId] = porP[ev.prestamoId] || []).push(ev); });
   return bases.map(b=>{
@@ -10211,8 +10223,8 @@ function prestAplicarEventos(bases, evs){
     xs.forEach(ev=>{
       if(ev.tipo==='envio'){ if(!p.envios.some(e=>e.id===ev.envId)) p.envios.push({id:ev.envId, fecha:ev.fecha, cantidad:Number(ev.cantidad), itemId:ev.itemId, itemNombre:ev.itemNombre, estado:'encamino', por:ev.creadoPor, salidaMovId:ev.salidaMovId}); }
       else if(ev.tipo==='confEnvio'){ const e = p.envios.find(x=>x.id===ev.envId); if(!e || e.estado!=='encamino') return;
-        if(ev.llego){ e.estado='recibido'; e.fechaConf=ev.fecha; e.confPor=ev.creadoPor; p.devuelto = Number(p.devuelto||0) + Number(e.cantidad);
-          p.devoluciones.push({fecha:ev.fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:!!ev.yaContadas}); }
+        if(ev.llego){ prestRecibidoEnvio(p, e, ev.recibido, ev.fecha, ev); e.estado='recibido'; e.fechaConf=ev.fecha; e.confPor=ev.creadoPor; p.devuelto = Number(p.devuelto||0) + Number(e.cantidad);
+          if(Number(e.cantidad)>0) p.devoluciones.push({fecha:ev.fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:!!ev.yaContadas}); }
         else { e.estado='cancelado'; e.fechaConf=ev.fecha; e.confPor=ev.creadoPor; } }
       else if(ev.tipo==='compensa'){ if(p.estado==='encamino' || p.estado==='cancelado') return;
         // v271 (pedido por el usuario): dos módulos que se deben entre sí cierran la deuda sin mover material.
@@ -10220,8 +10232,12 @@ function prestAplicarEventos(bases, evs){
         p.devuelto = Number(p.devuelto||0) + q;
         p.devoluciones.push({fecha:ev.fecha, cantidad:q, itemId:p.itemId, itemNombre:p.itemNombre, compensacion:true, conMod:p.destino, por:ev.creadoPor}); }
       else if(ev.tipo==='traspConf'){ if(p.estado!=='encamino') return;
-        if(ev.llego){ p.estado='pendiente'; p.recibido={fecha:ev.fecha, por:ev.creadoPor, yaContadasEnCierre:!!ev.yaContadas}; }
+        if(ev.llego){ p.estado='pendiente'; p.recibido={fecha:ev.fecha, por:ev.creadoPor, yaContadasEnCierre:!!ev.yaContadas}; prestRecibidoTrasp(p, ev.recibido, ev.fecha, ev); }
         else { p.estado='cancelado'; p.canceladoEn=ev.fecha; p.canceladoPor=ev.creadoPor; } }
+      else if(ev.tipo==='faltaDec'){ const f = ev.envId ? ((p.envios.find(x=>x.id===ev.envId)||{}).faltante) : p.faltante;
+        if(f && !f.decision){ f.decision = ev.decision; f.fechaDec = ev.fecha; f.decPor = ev.creadoPor;
+          // Un pago que se perdió en el camino: al que pagó no se le cobra otra vez (merma de la empresa).
+          if(ev.envId && ev.decision==='perdido'){ const q = Number(f.cantidad)||0; p.devuelto = Number(p.devuelto||0) + q; p.devoluciones.push({fecha:ev.fecha, cantidad:q, itemId:f.itemId, itemNombre:f.itemNombre, perdido:true}); } } }
     });
     if(p.estado!=='encamino' && p.estado!=='cancelado'){
       const pend = Math.max(0, fmtNum(Number(p.cantidad) - Number(p.devuelto||0)));
@@ -10252,21 +10268,23 @@ async function prestPorEntradas(lista){
   for(const p of enCam){
     const m = ents.find(x=>x.prestamoId===p.id && !x.envioDev && x.modulo===p.destino); if(!m) continue;
     p.estado = 'pendiente'; p.recibido = {fecha:m.fecha, por:m.creadoPor||'', yaContadasEnCierre:false, porEntrada:m.id};
+    const recE = m.recibidoDe!=null ? Number(m.cantidad) : null; prestRecibidoTrasp(p, recE, m.fecha);
     const pend = Math.max(0, fmtNum(Number(p.cantidad) - Number(p.devuelto||0)));
     p.pendiente = pend; p.estado = pend<=0 ? 'cerrado' : (Number(p.devuelto||0)>0 ? 'parcial' : 'pendiente');
     if(puedeReparar && (esAdmin() || p.destino===modulo()) && !prestEventos.some(ev=>ev.prestamoId===p.id && ev.tipo==='traspConf')){
-      try{ await prestEvento(p, {tipo:'traspConf', llego:true, yaContadas:false, fecha:m.fecha, porEntrada:m.id}); }catch(e){}
+      try{ await prestEvento(p, Object.assign({tipo:'traspConf', llego:true, yaContadas:false, fecha:m.fecha, porEntrada:m.id}, recE!=null?{recibido:recE}:{})); }catch(e){}
     }
   }
   for(const p of envCam){
     for(const e of (p.envios||[])){
       if(e.estado!=='encamino') continue;
       const m = ents.find(x=>x.prestamoId===p.id && x.envioDev===e.id && x.modulo===p.origen); if(!m) continue;
+      const recV = m.recibidoDe!=null ? Number(m.cantidad) : null; prestRecibidoEnvio(p, e, recV, m.fecha);
       e.estado = 'recibido'; e.fechaConf = m.fecha; e.confPor = m.creadoPor||'';
       p.devuelto = Number(p.devuelto||0) + Number(e.cantidad);
       p.devoluciones = (p.devoluciones||[]).concat([{fecha:m.fecha, cantidad:Number(e.cantidad), itemId:e.itemId, itemNombre:e.itemNombre, mandado:e.fecha, yaContadasEnCierre:false}]);
       if(puedeReparar && (esAdmin() || p.origen===modulo()) && !prestEventos.some(ev=>ev.prestamoId===p.id && ev.tipo==='confEnvio' && ev.envId===e.id)){
-        try{ await prestEvento(p, {tipo:'confEnvio', envId:e.id, llego:true, yaContadas:false, fecha:m.fecha, porEntrada:m.id}); }catch(er){}
+        try{ await prestEvento(p, Object.assign({tipo:'confEnvio', envId:e.id, llego:true, yaContadas:false, fecha:m.fecha, porEntrada:m.id}, recV!=null?{recibido:recV}:{})); }catch(er){}
       }
     }
     if(p.estado!=='encamino' && p.estado!=='cancelado'){
@@ -10343,8 +10361,8 @@ function renderTrasp(){
   if(!traspOrigen) traspOrigen = modulo();
   $('#main').innerHTML = `
     <div class="card"><div class="subtabs">
-      <button class="${traspSub==='nuevo'?'active':''}" onclick="traspSub='nuevo';renderTrasp()">Nuevo traspaso</button>
-      <button class="${traspSub==='historial'?'active':''}" onclick="traspSub='historial';renderTrasp()">Préstamos / Historial</button>
+      <button class="${traspSub==='nuevo'?'active':''}" onclick="traspSub='nuevo';renderTrasp()">📤 Mandar</button>
+      <button class="${traspSub==='historial'?'active':''}" onclick="traspSub='historial';renderTrasp()">📥 Recibir y cuentas</button>
       <button class="${traspSub==='resumen'?'active':''}" onclick="traspSub='resumen';renderTrasp()">Resumen de deudas</button>
     </div>
     <div style="margin-top:10px;padding:10px;border-radius:12px;background:rgba(124,58,237,.10);border:1px solid rgba(124,58,237,.35)"><strong>📄 PDF de traspasos</strong>
@@ -10369,8 +10387,8 @@ function renderTraspNuevo(){
   const items = CATALOGO.filter(i=>i.cat===traspCat);
   $('#trasp-body').innerHTML = `
   <div class="card">
-    <strong>Nuevo traspaso</strong>
-    <p class="hint">El material sale del inventario del módulo origen y entra al del destino de inmediato. Además queda un registro de préstamo para llevar la deuda entre módulos.</p>
+    <strong>📤 Mandar material a otro módulo</strong>
+    <p class="hint">Sale de tu inventario ahora y va en camino. Se suma al otro módulo cuando lo reciba. Si le debes a ese módulo, primero se paga lo que debes; lo demás queda prestado.</p>
     <div class="grid2" style="margin-top:8px">
       <div><label class="hint">Módulo origen</label>${(miPerfil && miPerfil.rol==='coordinador')
         ? `<input value="${traspOrigen}" disabled>`
@@ -10382,7 +10400,7 @@ function renderTraspNuevo(){
       ${items.map(it=>`<tr><td>${it.nombre}</td><td id="t-stock-${it.id}" class="hint">cargando…</td><td><input type="number" min="0" id="t-cant-${it.id}" placeholder="0"></td></tr>`).join('')}
     </table></div>
     <input id="t-nota" placeholder="Nota (opcional)" style="margin-top:8px">
-    <button class="btn" style="margin-top:10px" onclick="previewTraspaso()">Ver resumen del traspaso</button>
+    <button class="btn" style="margin-top:10px" onclick="previewTraspaso()">Ver resumen</button>
   </div>
   <div id="t-result"></div>`;
   items.forEach(async it=>{
@@ -10410,18 +10428,21 @@ async function previewTraspaso(){
     const disp = f.esHoja ? f.completas : f.final;
     if(disp - e.cantidad < -1e-9) faltantes.push({...e, disponible:disp});
   }
-  traspPreview = {origen:traspOrigen, destino:traspDestino, elegidos, nota:($('#t-nota').value||'').trim(), bloqueado: faltantes.length>0, faltantes};
+  await cargarPrestamos();
+  const plan = prestPlanMandar(traspOrigen, traspDestino, elegidos), aviso = prestAvisoOtroArticulo(traspOrigen, traspDestino, elegidos);
+  traspPreview = {origen:traspOrigen, destino:traspDestino, elegidos, nota:($('#t-nota').value||'').trim(), bloqueado: faltantes.length>0, faltantes, aviso};
   let html = `<div class="card"><h3>${traspOrigen} → ${traspDestino}</h3>
-    <div class="wrap-x"><table><tr><th>Artículo</th><th>Cantidad</th></tr>
-    ${elegidos.map(e=>`<tr><td>${e.itemNombre}</td><td>${e.cantidad} ${e.unidad}</td></tr>`).join('')}
+    <div class="wrap-x"><table><tr><th>Artículo</th><th>Cantidad</th><th></th></tr>
+    ${plan.map(x=>`<tr><td>${x.e.itemNombre}</td><td>${x.e.cantidad} ${x.e.unidad}</td><td class="hint">${[x.paga>0?'✅ paga '+fmtNum(x.paga)+' que debes':'', x.presta>0?'🤝 '+fmtNum(x.presta)+' prestado':''].filter(Boolean).join(' · ')}</td></tr>`).join('')}
     </table></div>
+    ${aviso?`<div class="warn" style="margin-top:8px;white-space:pre-line">${aviso}</div>`:''}
   </div>`;
   if(faltantes.length>0){
     html += `<div class="card"><div class="warn"><strong>Traspaso bloqueado — existencia insuficiente en ${traspOrigen}.</strong>
       <ul style="margin:6px 0 0 18px;padding:0">${faltantes.map(f=>`<li>${f.itemNombre}: disponible ${fmtNum(f.disponible)}, se pidieron ${fmtNum(f.cantidad)}</li>`).join('')}</ul>
       No se movió nada.</div></div>`;
   } else {
-    html += `<div class="card row" style="justify-content:flex-end"><button class="btn" onclick="confirmarTraspaso()">Confirmar traspaso</button></div>`;
+    html += `<div class="card row" style="justify-content:flex-end"><button class="btn" onclick="confirmarTraspaso()">📤 Mandar</button></div>`;
   }
   $('#t-result').innerHTML = html;
 }
@@ -10429,9 +10450,17 @@ async function previewTraspaso(){
 async function confirmarTraspaso(){
   if(!traspPreview || traspPreview.bloqueado) return;
   const {origen, destino, elegidos, nota} = traspPreview;
+  if(traspPreview.aviso && !confirm(traspPreview.aviso+'\n\n¿Mandar de todos modos?')) return;
   try{
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
-    for(const e of elegidos){
+    await cargarPrestamos(); const plan = prestPlanMandar(origen, destino, elegidos), fechaV = new Date().toISOString();
+    for(const x of plan) for(const {p, q} of x.pagos){
+      // Pago de lo que se debe: sale ahora y queda en camino; baja la deuda cuando el otro módulo lo reciba.
+      const movId = cryptoId(), envId = cryptoId(), it = x.e;
+      await db.collection('movimientos').doc(movId).set({modulo:origen,itemId:it.itemId,itemNombre:it.itemNombre,tipo:'salida',cantidad:q,nota:`Devolución de préstamo ${origen} → ${destino} (${p.itemNombre}) · en camino`,fecha:fechaV,estado:'aprobado',creadoPor,prestamoId:p.id,envioDev:envId});
+      await prestEvento(p, {tipo:'envio', envId, cantidad:q, itemId:it.itemId, itemNombre:it.itemNombre, salidaMovId:movId, fecha:fechaV});
+    }
+    for(const e0 of plan.filter(x=>x.presta>0).map(x=>Object.assign({}, x.e, {cantidad:x.presta}))){ const e = e0;
       const notaTxt = `Traspaso ${origen} → ${destino}${nota?(' · '+nota):''}`;
       // Los traspasos SIEMPRE se aplican de inmediato (no piden aprobación de Dirección),
       // aunque los registre un coordinador — así lo pidió el negocio. La deuda entre
@@ -10449,43 +10478,9 @@ async function confirmarTraspaso(){
         nota, fecha:fechaT, devoluciones:[], creadoPor
       });
     }
-    $('#t-result').innerHTML = `<div class="card pos">Traspaso registrado: ${elegidos.length} artículo(s) de ${origen} a ${destino}. Ya salió de ${origen} y va <strong>en camino</strong>: se suma a ${destino} (y queda la deuda) cuando ${destino} confirme que llegó.</div>`;
+    $('#t-result').innerHTML = `<div class="card pos">📤 Mandado: ${elegidos.length} artículo(s) de ${origen} a ${destino}. Ya salió de ${origen} y va <strong>en camino</strong>. Se suma a ${destino} y se ajusta la cuenta cuando ${destino} lo reciba.</div>`;
     traspPreview = null;
   }catch(e){ alert('Error al registrar: '+e.message); }
-}
-
-async function renderTraspHistorial(){
-  if(!document.getElementById('trasp-body')) return;
-  $('#trasp-body').innerHTML = `<div class="card hint">Cargando préstamos…</div>`;
-  await cargarPrestamos();
-  // v221 (pedido por el usuario): el que DEBE salda la deuda (manda el material, sale de su inventario y queda
-  // "en camino"); el que PRESTÓ confirma que sí llegó (entra a su inventario y baja la deuda).
-  const mod = modulo(), dir = esAdmin();
-  const xs = prestamos.filter(p=>p.origen===mod || p.destino===mod);
-  if(!xs.length){ $('#trasp-body').innerHTML = `<div class="card">${mod} no tiene traspasos registrados.</div>`; return; }
-  const env = p => (p.envios||[]).filter(e=>e.estado==='encamino');
-  const cardCamino = p => { const recibe = p.destino===mod;
-    return `<div class="card" style="border-left:6px solid #0891b2"><div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:15.5px;color:#0891b2">🚚 ${recibe?`${p.origen} te mandó ${fmtNum(p.cantidad)} ${p.unidad}`:`Mandaste ${fmtNum(p.cantidad)} ${p.unidad} a ${p.destino}`}</strong><span class="tag">${fCorta(diaLocal(p.fecha))}</span></div>
-      <p class="hint" style="margin:6px 0">${p.itemNombre}${p.nota?' · '+p.nota:''} · ${new Date(p.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})}. ${recibe?'Confírmalo cuando lo tengas: entonces se suma a tu inventario y queda la deuda.':`Ya salió de ${p.origen}. Se suma a ${p.destino} y queda la deuda cuando ${p.destino} lo confirme.`}</p>
-      ${(recibe||dir)?`<div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="traspConfirmar('${p.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="traspConfirmar('${p.id}',false)">❌ No llegaron</button></div>`:''}</div>`; };
-  const card = p => { if(p.estado==='encamino') return cardCamino(p); if(p.estado==='cancelado') return `<div class="card" style="opacity:.7"><strong>❌ Cancelado · ${p.origen} → ${p.destino}</strong><p class="hint" style="margin:4px 0 0">${fmtNum(p.cantidad)} ${p.itemNombre} · no llegó</p></div>`;
-    const debe = p.destino===mod, enC = env(p), enCq = enC.reduce((a,e)=>a+Number(e.cantidad),0);
-    const col = p.estado==='cerrado' ? '#16a34a' : (debe ? '#dc2626' : '#16a34a');
-    const titulo = p.estado==='cerrado' ? `✅ Saldado · ${p.origen} le prestó a ${p.destino}` : debe ? `🔴 Debes ${fmtNum(p.pendiente)} ${p.unidad} a ${p.origen}` : `🟢 ${p.destino} te debe ${fmtNum(p.pendiente)} ${p.unidad}`;
-    return `<div class="card" style="border-left:6px solid ${col}">
-      <div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:15.5px;color:${col}">${titulo}</strong><span class="tag">${fCorta(diaLocal(p.fecha))}</span></div>
-      <p class="hint" style="margin:6px 0">${p.origen} → ${p.destino} · ${p.itemNombre}${p.esMelamina?' (en melamina cuenta cualquier color)':''} · Prestado ${fmtNum(p.cantidad)} · Regresado ${fmtNum(p.devuelto)}${p.nota?' · '+p.nota:''}</p>
-      ${(p.devoluciones||[]).length?`<div class="hint" style="margin:0 0 6px">${p.devoluciones.map(d=>d.compensacion ? `🔁 ${fCorta(diaLocal(d.fecha))}: se compensaron ${fmtNum(d.cantidad)} ${p.unidad} con lo que ${p.origen} le debía a ${p.destino} (no se movió material)` : `✅ ${fCorta(diaLocal(d.fecha))}: regresaron ${fmtNum(d.cantidad)} ${d.itemNombre}${d.yaContadasEnCierre?' (ya se habían contado en el cierre del turno)':''}`).join('<br>')}</div>`:''}
-      ${enC.map(e=>`<div style="margin-top:6px;padding:10px 12px;border-radius:12px;background:rgba(8,145,178,.12);border:1px solid rgba(8,145,178,.5)"><strong>🚚 En camino: ${fmtNum(e.cantidad)} ${e.itemNombre}</strong><div class="hint" style="margin:2px 0 0">${p.destino} lo mandó el ${fCorta(diaLocal(e.fecha))} ${new Date(e.fecha).toLocaleTimeString('es-MX',{hour:'numeric',minute:'2-digit'})}. Ya salió de ${p.destino}; entra a ${p.origen} cuando lo confirme.</div>
-        ${(!debe || dir)?`<div class="row" style="gap:6px;margin-top:8px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="prestConfirmar('${p.id}','${e.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="prestConfirmar('${p.id}','${e.id}',false)">❌ No llegaron</button></div>`:`<div class="hint" style="margin:6px 0 0">Esperando que ${p.origen} confirme que llegaron.</div>`}</div>`).join('')}
-      ${p.pendiente - enCq > 0.0005 && (debe || dir) ? `<button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#dc2626,#b91c1c)" onclick="mostrarFormDevolucion('${p.id}')">💸 Saldar deuda (mandar a ${p.origen})</button><div id="dev-${p.id}"></div>` : ''}
-    </div>`; };
-  const cam = xs.filter(p=>p.estado==='encamino');
-  const deb = xs.filter(p=>!['cerrado','encamino','cancelado'].includes(p.estado) && p.destino===mod), nos = xs.filter(p=>!['cerrado','encamino','cancelado'].includes(p.estado) && p.origen===mod), cer = xs.filter(p=>p.estado==='cerrado' || p.estado==='cancelado');
-  const compH = dir ? prestCompensables().filter(g=>g.m1===mod||g.m2===mod) : [];
-  $('#trasp-body').innerHTML = (compH.length?`<div class="card" style="border:2px solid #d97706;padding:12px"><strong>🔁 ${mod} y ${compH.map(g=>g.m1===mod?g.m2:g.m1).join(', ')} se deben entre sí.</strong> <span class="hint" style="margin:0">Se pueden cruzar sin mover inventario.</span><button class="btn small" style="width:100%;margin-top:8px;background:#d97706" onclick="traspSub='resumen';renderTrasp()">Ver y compensar</button></div>`:'') + (cam.length?`<div style="font-weight:900;margin:6px 4px">🚚 Traspasos en camino</div>`+cam.map(card).join(''):'') + (deb.length?`<div style="font-weight:900;margin:6px 4px">🔴 Lo que ${mod} debe</div>`+deb.map(card).join(''):'')
-    + (nos.length?`<div style="font-weight:900;margin:12px 4px 6px">🟢 Lo que le deben a ${mod}</div>`+nos.map(card).join(''):'')
-    + (cer.length?`<details class="card"><summary><strong>✅ Ya saldados (${cer.length})</strong></summary>${cer.map(card).join('')}</details>`:'');
 }
 
 function mostrarFormDevolucion(prestamoId){
@@ -10526,27 +10521,215 @@ async function registrarDevolucion(prestamoId){
     await cargarPrestamos(); renderTraspHistorial();
   }catch(e){ alert('Error: '+e.message); }
 }
-// v221: en el Inicio del coordinador, lo que le mandaron para saldar una deuda (para confirmar) y lo que debe.
+// ===== v279 (pedido por el usuario): traspasos simples =====
+// · Lo que un módulo le manda a otro en un día va en UN solo envío ("viaje"). El que recibe cuenta lo que llegó.
+// · Una sola cuenta entre dos módulos (melamina: cualquier color; herrajes: por artículo), ya restada si se deben
+//   los dos. Al mandar, primero se paga lo que se debe; lo que sobra queda prestado.
+// · Se acabó "ya las conté / aún no hago mi cierre": el cierre pide recibir primero lo que viene en camino.
+// · Lo que no llega le toca decidirlo a Dirección; nunca se le cobra al coordinador.
+const prestUnidad = id => (CATALOGO.find(i=>i.id===id)||{}).unidad || '';
+const prestEnCam = p => (p.envios||[]).filter(e=>e.estado==='encamino').reduce((t,e)=>t+Number(e.cantidad),0);
+function prestPiezasEnCamino(){
+  const pz = [];
+  (prestamos||[]).forEach(p=>{
+    if(p.estado==='encamino') pz.push({k:'t', p, de:p.origen, a:p.destino, itemId:p.itemId, itemNombre:p.itemNombre, cant:Number(p.cantidad), fecha:p.fecha});
+    (p.envios||[]).forEach(e=>{ if(e.estado==='encamino') pz.push({k:'e', p, e, de:p.destino, a:p.origen, itemId:e.itemId, itemNombre:e.itemNombre, cant:Number(e.cantidad), fecha:e.fecha}); });
+  });
+  return pz.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+}
+function prestViajes(filtro){
+  const V = {};
+  prestPiezasEnCamino().filter(filtro).forEach(x=>{ const key = x.de+'|'+x.a+'|'+diaLocal(x.fecha);
+    const v = V[key] || (V[key] = {key, de:x.de, a:x.a, dia:diaLocal(x.fecha), fecha:x.fecha, pz:[], lineas:{}});
+    v.pz.push(x); const l = v.lineas[x.itemId] || (v.lineas[x.itemId] = {itemId:x.itemId, itemNombre:x.itemNombre, unidad:prestUnidad(x.itemId), cant:0}); l.cant = fmtNum(l.cant + x.cant); });
+  return Object.values(V).sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+}
+const viajesHacia = mod => prestViajes(x=>x.a===mod);
+const viajesDesde = mod => prestViajes(x=>x.de===mod);
+const viajeLineasTxt = v => Object.values(v.lineas).map(l=>`${fmtNum(l.cant)} ${l.itemNombre.replace(/^Melamina /,'')}`).join(' · ');
+function viajeCardHtml(v, puedeRecibir, extra){
+  return `<div class="card" style="border:2px solid #0891b2;background:rgba(8,145,178,.08)"><div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:16px">🚚 ${v.de} te mandó</strong><span class="tag">${fCorta(v.dia)}</span></div>
+    <div style="margin:6px 0 0;font-size:15px;font-weight:700">${viajeLineasTxt(v)}</div>
+    ${puedeRecibir?`<button class="btn" style="width:100%;margin-top:10px;min-height:50px;font-size:16px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="viajeAbrir('${v.key}')">📥 Recibir</button>`:''}${extra||''}</div>`;
+}
+// --- Recibir: se cuenta lo que llegó (ya viene escrito lo que mandaron) ---
+let viajeRec = null;
+async function viajeAbrir(key){
+  await cargarPrestamos(); const v = prestViajes(()=>true).find(x=>x.key===key);
+  if(!v) { toast('Ese envío ya se recibió'); return prestRefrescar(); }
+  if(!esAdmin() && v.a!==modulo()) return alert('Solo '+v.a+' puede recibirlo.');
+  viajeRec = {v, q:{}}; Object.values(v.lineas).forEach(l=>viajeRec.q[l.itemId] = l.cant); viajeRender();
+}
+function viajeCerrar(){ viajeRec = null; const o = document.getElementById('viaje-ov'); if(o) o.remove(); }
+function viajeQ(id, d, val){ const l = viajeRec.v.lineas[id]; let n = val!==undefined ? Number(val) : fmtNum(Number(viajeRec.q[id]||0) + d);
+  if(!(n>=0)) n = 0; if(n > l.cant) n = l.cant; viajeRec.q[id] = fmtNum(n); viajeRender(); }
+function viajeRender(){
+  let ov = document.getElementById('viaje-ov');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'viaje-ov'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto'; document.body.appendChild(ov); ov.addEventListener('click', e=>{ if(e.target===ov) viajeCerrar(); }); }
+  const {v, q} = viajeRec, ls = Object.values(v.lineas), falt = ls.filter(l=>Number(q[l.itemId]) < l.cant - 1e-9), rec = ls.filter(l=>Number(q[l.itemId])>0);
+  const bt = 'width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:20px;font-weight:900;cursor:pointer';
+  ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #16a34a;border-radius:18px;padding:16px;margin-top:20px">
+    <div class="row" style="justify-content:space-between"><div style="font-size:16px;font-weight:900;flex:1">📥 Llegó de ${v.de} · ${fCorta(v.dia)}</div><button onclick="viajeCerrar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <p class="hint" style="margin:4px 0 8px">Cuenta lo que tienes en tu taller. Si llegó menos, baja el número.</p>
+    ${ls.map(l=>`<div class="row" style="justify-content:space-between;gap:8px;padding:9px 0;border-top:1px solid var(--line)"><div><strong>${l.itemNombre}</strong><div class="hint" style="margin:0">mandaron ${fmtNum(l.cant)}</div></div>
+      <div class="row" style="gap:6px"><button style="${bt}" onclick="viajeQ('${l.itemId}',-1)">−</button><input type="number" min="0" inputmode="decimal" value="${fmtNum(q[l.itemId])}" onchange="viajeQ('${l.itemId}',0,this.value)" style="width:64px;margin:0;text-align:center;font-size:18px;font-weight:900"><button style="${bt}" onclick="viajeQ('${l.itemId}',1)">+</button></div></div>`).join('')}
+    ${falt.length?`<div style="margin-top:8px;padding:10px 12px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)"><b style="color:#dc2626">⚠️ Faltan ${falt.map(l=>fmtNum(l.cant-Number(q[l.itemId]))+' '+l.itemNombre).join(', ')}</b><div class="hint" style="margin:2px 0 0">No se te cobran a ti. Le llega aviso a Dirección para que decida.</div></div>`:''}
+    <button class="btn" style="width:100%;margin-top:12px;min-height:52px;font-size:16px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="viajeGuardar()">✅ ${rec.length?'Recibir '+rec.map(l=>fmtNum(q[l.itemId])+' '+l.itemNombre.replace(/^Melamina /,'')).join(' · '):'No llegó nada'}</button></div>`;
+}
+let _viajeGuardando = false;
+async function viajeGuardar(){
+  if(!viajeRec || _viajeGuardando) return; const {v, q} = viajeRec;
+  const ls = Object.values(v.lineas), falt = ls.filter(l=>Number(q[l.itemId]) < l.cant - 1e-9);
+  if(falt.length && !confirm(`⚠️ ¿Seguro que no llegaron?\n\n${falt.map(l=>`• ${l.itemNombre}: mandaron ${fmtNum(l.cant)}, llegaron ${fmtNum(q[l.itemId])}`).join('\n')}\n\nLo que falta le llega a Dirección. No se te cobra.`)) return;
+  _viajeGuardando = true;
+  try{
+    await cargarPrestamos(); const fecha = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
+    for(const l of ls){
+      let r = Number(q[l.itemId]) || 0;
+      for(const x of v.pz.filter(z=>z.itemId===l.itemId)){
+        const p = prestamos.find(y=>y.id===x.p.id); if(!p) continue;
+        const rr = fmtNum(Math.min(r, x.cant)); r = fmtNum(r - rr);
+        if(x.k==='t'){
+          if(p.estado!=='encamino') continue;
+          if(rr>0) await db.collection('movimientos').doc(cryptoId()).set({modulo:p.destino,itemId:p.itemId,itemNombre:p.itemNombre,tipo:'entrada',cantidad:rr,nota:`Traspaso ${p.origen} → ${p.destino}${p.nota?(' · '+p.nota):''}`,fecha,estado:'aprobado',creadoPor:quien,origenTipo:'modulo',origenModulo:p.origen,prestamoId:p.id,recibidoDe:x.cant});
+          await prestEvento(p, {tipo:'traspConf', llego:true, yaContadas:false, recibido:rr, viajeEnv:l.cant, viajeRec:Number(q[l.itemId])||0, fecha});
+        } else {
+          const e = (p.envios||[]).find(y=>y.id===x.e.id); if(!e || e.estado!=='encamino') continue;
+          if(rr>0) await db.collection('movimientos').doc(cryptoId()).set({modulo:p.origen,itemId:e.itemId,itemNombre:e.itemNombre,tipo:'entrada',cantidad:rr,nota:`Devolución de préstamo ${p.destino} → ${p.origen} (${p.itemNombre})`,fecha,estado:'aprobado',origenTipo:'modulo',origenModulo:p.destino,creadoPor:quien,prestamoId:p.id,envioDev:e.id,recibidoDe:x.cant});
+          await prestEvento(p, {tipo:'confEnvio', envId:e.id, llego:true, yaContadas:false, recibido:rr, viajeEnv:l.cant, viajeRec:Number(q[l.itemId])||0, fecha});
+        }
+      }
+    }
+    viajeCerrar(); toast(falt.length ? '✅ Recibido · lo que faltó le llega a Dirección' : '✅ Recibido');
+  }catch(er){ alert('Error: '+er.message); }
+  finally{ _viajeGuardando = false; }
+  await cargarPrestamos(); prestRefrescar();
+}
+function prestRefrescar(){
+  if(document.getElementById('trasp-body') && traspSub==='historial') return renderTraspHistorial();
+  if(current==='cierre') return cierreViajesPintar();
+  if(current==='home') return (esAdmin()&&enDirModo()?renderHomeDir():renderHome());
+  if(current==='trasp') return renderTrasp();
+}
+// --- Lo que no llegó: decide Dirección ---
+function prestFaltantes(){
+  const xs = [];
+  (prestamos||[]).forEach(p=>{ if(p.faltante && !p.faltante.decision) xs.push({p, envId:'', f:p.faltante});
+    (p.envios||[]).forEach(e=>{ if(e.faltante && !e.faltante.decision) xs.push({p, envId:e.id, f:e.faltante}); }); });
+  return xs.sort((a,b)=>(a.f.fecha||'').localeCompare(b.f.fecha||''));
+}
+function prestFaltGrupos(mod){
+  const G = {};
+  prestFaltantes().filter(x=>!mod || x.f.de===mod || x.f.a===mod).forEach(x=>{ const f = x.f, k = f.de+'|'+f.a+'|'+diaLocal(f.mandado||f.fecha)+'|'+f.itemId;
+    const g = G[k] || (G[k] = {k, de:f.de, a:f.a, dia:diaLocal(f.mandado||f.fecha), itemId:f.itemId, itemNombre:f.itemNombre, enviado:0, falta:0, xs:[]});
+    g.enviado = fmtNum(g.enviado + Number(f.enviado)); g.falta = fmtNum(g.falta + Number(f.cantidad)); if(f.vEnv!=null){ g.vEnv = Number(f.vEnv); g.vRec = Number(f.vRec); } g.xs.push(x); });
+  return Object.values(G);
+}
+function prestFaltHtml(mod){
+  if(!esAdmin()) return '';
+  const gs = prestFaltGrupos(mod); if(!gs.length) return '';
+  return `<div class="card" style="border:2px solid #dc2626"><div style="font-size:16px;font-weight:900">🚚 No llegó completo</div><p class="hint" style="margin:2px 0 6px">Mientras no decidas, no se le cobra a nadie y la cuenta entre módulos queda con lo que sí llegó.</p>
+    ${gs.map(g=>`<div style="padding:10px 12px;border-radius:12px;border:1px solid var(--line);margin-top:8px"><div class="hint" style="margin:0">${g.de} → ${g.a} · ${fCorta(g.dia)}</div>
+      <div style="font-weight:800;margin-top:2px">${g.itemNombre}: mandaron ${fmtNum(g.vEnv!=null?g.vEnv:g.enviado)} · llegaron ${fmtNum(g.vEnv!=null?g.vRec:g.enviado - g.falta)}</div>
+      <div class="hint" style="margin:4px 0 0">Las ${fmtNum(g.falta)} que faltan:</div>
+      <button class="btn small" style="width:100%;margin-top:6px;background:#0e7490" onclick="prestFaltDecidir('${g.k}','regresa')">↩️ Siguen en ${g.de} (regresan a su inventario)</button>
+      <button class="btn small" style="width:100%;margin-top:6px;background:#b45309" onclick="prestFaltDecidir('${g.k}','perdido')">🗑️ Se perdieron · merma de la empresa</button></div>`).join('')}</div>`;
+}
+async function prestFaltDecidir(k, dec){
+  if(!esAdmin()) return; await cargarPrestamos();
+  const g = prestFaltGrupos('').find(y=>y.k===k); if(!g) return alert('Eso ya se decidió.');
+  if(!confirm(dec==='regresa' ? `↩️ ${fmtNum(g.falta)} ${g.itemNombre} siguen en ${g.de}.\n\nSe regresan a su inventario (no salieron).\n\n¿Guardar?` : `🗑️ ${fmtNum(g.falta)} ${g.itemNombre} se perdieron en el camino.\n\nNo se le cobran a ${g.de} ni a ${g.a}: quedan como merma de la empresa.\n\n¿Guardar?`)) return;
+  try{
+    const fecha = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
+    if(dec==='regresa') await db.collection('movimientos').doc(cryptoId()).set({modulo:g.de,itemId:g.itemId,itemNombre:g.itemNombre,tipo:'entrada',cantidad:Number(g.falta),nota:`No llegó a ${g.a} (envío del ${fCorta(g.dia)}) · sigue en ${g.de}`,fecha,estado:'aprobado',creadoPor:quien,origenTipo:'faltanteTraspaso',origenModulo:g.a});
+    for(const x of g.xs) await prestEvento(x.p, {tipo:'faltaDec', envId:x.envId||'', decision:dec, cantidad:Number(x.f.cantidad), itemId:x.f.itemId, fecha});
+    toast(dec==='regresa' ? '↩️ Regresaron a '+g.de : '🗑️ Anotado como perdido');
+  }catch(er){ return alert('Error: '+er.message); }
+  await cargarPrestamos(); prestRefrescar();
+}
+// --- Una sola cuenta entre dos módulos ---
+function prestCuentas(mod){
+  const C = {};
+  (prestamos||[]).filter(p=>['pendiente','parcial'].includes(p.estado) && Number(p.pendiente)>0.0005 && (p.origen===mod || p.destino===mod)).forEach(p=>{
+    const otro = p.origen===mod ? p.destino : p.origen, g = grupoDeuda(p.itemId), c = C[otro] || (C[otro] = {otro, g:{}});
+    const x = c.g[g] || (c.g[g] = {g, etiqueta:p.esMelamina?'hojas de melamina':p.itemNombre, unidad:p.esMelamina?'hojas':p.unidad, neto:0, enCam:0});
+    const s = p.origen===mod ? 1 : -1; x.neto = fmtNum(x.neto + s*Number(p.pendiente)); x.enCam = fmtNum(x.enCam + s*prestEnCam(p)); });
+  return Object.values(C).map(c=>({otro:c.otro, meDeben:Object.values(c.g).filter(x=>x.neto>0.0005), leDebo:Object.values(c.g).filter(x=>x.neto<-0.0005).map(x=>Object.assign({}, x, {neto:-x.neto, enCam:-x.enCam}))}))
+    .filter(c=>c.meDeben.length || c.leDebo.length).sort((a,b)=>a.otro.localeCompare(b.otro));
+}
+const prestCuentaTxt = xs => xs.map(x=>`${fmtNum(x.neto)} ${x.etiqueta}${x.enCam>0.0005?` <span class="hint" style="margin:0;font-weight:600">(${fmtNum(x.enCam)} en camino)</span>`:''}`).join(' · ');
+let _prestAutoComp = 0;
+async function prestAutoCompensar(){
+  // Si dos módulos se deben lo mismo entre sí, la app lo resta sola (solo Dirección escribe la compensación).
+  if(!esAdmin() || esSoloLectura() || Date.now()-_prestAutoComp < 20000) return false; _prestAutoComp = Date.now();
+  const C = prestCompensables(); if(!C.length) return false; const fecha = new Date().toISOString();
+  for(const g of C) for(const lado of [g.d12, g.d21]){ let resta = g.q;
+    for(const p of lado.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))){ if(resta<=0.0005) break; const q = fmtNum(Math.min(resta, g.libre(p))); if(!(q>0)) continue;
+      try{ await prestEvento(p, {tipo:'compensa', cantidad:q, fecha, grupo:g.grupo, auto:true}); }catch(e){} resta = fmtNum(resta - q); } }
+  await cargarPrestamos(); return true;
+}
+function prestHistPar(mod, otro){
+  const ev = [];
+  (prestamos||[]).filter(p=>(p.origen===mod&&p.destino===otro)||(p.origen===otro&&p.destino===mod)).forEach(p=>{
+    if(p.estado!=='cancelado') ev.push({f:p.fecha, t:`${p.origen} → ${p.destino}: ${fmtNum(p.enviado||p.cantidad)} ${p.itemNombre}`, s:p.estado==='encamino'?'🚚 en camino':(p.faltante?`llegaron ${fmtNum(p.cantidad)}`:'')});
+    (p.envios||[]).forEach(e=>{ if(e.estado!=='cancelado') ev.push({f:e.fecha, t:`${p.destino} → ${p.origen}: ${fmtNum(e.enviado||e.cantidad)} ${e.itemNombre} (pago)`, s:e.estado==='encamino'?'🚚 en camino':(e.faltante?`llegaron ${fmtNum(e.cantidad)}`:'')}); });
+    (p.devoluciones||[]).filter(d=>d.compensacion).forEach(d=>ev.push({f:d.fecha, t:`🔁 Se restaron ${fmtNum(d.cantidad)} ${p.esMelamina?'hojas':p.itemNombre} (se debían los dos)`, s:''}));
+  });
+  return ev.sort((a,b)=>(b.f||'').localeCompare(a.f||'')).slice(0,40);
+}
+
+function viajeVanHtml(v){
+  return `<div class="card" style="border-left:6px solid #0891b2"><div class="row" style="justify-content:space-between;gap:8px"><strong>🚚 Mandaste a ${v.a}</strong><span class="tag">${fCorta(v.dia)}</span></div>
+    <div style="margin:4px 0 0;font-weight:700">${viajeLineasTxt(v)}</div><p class="hint" style="margin:4px 0 0">Cuando ${v.a} lo reciba se ajusta la cuenta. No lo vuelvas a mandar.</p></div>`;
+}
+async function renderTraspHistorial(){
+  if(!document.getElementById('trasp-body')) return;
+  $('#trasp-body').innerHTML = `<div class="card hint">Cargando…</div>`;
+  await cargarPrestamos(); await prestAutoCompensar();
+  if(!document.getElementById('trasp-body') || traspSub!=='historial') return;
+  const mod = modulo(), vienen = viajesHacia(mod), van = viajesDesde(mod), cu = prestCuentas(mod);
+  const otros = [...new Set((prestamos||[]).filter(p=>p.origen===mod||p.destino===mod).map(p=>p.origen===mod?p.destino:p.origen))].sort();
+  let h = prestFaltHtml(mod);
+  if(vienen.length) h += `<div style="font-weight:900;margin:6px 4px">📥 Te mandaron</div>` + vienen.map(v=>viajeCardHtml(v, true)).join('');
+  h += cu.length ? cu.map(c=>`<div class="card" style="border-left:6px solid ${c.leDebo.length?'#dc2626':'#16a34a'}">
+      ${c.meDeben.length?`<div class="hint" style="margin:0;font-weight:900;letter-spacing:.4px">${c.otro.toUpperCase()} TE DEBE</div><div style="font-size:19px;font-weight:900;color:#16a34a;margin:2px 0 4px">${prestCuentaTxt(c.meDeben)}</div>`:''}
+      ${c.leDebo.length?`<div class="hint" style="margin:${c.meDeben.length?8:0}px 0 0;font-weight:900;letter-spacing:.4px">LE DEBES A ${c.otro.toUpperCase()}</div><div style="font-size:19px;font-weight:900;color:#dc2626;margin:2px 0 4px">${prestCuentaTxt(c.leDebo)}</div>
+        <button class="btn" style="width:100%;margin-top:6px;background:#0e7490" onclick="traspDestino='${c.otro}';traspSub='nuevo';renderTrasp()">📤 Mandar a ${c.otro}</button>`:''}</div>`).join('')
+    : `<div class="card"><strong style="color:#16a34a">✅ ${mod} está a mano con todos los módulos.</strong></div>`;
+  if(van.length) h += `<div style="font-weight:900;margin:10px 4px 6px">🚚 Ya mandaste, falta que lo reciban</div>` + van.map(viajeVanHtml).join('');
+  if(otros.length) h += `<details class="card"><summary><strong>📋 Historial</strong></summary>${otros.map(o=>{ const ev = prestHistPar(mod, o); return ev.length ? `<div style="margin-top:10px;font-weight:900">${mod} ⇄ ${o}</div>`+ev.map(e=>`<div class="row" style="justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding:6px 0;font-size:13.5px"><span>${fCorta(diaLocal(e.f))} · ${e.t}</span><span class="hint" style="margin:0;white-space:nowrap">${e.s}</span></div>`).join('') : ''; }).join('')}</details>`;
+  $('#trasp-body').innerHTML = h;
+}
+// Inicio del coordinador: lo que le mandaron (para recibir) y lo que debe.
 let _prestHomeT = 0;
 function prestHomeHtml(){
   if(esAdmin() || esSoloLectura() || !esCoordinador()) return '';
   if(Date.now()-_prestHomeT > 30000){ _prestHomeT = Date.now(); cargarPrestamos().then(()=>{ if(current==='home') renderHome(); }); }
-  const mod = modulo(), xs = (prestamos||[]).filter(p=>p.estado!=='cerrado');
-  const llegan = xs.filter(p=>p.origen===mod).flatMap(p=>(p.envios||[]).filter(e=>e.estado==='encamino').map(e=>({p, e})));
-  const trLlegan = xs.filter(p=>p.estado==='encamino' && p.destino===mod);
-  const enCam = p => (p.envios||[]).filter(e=>e.estado==='encamino').reduce((t,e)=>t+Number(e.cantidad),0);
-  const debo = xs.filter(p=>p.destino===mod && p.pendiente - enCam(p) > 1e-9);
-  const esperando = xs.filter(p=>p.destino===mod && p.pendiente>0 && enCam(p)>0);
-  if(!llegan.length && !debo.length && !trLlegan.length && !esperando.length) return '';
-  return `<div class="card" style="padding:12px;border:2px solid #0891b2">
-    ${trLlegan.length?`<div style="font-size:16px;font-weight:900">🚚 Te mandaron material (traspaso)</div>${trLlegan.map(p=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${fmtNum(p.cantidad)} ${p.itemNombre}</strong> <span class="hint" style="margin:0">de ${p.origen} · ${fCorta(diaLocal(p.fecha))}${p.nota?' · '+p.nota:''}</span>
-      <div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="traspConfirmar('${p.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="traspConfirmar('${p.id}',false)">❌ No llegaron</button></div></div>`).join('')}<div style="height:8px"></div>`:''}
-    ${llegan.length?`<div style="font-size:16px;font-weight:900">↩️ Te regresaron material de un préstamo</div>${llegan.map(({p,e})=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${fmtNum(e.cantidad)} ${e.itemNombre}</strong> <span class="hint" style="margin:0">de ${p.destino} · ${fCorta(diaLocal(e.fecha))}</span>
-      <div class="row" style="gap:6px;margin-top:6px"><button class="btn small" style="flex:1;margin:0;background:#16a34a" onclick="prestConfirmar('${p.id}','${e.id}',true)">✅ Sí llegaron</button><button class="btn small" style="flex:1;margin:0;background:transparent;color:var(--bad);border:1px solid var(--bad);box-shadow:none" onclick="prestConfirmar('${p.id}','${e.id}',false)">❌ No llegaron</button></div></div>`).join('')}`:''}
-    ${debo.length?`<div style="font-size:15px;font-weight:900;margin-top:${llegan.length?10:0}px;color:#dc2626">🔴 Debes material a otros módulos</div>${debo.map(p=>`<div class="hint" style="margin:4px 0 0">• ${fmtNum(p.pendiente)} ${p.unidad} de ${p.esMelamina?'melamina':p.itemNombre} a <strong>${p.origen}</strong></div>`).join('')}
-      <button class="btn small" style="width:100%;margin-top:8px;background:#dc2626" onclick="traspSub='historial';irA('trasp')">💸 Saldar deuda</button>`:''}
-    ${esperando.length?`<div style="font-size:15px;font-weight:900;margin-top:10px;color:#0891b2">🚚 Ya mandaste, falta que lo confirmen</div>${esperando.map(p=>`<div class="hint" style="margin:4px 0 0">• ${fmtNum(enCam(p))} ${p.unidad} a <strong>${p.origen}</strong>: la deuda se salda cuando ${p.origen} confirme que llegaron. No lo vuelvas a mandar.</div>`).join('')}`:''}</div>`;
+  const mod = modulo(), vienen = viajesHacia(mod), debo = prestCuentas(mod).filter(c=>c.leDebo.length), van = viajesDesde(mod);
+  if(!vienen.length && !debo.length && !van.length) return '';
+  return vienen.map(v=>viajeCardHtml(v, true)).join('') + ((debo.length||van.length) ? `<div class="card" style="padding:12px;border:2px solid #0891b2">
+    ${debo.length?`<div style="font-size:15px;font-weight:900;color:#dc2626">🔴 Debes material</div>${debo.map(c=>`<div class="hint" style="margin:4px 0 0;font-size:14px">• ${c.leDebo.map(x=>fmtNum(x.neto)+' '+x.etiqueta).join(', ')} a <strong>${c.otro}</strong></div>`).join('')}
+      <button class="btn small" style="width:100%;margin-top:8px;background:#0e7490" onclick="traspSub='nuevo';irA('trasp')">📤 Mandar</button>`:''}
+    ${van.length?`<div style="font-size:15px;font-weight:900;margin-top:${debo.length?10:0}px;color:#0891b2">🚚 Ya mandaste, falta que lo reciban</div>${van.map(v=>`<div class="hint" style="margin:4px 0 0">• ${viajeLineasTxt(v)} a <strong>${v.a}</strong>. No lo vuelvas a mandar.</div>`).join('')}`:''}</div>` : '');
 }
+// --- Mandar: primero se paga lo que se debe; lo demás queda prestado ---
+function prestPlanMandar(origen, destino, elegidos){
+  const usado = {};
+  return elegidos.map(e=>{ const g = grupoDeuda(e.itemId); let resta = Number(e.cantidad); const pagos = [];
+    (prestamos||[]).filter(p=>['pendiente','parcial'].includes(p.estado) && p.destino===origen && p.origen===destino && grupoDeuda(p.itemId)===g)
+      .sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).forEach(p=>{ if(resta<=1e-9) return;
+        const libre = fmtNum(Number(p.pendiente) - prestEnCam(p) - (usado[p.id]||0)); if(!(libre>0)) return;
+        const q = fmtNum(Math.min(resta, libre)); pagos.push({p, q}); usado[p.id] = fmtNum((usado[p.id]||0) + q); resta = fmtNum(resta - q); });
+    return {e, pagos, paga:fmtNum(Number(e.cantidad) - resta), presta:fmtNum(resta)}; });
+}
+function prestAvisoOtroArticulo(origen, destino, elegidos){
+  // Herrajes: solo paga el mismo artículo (melamina: cualquier color).
+  const c = prestCuentas(origen).find(x=>x.otro===destino), debe = c ? c.leDebo.filter(x=>x.g!=='Melamina') : [];
+  if(!debe.length) return '';
+  const raros = elegidos.filter(e=>!esMelaminaId(e.itemId) && !debe.some(x=>x.g===grupoDeuda(e.itemId)));
+  return raros.length ? `⚠️ Le debes a ${destino}: ${debe.map(x=>fmtNum(x.neto)+' '+x.etiqueta).join(', ')}.\nLo que mandas (${raros.map(e=>e.itemNombre).join(', ')}) NO paga esa deuda: queda como préstamo nuevo.` : '';
+}
+
 function prestModoConfirmar(p, e, deMod, aMod){
   deMod = deMod || p.destino; aMod = aMod || p.origen;
   return new Promise(res=>{
@@ -11878,6 +12061,11 @@ function pendDirHtml(){
   if(!rows.length) return `<div class="card" style="padding:14px;border:2px solid var(--ok);background:linear-gradient(0deg,rgba(22,163,74,.12),rgba(22,163,74,.12)),var(--card)"><div style="font-weight:900;font-size:16px">${cargando?'🔔 Revisando pendientes…':'✅ Todo al día'}</div><p class="hint" style="margin:2px 0 0">${cargando?'Un momento.':'No hay nada por aprobar ni alertas.'}</p></div>`;
   return `<div class="card" style="padding:12px"><div class="row" style="justify-content:space-between"><strong style="font-size:16px">🔔 Pendientes y alertas</strong><span style="background:var(--bad);color:#fff;border-radius:10px;padding:1px 9px;font-size:13px;font-weight:800">${rows.length}</span></div>${rows.join('')}</div>`;
 }
+let _prestDirT = 0;
+function prestFaltDirHtml(){
+  if(Date.now()-_prestDirT > 60000){ _prestDirT = Date.now(); const n0 = prestFaltantes().length; cargarPrestamos().then(()=>{ if(current==='home' && prestFaltantes().length!==n0) renderHomeDir(); }).catch(()=>{}); }
+  return prestFaltHtml('');
+}
 function renderHomeDir(){
   current = 'home';
   cargarPendDir();
@@ -11903,6 +12091,7 @@ function renderHomeDir(){
   $('#main').innerHTML = `
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">Esto es lo que necesita tu atención hoy</div></div>
     ${pendDirHtml()}
+    ${prestFaltDirHtml()}
     ${avisosCardHtml()}
     ${avisoInstalarHtml()}
     ${audHomeCardHtml()}
@@ -12491,11 +12680,11 @@ function movsDiaClasif(mod, dia){
   return R;
 }
 function deudasDeModulo(mod){
-  const g = {}; (prestamos||[]).filter(p=>p.pendiente>0 && (p.origen===mod || p.destino===mod)).forEach(p=>{
-    const nos = p.origen===mod, otro = nos ? p.destino : p.origen, k = (nos?'N':'D')+'|'+otro+'|'+grupoDeuda(p.itemId);
-    const x = g[k] || (g[k] = {nos, otro, art: p.esMelamina ? 'Melamina (cualquier color)' : p.itemNombre, unidad:p.unidad, pend:0, camino:0}); x.pend += Number(p.pendiente)||0;
-    x.camino += (p.envios||[]).filter(e=>e.estado==='encamino').reduce((a,e)=>a+Number(e.cantidad),0); });
-  const xs = Object.values(g).sort((a,b)=>a.otro.localeCompare(b.otro) || a.art.localeCompare(b.art)); return {nosDeben: xs.filter(x=>x.nos), debemos: xs.filter(x=>!x.nos)};
+  // v279: una sola cuenta por módulo, ya restada si se deben los dos (misma forma que antes para el PDF).
+  const xs = []; prestCuentas(mod).forEach(c=>{
+    c.meDeben.forEach(x=>xs.push({nos:true, otro:c.otro, art:x.g==='Melamina'?'Melamina (cualquier color)':x.etiqueta, unidad:x.unidad, pend:x.neto, camino:Math.max(0,x.enCam)}));
+    c.leDebo.forEach(x=>xs.push({nos:false, otro:c.otro, art:x.g==='Melamina'?'Melamina (cualquier color)':x.etiqueta, unidad:x.unidad, pend:x.neto, camino:Math.max(0,x.enCam)})); });
+  xs.sort((a,b)=>a.otro.localeCompare(b.otro) || a.art.localeCompare(b.art)); return {nosDeben: xs.filter(x=>x.nos), debemos: xs.filter(x=>!x.nos)};
 }
 let cierrePrestOk = false;
 // ===== Avisos para que los errores no lleguen al inventario (confirmado por el usuario) =====
@@ -12634,12 +12823,23 @@ function dibujarMovsDiaPDF(doc, R, D, o){
     yA = blk(D.nosDeben, 'Nos deben', VER, L); yB = blk(D.debemos, 'Debemos', ROJ, L+mitad+6); y = Math.max(yA, yB); }
   return y;
 }
+// v279 (pedido por el usuario): antes de contar, se recibe lo que viene en camino. Así lo que llegó nunca se cuenta
+// dos veces. Si todavía no está en el taller, "Todavía no llega" y se recibe cuando llegue.
+let cierreViajeNo = {}, _cierreViajesT = 0;
+function cierreViajesPend(){ const hoy = fechaHoyLocal(); return viajesHacia(modulo()).filter(v=>cierreViajeNo[v.key]!==hoy); }
+function cierreViajesHtml(){
+  const vs = cierreViajesPend(); if(!vs.length) return '';
+  return `<div class="card" style="background:rgba(245,158,11,.14);border:2px solid #f59e0b;padding:12px"><b style="font-size:15px">✋ Antes de contar tus hojas, recibe lo que te mandaron.</b><div class="hint" style="margin:2px 0 0">Así no se cuenta dos veces.</div></div>`
+    + vs.map(v=>viajeCardHtml(v, true, `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="cierreViajeNo['${v.key}']=fechaHoyLocal();cierreViajesPintar()">Todavía no llega (no está en mi taller)</button>`)).join('');
+}
+function cierreViajesPintar(){ const el = document.getElementById('cierre-viajes'); if(el && current==='cierre') el.innerHTML = cierreViajesHtml(); }
 function renderCierre(){
   { const fs = hcBloqueaCierre(); if(fs.length){ current = 'cierre'; $('#main').innerHTML = hcBloqueoHtml(fs); return; } }
   if(!esSoloLectura() && cierreBorradorCargar()) setTimeout(()=>toast('📝 Recuperé lo que llevabas capturado hoy.'), 60);
   corrAutoJuntar();
   if(!cierrePrestOk){ cierrePrestOk = true; cargarPrestamos().then(()=>{ const el = document.getElementById('cierre-movs'); if(el && current==='cierre'){ const t = document.createElement('div'); t.innerHTML = cierreMovsHoyHtml(); el.replaceWith(t.firstElementChild); } }); }
   if(esSoloLectura()){ $('#main').innerHTML='<div class="card">Tu cuenta es de solo lectura.</div>'; return; }
+  if(Date.now()-_cierreViajesT > 20000){ _cierreViajesT = Date.now(); cargarPrestamos().then(cierreViajesPintar).catch(()=>{}); }
   const hojas = CATALOGO.filter(i=>esHoja(i));
   const cp = cortesPendientes();
   const conMaterial = hojas.filter(it=>{ const f=calcFormulaConPendientes(it.id); return f.completas>0.0005 || (f.autoCortes||0)>0 || !vacioCierre(cierreVals[it.id]); });
@@ -12652,6 +12852,7 @@ function renderCierre(){
       ${(()=>{ const ds = cierreHechoHoy() ? [] : diasSinCierre(); return ds.length ? `<p style="margin:10px 0 0;padding:9px 11px;border-radius:10px;background:rgba(37,99,235,.12);border:1px solid rgba(37,99,235,.5);font-size:14px">📆 Este cierre incluye <strong>${ds.length+1} días</strong> (${diasCortosTxt(ds.slice(-4))}${ds.length>4?'…':''} y hoy): no se hizo cierre antes. Cuenta lo que te queda como siempre.</p>` : ''; })()}
     </div>
     <div id="cierre-avisos"></div>
+    <div id="cierre-viajes">${cierreViajesHtml()}</div>
     ${cierreRepetidasHtml()}
     ${cierreMovsHoyHtml()}
     <div class="card">
@@ -12704,6 +12905,9 @@ function cierrePasosHtml(){
 async function guardarCierre(){
   { const fs = hcBloqueaCierre(); if(fs.length) return alert('Falta la hoja de corte del '+fs.map(pzpFmtDia).join(', ')+'. Captúrala primero.'); }
   if(!confirmarModuloDir()) return; // Dirección: ¿es el módulo correcto? (v178)
+  { try{ await cargarPrestamos(); }catch(e){} const vs = cierreViajesPend();
+    if(vs.length){ cierreViajesPintar(); const el = document.getElementById('cierre-viajes'); if(el) el.scrollIntoView({behavior:'smooth'});
+      return alert('🚚 Primero recibe lo que te mandaron:\n\n'+vs.map(v=>'• '+v.de+': '+viajeLineasTxt(v)).join('\n')+'\n\nSi todavía no está en tu taller, toca "Todavía no llega".'); } }
   const herrIts = herrConfItems(), herrSin = herrIts.filter(it=>!herrConf[it.id] || herrConf[it.id].ok===undefined);
   if(herrSin.length){ const el=document.getElementById('herrconf-card'); if(el) el.scrollIntoView({behavior:'smooth'}); return alert('🔩 Falta contestar si tienes estos herrajes:\n\n'+herrSin.map(it=>'• '+it.nombre+(CORR_CALC[it.nombre]?' (llena todas las casillas de la calculadora; pon 0 si no tienes)':'')).join('\n')); }
   { const cz = ['n','e'].map(k=>corrResultado(k)); if(cz.every(r=>r.completo && r.juegos===0 && r.sobH===0 && r.sobM===0) && !confirm('🔩 En las dos calculadoras de correderas pusiste todo en 0.\n\n¿Seguro que no tienes ninguna corredera?')) return; }
