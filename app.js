@@ -3204,7 +3204,9 @@ async function renderAlmacen(){
       <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrGuardarEntrega()">Entregar</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrEnt=null;${R}">Cancelar</button></div></div>`;
   }
   const tab = (k, t) => `<button class="${herrAlmTab===k?'active':''}" onclick="herrAlmTab='${k}';herrAbierta='';${R}">${t}</button>`;
-  const lista = (xs, vacio) => xs.length ? xs.map(t=>herrToolHtml(t,{render:R})).join('') : `<p class="hint">${vacio}</p>`;
+  // v285 (pedido por el usuario): Quitar / Agregar también en "Una por una" y dentro de cada grupo abierto.
+  const mm1 = t => esSoloLectura() || !['buenas','danadas'].includes(herrAlmTab) ? '' : `<div style="display:flex;gap:6px;margin:2px 0 8px"><button class="btn small" style="flex:1;min-height:36px;background:transparent;color:#dc2626;border:1.5px solid #dc2626;box-shadow:none" onclick="event.stopPropagation();herrAlmQuitar('${t.id}')">➖ Quitar 1</button><button class="btn small" style="flex:1;min-height:36px;background:transparent;color:#16a34a;border:1.5px solid #16a34a;box-shadow:none" onclick="event.stopPropagation();herrAlmAgregar('${t.id}')">➕ Agregar 1 igual</button></div>`;
+  const lista = (xs, vacio) => xs.length ? xs.map(t=>herrToolHtml(t,{render:R})+mm1(t)).join('') : `<p class="hint">${vacio}</p>`;
   const listaJ = (xs, vacio, colQ) => {
     if(!xs.length) return `<p class="hint">${vacio}</p>`;
     const sw = `<div style="display:flex;border:1.5px solid #0e7490;border-radius:10px;overflow:hidden;margin:10px 0 4px">${[[true,'Juntas'],[false,'Una por una']].map(([v,tx])=>`<button style="flex:1;padding:8px;border:0;font-weight:800;font-size:13.5px;${herrAlmJuntas===v?'background:#0e7490;color:#fff':'background:transparent;color:#0e7490'}" onclick="herrAlmJuntas=${v};herrGrupoAb='';herrAbierta='';${R}">${tx}</button>`).join('')}</div>`;
@@ -3223,7 +3225,7 @@ async function renderAlmacen(){
             <div class="hint" style="margin:3px 0 0">${ab?'▾ Ocultar':'▸ Ver una por una'}</div></span>
           <span style="background:${colQ};color:#fff;border-radius:999px;padding:4px 12px;font-weight:900;font-size:15px;white-space:nowrap">× ${herrCuenta(ts)}</span></div>
         ${masMenos(ts)}
-        ${ab?`<div style="margin-top:6px">${ts.map(t=>herrToolHtml(t,{render:R})).join('')}</div>`:''}</div>`; }).join('');
+        ${ab?`<div style="margin-top:6px">${ts.map(t=>herrToolHtml(t,{render:R})+mm1(t)).join('')}</div>`:''}</div>`; }).join('');
   };
   const regRow = (x, entra) => `<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(x.nombre)}</strong>${x.q>1?' × '+x.q:''} ${herrChipMarca(x.marca)}<span class="hint" style="margin:0">${herrEsc(x.color||'')}</span></div><div class="hint" style="margin:0">${herrFecha(x.f)} · ${entra?'de '+herrEsc(x.de):'➜ '+herrEsc(x.a)} · ${herrEsc(x.mot)}</div></div>`;
   let cuerpo = '';
