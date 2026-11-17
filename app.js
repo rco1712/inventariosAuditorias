@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v283';
+const APP_VERSION = 'v284';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -2131,8 +2131,8 @@ async function generarConsumoPDF(){
 //   reciben. Solo después de eso el coordinador puede confirmar "ya se entregó".
 // · En el almacén la dañada se repara o se manda a merma; las mermas van a su propia lista (fuera de
 //   los PDF) y de ahí se pueden eliminar para siempre.
-const HERR_LISTA_INST = ['Escalera','Atornillador','Taladro','Martillo','Segueta','Caladora','Extensión','Cinta métrica','Bandas sujetadoras','Pila','Cargador'];
-const HERR_LISTA_TALLER = ['Taladro','Atornillador','Martillo','Pinzas','Sargentos','Prensas','Compresor','Router','Escalera','Clavadora','Extensión','Manguera de compresor','Cinta métrica','Pila','Cargador'];
+const HERR_LISTA_INST = ['Escalera','Atornillador','Taladro atornillador','Taladro','Martillo','Segueta','Caladora','Extensión','Cinta métrica','Bandas sujetadoras','Pila','Cargador'];
+const HERR_LISTA_TALLER = ['Taladro','Atornillador','Taladro atornillador','Martillo','Pinzas','Sargentos','Prensas','Compresor','Router','Escalera','Clavadora','Extensión','Manguera de compresor','Cinta métrica','Pila','Cargador'];
 const HERR_MARCAS = [
   {n:'Bosch',bg:'#1e6fb8',fg:'#fff',rgb:[30,111,184]},
   {n:'Bostitch',bg:'#4b5563',fg:'#facc15',rgb:[75,85,99],fgRgb:[250,204,21],alias:['bostich','stanley bostitch','bostitch stanley']},
@@ -2156,7 +2156,7 @@ const herrAreaTxt = a => !a ? 'Sin área' : a==='General' ? 'Área general (la u
 const HERR_TIPOS = {alambrica:{ic:'🔌',t:'Alámbrica'}, inalambrica:{ic:'🔋',t:'Inalámbrica'}, manual:{ic:'✋',t:'Manual'}, accesorio:{ic:'🔋',t:'Pila / cargador'}};
 const HERR_TIPOS_SEL = ['alambrica','inalambrica','manual'];
 // Pilas y cargadores sueltos (sin su herramienta). En vez del tipo se pide de qué herramienta son.
-const HERR_ACCES = ['Pila','Cargador'], HERR_PARA = ['Atornillador','Taladro','Atornillador y taladro'];
+const HERR_ACCES = ['Pila','Cargador'], HERR_PARA = ['Atornillador','Taladro atornillador','Taladro','Atornillador y taladro']; // v284: taladro atornillador aparte (pedido por el usuario)
 const herrEsAcces = n => HERR_ACCES.includes(n);
 const herrAccesTxt = t => 'para '+(t.para||'¿?')+(t.voltaje?' · '+t.voltaje:'');
 const HERR_LUGAR = {instalador:'👷 Instalador', taller:'🛠️ Taller', stock:'📦 Stock', almacen:'🏢 Almacén general', prestamo:'🤝 Préstamo'};
@@ -2277,6 +2277,7 @@ function herrMovResumen(m){
   if(m.tipo==='renombrar') return `👷 Cambio de nombre de instalador: ${d.anterior} → ${d.nuevo}`;
   if(m.tipo==='garantiaHerr' || m.tipo==='garantiaHerrRegreso') return m.resumen||m.tipo;
   if(m.tipo==='sacarMerma') return `♻️ Salió de mermas: ${d.desc||''} · al almacén ${d.estado==='descompuesta'?'(dañada)':'(buena)'}`;
+  if(m.tipo==='quitarAlm') return `➖ Se quitó del almacén: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} · ${d.motivo||''}`;
   if(m.tipo==='borradoError') return `🗑️ Se borró por captura de más: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} (${d.donde||''}) · ${d.motivo||''}`;
   if(m.tipo==='merma') return `Merma: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} · ${herrMotTxt(HERR_MERMA_MOT,d.motivo,d.nota)}`;
   return m.tipo;
@@ -2581,7 +2582,7 @@ const herrOrdenar = xs => xs.slice().sort(herrOrden);
 // Instaladores parejos (confirmado por el usuario): todos con los mismos renglones y en el mismo orden.
 // Los nombres salen de toda la herramienta de los instaladores del módulo (A-Z); si a uno le falta, va "No tiene".
 // v220 (pedido por el usuario): este orden primero; lo demás, en orden alfabético.
-const HERR_ORDEN_INST = ['Atornillador','Taladro','Caladora','Escalera','Segueta','Martillo','Cinta métrica','Extensión'];
+const HERR_ORDEN_INST = ['Atornillador','Taladro atornillador','Taladro','Caladora','Escalera','Segueta','Martillo','Cinta métrica','Extensión'];
 const herrPosInst = n => { const i = HERR_ORDEN_INST.findIndex(x=>x.toLowerCase()===String(n).toLowerCase()); return i<0 ? 99 : i; };
 const herrNombresInst = ts => [...new Set(ts.filter(t=>t.tipo!=='accesorio').map(t=>t.nombre))].sort((a,b)=>herrPosInst(a)-herrPosInst(b) || a.localeCompare(b,'es',{sensitivity:'base'}));
 const herrFilasInst = (ts, nombres) => nombres.flatMap(n=>{ const xs = ts.filter(t=>t.nombre===n && t.tipo!=='accesorio').sort(herrOrden); return xs.length ? xs.map(t=>({t})) : [{falta:n}]; }).concat(ts.filter(t=>t.tipo==='accesorio').sort(herrOrden).map(t=>({t})));
@@ -2919,6 +2920,27 @@ async function herrBorrarError(toolId){
   { const mid = cryptoId(); await db.collection('herrMovs').doc(mid).set({id:mid, tipo:'borradoError', modulo:t.modulo, fecha:now, estado:'aprobado', creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{toolId, desc:herrDesc(t), cantidad:q, motivo, donde:herrDondeTxt(t)}, resumen:`🗑️ Se borró por captura de más: ${q>1?q+' ':''}${herrDesc(t)} (${herrDondeTxt(t)}) · ${motivo}`}); }
   herrCache = null; herrAbierta = ''; toast('🗑️ Borrada'); renderHerr();
 }
+// v284 (pedido por el usuario): en el almacén general, quitar una herramienta (reacomodo, se le puso a otra,
+// ya no existe) o agregar otra igual, sin que cuente como merma. Todo queda en el historial.
+const HERR_QUITAR_MOT = ['Se le puso a otra herramienta (completar)', 'Reacomodo del almacén', 'Ya no existe', 'Se capturó de más'];
+async function herrAlmQuitar(toolId){
+  if(!puedeAprobarHerr() || esSoloLectura()) return;
+  const D = await herrCargar(true); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
+  const r = prompt(`➖ Quitar 1 ${herrDesc(t)} del almacén.\n\n¿Por qué? Escribe el número o tu motivo:\n${HERR_QUITAR_MOT.map((m,i)=>(i+1)+'. '+m).join('\n')}\n\nNo cuenta como merma.`, '1');
+  if(r===null) return; const motivo = (HERR_QUITAR_MOT[Number(r)-1] || String(r).trim()); if(!motivo) return alert('Escribe el motivo.');
+  const now = new Date().toISOString(), hay = t.cantidad||1;
+  if(hay>1){ t.cantidad = hay-1; t.hist = (t.hist||[]).concat([{f:now, t:`➖ Se quitó 1 · ${motivo} · ${herrQuien()}`}]); await herrPut(t); }
+  else await db.collection('herramientas').doc(t.id).delete();
+  { const mid = cryptoId(); await db.collection('herrMovs').doc(mid).set({id:mid, tipo:'quitarAlm', modulo:ALM, fecha:now, estado:'aprobado', creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', datos:{toolId, desc:herrDesc(t), cantidad:1, motivo}, resumen:`➖ Se quitó del almacén: ${herrDesc(t)} · ${motivo}`}); }
+  herrCache = null; toast('➖ Se quitó 1'); renderAlmacen();
+}
+async function herrAlmAgregar(toolId){
+  if(!puedeAprobarHerr() || esSoloLectura()) return;
+  const D = await herrCargar(true); const t = D.tools.find(x=>x.id===toolId); if(!t) return;
+  if(!confirm(`➕ Agregar 1 ${herrDesc(t)} igual al almacén${t.tipo==='inalambrica'?` (con ${Number(t.pilas)||0} pila(s) y ${Number(t.cargadores)||0} cargador(es))`:''}${t.estado==='descompuesta'?' · dañada':''}.\n\nSi trae otras pilas o cargadores, después la corriges con ✏️ Corregir datos.\n\n¿Agregar?`)) return;
+  const ok = await herrGuardarMov({tipo:'alta', modulo:ALM, siempre:true, datos:{nombre:t.nombre, marca:t.marca||'Genérico', color:t.color||'', tipo:t.tipo||'manual', estado:t.estado||'funcionando', cantidad:1, pilas:Number(t.pilas)||0, cargadores:Number(t.cargadores)||0, para:t.para||'', voltaje:t.voltaje||''}});
+  if(ok){ toast('➕ Se agregó 1'); renderAlmacen(); }
+}
 // v220 (pedido por el usuario): nota libre en cualquier herramienta; la tarjeta se resalta en amarillo.
 async function herrNota(toolId){
   if(!puedeCapturarHerr()) return;
@@ -3190,14 +3212,17 @@ async function renderAlmacen(){
     const g = new Map();
     xs.forEach(t=>{ const k = [t.nombre||'', t.marca||'Genérico', String(t.color||'').toLowerCase(), t.tipo||''].join('|'); if(!g.has(k)) g.set(k, []); g.get(k).push(t); });
     const grupos = [...g.entries()].sort((a,b)=>herrCuenta(b[1])-herrCuenta(a[1]) || a[0].localeCompare(b[0]));
+    // v284 (pedido por el usuario): quitar o agregar una igual desde el grupo, con historial (no es merma).
+    const masMenos = ts => esSoloLectura() ? '' : `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn small" style="flex:1;background:transparent;color:#dc2626;border:1.5px solid #dc2626;box-shadow:none" onclick="event.stopPropagation();herrAlmQuitar('${ts[ts.length-1].id}')">➖ Quitar 1</button><button class="btn small" style="flex:1;background:transparent;color:#16a34a;border:1.5px solid #16a34a;box-shadow:none" onclick="event.stopPropagation();herrAlmAgregar('${ts[0].id}')">➕ Agregar 1 igual</button></div>`;
     return sw + grupos.map(([k, ts])=>{
-      if(ts.length===1) return herrToolHtml(ts[0], {render:R});
+      if(ts.length===1) return `<div>${herrToolHtml(ts[0], {render:R})}${masMenos(ts)}</div>`;
       const ab = herrGrupoAb===k, t0 = ts[0], kk = encodeURIComponent(k).replace(/'/g,'%27');
       return `<div style="border:1.5px solid ${ab?'#0e7490':'var(--line)'};border-radius:12px;padding:10px 12px;margin-top:8px">
         <div role="button" onclick="herrGrupoAb=${ab?"''":`decodeURIComponent('${kk}')`};herrAbierta='';${R}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer">
           <span><strong style="font-size:15px">${herrEsc(t0.nombre)}</strong> ${herrChipMarca(t0.marca)}<span class="hint" style="margin:0">${herrEsc(t0.color||'')}</span>
             <div class="hint" style="margin:3px 0 0">${ab?'▾ Ocultar':'▸ Ver una por una'}</div></span>
           <span style="background:${colQ};color:#fff;border-radius:999px;padding:4px 12px;font-weight:900;font-size:15px;white-space:nowrap">× ${herrCuenta(ts)}</span></div>
+        ${masMenos(ts)}
         ${ab?`<div style="margin-top:6px">${ts.map(t=>herrToolHtml(t,{render:R})).join('')}</div>`:''}</div>`; }).join('');
   };
   const regRow = (x, entra) => `<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(x.nombre)}</strong>${x.q>1?' × '+x.q:''} ${herrChipMarca(x.marca)}<span class="hint" style="margin:0">${herrEsc(x.color||'')}</span></div><div class="hint" style="margin:0">${herrFecha(x.f)} · ${entra?'de '+herrEsc(x.de):'➜ '+herrEsc(x.a)} · ${herrEsc(x.mot)}</div></div>`;
