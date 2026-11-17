@@ -165,6 +165,8 @@ const CATALOGO = [];
   // v251 (confirmado por el usuario): los taquetes se cuentan por CAJA y cada caja trae 100. Los
   // coordinadores ya los venían contando en cajas; solo se corrige la unidad para que no se confunda.
   const tq = CATALOGO.find(x=>x.nombre==='Taquetes'); if(tq) tq.unidad = 'cajas de 100';
+  // v282 (confirmado por el usuario): los clavos se cuentan por cajitas, no por pieza.
+  ['Clavo 25','Clavo 30'].forEach(n=>{ const c = CATALOGO.find(x=>x.nombre===n); if(c) c.unidad = 'cajitas'; });
   CATALOGO.forEach(it=>it.id = slug(it.nombre));
 })();
 function slug(s){return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_');}
@@ -252,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v281';
+const APP_VERSION = 'v282';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3367,8 +3369,9 @@ async function ferGuardarNuevo(){
   try{ await db.collection('herrMovs').doc('ferConfig').set(doc); }catch(e){ return alert('Error: '+e.message); }
   ferForm.cat = n.cat; ferForm.nuevo = null; herrCache = null; toast(n.editId?'✅ Nombre cambiado':`✅ "${nombre}" agregado a ${n.cat}`); await herrCargar(true); renderAlmacen();
 }
-const ferEsTipo = t => t==='ferEntrada' || t==='ferEnvio' || t==='ferConfig';
-function ferStock(D){ const s = {}; (D.fer||[]).forEach(m=>{ if(m.estado==='cancelado' || m.tipo==='ferConfig') return; const sg = m.tipo==='ferEntrada' ? 1 : -1; ((m.datos||{}).items||[]).forEach(x=>{ s[x.itemId] = (s[x.itemId]||0) + sg*(Number(x.q)||0); }); }); return s; }
+const ferEsTipo = t => t==='ferEntrada' || t==='ferEnvio' || t==='ferConfig' || t==='ferAjuste';
+// v282: ferAjuste = corrección de Dirección (q con signo: + si había más, − si había menos).
+function ferStock(D){ const s = {}; (D.fer||[]).forEach(m=>{ if(m.estado==='cancelado' || m.tipo==='ferConfig') return; const sg = (m.tipo==='ferEntrada' || m.tipo==='ferAjuste') ? 1 : -1; ((m.datos||{}).items||[]).forEach(x=>{ s[x.itemId] = (s[x.itemId]||0) + sg*(Number(x.q)||0); }); }); return s; }
 const ferEnCaminoMod = mod => herrCache ? ferEnvios(herrCache, mod).length : 0;
 const ferEnvios = (D, mod) => (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado==='encamino' && (!mod || m.modulo===mod));
 const ferRecibidosSinVer = D => (D.fer||[]).filter(m=>m.tipo==='ferEnvio' && m.estado==='recibido' && !m.dirAck);
@@ -3492,7 +3495,7 @@ function ferEnvioCard(m, dir){
 }
 function ferHistHtml(D, id){
   const it = ferItem(id); if(!it) return ''; const N = ferCaja(D, id), P = FER_COL[it.cat]||'#db2777', st = ferStock(D)[id]||0, f = q => ferFmt(q, N, it.unidad);
-  const evs = (D.fer||[]).filter(m=>(m.tipo==='ferEntrada'||m.tipo==='ferEnvio')).map(m=>({m, x:((m.datos||{}).items||[]).find(y=>y.itemId===id)})).filter(e=>e.x);
+  const evs = (D.fer||[]).filter(m=>(m.tipo==='ferEntrada'||m.tipo==='ferEnvio'||m.tipo==='ferAjuste')).map(m=>({m, x:((m.datos||{}).items||[]).find(y=>y.itemId===id)})).filter(e=>e.x);
   const ents = evs.filter(e=>e.m.tipo==='ferEntrada'), envs = evs.filter(e=>e.m.tipo==='ferEnvio' && e.m.estado!=='cancelado');
   const entro = ents.reduce((s,e)=>s+(Number(e.x.q)||0),0), salio = envs.reduce((s,e)=>s+(Number(e.x.q)||0),0);
   const porMod = {}; envs.forEach(e=>{ porMod[e.m.modulo] = (porMod[e.m.modulo]||0) + (Number(e.x.q)||0); });
@@ -3504,10 +3507,30 @@ function ferHistHtml(D, id){
     <div style="display:flex;gap:6px;margin-top:10px;text-align:center"><div style="flex:1;background:rgba(22,163,74,.18);border-radius:10px;padding:6px"><div class="hint" style="margin:0">Entró</div><strong style="color:#4ade80">${f(entro)}</strong></div><div style="flex:1;background:rgba(8,145,178,.2);border-radius:10px;padding:6px"><div class="hint" style="margin:0">Se entregó</div><strong style="color:#38bdf8">${f(salio)}</strong></div></div>
     ${Object.keys(porMod).length?`<div class="hint" style="margin:10px 0 0;font-weight:800">Por módulo (ya no regresa, no es prestada)</div><div class="chips" style="margin-top:4px">${Object.keys(porMod).map(md=>`<span class="chip">📍 ${herrEsc(md)} · ${f(porMod[md])}</span>`).join('')}</div>`:''}
     <div style="margin-top:6px">${evs.length?evs.map(e=>{ const m = e.m, q = f(e.x.q);
+      if(m.tipo==='ferAjuste'){ const qq = Number(e.x.q)||0; return ev('✏️', '#d97706', 'Corrección de Dirección', herrFecha(m.fecha)+' · '+quien(m.creadoPor)+(m.datos.nota?' · '+herrEsc(m.datos.nota):''), (qq>0?'+ ':'− ')+f(Math.abs(qq))+` <span class="hint" style="margin:0">(había ${f(m.datos.antes)} · quedó ${f(m.datos.despues)})</span>`); }
       if(m.tipo==='ferEntrada') return ev(m.id===primera?'🆕':'📥', m.id===primera?'#ca8a04':'#16a34a', (m.id===primera?'Alta en ferretería':'Entrada')+' · '+herrEsc(m.datos.proveedor||''), herrFecha(m.fecha)+' · '+quien(m.creadoPor)+(m.datos.nota?' · '+herrEsc(m.datos.nota):''), '+ '+q);
       if(m.estado==='cancelado') return ev('✖️', '#6b7280', 'Envío cancelado a '+herrEsc(m.modulo), herrFecha(m.fecha)+' · regresó a la ferretería', q);
       return ev('📤', '#0891b2', 'Se entregó a '+herrEsc(m.modulo), herrFecha(m.fecha)+' · '+(m.estado==='recibido'?`✅ recibió ${quien(m.recibidoPor)} el ${herrFecha(m.fechaRecibido)}`:'🚚 en camino'), '− '+q); }).join(''):'<p class="hint">Sin movimientos.</p>'}</div>
+    ${esAdmin() && !esSoloLectura() ? `<div style="margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid #d97706"><div style="font-weight:900">✏️ Corregir cantidad</div><p class="hint" style="margin:2px 0 6px">Si la cantidad está mal (mala captura). Escribe lo que hay realmente.</p>
+      <div class="row" style="gap:8px"><input id="fercorr-q" type="number" min="0" inputmode="decimal" placeholder="Hay realmente" style="flex:1;margin:0;text-align:center;font-weight:800;font-size:16px"><span class="hint" style="margin:0">${herrEsc(it.unidad||'pza')}</span></div>
+      <input id="fercorr-n" placeholder="Motivo (ej. se capturó mal la entrada)" style="margin-top:8px">
+      <button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#d97706,#b45309)" onclick="ferCorregir('${id}')">✏️ Guardar corrección</button></div>` : ''}
     <button class="btn small" style="width:100%;margin-top:10px;background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="ferHist='';renderAlmacen()">← Regresar</button></div>`;
+}
+async function ferCorregir(id){
+  if(!esAdmin() || esSoloLectura()) return;
+  const it = ferItem(id); if(!it) return; const el = document.getElementById('fercorr-q'), v = el && el.value!=='' ? Number(el.value) : NaN;
+  const nota = ((document.getElementById('fercorr-n')||{}).value||'').trim();
+  if(!(v>=0)) return alert('Escribe cuántas hay realmente (0 o más).');
+  if(!nota) return alert('Escribe el motivo de la corrección.');
+  const D = await herrCargar(true), antes = fmtNum(ferStock(D)[id]||0), dif = fmtNum(v - antes), u = it.unidad||'pza';
+  if(Math.abs(dif) < 1e-9) return alert(`Ya dice ${fmtNum(antes)} ${u}. No hay nada que corregir.`);
+  if(!confirm(`✏️ Corregir ${it.nombre}\n\nAhora dice: ${fmtNum(antes)} ${u}\nHay realmente: ${fmtNum(v)} ${u}\n(${dif>0?'+':''}${fmtNum(dif)} ${u})\n\nMotivo: ${nota}\n\n¿Guardar?`)) return;
+  const mid = 'fa'+cryptoId();
+  try{ await db.collection('herrMovs').doc(mid).set({id:mid, tipo:'ferAjuste', modulo:ALM, fecha:new Date().toISOString(), estado:'aprobado', siempre:true, creadoPor:herrQuien(),
+    datos:{items:[{itemId:id, nombre:it.nombre, unidad:u, cat:it.cat, q:dif}], antes, despues:fmtNum(v), nota}}); }
+  catch(e){ return alert('Error: '+e.message); }
+  herrCache = null; toast(`✅ ${it.nombre}: ahora hay ${fmtNum(v)} ${u}`); await herrCargar(true); renderAlmacen();
 }
 function renderFer(D){
   const R = 'renderAlmacen()', st = ferStock(D), camino = ferEnvios(D), rec = ferRecibidosSinVer(D);
