@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v284';
+const APP_VERSION = 'v285';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -3204,7 +3204,9 @@ async function renderAlmacen(){
       <div class="row" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:linear-gradient(135deg,#0891b2,#0e7490)" onclick="herrGuardarEntrega()">Entregar</button><button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="herrEnt=null;${R}">Cancelar</button></div></div>`;
   }
   const tab = (k, t) => `<button class="${herrAlmTab===k?'active':''}" onclick="herrAlmTab='${k}';herrAbierta='';${R}">${t}</button>`;
-  const lista = (xs, vacio) => xs.length ? xs.map(t=>herrToolHtml(t,{render:R})).join('') : `<p class="hint">${vacio}</p>`;
+  // v285 (pedido por el usuario): Quitar / Agregar también en "Una por una" y dentro de cada grupo abierto.
+  const mm1 = t => esSoloLectura() || !['buenas','danadas'].includes(herrAlmTab) ? '' : `<div style="display:flex;gap:6px;margin:2px 0 8px"><button class="btn small" style="flex:1;min-height:36px;background:transparent;color:#dc2626;border:1.5px solid #dc2626;box-shadow:none" onclick="event.stopPropagation();herrAlmQuitar('${t.id}')">➖ Quitar 1</button><button class="btn small" style="flex:1;min-height:36px;background:transparent;color:#16a34a;border:1.5px solid #16a34a;box-shadow:none" onclick="event.stopPropagation();herrAlmAgregar('${t.id}')">➕ Agregar 1 igual</button></div>`;
+  const lista = (xs, vacio) => xs.length ? xs.map(t=>herrToolHtml(t,{render:R})+mm1(t)).join('') : `<p class="hint">${vacio}</p>`;
   const listaJ = (xs, vacio, colQ) => {
     if(!xs.length) return `<p class="hint">${vacio}</p>`;
     const sw = `<div style="display:flex;border:1.5px solid #0e7490;border-radius:10px;overflow:hidden;margin:10px 0 4px">${[[true,'Juntas'],[false,'Una por una']].map(([v,tx])=>`<button style="flex:1;padding:8px;border:0;font-weight:800;font-size:13.5px;${herrAlmJuntas===v?'background:#0e7490;color:#fff':'background:transparent;color:#0e7490'}" onclick="herrAlmJuntas=${v};herrGrupoAb='';herrAbierta='';${R}">${tx}</button>`).join('')}</div>`;
@@ -3223,7 +3225,7 @@ async function renderAlmacen(){
             <div class="hint" style="margin:3px 0 0">${ab?'▾ Ocultar':'▸ Ver una por una'}</div></span>
           <span style="background:${colQ};color:#fff;border-radius:999px;padding:4px 12px;font-weight:900;font-size:15px;white-space:nowrap">× ${herrCuenta(ts)}</span></div>
         ${masMenos(ts)}
-        ${ab?`<div style="margin-top:6px">${ts.map(t=>herrToolHtml(t,{render:R})).join('')}</div>`:''}</div>`; }).join('');
+        ${ab?`<div style="margin-top:6px">${ts.map(t=>herrToolHtml(t,{render:R})+mm1(t)).join('')}</div>`:''}</div>`; }).join('');
   };
   const regRow = (x, entra) => `<div style="border-bottom:1px solid var(--line);padding:8px 0"><div><strong>${herrEsc(x.nombre)}</strong>${x.q>1?' × '+x.q:''} ${herrChipMarca(x.marca)}<span class="hint" style="margin:0">${herrEsc(x.color||'')}</span></div><div class="hint" style="margin:0">${herrFecha(x.f)} · ${entra?'de '+herrEsc(x.de):'➜ '+herrEsc(x.a)} · ${herrEsc(x.mot)}</div></div>`;
   let cuerpo = '';
@@ -8146,7 +8148,7 @@ let verifQ = '', verifQF = 'todas';
 const verifNorm = t => String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 function verifBuscarHtml(){
   const f = (k, t) => `<button class="chip ${verifQF===k?'on':''}" onclick="verifQF='${k}';verifBuscarPintar()">${t}</button>`;
-  return `<div class="card" style="padding:12px"><div style="font-weight:900">🔎 Buscar una instalación</div>
+  return `<div class="card" style="padding:12px"><div style="font-weight:900">🔎 Buscar una instalación</div><div class="hint" style="margin:2px 0 0">En todos los módulos · últimas 6 semanas, incluidas las de hoy</div>
     <input id="verif-q" placeholder="Calle, modelo, color o coordinador" value="${escCalle(verifQ)}" autocomplete="off" style="margin-top:8px" oninput="verifQ=this.value;verifBuscarPintar()">
     <div class="chips" style="margin-top:8px">${f('todas','Todas')}${f('si','✅ Ya verificadas')}${f('no','⏳ Sin verificar')}</div>
     <div id="verif-res"></div></div>`;
@@ -8156,8 +8158,11 @@ function verifBuscarPintar(){
   const q = verifNorm(verifQ).trim(), palabras = q.split(/\s+/).filter(Boolean);
   const chipsF = box.parentElement.querySelectorAll('.chips')[0]; if(chipsF) chipsF.innerHTML = [['todas','Todas'],['si','✅ Ya verificadas'],['no','⏳ Sin verificar']].map(([k,t])=>`<button class="chip ${verifQF===k?'on':''}" onclick="verifQF='${k}';verifBuscarPintar()">${t}</button>`).join('');
   if(!palabras.length && verifQF==='todas'){ box.innerHTML = ''; return; }
-  const base = verifRevisables(verifLogs||[], verifRegresadas||[]);
-  const xs = base.filter(l=>{ const sinV = verifPorRevisar(l); if(verifQF==='si' && sinV) return false; if(verifQF==='no' && !sinV) return false;
+  // v285 (pedido por el usuario): busca en las últimas 6 semanas, incluidas las de hoy.
+  const d6 = new Date(fechaHoyLocal()+'T12:00:00'); d6.setDate(d6.getDate()-42); const desde6 = d6.toISOString().slice(0,10);
+  const enVentana = new Set(verifRevisables(verifLogs||[], verifRegresadas||[]).map(l=>l.id));
+  const base = (verifLogs||[]).filter(l=>{ const d = diaValorInst(l); return d >= desde6 && !l.cambiadaPor && (l.estado!=='rechazado' || l.verif); });
+  const xs = base.filter(l=>{ const sinV = !l.verif || verifReinstPend(l); if(verifQF==='si' && sinV) return false; if(verifQF==='no' && !sinV) return false;
       if(!palabras.length) return true; const txt = verifNorm([l.calle, l.descripcion, l.modulo, verifQuien(l), l.nota].join(' ')); return palabras.every(w=>txt.includes(w)); })
     .sort((a,b)=>String(diaValorInst(b)).localeCompare(String(diaValorInst(a))) || String(b.fecha||'').localeCompare(String(a.fecha||'')));
   const M = n => (MODULOS.find(m=>m.nombre===n)||{color:'#666'}).color;
@@ -8165,8 +8170,8 @@ function verifBuscarPintar(){
     + xs.slice(0,40).map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start;border-left:5px solid ${M(l.modulo)}"><span style="min-width:0;flex:1">
       <span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span>${calleHtml(l)}
       <span class="hint" style="display:block;margin:2px 0 0">${l.modulo} · instalada el ${fCorta(diaValorInst(l))}${verifQuien(l)?' · '+verifQuien(l):''}</span>
-      <span style="display:block;margin-top:4px">${verifPorRevisar(l)?'<span class="tag" style="color:#d97706;border-color:#d97706">⏳ Sin verificar</span>':verifEstadoTxt(l)}${(l.verif||{}).fecha?` <span class="hint" style="margin:0">· verificada el ${fCorta(diaLocal(l.verif.fecha))}</span>`:''}</span></span>
-      <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="verifIrA('${l.id}')">Ver</button></div>`).join('');
+      <span style="display:block;margin-top:4px">${(!l.verif || verifReinstPend(l)) ? (diaValorInst(l)>=fechaHoyLocal() ? '<span class="tag" style="color:#0891b2;border-color:#0891b2">🕒 De hoy · se verifica mañana</span>' : enVentana.has(l.id) ? '<span class="tag" style="color:#d97706;border-color:#d97706">⏳ Sin verificar</span>' : `<span class="tag" style="color:#64748b;border-color:#64748b">Sin verificar · ${l.estado==='aprobado'?'aprobada':l.estado}</span>`) : verifEstadoTxt(l)}${(l.verif||{}).fecha?` <span class="hint" style="margin:0">· verificada el ${fCorta(diaLocal(l.verif.fecha))}</span>`:''}</span></span>
+      ${enVentana.has(l.id)?`<button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="verifIrA('${l.id}')">Ver</button>`:''}</div>`).join('');
 }
 function verifIrA(id){ const l = (verifLogs||[]).find(x=>x.id===id); if(!l) return; verifMod = l.modulo; verifDia = diaValorInst(l); verifPanel = null; verifPintar();
   setTimeout(()=>{ const el = [...document.querySelectorAll('#main .card, #main .movitem')].find(e=>e.innerText.includes(l.descripcion) && (!l.calle || e.innerText.includes(l.calle)) && !e.closest('#verif-res')); if(el){ el.scrollIntoView({behavior:'smooth', block:'center'}); el.style.outline='3px solid #f59e0b'; setTimeout(()=>el.style.outline='', 2500); } }, 50); }
