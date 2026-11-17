@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v285';
+const APP_VERSION = 'v286';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -10634,7 +10634,7 @@ const viajeLineasTxt = v => Object.values(v.lineas).map(l=>`${fmtNum(l.cant)} ${
 function viajeCardHtml(v, puedeRecibir, extra){
   return `<div class="card" style="border:2px solid #0891b2;background:rgba(8,145,178,.08)"><div class="row" style="justify-content:space-between;gap:8px"><strong style="font-size:16px">🚚 ${v.de} te mandó</strong><span class="tag">${fCorta(v.dia)}</span></div>
     <div style="margin:6px 0 0;font-size:15px;font-weight:700">${viajeLineasTxt(v)}</div>
-    ${puedeRecibir?`<button class="btn" style="width:100%;margin-top:10px;min-height:50px;font-size:16px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="viajeAbrir('${v.key}')">📥 Recibir</button>`:''}${extra||''}</div>`;
+    ${puedeRecibir?`<button class="btn" style="width:100%;margin-top:10px;min-height:50px;font-size:16px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="viajeAbrir('${v.key}')">📥 Recibir</button>`:''}${esAdmin() && !esSoloLectura() ? `<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:#b45309;border:1px solid #b45309;box-shadow:none" onclick="viajeRedirigir('${v.key}')">🔁 Se mandó a otro módulo por error</button>` : ''}${extra||''}</div>`;
 }
 // --- Recibir: se cuenta lo que llegó (ya viene escrito lo que mandaron) ---
 let viajeRec = null;
@@ -10762,9 +10762,39 @@ function prestHistPar(mod, otro){
   return ev.sort((a,b)=>(b.f||'').localeCompare(a.f||'')).slice(0,40);
 }
 
+// v286 (pedido por el usuario): si un envío se mandó al módulo equivocado, Dirección (o el que lo mandó) lo
+// cancela antes de que lo reciban: el material regresa al que lo mandó y se abre "Mandar" ya lleno hacia el
+// módulo correcto (ahí se ve si paga la deuda).
+async function viajeRedirigir(key){
+  await cargarPrestamos(); const v = prestViajes(()=>true).find(x=>x.key===key);
+  if(!v) return alert('Ese envío ya se recibió; ya no se puede cancelar.');
+  if(!esAdmin() && modulo()!==v.de) return alert('Solo '+v.de+' o Dirección pueden cancelarlo.');
+  const otros = MODULOS.map(m=>m.nombre).filter(n=>n!==v.de && n!==v.a);
+  const r = prompt(`🔁 Se mandó a ${v.a} por error:\n${viajeLineasTxt(v)}\n\nEl envío se cancela y el material regresa a ${v.de}.\n¿A qué módulo se debía mandar? Escribe el número (o deja vacío para solo cancelar):\n${otros.map((n,i)=>(i+1)+'. '+n).join('\n')}`, '');
+  if(r===null) return; const dest = String(r).trim() ? (otros[Number(r)-1] || otros.find(n=>n.toLowerCase()===String(r).trim().toLowerCase())) : '';
+  if(String(r).trim() && !dest) return alert('No reconocí el módulo. Vuelve a intentarlo.');
+  if(!confirm(`¿Cancelar el envío ${v.de} → ${v.a} del ${fCorta(v.dia)}?\n\n${viajeLineasTxt(v)}\n\nRegresa al inventario de ${v.de}.${dest?`\nDespués se abre "Mandar" de ${v.de} a ${dest} con lo mismo, para que lo confirmes.`:''}`)) return;
+  try{
+    const fecha = new Date().toISOString();
+    for(const x of v.pz){ const p = prestamos.find(y=>y.id===x.p.id); if(!p) continue;
+      const anula = async (id, nota) => { if(!id) return; try{ const r = await db.collection('movimientos').doc(id).get(); const m = r && r.data ? r.data() : null;
+        if(m && m.estado!=='rechazado') await db.collection('movimientos').doc(id).update({estado:'rechazado', anulado:true, nota}); }catch(e){} };
+      if(x.k==='t'){ if(p.estado==='encamino'){ await prestEvento(p, {tipo:'traspConf', llego:false, porError:true, fecha}); await anula(p.salidaMovId, `Traspaso ${p.origen} → ${p.destino} · cancelado: se mandó por error`); } }
+      else { const e = (p.envios||[]).find(y=>y.id===x.e.id); if(e && e.estado==='encamino'){ await prestEvento(p, {tipo:'confEnvio', envId:e.id, llego:false, porError:true, fecha}); await anula(e.salidaMovId, `Devolución de préstamo ${p.destino} → ${p.origen} · cancelada: se mandó por error`); } } }
+    await cargarPrestamos(); toast('🔁 Envío cancelado · regresó a '+v.de);
+  }catch(er){ return alert('Error: '+er.message); }
+  if(!dest) return prestRefrescar();
+  const ls = Object.values(v.lineas), cat = (CATALOGO.find(i=>i.id===ls[0].itemId)||{}).cat, mismos = ls.filter(l=>(CATALOGO.find(i=>i.id===l.itemId)||{}).cat===cat);
+  traspOrigen = v.de; traspDestino = dest; traspCat = cat; traspSub = 'nuevo'; irA('trasp');
+  setTimeout(async()=>{ mismos.forEach(l=>{ const el = document.getElementById('t-cant-'+l.itemId); if(el) el.value = l.cant; });
+    const n = document.getElementById('t-nota'); if(n) n.value = `Corrige envío a ${v.a} por error (${fCorta(v.dia)})`;
+    if(mismos.length < ls.length) alert('Ojo: también iban artículos de otra categoría. Captúralos aparte en "Mandar".');
+    try{ await previewTraspaso(); }catch(e){} const t = document.getElementById('t-result'); if(t) t.scrollIntoView({behavior:'smooth'}); }, 400);
+}
 function viajeVanHtml(v){
   return `<div class="card" style="border-left:6px solid #0891b2"><div class="row" style="justify-content:space-between;gap:8px"><strong>🚚 Mandaste a ${v.a}</strong><span class="tag">${fCorta(v.dia)}</span></div>
-    <div style="margin:4px 0 0;font-weight:700">${viajeLineasTxt(v)}</div><p class="hint" style="margin:4px 0 0">Cuando ${v.a} lo reciba se ajusta la cuenta. No lo vuelvas a mandar.</p></div>`;
+    <div style="margin:4px 0 0;font-weight:700">${viajeLineasTxt(v)}</div><p class="hint" style="margin:4px 0 0">Cuando ${v.a} lo reciba se ajusta la cuenta. No lo vuelvas a mandar.</p>
+    ${esSoloLectura()?'':`<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:#b45309;border:1px solid #b45309;box-shadow:none" onclick="viajeRedirigir('${v.key}')">🔁 Se mandó a otro módulo por error</button>`}</div>`;
 }
 async function renderTraspHistorial(){
   if(!document.getElementById('trasp-body')) return;
