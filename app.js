@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v282';
+const APP_VERSION = 'v283';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8115,6 +8115,36 @@ function verifEstadoTxt(l){
   if(v.estado==='modelo') extra = v.resuelto ? ' · el coordinador corrigió el modelo' : ' · esperando al coordinador';
   return `<span class="tag" style="color:${t[1]};border-color:${t[1]}">${t[0]}${extra}</span>`;
 }
+// v283 (pedido por el usuario): buscar una instalación (ya verificada o no) por calle, modelo, color o coordinador,
+// en todos los módulos y días, y filtrar si ya se verificó.
+let verifQ = '', verifQF = 'todas';
+const verifNorm = t => String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+function verifBuscarHtml(){
+  const f = (k, t) => `<button class="chip ${verifQF===k?'on':''}" onclick="verifQF='${k}';verifBuscarPintar()">${t}</button>`;
+  return `<div class="card" style="padding:12px"><div style="font-weight:900">🔎 Buscar una instalación</div>
+    <input id="verif-q" placeholder="Calle, modelo, color o coordinador" value="${escCalle(verifQ)}" autocomplete="off" style="margin-top:8px" oninput="verifQ=this.value;verifBuscarPintar()">
+    <div class="chips" style="margin-top:8px">${f('todas','Todas')}${f('si','✅ Ya verificadas')}${f('no','⏳ Sin verificar')}</div>
+    <div id="verif-res"></div></div>`;
+}
+function verifBuscarPintar(){
+  const box = document.getElementById('verif-res'); if(!box) return;
+  const q = verifNorm(verifQ).trim(), palabras = q.split(/\s+/).filter(Boolean);
+  const chipsF = box.parentElement.querySelectorAll('.chips')[0]; if(chipsF) chipsF.innerHTML = [['todas','Todas'],['si','✅ Ya verificadas'],['no','⏳ Sin verificar']].map(([k,t])=>`<button class="chip ${verifQF===k?'on':''}" onclick="verifQF='${k}';verifBuscarPintar()">${t}</button>`).join('');
+  if(!palabras.length && verifQF==='todas'){ box.innerHTML = ''; return; }
+  const base = verifRevisables(verifLogs||[], verifRegresadas||[]);
+  const xs = base.filter(l=>{ const sinV = verifPorRevisar(l); if(verifQF==='si' && sinV) return false; if(verifQF==='no' && !sinV) return false;
+      if(!palabras.length) return true; const txt = verifNorm([l.calle, l.descripcion, l.modulo, verifQuien(l), l.nota].join(' ')); return palabras.every(w=>txt.includes(w)); })
+    .sort((a,b)=>String(diaValorInst(b)).localeCompare(String(diaValorInst(a))) || String(b.fecha||'').localeCompare(String(a.fecha||'')));
+  const M = n => (MODULOS.find(m=>m.nombre===n)||{color:'#666'}).color;
+  box.innerHTML = `<p class="hint" style="margin:8px 0 0">${xs.length} encontrada${xs.length===1?'':'s'}${xs.length>40?' · se muestran las 40 más recientes':''}</p>`
+    + xs.slice(0,40).map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start;border-left:5px solid ${M(l.modulo)}"><span style="min-width:0;flex:1">
+      <span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span>${calleHtml(l)}
+      <span class="hint" style="display:block;margin:2px 0 0">${l.modulo} · instalada el ${fCorta(diaValorInst(l))}${verifQuien(l)?' · '+verifQuien(l):''}</span>
+      <span style="display:block;margin-top:4px">${verifPorRevisar(l)?'<span class="tag" style="color:#d97706;border-color:#d97706">⏳ Sin verificar</span>':verifEstadoTxt(l)}${(l.verif||{}).fecha?` <span class="hint" style="margin:0">· verificada el ${fCorta(diaLocal(l.verif.fecha))}</span>`:''}</span></span>
+      <button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="verifIrA('${l.id}')">Ver</button></div>`).join('');
+}
+function verifIrA(id){ const l = (verifLogs||[]).find(x=>x.id===id); if(!l) return; verifMod = l.modulo; verifDia = diaValorInst(l); verifPanel = null; verifPintar();
+  setTimeout(()=>{ const el = [...document.querySelectorAll('#main .card, #main .movitem')].find(e=>e.innerText.includes(l.descripcion) && (!l.calle || e.innerText.includes(l.calle)) && !e.closest('#verif-res')); if(el){ el.scrollIntoView({behavior:'smooth', block:'center'}); el.style.outline='3px solid #f59e0b'; setTimeout(()=>el.style.outline='', 2500); } }, 50); }
 async function renderVerif(){
   current = 'verif';
   $('#main').innerHTML = `<div class="card hint">Cargando instalaciones…</div>`;
@@ -8122,7 +8152,7 @@ async function renderVerif(){
   verifPintar();
 }
 function verifPintar(){
-  if(current!=='verif') return;
+  if(current!=='verif') return; setTimeout(verifBuscarPintar, 0);
   // Un módulo a la vez (confirmado por el usuario, v182): cada módulo se compara con su reporte del grupo.
   const todasAll = verifRevisables(verifLogs, verifRegresadas), sinRevAll = todasAll.filter(verifPorRevisar);
   const otrosMod = n => verifEsperando(verifLogs).some(e=>e.l.modulo===n);
@@ -8178,6 +8208,7 @@ function verifPintar(){
       ${rojo?`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:700">⚠️ Estas tienen ${verifDiasAtras(verifDia)} días sin revisar.</div>`:''}
       ${chips?`<div class="chips" style="margin-top:8px;flex-wrap:wrap">${chips}</div>`:''}
     </div>
+    ${verifBuscarHtml()}
     ${verifReverifHtml(todasAll.filter(l=>l.modulo===verifMod && verifEsReverif(l)))}
     ${verifReinstHtml(verifMod)}
     ${verifEsperandoHtml(verifMod)}
