@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v286';
+const APP_VERSION = 'v287';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5914,7 +5914,7 @@ function renderHist(){
         ${esAdmin() ? `<button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="borrarAuditoria('${a.id}')">🗑️ Borrar</button>` : ''}
       </div>
       ${(a.melaminasFuera||[]).length ? `<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(100,116,139,.15);border:1px solid rgba(100,116,139,.5)"><strong>🗃️ Melaminas que ya no se usan</strong> <span class="hint" style="margin:0">(solo registro, no entran al inventario)</span><div class="hint" style="margin:2px 0 0">${a.melaminasFuera.map(x=>`${x.nombre}: <strong>${fmtNum(x.hojas)}</strong> ${Number(x.hojas)===1?'hoja':'hojas'}`).join(' · ')}</div></div>` : ''}
-      ${(a.correcciones||[]).length ? `<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.4)"><strong style="color:#f59e0b">✏️ Correcciones de Dirección</strong>${a.correcciones.map(c=>`<div class="hint" style="margin:2px 0 0">• <strong>${c.nombre}</strong>: capturó ${fmtNum(c.antes)} → corregido a <strong>${fmtNum(c.despues)}</strong> ${c.unidad||''} · ${String(c.por||'').split('@')[0]} · ${new Date(c.fecha).toLocaleString('es-MX')}${c.nota?' · '+c.nota:''}</div>`).join('')}</div>` : ''}
+      ${''/* v287 (pedido por el usuario): las correcciones por mala captura ya no se muestran; quedan guardadas */}
       ${(a.reconteos||[]).length ? `<div style="margin-top:8px">${a.reconteos.map(rc=>`<p class="hint" style="margin:2px 0">🔍 Reconteo de ${rc.cat} (${new Date(rc.fecha).toLocaleString()}): ${rc.ok?'<span class="pos">✅ coincidió con la auditoría</span>':`<span class="neg">⚠️ no coincidió</span>${rc.corrigio?' · <strong>auditoría corregida</strong>':''}`}</p>`).join('')}</div>` : ''}
       ${a.conteoInicial||a.complemento ? resumenHojasConteoHtml(a) : ''}
       ${a.aplicada ? `<p class="hint" style="margin:6px 0 0">Aplicada el ${new Date(a.fechaAplicada).toLocaleString()}${a.aplicadaPor?' por '+a.aplicadaPor:''}${a.deudasCreadas?` · ${a.deudasCreadas} faltante(s) pasaron a deuda`:''}.</p>` : ''}
@@ -6113,7 +6113,7 @@ async function generarReporteAuditoriaPDF(a){
     y += 4;
   }
   // Correcciones de Dirección (un artículo a la vez)
-  if((a.correcciones||[]).length){
+  if(false && (a.correcciones||[]).length){ // v287 (pedido por el usuario): ya no salen en el PDF
     if(y > pageH-40){ doc.addPage(); y=15; }
     doc.setFontSize(11); doc.setFont(undefined,'bold'); doc.text('Correcciones de Dirección', marginL, y+4); doc.setFont(undefined,'normal'); y+=8; doc.setFontSize(9);
     a.correcciones.forEach(c=>{ if(y > pageH-12){ doc.addPage(); y=15; } doc.text(`• ${c.nombre}: capturó ${fmtNum(c.antes)} → corregido a ${fmtNum(c.despues)} ${c.unidad||''} · ${String(c.por||'').split('@')[0]} · ${new Date(c.fecha).toLocaleString('es-MX')}${c.nota?' · '+c.nota:''}`, marginL+2, y); y+=4.5; });
