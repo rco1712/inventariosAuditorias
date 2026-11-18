@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v288';
+const APP_VERSION = 'v289';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -7659,7 +7659,8 @@ function renderInst(){
         ${op('puertas','🚪','Puertas','Puertas corredizas')}
       </div>
       <button class="btn small" style="margin-top:10px;width:100%;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=false;instRegresoLibre=false;renderInst()">📅 Ver instalaciones anteriores</button>
-      ${esSoloLectura()?'':`${esAdmin()?`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=true;instRegresoLibre=false;renderInst()">↩️ Regresó un modelo completo → vuelve al inventario</button>`:`<p class="hint" style="margin:8px 0 0">↩️ ¿No se instaló? Lo marca Dirección al verificar con el reporte del grupo, y entonces tú decides a dónde va el material.</p>`}
+      ${esSoloLectura()?'':`<button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=true;instRegresoLibre=false;renderInst()">↩️ Regresó una instalación completa que no está en la app</button>
+      ${esAdmin()?'':`<p class="hint" style="margin:8px 0 0">Si la instalación sí está en la app, no uses este botón: Dirección la marca como "no se instaló" al verificar y entonces decides a dónde va el material.</p>`}
       <button class="btn small" style="margin-top:8px;width:100%;background:transparent;color:#0e8a8a;border:1px solid var(--line);box-shadow:none" onclick="irA('sob')">🧩 Regresaron piezas sueltas sin instalar → Sobrantes</button>`}
     </div>
     <div id="inst-body"></div>`;
@@ -7680,8 +7681,8 @@ async function cargarInstLog(){
 async function renderInstHistorial(){
   $('#inst-body').innerHTML = `<div class="card hint">Cargando historial de ${modulo()}…</div>`;
   await cargarInstLog();
-  const avisoReg = instRegreso ? `<div class="card" style="border:2px solid #1f9d55"><strong>↩️ Regresó un modelo completo</strong>
-    <p class="hint" style="margin-top:4px">Todo su material (melamina, cargadores, herrajes…) vuelve al inventario; la melamina regresa como <strong>material cortado</strong>. No va a merma ni a sobrantes.</p>
+  const avisoReg = instRegreso ? `<div class="card" style="border:2px solid #1f9d55"><strong>↩️ Regresó una instalación completa que no está en la app</strong>
+    <p class="hint" style="margin-top:4px">Eliges el modelo o las puertas que regresaron y decides a dónde va cada material: al inventario (la melamina como <strong>cortado</strong>), a sobrantes o a merma.</p>
     <button class="btn" style="width:100%;min-height:50px;margin-top:6px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="instSub='mueble';instRegresoLibre=true;instRegreso=false;instPreview=null;renderInst();window.scrollTo(0,0)">🗄️ Elegir el clóset que regresó</button>
     <button class="btn" style="width:100%;min-height:50px;margin-top:8px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="instSub='puertas';instRegresoLibre=true;instRegreso=false;puertaPreview=null;renderInst();window.scrollTo(0,0)">🚪 Elegir las puertas que regresaron</button>
     <p class="hint" style="margin:8px 0 0">Úsalo aunque no haya una instalación registrada: eliges el modelo, su color y sus extras, y todo se suma al inventario.${instLog.length?' Si el modelo sí se registró como instalación, también puedes buscarla abajo y tocar "↩️ Regresó completo".':''}</p>
@@ -8866,6 +8867,40 @@ async function verifAvisoRecaptura(categoria, modeloKey){
   return confirm(`⚠️ Dirección marcó como NO instalado y su material sigue apartado (YA está descontado):\n\n${lista}\n\nSi es ${categoria==='Puerta'?'una de esas puertas':'uno de esos'}, NO lo captures otra vez: en Inicio elige "🔁 Se vuelve a instalar" y Dirección lo marca como instalado cuando salga en el reporte del grupo.\n\n¿Es una instalación nueva y distinta?`);
 }
 
+// v289 (pedido por el usuario): al regresar un modelo o puertas que no están en la app, el coordinador decide
+// a dónde va cada material: 📦 al inventario (melamina como cortado), 🧩 a sobrantes (melamina/MDF, para
+// transformarla después) o 🗑️ merma (ya no sirve). Todo pasa por Aprobaciones.
+let regLibDest = {};
+function regLibDestHtml(consumo){
+  const cs = consumo.filter(c=>Number(c.cantidad)>0); if(!cs.length) return '';
+  const chip = (id, k, t, c) => `<button class="chip ${(regLibDest[id]||'inv')===k?'on':''}" style="${(regLibDest[id]||'inv')===k?`background:${c};border-color:${c};color:#fff`:''}" onclick="regLibDest['${id}']='${k}';regLibDestPintar()">${t}</button>`;
+  return `<div class="card" id="reglib-dest"><div style="font-size:16px;font-weight:800">¿A dónde va cada cosa?</div>
+    <p class="hint" style="margin:4px 0 8px">Revisa el material que regresó. Lo que no cambies se suma al inventario.</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="btn small" style="background:transparent;color:#0e8a8a;border:1px solid #0e8a8a;box-shadow:none" onclick="cs_regLibTodo('sob')">🧩 Toda la melamina/MDF a sobrantes</button><button class="btn small" style="background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="cs_regLibTodo('inv')">📦 Todo al inventario</button></div>
+    ${cs.map(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); const h = esHoja(it); return `<div style="padding:8px 0;border-top:1px solid var(--line)"><div class="row" style="justify-content:space-between;gap:8px"><span class="invname">${it.nombre}</span><strong style="white-space:nowrap">${fmtNum(c.cantidad)} ${item2unidad(c.itemId)}</strong></div>
+      <div class="chips" style="margin-top:6px">${chip(c.itemId,'inv',h?'📦 Inventario (cortado)':'📦 Inventario','#1f9d55')}${h?chip(c.itemId,'sob','🧩 Sobrantes','#0e8a8a'):''}${chip(c.itemId,'merma','🗑️ Merma','#dc2626')}</div></div>`; }).join('')}</div>`;
+}
+let _regLibCons = [];
+function regLibDestPintar(){ const el = document.getElementById('reglib-dest'); if(el) el.outerHTML = regLibDestHtml(_regLibCons); }
+function cs_regLibTodo(k){ _regLibCons.forEach(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); if(k==='sob'){ if(esHoja(it)) regLibDest[c.itemId] = 'sob'; } else regLibDest[c.itemId] = k; }); regLibDestPintar(); }
+async function regLibGuardar(cons, desc, nota, prefijo){
+  const D = c => regLibDest[c.itemId] || 'inv', txt = {inv:'al inventario', sob:'a sobrantes', merma:'a merma'};
+  const g = k => cons.filter(c=>D(c)===k);
+  if(!confirm(`↩️ Regresó: ${desc}\n\n${['inv','sob','merma'].filter(k=>g(k).length).map(k=>`${k==='inv'?'📦 Al inventario':k==='sob'?'🧩 A sobrantes':'🗑️ A merma'}:\n`+g(k).map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `  ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}`; }).join('\n')).join('\n\n')}\n\n¿Continuar?`)) return false;
+  const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), fechaReg = new Date(Date.parse(fecha)-1).toISOString(), loteId = cryptoId(), mod = modulo();
+  for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId), q = fmtNum(Number(c.cantidad)), d = D(c);
+    // Siempre entra primero (regresó); si va a sobrantes o merma, en el mismo lote vuelve a salir.
+    await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', modeloRegreso:desc, regresoDestino:d, cantidad:q, nota:prefijo+' · '+desc+(d!=='inv'?' · va '+txt[d]:'')+(nota?' · '+nota:''), fecha:d==='inv'?fecha:fechaReg, estado, loteId, ...(d==='sob'?{sobranteId:loteId}:{}), creadoPor});
+    if(d==='sob') await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', cantidad:q, nota:'A sobrantes · '+desc+(nota?' · '+nota:''), fecha, estado, loteId, sobranteId:loteId, creadoPor});
+    if(d==='merma') await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'merma', ...(esHoja(it)?{lado:'cortado'}:{}), motivo:'regresoMerma', cantidad:q, nota:'Regresó y ya no sirve · '+desc+(nota?' · '+nota:''), fecha, estado, loteId, creadoPor});
+  }
+  const sob = g('sob').map(c=>({itemId:c.itemId, cantidad:fmtNum(Number(c.cantidad))}));
+  if(sob.length){ const restante = {}; sob.forEach(c=>{ restante[c.itemId] = c.cantidad; });
+    await db.collection('sobrantes').doc(loteId).set({modulo:mod, fecha, nota:(nota?nota+' · ':'')+'Regresó: '+desc, lineas:[desc], material:sob, restante, estado:'abierto', transformaciones:[], yaDescontado:true, creadoPor}); }
+  regLibDest = {};
+  toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba.</small>' : '✅ Regreso guardado.');
+  return true;
+}
 // Regreso de un modelo completo elegido a mano (sin instalación registrada): mismo cálculo que una
 // instalación, pero todo se SUMA al inventario (confirmado por el usuario).
 async function confirmarRegresoLibre(){
@@ -8876,13 +8911,8 @@ async function confirmarRegresoLibre(){
   // v186: si Dirección marcó ese modelo como NO instalado, el regreso se hace desde el aviso del Inicio.
   try{ await cargarInstLog(); const pend = (instLog||[]).filter(l=>l.verif && l.verif.estado==='no' && l.verif.puertas==='pendiente' && l.descripcion.split(' · ')[0]===instPreview.modeloNombre);
     if(pend.length && !confirm(`⚠️ Dirección marcó como NO instalado ${pend.length===1?'un':pend.length} ${instPreview.modeloNombre}:\n\n${pend.slice(0,4).map(l=>'• '+l.descripcion+(l.calle?' · '+l.calle:'')+' ('+fCorta(l.fechaDia)+')').join('\n')}\n\nSi es ${pend.length===1?'ese':'uno de esos'}, NO lo regreses aquí: en Inicio, en el aviso, toca "↩️ Regresa". Si lo regresas aquí también, se suma dos veces.\n\n¿Es otro modelo distinto y quieres regresarlo aquí?`)) return; }catch(e){}
-  if(!confirm(`↩️ Regresar al inventario:\n${desc}\n\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n')}\n\n¿Continuar?`)) return;
   try{
-    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
-    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', modeloRegreso:desc, cantidad:fmtNum(Number(c.cantidad)), nota:'Regresó modelo completo · '+desc+(nota?' · '+nota:''), fecha, estado, loteId, creadoPor});
-    }
-    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Modelo regresado al inventario.');
+    if(!(await regLibGuardar(cons, desc, nota, 'Regresó modelo completo'))) return;
     instPreview=null; iAdicionales=[]; renderInstMueble(); window.scrollTo(0,0);
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -9095,7 +9125,8 @@ function previewInst(){
       <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">${faltantes.map(f=>`<li>${f.nombre}: hay <strong>${fmtNum(f.disponible)}</strong> y se necesitan <strong>${fmtNum(f.requerido)}</strong></li>`).join('')}</ul>
       <p class="hint">Revisa que el modelo y el color sean correctos, o que ya se hayan anotado las entradas de material. No se descontó nada.</p></div>`;
   } else if(instRegresoLibre){
-    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoLibre()">↩️ Regresar al inventario</button></div>`;
+    _regLibCons = consumo.filter(c=>Number(c.cantidad)>0); regLibDest = {};
+    html += regLibDestHtml(consumo) + `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoLibre()">↩️ Guardar el regreso</button></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
     html += instCambio ? cambioPreviewHtml(consumo, 'confirmarInst()') : `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarInst()">✅ Confirmar instalación</button></div>`;
@@ -10151,7 +10182,8 @@ function calcPuerta(){
       <ul style="margin:6px 0 0 18px;padding:0;line-height:1.7">${faltantes.map(f=>`<li>${f.nombre}: hay <strong>${fmtNum(f.disponible)}</strong> y se necesitan <strong>${fmtNum(f.requerido)}</strong></li>`).join('')}</ul>
       <p class="hint">Revisa las medidas y el color, o que ya se hayan anotado las entradas de material. No se descontó nada.</p></div>`;
   } else if(instRegresoLibre){
-    html += `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoPuerta()">↩️ Regresar puertas al inventario</button></div>`;
+    _regLibCons = consumo.filter(c=>Number(c.cantidad)>0); regLibDest = {};
+    html += regLibDestHtml(consumo) + `<div class="card"><button class="btn" style="width:100%;min-height:56px;font-size:16px;background:linear-gradient(135deg,#1f9d55,#178045)" onclick="confirmarRegresoPuerta()">↩️ Guardar el regreso</button></div>`;
   } else {
     html += avisoAutoCorteHtml(consumo);
     if(sobOferta) html += `<div class="card" id="p-sob-card"></div>`;
@@ -10187,13 +10219,8 @@ async function confirmarRegresoPuerta(){
   const nota = ($('#p-nota').value||'').trim();
   const desc = `Puerta ${pp.tipo} · ${pp.color} · ${pp.medidasTxt||(pp.ancho+'×'+pp.alto+' cm (ancho×alto)')}${pp.conHerrajes?'':' · sin herrajes'}`;
   const cons = pp.consumo.filter(c=>Number(c.cantidad)>0);
-  if(!confirm(`↩️ Regresar al inventario:\n${desc}\n\n${cons.map(c=>{ const it=CATALOGO.find(i=>i.id===c.itemId); return `+ ${fmtNum(c.cantidad)} ${it.unidad} ${it.nombre}${esHoja(it)?' (como cortado)':''}`; }).join('\n')}\n\n¿Continuar?`)) return;
   try{
-    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
-    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', modeloRegreso:desc, cantidad:fmtNum(Number(c.cantidad)), nota:'Regresaron puertas completas · '+desc+(nota?' · '+nota:''), fecha, estado, loteId, creadoPor});
-    }
-    toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Puertas regresadas al inventario.');
+    if(!(await regLibGuardar(cons, desc, nota, 'Regresaron puertas completas'))) return;
     puertaPreview=null; renderInstPuertas(); window.scrollTo(0,0);
   }catch(e){ alert('Error: '+e.message); }
 }
