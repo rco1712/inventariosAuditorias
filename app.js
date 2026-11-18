@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v289';
+const APP_VERSION = 'v290';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -16188,7 +16188,9 @@ function pzpCalcular(D, hasta, borrador){
   const base = D.cfg && D.auds.find(a=>a.id===D.cfg.auditoriaId); if(!base) return null;
   // v231: `hasta` puede ser una hora exacta (conteo final entre semana): solo cuenta lo capturado ANTES de esa hora.
   const hastaT = (hasta && hasta.length>10) ? hasta : null; if(hastaT) hasta = diaLocal(hastaT);
-  const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, vie = {}, avisos = [], mermaPz = {};
+  const T = {}, N = {}, ret = {}, des = {}, pend = {}, sinCap = {}, vie = {}, avisos = [], mermaPz = {}, pendInfo = {};
+  // v290: de dónde salió lo apartado para puertas y en qué calles se usó, hasta que se cierre (sobró → retazo o merma).
+  const pInfo = id => (pendInfo[id] = pendInfo[id] || {ap:[], us:[]});
   const addA = (o, id, v) => { o[id] = (o[id]||0) + v; };
   // v258 (pedido por el usuario): F lleva de dónde vino cada movimiento de piezas, para el reporte
   // "iniciaste con tantas, cortaste tantas, se fueron tantas en instalaciones, debe haber tantas".
@@ -16241,11 +16243,15 @@ function pzpCalcular(D, hasta, borrador){
       const cc = (c.corte||{})[id] || {}; let usado = 0;
       (cc.piezas||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre, 'corte'); usado += r.q*pzpArea(P.dim); });
       (cc.otras||[]).forEach(r=>{ const w = Number(r.w)||0, hh = Number(r.h)||0, q = Number(r.q)||0; if(!(w>0 && hh>0 && q>0)) return; add(id, fmtNum(w)+'×'+fmtNum(hh), q, r.n||'Otra pieza', 'corte'); usado += q*w*hh; }); // v273
-      const ph = Number(cc.puertasOtroDia)||0; if(ph>0){ addA(pend, id, ph*PZP_A); pendHoy[id] = ph*PZP_A; usado += ph*PZP_A; }
+      const ph = Number(cc.puertasOtroDia)||0; if(ph>0){ addA(pend, id, ph*PZP_A); pendHoy[id] = ph*PZP_A; usado += ph*PZP_A; pInfo(id).ap.push({dia, h:ph, dir:cc.puertasDir||''}); }
       libre[id] = H - usado;
     });
     info.insts.forEach(l=>{
       const pz = pzpInstPiezas(l);
+      // v290: lo que el inventario OFICIAL descontó por cada cm² de pieza de esta instalación (receta vs. medida),
+      // para que la merma de lo que sobró de las puertas nunca sea mayor a lo que de verdad quedó en el cortado.
+      const ofR = {}; if(pz){ const tA = {}; pz.forEach(p=>{ if(p.itemId && Number(p.q)>0) tA[p.itemId] = (tA[p.itemId]||0) + Number(p.q)*pzpArea(p.dim); });
+        Object.keys(tA).forEach(id=>{ const cn = (l.consumo||[]).filter(x=>x.itemId===id).reduce((t,x)=>t+(Number(x.cantidad)||0),0); ofR[id] = cn>0 && tA[id]>0 ? cn*PZP_A/tA[id] : 1; }); }
       if(!pz){
         (l.consumo||[]).forEach(cn=>{ if(esHojaId(cn.itemId)) addA(ret, cn.itemId, -(Number(cn.cantidad)||0)*PZP_A); });
         avisos.push({dia, t:'Instalación sin detalle de piezas ('+String(l.descripcion||'').split(' · ')[0]+'): se tomó del retazo en hojas.'});
@@ -16258,7 +16264,7 @@ function pzpCalcular(D, hasta, borrador){
         info.puertas[id] = (info.puertas[id]||0) + a;
         // v234: lo apartado HOY es para puertas de otro día; las puertas de hoy solo toman lo apartado antes.
         // v273: en la hoja del coordinador, "Hojas para PUERTAS" cubre las puertas de hoy y las de otro día.
-        const dp = Math.min(a, Math.max(0, (pend[id]||0) - (c && c.puertasTodo ? 0 : (pendHoy[id]||0)))); if(dp>0){ pend[id] -= dp; a -= dp; }
+        const dp = Math.min(a, Math.max(0, (pend[id]||0) - (c && c.puertasTodo ? 0 : (pendHoy[id]||0)))); if(dp>0){ pend[id] -= dp; a -= dp; pInfo(id).us.push({dia, a:dp, of:dp*(ofR[id]||1), calle:l.calle||String(l.descripcion||'').split(' · ')[0]}); if(pend[id] <= 0.005*PZP_A){ pend[id] = 0; delete pendInfo[id]; } }
         if(a>0 && libre[id]!==undefined){ const dl = Math.min(a, Math.max(0, libre[id])); libre[id] -= dl; a -= dl; }
         if(a>0) addA(ret, id, -a);
       });
@@ -16283,7 +16289,15 @@ function pzpCalcular(D, hasta, borrador){
       (c.retTirar||[]).forEach(id=>{ const q = Math.min(Math.max(0, (ret0[id]||0) - (usoRet[id]||0)), Math.max(0, ret[id]||0)); if(q>0){ addA(ret, id, -q); addA(des, id, q); } });
       // v255 (pedido por el usuario): piezas sacadas de retazo que ya había antes de la prueba (no se midió): suben, sin restar de nada.
       Object.keys(c.retViejo||{}).forEach(id=>{ (c.retViejo[id]||[]).forEach(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); if(!P || !(r.q>0)) return; add(id, P.dim, r.q, P.nombre, 'ret'); addA(vie, id, r.q*pzpArea(P.dim)); }); });
-      (c.liberar||[]).forEach(id=>{ if((pend[id]||0)>0){ addA(ret, id, pend[id]); pend[id] = 0; } });
+      (c.liberar||[]).forEach(id=>{ if((pend[id]||0)>0){ addA(ret, id, pend[id]); pend[id] = 0; delete pendInfo[id]; } });
+      // v290 (pedido por el usuario): lo que sobró de las «Hojas para PUERTAS» ya no se queda apartado para siempre.
+      // ♻️ Se guardó: entra al retazo lo MEDIDO; lo demás es merma del corte. 🗑️ Se tiró: todo es merma del corte.
+      Object.keys(c.puertasSobra||{}).forEach(id=>{ const s = c.puertasSobra[id]||{}, p = pend[id]||0; if(!(p>0) || (s.dest!=='retazo' && s.dest!=='tiro')) return;
+        const aR = s.dest==='retazo' ? Math.min(p, (s.retazos||[]).reduce((t,x)=>t+(Number(x.w)||0)*(Number(x.h)||0)*(Number(x.q)||0),0)) : 0;
+        if(aR>0) addA(ret, id, aR); if(p-aR>0) addA(des, id, p-aR);
+        const pi = pendInfo[id]||{ap:[], us:[]}, sOf = Math.min(p, Math.max(0, pi.ap.reduce((t,a)=>t+a.h*PZP_A,0) - pi.us.reduce((t,u)=>t+(u.of||u.a),0)));
+        (info.puertasCierre = info.puertasCierre||{})[id] = {sobra:sOf, ret:aR, des:p-aR, desOf:Math.max(0, sOf-aR), dest:s.dest, ap:pi.ap};
+        pend[id] = 0; delete pendInfo[id]; });
       // v273: piezas sacadas de un retazo, renglón por renglón (hoja del coordinador): el retazo medido baja, las
       // piezas suben y, si lo que quedó fue basura, el resto de ese retazo pasa a desperdicio.
       (c.retFilas||[]).forEach(rf=>{ const id = rf.itemId; if(!id) return; let aS = 0;
@@ -16311,7 +16325,7 @@ function pzpCalcular(D, hasta, borrador){
     info.otros.forEach(m=>{
       const s = pzpEsOtro(m), q = pzpOtroQ(m), o = (c && (c.otros||{})[m.id]) || pzpOtroAuto(D, m);
       if(!o){ addA(sinCap, m.itemId, s*q*PZP_A); return; }
-      if(o.modo==='puertaSob'){ let a = q*PZP_A; const dp = Math.min(a, Math.max(0, pend[m.itemId]||0)); if(dp>0){ pend[m.itemId] -= dp; a -= dp; } if(a>0) addA(ret, m.itemId, -a); return; }
+      if(o.modo==='puertaSob'){ let a = q*PZP_A; const dp = Math.min(a, Math.max(0, pend[m.itemId]||0)); if(dp>0){ pend[m.itemId] -= dp; a -= dp; pInfo(m.itemId).us.push({dia, a:dp, of:dp, calle:'Puerta (salida)'}); } if(a>0) addA(ret, m.itemId, -a); return; }
       if(o.extraRet) addA(ret, m.itemId, s*o.extraRet); // v250: piezas a la medida (puertas) que regresaron o se apartaron
       let aBase = 0;
       if(o.modo==='retazo'){ addA(ret, m.itemId, s*q*PZP_A); aBase = q*PZP_A; }
@@ -16333,7 +16347,7 @@ function pzpCalcular(D, hasta, borrador){
   arm.forEach(a=>pzpContArmado(a).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); AC[k] = (AC[k]||0) + p.q; if(!N[k]) N[k] = {itemId:p.itemId, dim:pzpNorm(p.dim), n:pzpNombre(p.dim, p.n), area:pzpArea(p.dim)}; }));
   Object.keys(N).forEach(k=>{ const su = fmtNum((T[k]||0) - (AC[k]||0)); if(su < 0) avisos.push({id:N[k].itemId, t:pzpColor(N[k].itemId)+': faltan '+fmtNum(-su)+' '+N[k].n+' sueltas (se usó o armó más de lo anotado en el corte).'}); });
   Object.keys(ret).forEach(id=>{ if(ret[id] < -PZP_A*0.02) avisos.push({id, t:pzpColor(id)+': el retazo quedó en negativo ('+pzpH(ret[id])+' hojas). Se usó material que no estaba anotado.'}); });
-  return {base, T, N, F, FD, AC, ret, des, pend, sinCap, vie, arm, avisos, dias:lista, capt, porDia};
+  return {base, T, N, F, FD, AC, ret, des, pend, pendInfo, sinCap, vie, arm, avisos, dias:lista, capt, porDia};
 }
 // Resumen por material (hojas por área).
 function pzpResumen(R){
@@ -16501,8 +16515,8 @@ async function hcAbrir(){
 function hcCargarCap(){
   if(hcCap && hcCap.fecha===hcFecha) return;
   const c = (pzpD.dias||[]).find(x=>x.fecha===hcFecha);
-  let cap = c ? JSON.parse(JSON.stringify({fecha:hcFecha, corte:c.corte||{}, retFilas:c.retFilas||[], recortes:c.recortes||[], mermas:c.mermas||[], hojaCortador:c.hojaCortador||''}))
-    : {fecha:hcFecha, corte:{}, retFilas:[], recortes:[], mermas:[], hojaCortador:''};
+  let cap = c ? JSON.parse(JSON.stringify({fecha:hcFecha, corte:c.corte||{}, retFilas:c.retFilas||[], recortes:c.recortes||[], mermas:c.mermas||[], hojaCortador:c.hojaCortador||'', puertasSobra:c.puertasSobra||{}}))
+    : {fecha:hcFecha, corte:{}, retFilas:[], recortes:[], mermas:[], hojaCortador:'', puertasSobra:{}};
   try{ const b = JSON.parse(localStorage.getItem(hcBorrKey(modulo(), hcFecha))||'null'); if(b && b.cap && (!c || (b.ts||'') > (c.hojaGuardado||c.guardado||''))){ cap = b.cap; setTimeout(()=>toast('↩️ Se recuperó lo que llevabas en esta hoja.'), 300); } }catch(e){}
   hcCap = cap; hcColor = null;
 }
@@ -16594,6 +16608,48 @@ function hcColorHtml(id){
         return `<div style="margin-top:8px;font-size:13px;line-height:1.45">${aR>0?`♻️ Retazo: <b>${pzpH(aR)}</b> hojas`:''}${d/(H*PZP_A)>0.10?`${aR>0?'<br>':''}<span style="color:#b45309;font-weight:800">⚠️ Revisa que no falten piezas o retazo por anotar.</span>`:''}</div>`; })():''}
       ${!cc.sobroRet?'<div style="font-size:12.5px;color:#b45309;font-weight:700;margin-top:4px">Contesta No o Sí, como en el papel.</div>':''}</div>`;
 }
+// v290 (pedido por el usuario): lo apartado en «Hojas para PUERTAS» que no se usó. Al instalar las puertas, la hoja
+// pregunta qué pasó con la tira que sobró: ♻️ se guardó (con su medida) o 🗑️ se tiró (merma del corte).
+function hcPuertasPend(){
+  if(!pzpD || !hcCap) return [];
+  const saved = (pzpD.dias||[]).find(x=>x.fecha===hcFecha) || {};
+  const borr = Object.assign({}, saved, {fecha:hcFecha, corte:hcCap.corte||{}, retFilas:hcCap.retFilas||[], recortes:hcCap.recortes||[], mermas:hcCap.mermas||[], puertasTodo:true, hojaCoord:true, puertasSobra:{}});
+  let R = null; try{ R = pzpCalcular(pzpD, hcFecha, borr); }catch(e){ return []; }
+  if(!R) return [];
+  return Object.keys(R.pend||{}).filter(id=>(R.pend[id]||0) > 0.005*PZP_A).map(id=>{ const pi = (R.pendInfo||{})[id] || {ap:[], us:[]};
+    const sOf = Math.min(R.pend[id], Math.max(0, pi.ap.reduce((t,a)=>t+a.h*PZP_A,0) - pi.us.reduce((t,u)=>t+(u.of||u.a),0)));
+    return {id, p:(pi.ap.length ? sOf : R.pend[id]), ap:pi.ap, us:pi.us, hoy:pi.us.filter(u=>u.dia===hcFecha).reduce((t,u)=>t+u.a,0)}; });
+}
+function hcPS(id){ const o = hcCap.puertasSobra = hcCap.puertasSobra || {}; if(!o[id]) o[id] = {dest:'', retazos:[]}; return o[id]; }
+function hcPSet(id, dest){ const s = hcPS(id); if(dest!=='retazo' && (s.retazos||[]).length && !confirm('¿Quitar las medidas anotadas?')) return; s.dest = dest; if(dest!=='retazo') s.retazos = []; hcBorrGuardar(); hcRender(); }
+function hcPRetAgregar(id){ const w = Number((document.getElementById('hcp-w-'+id)||{}).value), h = Number((document.getElementById('hcp-h-'+id)||{}).value), q = Math.round(Number((document.getElementById('hcp-q-'+id)||{}).value)||1);
+  if(!(w>0 && h>0)) return alert('Escribe ancho y alto del retazo (cm).'); if(Math.min(w,h)>122 || Math.max(w,h)>244) return alert('Una hoja mide 122×244. Revisa la medida.');
+  if(Math.min(w,h)<10 || Math.max(w,h)<27) return alert('Un retazo útil es de 10×27 o más. Si es más chico, es basura: elige «Se tiró».');
+  const s = hcPS(id); s.retazos = s.retazos||[]; s.retazos.push({w, h, q}); hcBorrGuardar(); hcRender(); }
+function hcPRetQuitar(id, i){ const s = hcPS(id); if(!confirm('¿Quitar ese retazo?')) return; (s.retazos||[]).splice(i,1); hcBorrGuardar(); hcRender(); }
+function hcPuertasHtml(L){
+  if(!L.length) return '';
+  const fd = d => pzpFmtDia(d);
+  return `<div class="card" style="border:2px solid #b45309;background:#fffbeb;color:#1f2937"><div style="font-size:16px;font-weight:900">🚪 Lo que sobró de las HOJAS PARA PUERTAS</div>
+    <p style="margin:4px 0 0;font-size:13px;line-height:1.4">Cuando ya se instalaron las puertas, contesta qué pasó con la tira que sobró. Así no se queda «apartada» en tu inventario.</p>
+    ${L.map(x=>{ const s = (hcCap.puertasSobra||{})[x.id] || {}, aR = (s.retazos||[]).reduce((t,r)=>t+r.w*r.h*r.q,0), dR = Math.min(aR, x.p);
+      const btn = (k,t,col) => `<button class="btn small" style="flex:1;margin:0;min-height:44px;${(s.dest||'')===k?`background:${col}`:'background:#fff;color:#1f2937;border:1px solid #d1d5db;box-shadow:none'}" onclick="hcPSet('${x.id}','${k}')">${t}</button>`;
+      return `<div style="border-top:1px solid #f5d77a;margin-top:10px;padding-top:8px">
+        <div style="font-weight:900;font-size:15px">${swatchHtml(CATALOGO.find(i=>i.id===x.id).nombre)} ${pzpColor(x.id)}</div>
+        ${x.ap.map(a=>`<div style="font-size:13px">📌 ${fd(a.dia)}: ${fmtNum(a.h)} hoja(s) apartadas${a.dir?' para <b>'+herrEsc(a.dir)+'</b>':''}</div>`).join('')}
+        ${x.us.length?Object.values(x.us.reduce((g,u)=>{ const k = u.dia+'|'+u.calle; g[k] = g[k] ? Object.assign({}, g[k], {a:g[k].a+u.a, of:(g[k].of||g[k].a)+(u.of||u.a)}) : Object.assign({}, u); return g; }, {})).map(u=>`<div style="font-size:13px">🚪 ${fd(u.dia)}: se usaron <b>${pzpH(u.of||u.a)}</b> en ${herrEsc(u.calle||'')}</div>`).join(''):'<div style="font-size:13px;opacity:.8">Todavía no se registra ninguna puerta con estas hojas.</div>'}
+        <div style="font-size:15px;font-weight:900;margin:4px 0 6px">Sobran: ${pzpH(x.p)} hoja(s)</div>
+        <div style="font-weight:800;font-size:13.5px;margin-bottom:4px">¿Qué pasó con lo que sobró?</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${btn('faltan','⏳ Faltan puertas','#64748b')}${btn('retazo','♻️ Se guardó','#16a34a')}${btn('tiro','🗑️ Se tiró','#dc2626')}</div>
+        ${s.dest==='retazo'?`${(s.retazos||[]).map((r,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:4px 0"><span style="flex:1;font-weight:800">♻️ ${fmtNum(r.w)}×${fmtNum(r.h)} × ${r.q}</span><button onclick="hcPRetQuitar('${x.id}',${i})" style="all:unset;cursor:pointer;color:#b91c1c;font-weight:800">Quitar</button></div>`).join('')}
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px"><input id="hcp-w-${x.id}" type="number" inputmode="decimal" placeholder="ancho" style="flex:1;min-width:0;margin:0"><b>×</b><input id="hcp-h-${x.id}" type="number" inputmode="decimal" placeholder="alto" style="flex:1;min-width:0;margin:0"><input id="hcp-q-${x.id}" type="number" inputmode="numeric" placeholder="cuántos" style="width:70px;margin:0"><button class="btn small" style="margin:0;background:#16a34a" onclick="hcPRetAgregar('${x.id}')">+</button></div>
+          ${aR>x.p+1?`<div style="color:#b91c1c;font-weight:800;font-size:13px;margin-top:4px">⛔ Esos retazos (${pzpH(aR)}) son más de lo que sobró (${pzpH(x.p)}). Revisa la medida.</div>`:''}
+          ${aR>0&&aR<=x.p+1?`<div style="font-size:13px;margin-top:6px;line-height:1.45">♻️ Retazo: <b>${pzpH(dR)}</b> hojas${x.p-dR>0.005*PZP_A?`<br>🗑️ Lo demás (<b>${pzpH(x.p-dR)}</b>) es merma del corte · la aprueba Dirección`:''}</div>`:'<div style="font-size:12.5px;color:#b45309;font-weight:700;margin-top:4px">Anota la medida del retazo (ancho × alto) y +.</div>'}`:''}
+        ${s.dest==='tiro'?`<div style="font-size:13px;margin-top:6px;line-height:1.45">🗑️ <b>${pzpH(x.p)}</b> hojas pasan a <b>merma del corte</b> · la aprueba Dirección.</div>`:''}
+        ${s.dest==='faltan'?`<div style="font-size:13px;margin-top:6px">⏳ Se quedan apartadas. Pregunto otra vez cuando se instalen.</div>`:''}
+        ${!s.dest&&x.hoy>0?'<div style="font-size:12.5px;color:#b91c1c;font-weight:800;margin-top:4px">Hoy se usaron estas hojas: contesta antes de guardar.</div>':''}
+      </div>`; }).join('')}</div>`;
+}
 function hcHoja2Html(){
   const hojas = CATALOGO.filter(i=>esHoja(i) && /^Melamina|^MDF/.test(i.nombre));
   const optsColor = sel => hojas.map(i=>`<option value="${i.id}" ${i.id===sel?'selected':''}>${pzpColor(i.id)}</option>`).join('');
@@ -16674,6 +16730,7 @@ function hcRender(){
       ${cfg.modo!=='real'?'<div style="margin-top:8px;padding:8px 10px;border-radius:10px;border:2px dashed #7c3aed;background:rgba(124,58,237,.08);font-size:13px;font-weight:700;color:#6d28d9">🎓 Práctica: lo que captures aquí no cambia tu inventario.</div>':''}
       ${guardada?`<p class="hint" style="margin:6px 0 0;color:var(--ok)">✔ Hoja de este día guardada ${new Date(guardada.hojaGuardado).toLocaleString('es-MX',{hour:'numeric',minute:'2-digit'})}. Puedes corregirla y volver a guardar.</p>`:'<p class="hint" style="margin:6px 0 0">Copia la hoja del cortador renglón por renglón: mismo orden y mismos colores que el papel.</p>'}
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${tabs}</div></div>
+    ${hcPuertasHtml(hcPuertasPend())}
     ${cuerpo}
     <div class="card"><button class="btn" style="width:100%;min-height:54px;font-size:16px;background:#0e7490" onclick="hcGuardar()">💾 Guardar hoja de corte del ${pzpFmtDia(hcFecha)}</button></div>`;
 }
@@ -16720,13 +16777,17 @@ async function hcDesperdicioSync(mod, f){
     (doc.recortes||[]).forEach(rc=>{ const P = PIEZAS_AUDIT.find(x=>x.key===rc.k); if(!P) return; const q = Number(rc.q)||0;
       const Ep = eqL(rc.itemId, [{k:rc.k, q}]), E = eqL(rc.itemId, rc.salio), queda = rc.resto==='retazo' ? Math.max(0, q*pzpArea(P.dim) - arL(rc.salio)) : 0;
       addD(rc.itemId, E + queda - Ep, `${q} ${hcNom(P)} recortada(s)`); });
+    // v290: lo que sobró de las hojas para puertas y no se guardó como retazo medido ➜ merma del corte (la aprueba Dirección).
+    const pcie = (R && R.porDia[f] && R.porDia[f].puertasCierre) || {}, sinAuto = {};
+    Object.keys(pcie).forEach(id=>{ const x = pcie[id]; if(!(x.desOf > 0.0005)) return; sinAuto[id] = true;
+      addD(id, -x.desOf, `sobrante de hojas para puertas${(x.ap||[]).filter(a=>a.dir).length?' ('+x.ap.filter(a=>a.dir).map(a=>a.dir).join(', ')+')':''}: ${x.dest==='tiro'?'se tiró '+pzpH(x.sobra):'sobró '+pzpH(x.sobra)+', se guardó retazo '+pzpH(x.ret)}`); });
     const ids = new Set([...Object.keys(D), ...Object.keys(map)]);
     for(const id of ids){
       if(malo[id]) continue; // hoja con error de captura: no se toca nada hasta que la corrijan
       const it = CATALOGO.find(i=>i.id===id); if(!it) continue;
       const v = Math.round(((D[id]||0)/PZP_A)*100)/100, H = Hc[id]||0;
       const esMerma = v < -0.004, esAjuste = v > 0.004, q = Math.abs(v);
-      const autoOk = esMerma && H>0 && q/H <= 0.10 + 1e-9;
+      const autoOk = esMerma && H>0 && !sinAuto[id] && q/H <= 0.10 + 1e-9;
       const nota = `${esAjuste?'Ajuste del corte (salió más de lo que dice la receta)':'Merma del corte (lo que se tiró al cortar)'} del ${pzpFmtDia(f)}: ${(txt[id]||[]).join(' · ')} → ${esAjuste?'+':'−'}${fmtNum(q)} hoja(s)${autoOk?' · aprobada sola (10 % o menos)':''}${esMerma&&!autoOk&&H>0?' · ⚠️ más de 10 %: revisa la hoja antes de aprobar':''}`;
       const datos = esAjuste ? {tipo:'ajuste', motivo:'hojaCorteAjuste', cantidad:q, completasDelta:0, cortadoDelta:q} : {tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:q};
       const prevId = map[id];
@@ -16757,6 +16818,16 @@ async function hcGuardar(){
     corte[id] = {piezas, otras, hojasPapel:Number(x.hojasPapel)||0, puertasOtroDia:Number(x.puertasOtroDia)||0, puertasDir:x.puertasDir||'', sobrante:(x.retazos||[]).length?'retazo':'desperdicio', sobroRet:x.sobroRet||'', retazos:x.sobroRet==='si'?(x.retazos||[]).filter(r=>r.w>0&&r.h>0&&r.q>0):[]}; });
   const sinResp = Object.keys(corte).filter(id=>!corte[id].sobroRet || (corte[id].sobroRet==='si' && !corte[id].retazos.length));
   if(sinResp.length) return alert('Falta contestar «¿Sobró retazo útil?» en: '+sinResp.map(pzpColor).join(', ')+'\n\nPon No, o Sí con su medida.');
+  // v290: lo que sobró de las hojas para puertas
+  const PL = hcPuertasPend(), puertasSobra = {};
+  for(const x of PL){ const s = (c.puertasSobra||{})[x.id] || {};
+    if(!s.dest && x.hoy>0) return alert(`${pzpColor(x.id)}: hoy se usaron hojas apartadas para puertas y sobran ${pzpH(x.p)}.\n\nContesta arriba qué pasó con lo que sobró: ⏳ Faltan puertas, ♻️ Se guardó o 🗑️ Se tiró.`);
+    if(s.dest==='retazo'){ const aR = (s.retazos||[]).reduce((t,r)=>t+r.w*r.h*r.q,0);
+      if(!(aR>0)) return alert(`${pzpColor(x.id)}: anota la medida del retazo que se guardó de las puertas (ancho × alto y +).`);
+      if(aR > x.p + 1) return alert(`${pzpColor(x.id)}: los retazos anotados (${pzpH(aR)}) son más de lo que sobró de las puertas (${pzpH(x.p)}). Revisa la medida.`);
+      puertasSobra[x.id] = {dest:'retazo', retazos:s.retazos}; }
+    else if(s.dest==='tiro') puertasSobra[x.id] = {dest:'tiro', retazos:[]};
+    else if(s.dest==='faltan') puertasSobra[x.id] = {dest:'faltan', retazos:[]}; }
   // Avisos antes de guardar: lo que no cabe y la diferencia con el cierre
   const cortes = hcCortesCierre(), malos = [], dif = [];
   Object.keys(corte).forEach(id=>{ const H = Number(cortes[id])>0 ? Number(cortes[id]) : corte[id].hojasPapel; if(H>0 && hcAreaColor(id) > H*PZP_A + 1) malos.push(pzpColor(id));
@@ -16771,7 +16842,7 @@ async function hcGuardar(){
     // v274 (pedido por el usuario): la merma de la hoja de corte ya NO crea movimiento en el inventario oficial;
     // queda guardada en la hoja y solo la descuenta el inventario de piezas.
     const otros = Object.assign({}, prev.otros||{});
-    const doc = Object.assign({}, prev, {tipo:'dia', modulo:mod, fecha:f, corte:Object.assign({}, prev.corte||{}, corte), retFilas:c.retFilas||[], recortes:c.recortes||[], mermas:c.mermas||[], otros, puertasTodo:true, hojaCoord:true, hojaCortador:c.hojaCortador||'', hojaPor:quien, hojaGuardado:ahora, guardado:prev.guardado||ahora, por:prev.por||quien});
+    const doc = Object.assign({}, prev, {tipo:'dia', modulo:mod, fecha:f, corte:Object.assign({}, prev.corte||{}, corte), retFilas:c.retFilas||[], recortes:c.recortes||[], mermas:c.mermas||[], otros, puertasSobra, puertasTodo:true, hojaCoord:true, hojaCortador:c.hojaCortador||'', hojaPor:quien, hojaGuardado:ahora, guardado:prev.guardado||ahora, por:prev.por||quien});
     delete doc.id;
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+f).set(doc);
     hcBorrBorrar(f); toast('✅ Hoja de corte guardada'); await pzpCargar(mod); await hcDesperdicioSync(mod, f); hcCap = null; hcRender(); window.scrollTo(0,0);
@@ -17144,7 +17215,7 @@ async function pzpGuardar(){
   const vie = pzpDatosDe(c).retViejo;
   const doc = {tipo:'dia', modulo:mod, fecha:pzpFecha, corte:limpio, retazo:ret, retViejo:vie, retTirar:[...(c.retTirar||[])], recortes, liberar:c.liberar||[], otros, armados:pzpArmados().filter(a=>Number(a.cantidad)>0), guardado:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():''};
   try{
-    { const prev = (pzpD.dias||[]).find(x=>x.fecha===pzpFecha); if(prev) ['retFilas','puertasTodo','mermas','hojaCoord','hojaPor','hojaGuardado'].forEach(k=>{ if(prev[k]!==undefined && doc[k]===undefined) doc[k] = prev[k]; }); } // v273
+    { const prev = (pzpD.dias||[]).find(x=>x.fecha===pzpFecha); if(prev) ['retFilas','puertasTodo','mermas','hojaCoord','hojaPor','hojaGuardado','puertasSobra','desperdicioMov','hojaCortador'].forEach(k=>{ if(prev[k]!==undefined && doc[k]===undefined) doc[k] = prev[k]; }); } // v273
     await db.collection('piezasPrueba').doc('dia_'+mod+'_'+pzpFecha).set(doc); pzpBorrBorrar(mod, pzpFecha); pzpRecuperado = false;
     toast('✅ Guardado: hoja del '+pzpFmtDia(pzpFecha)+' (no cambia el inventario oficial)');
     await pzpCargar(mod); pzpCap = null; pzpRender(); window.scrollTo(0,0);
