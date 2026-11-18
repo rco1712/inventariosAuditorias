@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v290';
+const APP_VERSION = 'v291';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -13454,7 +13454,7 @@ function renderSobranteNuevo(lista, campos){
   if(!SOB_TIPOS.includes(garTipo)){ garTipo='puertas'; return renderGar(); }
   $('#main').innerHTML = `<div class="card" style="border:2px solid #0e8a8a">
       <div style="font-size:17px;font-weight:800">🧩 Mandar a sobrantes · ${modulo()}</div>
-      <p class="hint">Material que salió para una instalación, <strong>no se instaló</strong> y regresó al taller. Su melamina/MDF sale del inventario y queda apartada en Sobrantes hasta que se transforme en otra cosa. Los herrajes no se tocan.</p>
+      <p class="hint">Material que salió para una instalación, <strong>no se instaló</strong> y regresó al taller. Su melamina/MDF sale del inventario y queda apartada en Sobrantes hasta que se transforme en otra cosa. Los herrajes no se tocan.</p>${difRetSobHtml('sob')}
       <button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="salirSobrante();renderSob()">Cancelar</button>
     </div>
     <div class="card">
@@ -13552,7 +13552,7 @@ async function renderSob(){
   else cuerpo = (sobTab==='abiertos' ? (abiertos.length ? abiertos.map(cardSob).join('') : '<div class="card hint">No hay sobrantes apartados. 🎉</div>') : (cerrados.length ? cerrados.map(cardSob).join('') : '<div class="card hint">Todavía no hay sobrantes terminados.</div>'));
   $('#main').innerHTML = `<div class="card">
       <div style="font-size:17px;font-weight:800">🧩 Sobrantes · ${modulo()}</div>
-      <p class="hint">Material que regresó sin instalarse. Está <strong>fuera del inventario</strong> hasta que se transforme; entonces regresa lo que salió de él (como material cortado). En las auditorías no se cuenta.</p>
+      <p class="hint">Material que regresó sin instalarse. Está <strong>fuera del inventario</strong> hasta que se transforme; entonces regresa lo que salió de él (como material cortado). En las auditorías no se cuenta.</p>${difRetSobHtml('sob')}
       ${puede?`<button class="btn" style="width:100%;margin-top:6px" onclick="iniciarSobrante()">+ Mandar material a sobrantes</button>
       ${esAdmin()?`<button class="btn small" style="width:100%;margin-top:8px;background:transparent;color:#1f9d55;border:1px solid var(--line);box-shadow:none" onclick="instSub='historial';instRegreso=true;setView('inst')">↩️ ¿Regresó un modelo completo? Ese vuelve al inventario</button>`:''}`:''}
       ${totHtml?`<p class="hint" style="margin:10px 0 4px"><strong>Apartado ahora:</strong></p><div class="movlist">${totHtml}</div>`:''}
@@ -13599,6 +13599,18 @@ function piezasTransformacion(){
   Object.keys(out).forEach(k=>out[k]=fmtNum(out[k]));
   return out;
 }
+// v291 (pedido por el usuario): qué piezas salieron del sobrante, por artículo, para que el inventario de piezas
+// las sume solas (antes solo llegaban las hojas y quedaban «sin capturar»). Las piezas a medida (puertas, marcos,
+// repisas…) entran al retazo por su área, igual que las puertas que regresan de una instalación.
+function piezasTransfPorItem(){
+  const t = sobTransf, out = {}, o = id => (out[id] = out[id] || {pz:[], extraA:0});
+  Object.keys(t.piezas).forEach(k=>{ const n = Number(t.piezas[k]), P = PIEZAS_AUDIT.find(x=>x.key===k); if(!P || !(n>0)) return;
+    let ids = []; try{ ids = (piezasAConsumo([{nombre:P.nombre, cantidad:n, dim:P.dim, colorDestino:P.tipo==='mel'?t.color:'—', estado:'ok'}], P.tipo==='mel'?t.color:'—')||[]).filter(r=>esHojaId(r.itemId) && r.cantidad>0).map(r=>r.itemId); }catch(e){}
+    if(ids[0]) o(ids[0]).pz.push({k, q:n}); });
+  const it = itemByName('Melamina '+t.color);
+  if(it) (t.medidas||[]).forEach(m=>{ const a = (Number(m.ancho)||0)*(Number(m.alto)||0)*(Number(m.cantidad)||0); if(a>0) o(it.id).extraA += a; });
+  return out;
+}
 function descPiezasTransformacion(){
   const t = sobTransf;
   return Object.keys(t.piezas).filter(k=>Number(t.piezas[k])>0).map(k=>{ const p=PIEZAS_AUDIT.find(x=>x.key===k); return `${t.piezas[k]} ${p.label}`; })
@@ -13616,7 +13628,7 @@ function transformacionHtml(){
   return `<div class="card" style="border:2px solid #0e8a8a">
       <div style="font-size:16px;font-weight:800">✂️ ¿Qué salió de este sobrante?</div>
       <p class="hint">${(x.lineas||[]).join(' · ')}${x.nota?' — '+x.nota:''}</p>
-      <p class="hint">Anota las piezas <strong>exactas</strong> que se sacaron. Regresan al inventario como material cortado.</p>
+      <p class="hint">Anota las piezas <strong>exactas</strong> que se sacaron. Regresan al inventario como material cortado${hcActivo(x.modulo)?" y <strong>se suman solas a tu inventario de piezas</strong>":""}.</p>
       ${colores.length>1?`<label class="hint">Color</label><select style="margin-top:4px" onchange="sobTransf.color=this.value;renderSob()">${colores.map(c=>`<option ${c===t.color?'selected':''}>${c}</option>`).join('')}</select>`:`<p class="hint" style="margin:0">Color: <strong>${t.color}</strong></p>`}
       <div class="wrap-x" style="margin-top:10px"><table><tr><th>Pieza</th><th>Cantidad</th></tr>
         ${lista.map(p=>`<tr><td>${p.label}<div class="tag">${p.dimTxt||p.dim}</div></td><td><input type="number" min="0" inputmode="numeric" style="min-width:70px" value="${t.piezas[p.key]||''}" onchange="sobTransf.piezas['${p.key}']=Number(this.value)||0;renderSob()"></td></tr>`).join('')}
@@ -13687,8 +13699,9 @@ async function confirmarTransformacion(){
   if(quedaAlgo) cerrar = confirm(`Regresa al inventario:\n${Object.keys(eq).map(k=>`• ${fmtNum(eq[k])} ${CATALOGO.find(i=>i.id===k).nombre}`).join('\n')}\n\nEn el sobrante todavía queda:\n${Object.keys(rest).filter(k=>rest[k]>0.0005).map(k=>`• ${fmtNum(rest[k])} ${CATALOGO.find(i=>i.id===k).nombre}`).join('\n')}\n\n¿Ya se acabó este sobrante?\nAceptar = sí, lo que queda es MERMA.\nCancelar = no, lo que queda sigue apartado para después.`);
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
-    for(const k of Object.keys(eq)){ const it=CATALOGO.find(i=>i.id===k);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:x.modulo, itemId:k, itemNombre:it.nombre, tipo:'devolucion', motivo:'deSobrante', cantidad:eq[k], nota:'Sobrante transformado: '+piezas.join(', '), fecha, estado, loteId, sobranteId:x.id, creadoPor}); }
+    const pzI = piezasTransfPorItem();
+    for(const k of Object.keys(eq)){ const it=CATALOGO.find(i=>i.id===k), d = pzI[k];
+      await db.collection('movimientos').doc(cryptoId()).set(Object.assign({modulo:x.modulo, itemId:k, itemNombre:it.nombre, tipo:'devolucion', motivo:'deSobrante', cantidad:eq[k], nota:'Sobrante transformado: '+piezas.join(', '), fecha, estado, loteId, sobranteId:x.id, creadoPor}, d ? {piezasPz:d.pz, extraRetA:Math.round(d.extraA)} : {})); }
     const upd = {transformaciones:(x.transformaciones||[]).concat([{fecha, piezas, usado, loteId, creadoPor}]), restante: rest};
     if(cerrar){ upd.estado='cerrado'; upd.cerradoEn=fecha; upd.mermaFinal = Object.keys(rest).filter(k=>rest[k]>0.0005).map(k=>({itemId:k, cantidad:rest[k]})); }
     await db.collection('sobrantes').doc(x.id).update(upd);
@@ -16600,6 +16613,7 @@ function hcColorHtml(id){
     ${hcPiezasHtml(id)}
     <div style="background:#fff3cd;border:1px solid #f5d77a;border-radius:12px;padding:8px 12px;margin-top:10px;color:#1f2937"><b>Lo que SOBRÓ</b>
       ${H>0?`<div style="height:10px;border-radius:6px;background:#e5e7eb;overflow:hidden;margin-top:6px"><div style="height:100%;width:${pct}%;background:${resto<-1?'#dc2626':'#2563eb'}"></div></div><div style="font-size:12.5px;margin-top:3px">${resto<-1?`⛔ Lo anotado (${pzpH(A)} hojas) no cabe en ${fmtNum(H)} hoja(s).`:`Piezas: ${pzpH(A)} de ${fmtNum(H)} hoja(s)`}</div>`:''}
+      <div style="font-size:12.5px;line-height:1.4;margin-top:6px">♻️ <b>Retazo</b> = lo que quedó de las hojas que cortaste hoy (se queda en tu inventario). No es lo mismo que <b>🧩 Sobrante</b>: eso es lo que mandas a Sobrantes en la app.</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span style="flex:1;font-size:14px;font-weight:900">¿Sobró retazo útil?<span style="display:block;font-size:12px;font-weight:600">10×27 o más</span></span>
         ${[['no','No','#64748b'],['si','Sí','#16a34a']].map(([k,t,col])=>`<button class="btn small" style="margin:0;min-width:56px;${cc.sobroRet===k?`background:${col}`:'background:#fff;color:#1f2937;border:1px solid #d1d5db;box-shadow:none'}" onclick="hcSobro('${id}','${k}')">${t}</button>`).join('')}</div>
       ${cc.sobroRet==='si' ? `${(cc.retazos||[]).map((r,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:4px 0"><span style="flex:1;font-weight:800">♻️ ${fmtNum(r.w)}×${fmtNum(r.h)} × ${r.q}</span><button onclick="hcRetQuitar('${id}',${i})" style="all:unset;cursor:pointer;color:#b91c1c;font-weight:800">Quitar</button></div>`).join('')}
@@ -16650,6 +16664,14 @@ function hcPuertasHtml(L){
         ${!s.dest&&x.hoy>0?'<div style="font-size:12.5px;color:#b91c1c;font-weight:800;margin-top:4px">Hoy se usaron estas hojas: contesta antes de guardar.</div>':''}
       </div>`; }).join('')}</div>`;
 }
+// v291 (pedido por el usuario): que los coordinadores sepan la diferencia entre RETAZO y SOBRANTE.
+function difRetSobHtml(resalta){
+  const box = (on, ic, t, d, col) => `<div style="flex:1;min-width:150px;padding:8px 10px;border-radius:10px;border:2px solid ${on?col:'#d1d5db'};background:${on?col+'14':'#fff'}"><div style="font-weight:900;color:${col}">${ic} ${t}</div><div style="font-size:12.5px;line-height:1.4;color:#1f2937;margin-top:2px">${d}</div></div>`;
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    ${box(resalta==='ret','♻️','RETAZO','Lo que <b>quedó de las hojas que cortaste en el día</b>. Se queda en el taller y <b>sí es parte de tu inventario</b>. Se anota en la <b>hoja de corte</b>.','#16a34a')}
+    ${box(resalta==='sob','🧩','SOBRANTE','Material que el coordinador <b>manda a Sobrantes</b> en la app (regresó de una instalación, puertas que no se instalaron…). Está <b>fuera del inventario</b> hasta que lo <b>transformes</b> en 🧩 Sobrantes.','#0e8a8a')}
+  </div>`;
+}
 function hcHoja2Html(){
   const hojas = CATALOGO.filter(i=>esHoja(i) && /^Melamina|^MDF/.test(i.nombre));
   const optsColor = sel => hojas.map(i=>`<option value="${i.id}" ${i.id===sel?'selected':''}>${pzpColor(i.id)}</option>`).join('');
@@ -16657,7 +16679,7 @@ function hcHoja2Html(){
   const salioTxt = l => (l||[]).map(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return r.q+' '+(P?hcNom(P):r.k); }).join(' · ');
   const titulo = t => `<div style="background:#111;color:#fff;display:inline-block;padding:4px 10px;border-radius:5px;font-weight:900;font-size:13.5px">${t}</div>`;
   const salioEditor = (obj, fnPre) => `<div style="margin-top:6px"><div style="display:flex;gap:6px"><select id="${fnPre}-k" style="flex:1;min-width:0;margin:0">${optsPieza(obj.itemId)}</select><input id="${fnPre}-q" type="number" inputmode="numeric" placeholder="cuántas" style="width:80px;margin:0"><button class="btn small" style="margin:0" onclick="hcSalioAdd('${fnPre}')">+</button></div>${(obj.salio||[]).length?`<div class="hint" style="margin:4px 0 0">Salió: ${salioTxt(obj.salio)} <button onclick="hcSalioLimpiar('${fnPre}')" style="all:unset;cursor:pointer;color:var(--bad);font-weight:700;margin-left:6px">borrar</button></div>`:''}</div>`;
-  let h = `<div class="card">${titulo('PIEZAS SACADAS DE UN RETAZO')}<p class="hint" style="margin:4px 0 0">Solo retazo del taller que ya estaba (no hoja nueva, no sobrantes).</p>
+  let h = `<div class="card">${titulo('PIEZAS SACADAS DE UN RETAZO')}<p class="hint" style="margin:4px 0 0">Solo retazo del taller que ya estaba (no hoja nueva, no sobrantes).</p>${difRetSobHtml('ret')}
     ${(hcCap.retFilas||[]).map((r,i)=>`<div class="movitem" style="padding-left:10px;box-shadow:inset 4px 0 0 #16a34a"><span style="min-width:0"><b>${pzpColor(r.itemId)} · retazo ${fmtNum(r.w)}×${fmtNum(r.h)}</b><span class="hint" style="display:block;margin:2px 0 0">Salió: ${salioTxt(r.salio)||'—'} · quedó: ${r.resto==='basura'?'🗑️ basura':'♻️ se guardó'}</span></span><button class="btn small" style="background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none" onclick="hcQuitar('retFilas',${i})">Quitar</button></div>`).join('')}
     ${hcRF ? `<div style="border:2px solid #16a34a;border-radius:12px;padding:10px;margin-top:8px"><label class="hint">Color</label><select style="margin-top:2px" onchange="hcRF.itemId=this.value;hcRF.salio=[];hcRender()">${optsColor(hcRF.itemId)}</select>
         <label class="hint" style="display:block;margin-top:6px">Retazo (medida en cm)</label><div style="display:flex;gap:6px;align-items:center"><input type="number" inputmode="decimal" placeholder="ancho" value="${hcRF.w||''}" oninput="hcRF.w=this.value" style="flex:1;min-width:0;margin:0"><b>×</b><input type="number" inputmode="decimal" placeholder="alto" value="${hcRF.h||''}" oninput="hcRF.h=this.value" style="flex:1;min-width:0;margin:0"></div>
@@ -16953,6 +16975,8 @@ function pzpOtroModo(mid, modo){ pzpOtro(mid).modo = modo; pzpRender(); }
 function pzpOtroAuto(D, m){
   // v276: merma capturada contando piezas («Contar las piezas dañadas»): ya dice qué piezas eran.
   if(m && m.tipo==='merma' && Array.isArray(m.piezasPz) && m.piezasPz.length) return {modo:'piezas', piezas:m.piezasPz.map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:0, auto:true};
+  // v291: piezas que salieron de un sobrante registrado (al transformarlo): suben como piezas; lo hecho a medida, al retazo.
+  if(m && m.tipo==='devolucion' && m.motivo==='deSobrante' && (Array.isArray(m.piezasPz) || Number(m.extraRetA)>0)) return {modo:'piezas', piezas:(m.piezasPz||[]).map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:Number(m.extraRetA)||0, auto:true, deSobrante:true};
   if(!m || !m.instalacionId) return null;
   // v274: lo que sobró de las hojas de puertas y se mandó a sobrantes sale de lo apartado para puertas de ese color.
   if(m.tipo==='sobrante' && m.motivo==='sobranteCortePuertas') return {modo:'puertaSob', auto:true};
@@ -16972,7 +16996,7 @@ function pzpOtroAuto(D, m){
 function pzpAutoTxt(a){
   if(a && a.modo==='puertaSob') return 'Sobrante del corte de puertas (sale de lo apartado para puertas)';
   const t = (a.piezas||[]).map(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return fmtNum(r.q)+' '+(P?P.label:r.k); });
-  if(a.extraRet>0) t.push(pzpH(a.extraRet)+' hojas de puerta (a la medida)');
+  if(a.extraRet>0) t.push(pzpH(a.extraRet)+(a.deSobrante?' hojas de piezas a la medida (al retazo)':' hojas de puerta (a la medida)'));
   return t.join(' · ') || '—';
 }
 function pzpOtroCorregir(mid){
