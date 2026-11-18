@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v287';
+const APP_VERSION = 'v288';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -12818,7 +12818,8 @@ let cierrePrestOk = false;
 // 3) Auditoría: material de instalaciones/garantías de los últimos 3 días que ya se descontó.
 function entradasRepetidasHoy(mod){
   const hoy = fechaHoyLocal();
-  const ents = movs.filter(m=>m.modulo===mod && m.tipo==='entrada' && !m.anulado && m.estado!=='rechazado' && diaLocal(m.fecha)===hoy);
+  // v288: lo recibido de otro módulo (Recibir) lo anota la app pieza por pieza; no es una captura repetida.
+  const ents = movs.filter(m=>m.modulo===mod && m.tipo==='entrada' && !m.anulado && m.estado!=='rechazado' && diaLocal(m.fecha)===hoy && !m.prestamoId && !m.envioDev && m.recibidoDe==null);
   const g = {}; ents.forEach(m=>{ const k = m.itemId+'|'+fmtNum(Number(m.cantidad)); (g[k] = g[k]||[]).push(m); });
   return Object.values(g).filter(xs=>xs.length>1 && new Set(xs.map(x=>x.loteId||x.id)).size>1).map(xs=>xs.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')));
 }
