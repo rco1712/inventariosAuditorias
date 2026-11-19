@@ -10287,7 +10287,7 @@ async function registrarPuerta(tipo, alto, ancho){
 // • Inventario oficial: el sobrante regresa al cortado lo que se usó (la instalación ya lo descontó del cortado).
 // • Inventario de piezas: suben las piezas de la instalación (para que no quede el retazo en negativo).
 // • El sobrante baja lo usado; si queda algo, se decide si es merma o sigue apartado.
-// Si ese mismo día ya se transformó parte del sobrante para esta instalación, eso se toma en cuenta (no se duplica).
+// Si desde ese día ya se transformó parte del sobrante (para esta instalación), eso se toma en cuenta (no se duplica).
 let _instSobCtx = null;
 function instSobMel(l){ return (l.consumo||[]).filter(c=>esHojaId(c.itemId) && Number(c.cantidad)>0 && (CATALOGO.find(i=>i.id===c.itemId)||{}).cat==='Melamina'); }
 function instSobPuede(x){
@@ -10338,8 +10338,8 @@ async function instSobUsar(sobId){
   const pzAll = (pzpInstPiezas(l)||[]).filter(p=>Number(p.q)>0), nd = d => pzpNorm(d);
   for(const c of instSobMel(l)){
     const id = c.itemId, r0 = Number(rest[id])||0; if(!(r0>0.0005)) continue;
-    // lo que ya se transformó de este sobrante el mismo día (para esta instalación) no se vuelve a contar
-    const prev = (movs||[]).filter(m=>m.motivo==='deSobrante' && m.sobranteId===x.id && m.itemId===id && m.estado!=='rechazado' && diaLocal(m.fecha)===l.fechaDia);
+    // lo que ya se transformó de este sobrante desde el día de la instalación (para esta instalación) no se vuelve a contar
+    const prev = (movs||[]).filter(m=>m.motivo==='deSobrante' && m.sobranteId===x.id && m.itemId===id && m.estado!=='rechazado' && diaLocal(m.fecha)>=(l.fechaDia||'') && !m.usadoEnInst);
     const prevQ = prev.reduce((t,m)=>t+(Number(m.cantidad)||0),0), prevA = prev.reduce((t,m)=>t+(Number(m.extraRetA)||0),0), prevPz = {};
     prev.forEach(m=>(m.piezasPz||[]).forEach(r=>{ prevPz[r.k] = (prevPz[r.k]||0) + (Number(r.q)||0); }));
     const q = fmtNum(Math.min(Math.max(0, Number(c.cantidad) - prevQ), r0)); if(!(q>0.0005)) continue;
