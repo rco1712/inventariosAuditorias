@@ -42,7 +42,11 @@ function puedeEscribir(){ return !miPerfil || miPerfil.rol==='admin' || miPerfil
 function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // Lo que capture un coordinador queda "pendiente" hasta que Dirección lo apruebe; lo de
 // Dirección (o traspasos, que siempre son inmediatos) se guarda ya "aprobado".
-function estadoNuevoMovimiento(){ return esAdmin() ? 'aprobado' : 'pendiente'; }
+// v294 (pedido por el usuario, temporal mientras se reestructura la app): «Modo automático». Todo lo que captura
+// el coordinador entra aprobado (igual que si lo capturara Dirección) y él mismo confirma sus instalaciones.
+let modoAuto = {activo:false};
+function modoAutoOn(){ return !!(modoAuto && modoAuto.activo); }
+function estadoNuevoMovimiento(){ return (esAdmin() || modoAutoOn()) ? 'aprobado' : 'pendiente'; }
 // v181 (confirmado por el usuario): las INSTALACIONES se descuentan desde que el coordinador las
 // captura (aunque estén pendientes); si Dirección las rechaza, el material regresa solo. Todo lo
 // demás (entradas, salidas, regresos, diferencias de cambio de modelo…) cuenta hasta que se aprueba.
@@ -254,7 +258,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v293';
+const APP_VERSION = 'v294';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -411,6 +415,14 @@ async function loadStock(){
     sub(db.collection('resets').onSnapshot(snap=>{
       resetMap={}; snap.docs.forEach(d=>{ resetMap[d.id]=d.data().fecha; });
       if(current==='inv') renderInv();
+    }));
+  }catch(e){}
+  try{
+    // v294: Modo automático (lo prende Dirección en Configuración)
+    sub(db.collection('config').where('modulo','==','_global').onSnapshot(snap=>{
+      const d = snap.docs.find(x=>x.id==='modoAuto'); const nuevo = d ? (d.data()||{}) : {activo:false};
+      const cambio = !!nuevo.activo !== modoAutoOn(); modoAuto = nuevo;
+      if(cambio && current==='home') renderHome(); if(current==='conf') renderConf();
     }));
   }catch(e){}
   try{
@@ -1135,7 +1147,7 @@ async function vehAplicar(m){
 }
 // Registra un cambio: Dirección lo aplica directo; el coordinador lo deja por aprobar.
 async function vehRegistrar(tipo, mod, vehId, datos, antes){
-  const directo = esAdmin() || tipo==='mantPend';
+  const directo = esAdmin() || tipo==='mantPend' || modoAutoOn();
   const m = {id:cryptoId(), tipo, modulo:mod, vehId:vehId||'', datos, antes:antes||null, fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', estado: directo ? 'aprobado' : 'pendiente'};
   if(directo){ await vehAplicar(m); m.fechaAprob = m.fecha; m.aprobPor = m.creadoPor; }
   await db.collection('vehMovs').doc(m.id).set(m);
@@ -1436,6 +1448,7 @@ function renderHome(){
     ${hcFaltaHtml()}
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
+    ${coordConfHtml()}
     ${prestHomeHtml()}
     ${riHomeHtml()}
     ${avisosCardHtml()}
@@ -2282,7 +2295,7 @@ function herrMovResumen(m){
   if(m.tipo==='merma') return `Merma: ${d.cantidad>1?d.cantidad+' ':''}${d.desc||''} · ${herrMotTxt(HERR_MERMA_MOT,d.motivo,d.nota)}`;
   return m.tipo;
 }
-const herrEstadoMov = m => (m && m.siempre) || puedeAprobarHerr() ? 'aprobado' : 'pendiente';
+const herrEstadoMov = m => (m && m.siempre) || puedeAprobarHerr() || modoAutoOn() ? 'aprobado' : 'pendiente';
 async function herrGuardarMov(m){
   m.id = m.id || cryptoId(); m.fecha = m.fecha || new Date().toISOString(); m.creadoPor = getCurrentUserEmail?getCurrentUserEmail():''; m.estado = herrEstadoMov(m); delete m.siempre;
   if(m.estado==='aprobado'){ const err = await herrAplicar(m); if(err){ alert(err); return false; } m.aprobadoPor = m.creadoPor; m.fechaAprob = m.fecha; }
@@ -8636,9 +8649,51 @@ async function verifCoordCargar(){
   try{ const snap = await db.collection('instalacionesLog').get(); const mod = modulo();
     const todos = snap.docs.map(d=>({id:d.id,...d.data()})).filter(l=>l.modulo===mod);
     const logs = todos.filter(l=>l.verif && l.verif.estado && l.verif.estado!=='ok'), posp = instPospuestas(todos);
-    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp};
+    // v294 (modo automático): las instalaciones que el coordinador confirma él mismo (últimos 14 días, hasta hoy).
+    const hoy = fechaHoyLocal(), desde = verifDesde();
+    const conf = todos.filter(l=>{ const d = diaValorInst(l); return d <= hoy && d >= desde && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.cambioDe && l.estado==='pendiente') && (!l.verif || verifReinstPend(l)) && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)); })
+      .sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)) || String(a.calle||'').localeCompare(String(b.calle||'')));
+    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp, conf};
     if(JSON.stringify(_verifCoord)!==antes && current==='home' && !esAdmin()) renderHome();
   }catch(e){}
+}
+// v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
+// ✅ Se instaló → queda verificada. ❌ No se instaló → le sale el aviso de siempre para decidir (se instala hoy u otro
+// día · regresa al inventario · sobrantes · merma).
+function coordConfHtml(){
+  if(!modoAutoOn() || esAdmin() || esSoloLectura() || !_verifCoord) return '';
+  const xs = _verifCoord.conf||[]; if(!xs.length) return '';
+  const nomDia = d => d===fechaHoyLocal() ? 'Hoy' : new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'});
+  const fila = l => { const re = verifReinstPend(l), pl = l.categoria==='Puerta';
+    return `<div style="padding:10px;border-radius:12px;border:1px solid var(--line);margin-top:8px;background:var(--card)">
+      <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:20px">${pl?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
+        <strong>${l.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${calleHtml(l)}
+        <div class="hint" style="margin:2px 0 0">${nomDia(diaValorInst(l))}${re?' · 🔁 se volvió a instalar':''}</div></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+        <button class="btn small" style="min-height:46px;margin:0;background:#16a34a" onclick="coordConf('${l.id}','ok')">✅ Se instal${pl?'aron':'ó'}</button>
+        <button class="btn small" style="min-height:46px;margin:0;background:transparent;color:#dc2626;border:1.5px solid #dc2626;box-shadow:none" onclick="coordConf('${l.id}','no')">❌ No se instal${pl?'aron':'ó'}</button></div></div>`; };
+  const n = xs.length, dias = [...new Set(xs.map(diaValorInst))];
+  return `<details class="card" style="padding:12px;border:2px solid #16a34a" ${n<=6?'open':''}>
+    <summary style="cursor:pointer;list-style:none"><div style="font-size:16px;font-weight:900">✅ Confirma tus instalaciones (${n})</div>
+      <div class="hint" style="margin:2px 0 0">Revisa con el reporte del grupo: ¿se instaló?${dias.length>1?' · '+dias.length+' días':''}</div></summary>
+    ${xs.map(fila).join('')}</details>`;
+}
+async function coordConf(id, acc){
+  const l = ((_verifCoord && _verifCoord.conf)||[]).find(x=>x.id===id); if(!l) return;
+  const re = verifReinstPend(l), pl = l.categoria==='Puerta', d = l.descripcion.split(' · ').slice(0,2).join(' · ');
+  try{
+    if(acc==='ok'){
+      if(re) await verifGuardar(id, {reEstado:'ok', reFecha:new Date().toISOString(), porCoord:true});
+      else { try{ await verifAprobarSiPend(l); }catch(e){} await verifGuardar(id, {estado:'ok', porCoord:true}); }
+      toast('✅ '+d+(l.calle?' · '+l.calle:''));
+    } else {
+      if(!confirm(`❌ ${d}${l.calle?'\n📍 '+l.calle:''}\n\n¿No se instal${pl?'aron':'ó'}?\n\nEnseguida eliges: si se instala hoy u otro día, o a dónde va el material (inventario, sobrantes o merma).`)) return;
+      if(re) await verifGuardar(id, Object.assign({}, l.verif, {estado:'no', puertas:'pendiente', visto:true, fechaReinst:null, reEstado:null, intentos:((l.verif||{}).intentos||0)+1, porCoord:true}));
+      else { try{ await verifAprobarSiPend(l); }catch(e){} await verifGuardar(id, {estado:'no', puertas:'pendiente', visto:true, porCoord:true}); }
+    }
+    _verifCoordT = 0; await verifCoordCargar(); if(current==='home') renderHome();
+    if(acc!=='ok') setTimeout(()=>{ const el = document.getElementById('vcoord-card'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }, 300);
+  }catch(e){ alert('Error: '+e.message); }
 }
 function verifCoordHtml(){
   if(esAdmin() || esSoloLectura()) return '';
@@ -8666,9 +8721,10 @@ function verifCoordHtml(){
       const notaD = v.nota && v.estado!=='modelo' ? `<div style="margin-top:4px;font-size:13.5px">📝 Dirección: “${v.nota}”</div>` : '';
       return `<div style="padding:10px;border-radius:12px;border:1px solid var(--line);margin-top:8px;background:var(--card)"><div style="display:flex;gap:8px"><span style="font-size:18px">${ic}</span><div style="flex:1;min-width:0">${d}<div class="hint" style="margin:2px 0 0">${txt}</div>${notaD}</div></div>${bt}</div>`; };
     const nInfo = aviso.filter(l=>!accion(l)).length;
-    html += `<div class="card" style="padding:12px;border:2px solid #dc2626;background:linear-gradient(0deg,rgba(220,38,38,.10),rgba(220,38,38,.10)),var(--card)">
-      <div style="font-size:16px;font-weight:900">⚠️ ${aviso.length} instalaci${aviso.length===1?'ón no se aprobó':'ones no se aprobaron'}</div>
-      <p class="hint" style="margin:2px 0 0">Dirección las revisó con el reporte del grupo de instalaciones.</p>
+    const todasPropias = aviso.every(l=>l.verif && l.verif.porCoord);
+    html += `<div class="card" id="vcoord-card" style="padding:12px;border:2px solid #dc2626;background:linear-gradient(0deg,rgba(220,38,38,.10),rgba(220,38,38,.10)),var(--card)">
+      <div style="font-size:16px;font-weight:900">⚠️ ${todasPropias ? `${aviso.length} instalaci${aviso.length===1?'ón no se hizo':'ones no se hicieron'}: decide qué pasa` : `${aviso.length} instalaci${aviso.length===1?'ón no se aprobó':'ones no se aprobaron'}`}</div>
+      <p class="hint" style="margin:2px 0 0">${todasPropias ? 'El material sigue apartado hasta que elijas.' : 'Dirección las revisó con el reporte del grupo de instalaciones.'}</p>
       ${aviso.map(linea).join('')}
       ${nInfo?`<button class="btn small" style="width:100%;margin-top:10px;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="verifEnterado()">👍 Enterado</button>`:''}</div>`;
   }
@@ -12102,6 +12158,14 @@ function repUltAudHtml(){
 }
 
 // ===== ⚙️ Configuración (confirmado por el usuario, v178): lo que casi no se usa o es delicado =====
+async function modoAutoCambiar(on){
+  if(!esAdmin()) return;
+  if(!confirm(on ? '⚡ ¿Prender el modo automático?\n\n• Todo lo que capturen los coordinadores entra aprobado.\n• Ellos confirman sus instalaciones.\n\nSe puede apagar cuando quieras.' : '¿Apagar el modo automático?\n\nLo nuevo vuelve a pasar por Aprobaciones y la verificación de instalaciones vuelve a ser de Dirección.')) return;
+  const pin = prompt('🔒 Escribe el PIN de Dirección:'); if(pin===null) return; if(pin!==(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
+  try{ const x = {modulo:'_global', activo:!!on, por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()};
+    await db.collection('config').doc('modoAuto').set(x); modoAuto = x; toast(on?'⚡ Modo automático prendido.':'Modo automático apagado.'); renderConf(); }
+  catch(e){ alert('Error: '+e.message); }
+}
 function renderConf(){
   if(!esAdmin()){ $('#main').innerHTML = '<div class="card">Esta sección es solo para Dirección.</div>'; return; }
   const fila = (t, s, js) => repFilaHtml({t, s, js});
@@ -12109,6 +12173,14 @@ function renderConf(){
   $('#main').innerHTML = `<div class="card" style="padding:12px"><div style="font-size:18px;font-weight:900">⚙️ Configuración</div><p class="hint" style="margin:2px 0 0">Lo que casi no se usa o es delicado. Solo Dirección.</p></div>
     ${grp('👥','Personal','#0369a1', fila('Usuarios','altas y roles',"irA('usr')"))}
     ${grp('📚','Catálogo','#0891b2', fila('Artículos y colores','lista',"irA('cat')") + fila('Despiece','piezas por modelo',"irA('desp')") + fila('Stock mínimo','avisos de poco material',"minVals=null;irA('min')") + fila('⭐ Valor de cada modelo','instalaciones',"valEdit=null;irA('valinst')"))}
+    <div class="card" style="border:2px solid ${modoAutoOn()?'#16a34a':'#64748b'}">
+      <div style="font-size:16px;font-weight:900">⚡ Modo automático <span class="tag" style="color:${modoAutoOn()?'#16a34a':'#64748b'};border-color:currentColor">${modoAutoOn()?'PRENDIDO':'apagado'}</span></div>
+      <p class="hint" style="margin:4px 0 0;line-height:1.45">Temporal, mientras se reestructura la app. <strong>Prendido:</strong> todo lo que capturan los coordinadores entra <strong>aprobado</strong> (entradas, salidas, mermas, garantías, regresos, sobrantes, mermas del corte, herramienta y vehículos) y <strong>ellos confirman sus instalaciones</strong> (✅ se instaló / ❌ no se instaló). Todo queda en el historial con quién lo capturó.</p>
+      ${modoAutoOn() && modoAuto.por ? `<p class="hint" style="margin:4px 0 0">Prendido por ${String(modoAuto.por).split('@')[0]} · ${new Date(modoAuto.en).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</p>` : ''}
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn small" style="background:${modoAutoOn()?'#64748b':'#16a34a'}" onclick="modoAutoCambiar(${!modoAutoOn()})">${modoAutoOn()?'Apagar':'⚡ Prender'}</button>
+        ${modoAutoOn()?`<button class="btn small" style="background:transparent;color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="aprobarTodo()">✅ Aprobar también lo que ya estaba pendiente</button>`:''}
+      </div></div>
     ${grp('🔒','Con PIN','#b91c1c', fila('Stock inicial · '+modulo(),'línea base',"irA('ini')") + fila('PIN de administrador','cambiar','cambiarPinCero()'))}
     <div class="card" style="border:2px solid var(--bad)">
       <strong style="color:var(--bad)">🗑️ Borrar datos de prueba</strong>
@@ -13216,7 +13288,7 @@ async function guardarCierre(){
     for(const c of cortes) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:c.it.id, itemNombre:c.it.nombre, tipo:'corte', cantidad:c.q, nota:`Cierre del turno: quedan ${fmtNum(c.contadas)} completas`+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:loteC, creadoPor, cierreTurno:true, conteoCompletas:{esperado:c.esp, contado:c.contadas}});
     // Hojas completas de más: no se tocan solas; van a Dirección como ajuste por aprobar.
     const loteA = cryptoId();
-    for(const x of hojasDeMas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'ajuste', motivo:'cierreCompletasDeMas', cantidad:x.deMas, completasDelta:x.deMas, cortadoDelta:0, nota:`Cierre del turno: la app esperaba ${fmtNum(x.esp)} completas y contaron ${fmtNum(x.contadas)}`+(nota?' · '+nota:''), fecha, estado:'pendiente', loteId:loteA, creadoPor, cierreTurno:true});
+    for(const x of hojasDeMas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'ajuste', motivo:'cierreCompletasDeMas', cantidad:x.deMas, completasDelta:x.deMas, cortadoDelta:0, nota:`Cierre del turno: la app esperaba ${fmtNum(x.esp)} completas y contaron ${fmtNum(x.contadas)}`+(nota?' · '+nota:''), fecha, estado:estadoNuevoMovimiento(), loteId:loteA, creadoPor, cierreTurno:true});
     const estado = 'aprobado'; // Cierre del turno entra directo, sin aprobación (confirmado por el usuario)
     for(const x of salidas) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:x.it.id, itemNombre:x.it.nombre, tipo:'salida', cantidad:x.q, nota:`Cierre del turno: había ${fmtNum(x.esp)}, quedan ${fmtNum(x.hay)}`+(nota?' · '+nota:''), fecha, estado, loteId:loteS, creadoPor, cierreTurno:true, conteoCierre:{esperado:x.esp, contado:x.hay}});
     if(!cortes.length && !salidas.length) await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:'_cierre', itemNombre:'Cierre sin movimiento', tipo:'nota', cantidad:0, nota:'Cierre del turno sin movimiento'+(nota?' · '+nota:''), fecha, estado:'aprobado', loteId:cryptoId(), creadoPor, cierreTurno:true});
@@ -16917,7 +16989,7 @@ async function hcDesperdicioSync(mod, f){
       const it = CATALOGO.find(i=>i.id===id); if(!it) continue;
       const v = Math.round(((D[id]||0)/PZP_A)*100)/100, H = Hc[id]||0;
       const esMerma = v < -0.004, esAjuste = v > 0.004, q = Math.abs(v);
-      const autoOk = esMerma && H>0 && !sinAuto[id] && q/H <= 0.10 + 1e-9;
+      const autoOk = modoAutoOn() || (esMerma && H>0 && !sinAuto[id] && q/H <= 0.10 + 1e-9);
       const nota = `${esAjuste?'Ajuste del corte (salió más de lo que dice la receta)':'Merma del corte (lo que se tiró al cortar)'} del ${pzpFmtDia(f)}: ${(txt[id]||[]).join(' · ')} → ${esAjuste?'+':'−'}${fmtNum(q)} hoja(s)${autoOk?' · aprobada sola (10 % o menos)':''}${esMerma&&!autoOk&&H>0?' · ⚠️ más de 10 %: revisa la hoja antes de aprobar':''}`;
       const datos = esAjuste ? {tipo:'ajuste', motivo:'hojaCorteAjuste', cantidad:q, completasDelta:0, cortadoDelta:q} : {tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:q};
       const prevId = map[id];
