@@ -45,7 +45,10 @@ function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // v294 (pedido por el usuario, temporal mientras se reestructura la app): «Modo automático». Todo lo que captura
 // el coordinador entra aprobado (igual que si lo capturara Dirección) y él mismo confirma sus instalaciones.
 let modoAuto = {activo:false};
-function modoAutoOn(){ return !!(modoAuto && modoAuto.activo); }
+// v295: se prende y apaga por módulo (modoAuto.modulos = {Apodaca:true, …}). 'activo' viejo = todos.
+function modoAutoMod(m){ if(!modoAuto) return false; if(modoAuto.modulos) return !!modoAuto.modulos[m]; return !!modoAuto.activo; }
+function modoAutoOn(m){ return modoAutoMod(m || (typeof modulo==='function' ? modulo() : '')); }
+function modoAutoAlguno(){ return MODULOS.some(x=>modoAutoMod(x.nombre)); }
 function estadoNuevoMovimiento(){ return (esAdmin() || modoAutoOn()) ? 'aprobado' : 'pendiente'; }
 // v181 (confirmado por el usuario): las INSTALACIONES se descuentan desde que el coordinador las
 // captura (aunque estén pendientes); si Dirección las rechaza, el material regresa solo. Todo lo
@@ -258,7 +261,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v294';
+const APP_VERSION = 'v295';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -421,7 +424,7 @@ async function loadStock(){
     // v294: Modo automático (lo prende Dirección en Configuración)
     sub(db.collection('config').where('modulo','==','_global').onSnapshot(snap=>{
       const d = snap.docs.find(x=>x.id==='modoAuto'); const nuevo = d ? (d.data()||{}) : {activo:false};
-      const cambio = !!nuevo.activo !== modoAutoOn(); modoAuto = nuevo;
+      const cambio = JSON.stringify(nuevo.modulos||nuevo.activo||null) !== JSON.stringify((modoAuto&&(modoAuto.modulos||modoAuto.activo))||null); modoAuto = nuevo;
       if(cambio && current==='home') renderHome(); if(current==='conf') renderConf();
     }));
   }catch(e){}
@@ -1147,7 +1150,7 @@ async function vehAplicar(m){
 }
 // Registra un cambio: Dirección lo aplica directo; el coordinador lo deja por aprobar.
 async function vehRegistrar(tipo, mod, vehId, datos, antes){
-  const directo = esAdmin() || tipo==='mantPend' || modoAutoOn();
+  const directo = esAdmin() || tipo==='mantPend' || modoAutoOn(mod);
   const m = {id:cryptoId(), tipo, modulo:mod, vehId:vehId||'', datos, antes:antes||null, fecha:new Date().toISOString(), creadoPor:getCurrentUserEmail?getCurrentUserEmail():'', estado: directo ? 'aprobado' : 'pendiente'};
   if(directo){ await vehAplicar(m); m.fechaAprob = m.fecha; m.aprobPor = m.creadoPor; }
   await db.collection('vehMovs').doc(m.id).set(m);
@@ -12158,12 +12161,13 @@ function repUltAudHtml(){
 }
 
 // ===== ⚙️ Configuración (confirmado por el usuario, v178): lo que casi no se usa o es delicado =====
-async function modoAutoCambiar(on){
+async function modoAutoCambiar(mod, on){
   if(!esAdmin()) return;
-  if(!confirm(on ? '⚡ ¿Prender el modo automático?\n\n• Todo lo que capturen los coordinadores entra aprobado.\n• Ellos confirman sus instalaciones.\n\nSe puede apagar cuando quieras.' : '¿Apagar el modo automático?\n\nLo nuevo vuelve a pasar por Aprobaciones y la verificación de instalaciones vuelve a ser de Dirección.')) return;
+  if(!confirm(on ? `⚡ ¿Prender el modo automático en ${mod}?\n\n• Todo lo que capture su coordinador entra aprobado.\n• Él confirma sus instalaciones.\n\nSe puede apagar cuando quieras.` : `¿Apagar el modo automático en ${mod}?\n\nLo nuevo vuelve a pasar por Aprobaciones y la verificación de instalaciones vuelve a ser de Dirección.`)) return;
   const pin = prompt('🔒 Escribe el PIN de Dirección:'); if(pin===null) return; if(pin!==(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
-  try{ const x = {modulo:'_global', activo:!!on, por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()};
-    await db.collection('config').doc('modoAuto').set(x); modoAuto = x; toast(on?'⚡ Modo automático prendido.':'Modo automático apagado.'); renderConf(); }
+  try{ const mods = {}; MODULOS.forEach(m=>{ mods[m.nombre] = modoAutoMod(m.nombre); }); mods[mod] = !!on;
+    const x = {modulo:'_global', modulos:mods, activo:Object.values(mods).some(Boolean), por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()};
+    await db.collection('config').doc('modoAuto').set(x); modoAuto = x; toast(on?`⚡ Modo automático prendido en ${mod}.`:`Modo automático apagado en ${mod}.`); renderConf(); }
   catch(e){ alert('Error: '+e.message); }
 }
 function renderConf(){
@@ -12173,14 +12177,13 @@ function renderConf(){
   $('#main').innerHTML = `<div class="card" style="padding:12px"><div style="font-size:18px;font-weight:900">⚙️ Configuración</div><p class="hint" style="margin:2px 0 0">Lo que casi no se usa o es delicado. Solo Dirección.</p></div>
     ${grp('👥','Personal','#0369a1', fila('Usuarios','altas y roles',"irA('usr')"))}
     ${grp('📚','Catálogo','#0891b2', fila('Artículos y colores','lista',"irA('cat')") + fila('Despiece','piezas por modelo',"irA('desp')") + fila('Stock mínimo','avisos de poco material',"minVals=null;irA('min')") + fila('⭐ Valor de cada modelo','instalaciones',"valEdit=null;irA('valinst')"))}
-    <div class="card" style="border:2px solid ${modoAutoOn()?'#16a34a':'#64748b'}">
-      <div style="font-size:16px;font-weight:900">⚡ Modo automático <span class="tag" style="color:${modoAutoOn()?'#16a34a':'#64748b'};border-color:currentColor">${modoAutoOn()?'PRENDIDO':'apagado'}</span></div>
-      <p class="hint" style="margin:4px 0 0;line-height:1.45">Temporal, mientras se reestructura la app. <strong>Prendido:</strong> todo lo que capturan los coordinadores entra <strong>aprobado</strong> (entradas, salidas, mermas, garantías, regresos, sobrantes, mermas del corte, herramienta y vehículos) y <strong>ellos confirman sus instalaciones</strong> (✅ se instaló / ❌ no se instaló). Todo queda en el historial con quién lo capturó.</p>
-      ${modoAutoOn() && modoAuto.por ? `<p class="hint" style="margin:4px 0 0">Prendido por ${String(modoAuto.por).split('@')[0]} · ${new Date(modoAuto.en).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</p>` : ''}
-      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button class="btn small" style="background:${modoAutoOn()?'#64748b':'#16a34a'}" onclick="modoAutoCambiar(${!modoAutoOn()})">${modoAutoOn()?'Apagar':'⚡ Prender'}</button>
-        ${modoAutoOn()?`<button class="btn small" style="background:transparent;color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="aprobarTodo()">✅ Aprobar también lo que ya estaba pendiente</button>`:''}
-      </div></div>
+    <div class="card" style="border:2px solid ${modoAutoAlguno()?'#16a34a':'#64748b'}">
+      <div style="font-size:16px;font-weight:900">⚡ Modo automático</div>
+      <p class="hint" style="margin:4px 0 0;line-height:1.45">Temporal, mientras se reestructura la app. <strong>Prendido en un módulo:</strong> todo lo que captura su coordinador entra <strong>aprobado</strong> (entradas, salidas, mermas, garantías, regresos, sobrantes, mermas del corte, herramienta y vehículos) y <strong>él confirma sus instalaciones</strong> (✅ se instaló / ❌ no se instaló). Todo queda en el historial con quién lo capturó.</p>
+      <div style="display:grid;gap:6px;margin-top:10px">${MODULOS.map(m=>{ const on = modoAutoMod(m.nombre); return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;border:1px solid var(--line)"><span style="width:12px;height:12px;border-radius:50%;background:${m.color}"></span><strong style="flex:1">${m.nombre}</strong><span class="tag" style="color:${on?'#16a34a':'#64748b'};border-color:currentColor">${on?'PRENDIDO':'apagado'}</span><button class="btn small" style="margin:0;min-width:90px;background:${on?'#64748b':'#16a34a'}" onclick="modoAutoCambiar('${m.nombre}',${!on})">${on?'Apagar':'⚡ Prender'}</button></div>`; }).join('')}</div>
+      ${modoAuto && modoAuto.por ? `<p class="hint" style="margin:6px 0 0">Último cambio: ${String(modoAuto.por).split('@')[0]} · ${new Date(modoAuto.en).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</p>` : ''}
+      ${modoAutoAlguno()?`<button class="btn small" style="margin-top:10px;background:transparent;color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="aprobarTodo()">✅ Aprobar también lo que ya estaba pendiente</button>`:''}
+    </div>
     ${grp('🔒','Con PIN','#b91c1c', fila('Stock inicial · '+modulo(),'línea base',"irA('ini')") + fila('PIN de administrador','cambiar','cambiarPinCero()'))}
     <div class="card" style="border:2px solid var(--bad)">
       <strong style="color:var(--bad)">🗑️ Borrar datos de prueba</strong>
@@ -16989,7 +16992,7 @@ async function hcDesperdicioSync(mod, f){
       const it = CATALOGO.find(i=>i.id===id); if(!it) continue;
       const v = Math.round(((D[id]||0)/PZP_A)*100)/100, H = Hc[id]||0;
       const esMerma = v < -0.004, esAjuste = v > 0.004, q = Math.abs(v);
-      const autoOk = modoAutoOn() || (esMerma && H>0 && !sinAuto[id] && q/H <= 0.10 + 1e-9);
+      const autoOk = modoAutoOn(mod) || (esMerma && H>0 && !sinAuto[id] && q/H <= 0.10 + 1e-9);
       const nota = `${esAjuste?'Ajuste del corte (salió más de lo que dice la receta)':'Merma del corte (lo que se tiró al cortar)'} del ${pzpFmtDia(f)}: ${(txt[id]||[]).join(' · ')} → ${esAjuste?'+':'−'}${fmtNum(q)} hoja(s)${autoOk?' · aprobada sola (10 % o menos)':''}${esMerma&&!autoOk&&H>0?' · ⚠️ más de 10 %: revisa la hoja antes de aprobar':''}`;
       const datos = esAjuste ? {tipo:'ajuste', motivo:'hojaCorteAjuste', cantidad:q, completasDelta:0, cortadoDelta:q} : {tipo:'merma', lado:'cortado', motivo:'hojaCorteDesperdicio', cantidad:q};
       const prevId = map[id];
