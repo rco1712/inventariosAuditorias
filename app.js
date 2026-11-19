@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v292';
+const APP_VERSION = 'v293';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -7676,7 +7676,12 @@ async function cargarInstLog(){
     const snap = await db.collection('instalacionesLog').get();
     instLog = snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.modulo===modulo()).sort((a,b)=>(b.fechaDia||'').localeCompare(a.fechaDia||'')||(b.fecha||'').localeCompare(a.fecha||''));
   }catch(e){ instLog=[]; }
+  // v293: colores con sobrantes que se pueden ligar (para mostrar «🧩 Salió de un sobrante» solo donde aplica)
+  try{ const ss = await db.collection('sobrantes').get(), lim = Date.now() - 4*86400000; _instSobColores = new Set();
+    ss.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.modulo===modulo() && (x.estado!=='cerrado' || new Date(x.cerradoEn||x.fecha||0).getTime() >= lim))
+      .forEach(x=>Object.keys(x.restante||{}).forEach(k=>{ if(Number(x.restante[k])>0.005) _instSobColores.add(k); })); }catch(e){ _instSobColores = null; }
 }
+let _instSobColores = null;
 
 async function renderInstHistorial(){
   $('#inst-body').innerHTML = `<div class="card hint">Cargando historial de ${modulo()}…</div>`;
@@ -7725,7 +7730,7 @@ async function renderInstHistorial(){
       <strong>${new Date(dia+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</strong>
       <div class="tag">${porDia[dia].length} instalación(es)</div>
       <div class="wrap-x" style="margin-top:6px"><table><tr><th>Tipo</th><th>Detalle</th><th>Nota</th><th>Hora</th><th>Estado</th></tr>
-      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${calleHtml(x)}${extrasLogHtml(x)}${x.verif&&VERIF_TAG[x.verif.estado]?`<div style="margin-top:4px">${verifEstadoTxt(x)}</div>`:''} ${tagValor(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${estadoInstHist(x)}</td></tr>`).join('')}
+      ${porDia[dia].map(x=>`<tr><td>${x.categoria}</td><td style="min-width:150px">${x.cambiadaPor?`<span style="text-decoration:line-through;opacity:.6">${x.descripcion}</span>`:x.descripcion}${calleHtml(x)}${extrasLogHtml(x)}${x.verif&&VERIF_TAG[x.verif.estado]?`<div style="margin-top:4px">${verifEstadoTxt(x)}</div>`:''} ${tagValor(x)}${instSobBtnHtml(x)}${x.cambioDe||x.cambioDeDesc?' <span class="tag" style="color:#3E5CDE;border-color:#3E5CDE">✏️ Cambio de modelo</span>':''}${(()=>{ const c=colReg(x); return c?`<div style="margin-top:6px">${c}</div>`:''; })()}</td><td>${x.nota||''}</td><td>${new Date(x.fecha).toLocaleTimeString()}</td><td>${estadoInstHist(x)}</td></tr>`).join('')}
       </table></div>
     </div>`; }).join('');
   if(regVolver && regInstSel){ regVolver = false; regParcial ? mostrarRegresoParcial() : mostrarRegresoInst(); }
@@ -10267,10 +10272,109 @@ async function registrarPuerta(tipo, alto, ancho){
       ? '✅ Puertas guardadas.<br><small>Dirección las tiene que aprobar para que se descuenten.</small>'
       : '✅ Instalación de puertas registrada.') + (conSob?'<br><small>🧩 El sobrante quedó en Sobrantes.</small>':''));
     if(conSob) alert(`⚠️ IMPORTANTE ⚠️\n\n🧩 El sobrante de estas puertas (${fmtNum(so.cantidad)} hoja de ${so.itemId?(CATALOGO.find(i=>i.id===so.itemId)||{}).nombre:''}) quedó en SOBRANTES.\n\n✂️ Pídele a tu cortador qué piezas sacó de ese sobrante (marcos, zóclos, cargadores, frentes…) y regístralas en Sobrantes → "Se transformó".\n\nSolo esas piezas regresan a tu inventario. Si no las registras, tu inventario no va a cuadrar.`);
+    const logRec = {id:logId, modulo:modulo(), categoria:'Puerta', descripcion:desc, calle, fechaDia, fecha:new Date().toISOString(), consumo:puertaPreview.consumo, piezasMel:puertaPreview.piezasMel||null};
     puertaPreview = null;
     renderInstPuertas();
     window.scrollTo(0,0);
+    // v293: si hay sobrantes de ese color, pregunta si las puertas salieron de uno.
+    if(!conSob) setTimeout(()=>{ instSobElegir(logId, logRec); }, 400);
   }catch(e){ alert('Error al registrar: '+e.message); }
+}
+
+
+// ===== v293 (pedido por el usuario): «Salió de un sobrante» =====
+// Cuando unas puertas (o un mueble) se hacen con un sobrante registrado, se liga la instalación con ese sobrante:
+// • Inventario oficial: el sobrante regresa al cortado lo que se usó (la instalación ya lo descontó del cortado).
+// • Inventario de piezas: suben las piezas de la instalación (para que no quede el retazo en negativo).
+// • El sobrante baja lo usado; si queda algo, se decide si es merma o sigue apartado.
+// Si ese mismo día ya se transformó parte del sobrante para esta instalación, eso se toma en cuenta (no se duplica).
+let _instSobCtx = null;
+function instSobMel(l){ return (l.consumo||[]).filter(c=>esHojaId(c.itemId) && Number(c.cantidad)>0 && (CATALOGO.find(i=>i.id===c.itemId)||{}).cat==='Melamina'); }
+function instSobPuede(x){
+  if(esSoloLectura() || !x || x.deSobrante || x.cambiadaPor || x.estado==='rechazado' || (x.verif && x.verif.estado==='no')) return false;
+  if(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(x.id)) return false;
+  if(x.categoria!=='Puerta') return false;
+  if(!instSobMel(x).some(c=>!_instSobColores || _instSobColores.has(c.itemId))) return false;
+  const dias = (Date.now() - new Date((x.fechaDia||'')+'T12:00:00').getTime())/86400000; return dias <= 3.5;
+}
+function instSobBtnHtml(x){
+  if(x && x.deSobrante) return ` <span class="tag" style="color:#0e8a8a;border-color:#0e8a8a">🧩 Salió de un sobrante</span>`;
+  if(!instSobPuede(x)) return '';
+  return `<div style="margin-top:6px"><button class="btn small" style="margin:0;background:transparent;color:#0e8a8a;border:1px solid #0e8a8a;box-shadow:none;white-space:nowrap" onclick="instSobElegir('${x.id}')">🧩 Salió de un sobrante</button></div>`;
+}
+function instSobCerrarUI(){ const o = document.getElementById('instsob-ov'); if(o) o.remove(); _instSobCtx = null; }
+async function instSobCandidatos(l){
+  const cols = instSobMel(l).map(c=>c.itemId);
+  let xs = []; try{ const snap = await db.collection('sobrantes').get(); xs = snap.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.modulo===(l.modulo||modulo())); }catch(e){ xs = []; }
+  const lim = Date.now() - 4*86400000;
+  return xs.filter(x=>estadoAprobSob(x.id)!=='rechazado' && cols.some(c=>Number((x.restante||{})[c])>0.005) &&
+    (x.estado!=='cerrado' || new Date(x.cerradoEn||x.fecha||0).getTime() >= lim))
+    .sort((a,b)=>(a.estado==='cerrado')-(b.estado==='cerrado') || (b.fecha||'').localeCompare(a.fecha||''));
+}
+async function instSobElegir(logId, logObj){
+  const l = logObj || (instLog||[]).find(x=>x.id===logId); if(!l) return;
+  const cands = await instSobCandidatos(l);
+  const cols = instSobMel(l).map(c=>c.itemId);
+  if(!cands.length){ if(!logObj) alert('No hay sobrantes de '+cols.map(c=>CATALOGO.find(i=>i.id===c).nombre.replace('Melamina ','')).join(' / ')+' en '+(l.modulo||modulo())+' para ligar con esta instalación.'); return; }
+  _instSobCtx = {l, cands};
+  const nom = id => CATALOGO.find(i=>i.id===id).nombre.replace('Melamina ','');
+  const ov = document.createElement('div'); ov.id = 'instsob-ov';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.55);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px';
+  ov.innerHTML = `<div class="card" style="max-width:560px;width:100%;margin:20px 0;background:#fff;color:#1f2937;border:2px solid #0e8a8a">
+    <div style="font-size:17px;font-weight:900">${logObj?'🧩 ¿Estas puertas salieron de un sobrante?':'🧩 ¿De qué sobrante salió?'}</div>
+    <div style="font-size:13.5px;margin:4px 0 8px;line-height:1.4"><b>${herrEsc(l.descripcion||'')}</b>${l.calle?' · 📍 '+herrEsc(l.calle):''}<br>
+      Lo que se usó del sobrante <b>regresa al inventario</b> (porque la instalación ya lo descontó del cortado) y sus piezas se suman al inventario de piezas. No se descuenta nada de más.</div>
+    ${cands.map(x=>`<div style="border:1px solid #d1d5db;border-radius:12px;padding:10px;margin-top:8px">
+      <div style="font-weight:800">${x.calle?'📍 '+herrEsc(x.calle)+' · ':''}${new Date(x.fecha).toLocaleDateString('es-MX',{day:'numeric',month:'short'})}${x.estado==='cerrado'?' <span class="tag">terminado</span>':''}</div>
+      <div style="font-size:12.5px;margin:3px 0;line-height:1.35">${(x.lineas||[]).slice(0,5).map(t=>herrEsc(String(t))).join('<br>')}${(x.lineas||[]).length>5?'<br>…':''}</div>
+      <div style="font-size:13px">Queda: ${cols.filter(c=>Number((x.restante||{})[c])>0.005).map(c=>`<b>${fmtNum(x.restante[c])}</b> ${nom(c)}`).join(' · ')}</div>
+      <button class="btn small" style="margin:8px 0 0;width:100%;background:#0e8a8a" onclick="instSobUsar('${x.id}')">Sí, salió de este</button></div>`).join('')}
+    <button class="btn small" style="margin:12px 0 0;width:100%;background:transparent;color:#1f2937;border:1px solid #d1d5db;box-shadow:none" onclick="instSobCerrarUI()">No salió de un sobrante</button></div>`;
+  document.body.appendChild(ov);
+}
+async function instSobUsar(sobId){
+  const ctx = _instSobCtx; if(!ctx) return; const l = ctx.l, x = ctx.cands.find(s=>s.id===sobId); if(!x) return;
+  const rest = Object.assign({}, x.restante||{}), usado = {}, movsNew = [];
+  const pzAll = (pzpInstPiezas(l)||[]).filter(p=>Number(p.q)>0), nd = d => pzpNorm(d);
+  for(const c of instSobMel(l)){
+    const id = c.itemId, r0 = Number(rest[id])||0; if(!(r0>0.0005)) continue;
+    // lo que ya se transformó de este sobrante el mismo día (para esta instalación) no se vuelve a contar
+    const prev = (movs||[]).filter(m=>m.motivo==='deSobrante' && m.sobranteId===x.id && m.itemId===id && m.estado!=='rechazado' && diaLocal(m.fecha)===l.fechaDia);
+    const prevQ = prev.reduce((t,m)=>t+(Number(m.cantidad)||0),0), prevA = prev.reduce((t,m)=>t+(Number(m.extraRetA)||0),0), prevPz = {};
+    prev.forEach(m=>(m.piezasPz||[]).forEach(r=>{ prevPz[r.k] = (prevPz[r.k]||0) + (Number(r.q)||0); }));
+    const q = fmtNum(Math.min(Math.max(0, Number(c.cantidad) - prevQ), r0)); if(!(q>0.0005)) continue;
+    const piezas = []; let extra = 0;
+    pzAll.filter(p=>p.itemId===id).forEach(p=>{ const P = PIEZAS_AUDIT.find(z=>z.tipo==='mel' && nd(z.dim)===nd(p.dim));
+      if(P && !PZP_A_LA_MEDIDA.includes(p.n)){ const e = piezas.find(z=>z.k===P.key); if(e) e.q += Number(p.q); else piezas.push({k:P.key, q:Number(p.q)}); }
+      else extra += Number(p.q)*pzpArea(p.dim); });
+    piezas.forEach(z=>{ z.q = Math.max(0, z.q - (prevPz[z.k]||0)); });
+    movsNew.push({id, q, piezasPz:piezas.filter(z=>z.q>0), extraRetA:Math.max(0, Math.round(extra - prevA))});
+    usado[id] = q; rest[id] = fmtNum(r0 - q);
+  }
+  if(!movsNew.length) return alert('De ese sobrante ya no queda material de ese color para esta instalación.');
+  const quedaAlgo = Object.keys(rest).some(k=>rest[k]>0.0005);
+  let cerrar = x.estado==='cerrado' || !quedaAlgo;
+  const txtUso = movsNew.map(z=>`• ${fmtNum(z.q)} ${CATALOGO.find(i=>i.id===z.id).nombre}`).join('\n');
+  if(x.estado!=='cerrado' && quedaAlgo) cerrar = confirm(`Del sobrante se usó (regresa al inventario):\n${txtUso}\n\nEn el sobrante todavía queda:\n${Object.keys(rest).filter(k=>rest[k]>0.0005).map(k=>`• ${fmtNum(rest[k])} ${CATALOGO.find(i=>i.id===k).nombre}`).join('\n')}\n\n¿Ya se acabó este sobrante?\nAceptar = sí, lo que queda es MERMA.\nCancelar = no, lo que queda sigue apartado para después.`);
+  else if(!confirm(`Del sobrante se usó (regresa al inventario):\n${txtUso}\n\n¿Confirmas que esta instalación salió de ese sobrante?`)) return;
+  try{
+    const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), loteId = cryptoId();
+    const fMov = new Date(new Date(l.fecha||ahora).getTime()+1).toISOString(); // el mismo día de la instalación
+    for(const z of movsNew){ const it = CATALOGO.find(i=>i.id===z.id);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:x.modulo, itemId:z.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'deSobrante', cantidad:z.q,
+        nota:`Sobrante usado en: ${l.descripcion||''}${l.calle?' · 📍 '+l.calle:''}`, fecha:fMov, estado, loteId, sobranteId:x.id, usadoEnInst:l.id, creadoPor, piezasPz:z.piezasPz, extraRetA:z.extraRetA}); }
+    const piezasTxt = [`Usado en ${l.descripcion||'instalación'}${l.calle?' · '+l.calle:''}`];
+    const upd = {transformaciones:(x.transformaciones||[]).concat([{fecha:ahora, piezas:piezasTxt, usado, loteId, creadoPor, instalacionId:l.id}]), restante:rest};
+    if(x.estado==='cerrado') upd.mermaFinal = Object.keys(rest).filter(k=>rest[k]>0.0005).map(k=>({itemId:k, cantidad:rest[k]}));
+    else if(cerrar){ upd.estado='cerrado'; upd.cerradoEn=ahora; upd.mermaFinal = Object.keys(rest).filter(k=>rest[k]>0.0005).map(k=>({itemId:k, cantidad:rest[k]})); }
+    await db.collection('sobrantes').doc(x.id).update(upd);
+    await db.collection('instalacionesLog').doc(l.id).update({deSobrante:{sobranteId:x.id, usado, loteId, en:ahora, por:creadoPor}});
+    const li = (instLog||[]).find(y=>y.id===l.id); if(li) li.deSobrante = {sobranteId:x.id, usado};
+    instSobCerrarUI();
+    toast('🧩 Ligado con el sobrante.'+(estado==='pendiente'?'<br><small>Dirección lo aprueba para que regrese al inventario.</small>':''));
+    try{ await loadStock(); }catch(e){}
+    if(current==='inst'){ try{ renderInst(); }catch(e){} }
+  }catch(e){ alert('Error: '+e.message); }
 }
 
 // ===== Capa 5: Traspasos entre módulos =====
