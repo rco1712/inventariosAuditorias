@@ -16460,6 +16460,8 @@ function pzpModulosHtml(){
       ${hist.length?`<div class="hint" style="margin:6px 0 0"><strong>Historial:</strong><br>${hist.map(x=>`${x.accion==='on'?'🧪 Encendida':'⏸ Apagada'} · ${new Date(x.en).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · ${String(x.por||'').split('@')[0]}`).join('<br>')}</div>`:''}
     </div></div>`;
 }
+// v292: el PDF de piezas de un módulo, directo desde Inicio (todos los colores: inicio, cortadas, instaladas y debe haber).
+async function pzpPdfMod(m){ try{ toast('📄 Preparando el PDF de piezas de '+m+'…'); pzpMod = m; pzpCap = null; pzpFinalId = null; await pzpCargar(m); if(!pzpD || !pzpD.cfg || !pzpD.cfg.activo) return alert(m+' no tiene arrancado el inventario de piezas.'); await pzpDebePDF(); }catch(e){ alert('No se pudo hacer el PDF: '+e.message); } }
 function pzpVerMod(m){ pzpMod = m; pzpTab = 'debe'; pzpCap = null; pzpFinalId = null; pzpD = null; setView('pzp'); }
 async function pzpElegirMod(m){ pzpMod = m; pzpCap = null; pzpFinalId = null; await pzpCargar(m); pzpRender(); }
 // ===== v273: Hoja de corte del cortador, capturada por el coordinador =====
@@ -17406,7 +17408,7 @@ async function pzpDebePDF(){
       ks.map(k=>{ const x = pzpFlujo(R, k), su = fmtNum(x.debe - x.arm);
         return [String(R.N[k].n)+' '+String(R.N[k].dim), fm(x.ini), {t:x.cort?'+'+fmtNum(x.cort):'-', col:VER}, {t:x.inst?String(fmtNum(x.inst)):'-', col:ROJ}, x.otros?(x.otros>0?'+':'')+String(fmtNum(x.otros)):'-', {t:String(fmtNum(x.debe)), b:true}, {t:String(su)+' / '+String(fmtNum(x.arm)), col:su<0?ROJ:undefined}]; }), MOR);
   });
-  await S.fin(`Piezas_debe_haber_${pzpD.mod}.pdf`, 'Closets Vera · Inventario de piezas (no cambia el inventario oficial)');
+  await S.fin(`Piezas_debe_haber_${pzpD.mod}.pdf`, 'Closets Vera · Inventario de piezas · '+pzpD.mod);
 }
 
 // Conteo rápido: cada día se cuentan pocas piezas (rotando) y TODOS los armados; de los armados contados
@@ -17580,7 +17582,7 @@ async function pzpInicio(){
     m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #0e7490;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>🧩 Conteo de piezas</strong><div class="hint" style="margin:0">${hoyAct.length?'🟢 Conteo hoy en '+hoyAct.join(', '):'Sin conteo activado hoy'}${pendAud?` · <b style="color:#b3742c">${pendAud} conteo(s) por decidir</b>`:''}<br>✂️ Inventario de piezas: ${on.length?'activo en '+on.join(', '):'apagado'} · solo tú lo ves${(()=>{ const f = on.map(m=>({m, d:hcFaltantes(m)})).filter(x=>x.d.length); return f.length ? `<div style="margin-top:4px;font-weight:800;color:#dc2626">⚠️ Falta hoja de corte: ${f.map(x=>x.m+' ('+x.d.map(pzpFmtDia).join(', ')+')').join(' · ')}</div>` : ''; })()}</div></div><button class="btn small" style="background:#0e7490" onclick="setView('cpz')">Conteos</button></div>`);
     // v292 (pedido por el usuario): las piezas de cada módulo a un toque, sin buscarlas.
     if(on.length){ const el = document.getElementById('pzp-home'); if(el){ el.style.flexWrap = 'wrap';
-      el.insertAdjacentHTML('beforeend', `<div style="width:100%;margin-top:4px"><div style="font-weight:900;font-size:14px;margin-bottom:6px">✂️ Ver las piezas de:</div><div style="display:grid;grid-template-columns:repeat(${Math.min(on.length,3)},1fr);gap:8px">${on.map(n=>{ const M = MODULOS.find(x=>x.nombre===n)||{color:'#0e7490'}; return `<button onclick="pzpVerMod('${n}')" style="border:0;border-radius:12px;padding:12px 8px;background:${M.color};color:#fff;font:inherit;font-weight:900;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)">✂️ ${n}</button>`; }).join('')}</div></div>`); } }
+      el.insertAdjacentHTML('beforeend', `<div style="width:100%;margin-top:4px"><div style="font-weight:900;font-size:14px;margin-bottom:6px">✂️ Ver las piezas de:</div><div style="display:grid;grid-template-columns:repeat(${Math.min(on.length,3)},1fr);gap:8px">${on.map(n=>{ const M = MODULOS.find(x=>x.nombre===n)||{color:'#0e7490'}; return `<div style="display:flex;flex-direction:column;gap:6px"><button onclick="pzpVerMod('${n}')" style="border:0;border-radius:12px;padding:12px 8px;background:${M.color};color:#fff;font:inherit;font-weight:900;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)">✂️ ${n}</button><button onclick="pzpPdfMod('${n}')" style="border:1px solid ${M.color};border-radius:10px;padding:8px;background:#fff;color:${M.color};font:inherit;font-weight:800;font-size:13.5px;cursor:pointer">📄 PDF de ${n}</button></div>`; }).join('')}</div></div>`); } }
   }catch(e){}
 }
 (function(){
