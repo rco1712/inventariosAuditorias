@@ -254,7 +254,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v291';
+const APP_VERSION = 'v292';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -12230,6 +12230,7 @@ function renderHomeDir(){
     tile('aprobar','Aprobaciones','Revisar lo que capturaron',"irA('apr')",'#16a34a', nApr||''),
     tile('barras','Reportes','Del día, material, módulos…',"irA('rep')",'#b91c1c'),
     tile('mapa','Los 5 módulos','Cuánto hay en cada uno',"irA('todos')",'#4b5563'),
+    tile('capas','Inventario de piezas','Piezas por módulo, día por día',"setView('pzp')",'#0e7490'),
     tile('camion','Vehículos','Los 5 módulos',"vehMod='__todos';vehAbierto='';vehForm=null;irA('veh')",'#0369a1', nVeh||''),
     tile('llave','Herramienta','Por módulo',"irA('herr')",'#c2410c'),
     tile('maquina','Maquinaria','Mantenimiento y reparaciones',"maqCache=null;maqAbierta='';maqForm=null;maqServ=null;irA('maq')",'#7c3aed'),
@@ -16409,7 +16410,7 @@ function pzpRender(){
   const C = _pzpCfgs || {};
   let h = `<div class="card" style="border:2px solid #7c3aed;padding:12px 14px">
     <div style="font-size:17px;font-weight:800">✂️ Inventario de piezas · ${D.mod}</div>
-    <p class="hint" style="margin:2px 0 0">Solo Dirección. Lo alimenta la hoja de corte del coordinador. <strong>No cambia el inventario oficial (en hojas)</strong>; el coordinador no ve esto.${activo && D.cfg.auditoriaId ? (()=>{ const a = D.auds.find(y=>y.id===D.cfg.auditoriaId); return a ? ` Empezó con el conteo del <strong>${fCorta(diaLocal(a.fecha))}</strong>.` : ''; })() : ''}</p>
+    <p class="hint" style="margin:2px 0 0">Solo Dirección. Lo alimenta la hoja de corte del coordinador. ${D.cfg && D.cfg.modo==='real' ? '<strong>REAL:</strong> la merma del corte sí se descuenta del inventario oficial (hasta 10 % sola; más, la apruebas tú)' : '<strong>No cambia el inventario oficial (en hojas)</strong>'}; el coordinador no ve esto.${activo && D.cfg.auditoriaId ? (()=>{ const a = D.auds.find(y=>y.id===D.cfg.auditoriaId); return a ? ` Empezó con el conteo del <strong>${fCorta(diaLocal(a.fecha))}</strong>.` : ''; })() : ''}</p>
     <div style="display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:2px">${MODULOS.map(m=>{ const on = !!(C[m.nombre] && C[m.nombre].activo), sel = m.nombre===D.mod;
       return `<button class="chip ${sel?'on':''}" style="flex:none;white-space:nowrap" onclick="pzpElegirMod('${m.nombre}')">${on?'🟣 ':'⚪ '}${m.nombre}</button>`; }).join('')}</div>
   </div>`;
@@ -16459,6 +16460,7 @@ function pzpModulosHtml(){
       ${hist.length?`<div class="hint" style="margin:6px 0 0"><strong>Historial:</strong><br>${hist.map(x=>`${x.accion==='on'?'🧪 Encendida':'⏸ Apagada'} · ${new Date(x.en).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · ${String(x.por||'').split('@')[0]}`).join('<br>')}</div>`:''}
     </div></div>`;
 }
+function pzpVerMod(m){ pzpMod = m; pzpTab = 'debe'; pzpCap = null; pzpFinalId = null; pzpD = null; setView('pzp'); }
 async function pzpElegirMod(m){ pzpMod = m; pzpCap = null; pzpFinalId = null; await pzpCargar(m); pzpRender(); }
 // ===== v273: Hoja de corte del cortador, capturada por el coordinador =====
 // Igual a la hoja de papel (mismos renglones, mismo orden, mismos colores). Se guarda en el día de la prueba
@@ -17575,7 +17577,10 @@ async function pzpInicio(){
     const m = $('#main'); if(!m) return;
     const hoyAct = MODULOS.filter(x=>conteoCierreHoy(x.nombre)).map(x=>x.nombre); const pendAud = (await cpzAudsTodos()).filter(cpzPendiente).length;
     if(current!=='home' || document.getElementById('pzp-home')) return;
-    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #0e7490;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>🧩 Conteo de piezas</strong><div class="hint" style="margin:0">${hoyAct.length?'🟢 Conteo hoy en '+hoyAct.join(', '):'Sin conteo activado hoy'}${pendAud?` · <b style="color:#b3742c">${pendAud} conteo(s) por decidir</b>`:''}<br>✂️ Inventario de piezas: ${on.length?'activo en '+on.join(', '):'apagado'} · solo tú lo ves${(()=>{ const f = on.map(m=>({m, d:hcFaltantes(m)})).filter(x=>x.d.length); return f.length ? `<div style="margin-top:4px;font-weight:800;color:#dc2626">⚠️ Falta hoja de corte: ${f.map(x=>x.m+' ('+x.d.map(pzpFmtDia).join(', ')+')').join(' · ')}</div>` : ''; })()}</div></div><button class="btn small" style="background:#0e7490" onclick="setView('cpz')">Abrir</button></div>`);
+    m.insertAdjacentHTML('afterbegin', `<div id="pzp-home" class="card" style="border:2px solid #0e7490;display:flex;align-items:center;gap:10px;padding:12px"><div style="flex:1"><strong>🧩 Conteo de piezas</strong><div class="hint" style="margin:0">${hoyAct.length?'🟢 Conteo hoy en '+hoyAct.join(', '):'Sin conteo activado hoy'}${pendAud?` · <b style="color:#b3742c">${pendAud} conteo(s) por decidir</b>`:''}<br>✂️ Inventario de piezas: ${on.length?'activo en '+on.join(', '):'apagado'} · solo tú lo ves${(()=>{ const f = on.map(m=>({m, d:hcFaltantes(m)})).filter(x=>x.d.length); return f.length ? `<div style="margin-top:4px;font-weight:800;color:#dc2626">⚠️ Falta hoja de corte: ${f.map(x=>x.m+' ('+x.d.map(pzpFmtDia).join(', ')+')').join(' · ')}</div>` : ''; })()}</div></div><button class="btn small" style="background:#0e7490" onclick="setView('cpz')">Conteos</button></div>`);
+    // v292 (pedido por el usuario): las piezas de cada módulo a un toque, sin buscarlas.
+    if(on.length){ const el = document.getElementById('pzp-home'); if(el){ el.style.flexWrap = 'wrap';
+      el.insertAdjacentHTML('beforeend', `<div style="width:100%;margin-top:4px"><div style="font-weight:900;font-size:14px;margin-bottom:6px">✂️ Ver las piezas de:</div><div style="display:grid;grid-template-columns:repeat(${Math.min(on.length,3)},1fr);gap:8px">${on.map(n=>{ const M = MODULOS.find(x=>x.nombre===n)||{color:'#0e7490'}; return `<button onclick="pzpVerMod('${n}')" style="border:0;border-radius:12px;padding:12px 8px;background:${M.color};color:#fff;font:inherit;font-weight:900;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)">✂️ ${n}</button>`; }).join('')}</div></div>`); } }
   }catch(e){}
 }
 (function(){
