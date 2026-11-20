@@ -8837,7 +8837,7 @@ function hojaSepHtml(){
     <p class="hint" style="margin:2px 0 6px">Dirección la mandó antes del conteo. Revisa que tengas todo esto apartado.</p>
     ${H.lista.map(x=>`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--card)"><strong>${x.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${x.calle?`<div style="font-weight:800">📍 ${escCalle(x.calle)}</div>`:''}
       ${x.renglones.map(r=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:14px;padding:3px 0;border-top:1px solid var(--line)"><span>${r.nombre} · ${fmtNum(r.q)}${r.piezas?`<span class="hint" style="display:block;margin:0">${r.piezas}</span>`:''}</span><strong style="color:${r.queda==='sep'?'#7c3aed':'#16a34a'};white-space:nowrap">${r.queda==='sep'?'📌 separado':'📦 se cuenta'}</strong></div>`).join('')}</div>`).join('')}
-    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:10px;padding:10px 12px;border-radius:12px;border:2px solid #ca8a04;background:rgba(202,138,4,.10);cursor:pointer"><input type="checkbox" id="hs-firma" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> tengo este material <strong>separado y completo</strong>. Lo separado no es parte de mi inventario.</span></label>
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:10px;padding:10px 12px;border-radius:12px;border:2px solid #ca8a04;background:rgba(202,138,4,.10);cursor:pointer"><input type="checkbox" id="hs-firma" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> tengo este material <strong>separado y completo</strong>. Va aparte de mi inventario, pero está registrado y se cuenta en la auditoría.</span></label>
     <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:linear-gradient(135deg,#7c3aed,#5b21b6)" onclick="hojaSepFirmar('${H.id}')">✍️ Firmar hoja</button>
     <button class="btn small" style="width:100%;margin-top:6px;background:transparent;color:#dc2626;border:1px solid var(--line);box-shadow:none" onclick="hojaSepObjetar('${H.id}')">❌ Algo no está completo</button></div>`;
 }
@@ -8904,7 +8904,7 @@ async function actaPDF(id){
   if(d.tipo==='hojaSeparado'){
     (d.lista||[]).forEach(x=>{ S.banda(pdfS(x.descripcion.split(' · ').slice(0,3).join(' · ')), pdfS(x.calle||''), C);
       S.tabla([{t:'Material',w:118},{t:'Cant.',w:20},{t:'Queda',w:44}], x.renglones.map(r=>[pdfS(r.nombre+(r.piezas?' ('+r.piezas+')':'')), String(fmtNum(r.q)), {t:r.queda==='sep'?'SEPARADO':'SE CUENTA', col:r.queda==='sep'?MOR:VER, b:true}]), C, 5); });
-    S.vacio(pdfS('Declaro que tengo este material separado y completo. Lo separado no es parte de mi inventario.'));
+    S.vacio(pdfS('Declaro que tengo este material separado y completo. Va aparte de mi inventario, pero esta registrado y se cuenta en la auditoria.'));
   } else if(d.tipo==='actaRegreso'){
     S.banda(pdfS(String(d.descripcion||'').split(' · ').slice(0,3).join(' · ')), pdfS(d.calle||''), C);
     if((d.herrajes||[]).length) S.tabla([{t:'Herraje',w:100},{t:'Regresan',w:26},{t:'Tiene',w:26},{t:'Falta',w:30}], d.herrajes.map(h=>[pdfS(nom(h.itemId)), String(fmtNum(h.q)), String(fmtNum(h.tengo)), h.tengo<h.q?{t:String(fmtNum(h.q-h.tengo)), col:ROJ, b:true}:'-']), C);
@@ -8953,7 +8953,7 @@ function sepHtml(){
   const nHoy = xs.filter(l=>diaValorInst(l)<=hoy).length;
   return `<details class="card" style="padding:12px;border:2px solid #7c3aed" ${nHoy?'open':''}><summary style="cursor:pointer;list-style:none">
     <div style="font-size:16px;font-weight:900">📌 Material separado (${xs.length})${nHoy?` · <span style="color:#7c3aed">${nHoy} hoy</span>`:''}</div>
-    <div class="hint" style="margin:2px 0 0">No es parte de tu inventario. El día que se instale, toca 🚚 Sale.</div></summary>${xs.map(fila).join('')}</details>`;
+    <div class="hint" style="margin:2px 0 0">Va aparte de tu inventario, pero está registrado y se cuenta en la auditoría. El día que se instale, toca 🚚 Sale.</div></summary>${xs.map(fila).join('')}</details>`;
 }
 function sepSaleAbrir(id){
   const l = ((_verifCoord && _verifCoord.sep)||[]).find(x=>x.id===id); if(!l) return;
@@ -9396,7 +9396,7 @@ function apartPintar(){
     ${cons.map(c=>{ const k = V.items[c.itemId]==='cuenta', pz = esHojaId(c.itemId) ? paso0PzTxt(l, c.itemId) : ''; return `<div onclick="apartToggle('${c.itemId}')" style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;padding:8px 10px;margin-top:4px;border-radius:10px;border:1.5px solid ${k?'#16a34a':'#7c3aed'};background:${k?'rgba(22,163,74,.08)':'rgba(124,58,237,.08)'}"><span>${nom(c.itemId)} <span class="hint" style="margin:0">${fmtNum(c.cantidad)} ${un(c.itemId)}</span>${pz?`<span class="hint" style="display:block;margin:0">${pz}</span>`:''}</span><strong style="color:${k?'#16a34a':'#7c3aed'};white-space:nowrap">${k?'📦 a inventario':'📌 apartado'}</strong></div>`; }).join('')}
     <button class="btn small" style="margin-top:6px;background:transparent;color:#16a34a;border:1px solid var(--line);box-shadow:none" onclick="apartHerrajes()">🔩 Los herrajes a mi inventario, aparto solo la melamina</button>
     <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:linear-gradient(135deg,#7c3aed,#5b21b6)" onclick="apartGuardar()">📌 Apartar${nCu?` (${nCu} a mi inventario)`:''}</button>
-    <p class="hint" style="margin:6px 0 0">Lo apartado no es parte de tu inventario. Ese día le das 🚚 Sale en «Material separado».</p></div>`;
+    <p class="hint" style="margin:6px 0 0">Lo apartado va aparte, pero sigue registrado y se cuenta en la auditoría. Ese día le das 🚚 Sale en «Material separado».</p></div>`;
 }
 async function apartGuardar(){
   const V = apartV; if(!V) return; const l = V.l, nueva = V.fecha, hoy = fechaHoyLocal();
