@@ -8803,7 +8803,7 @@ async function hojaSepObjetar(id){
 // Acta de regreso y Hoja del día. Se guardan en 'piezasPrueba' con su tipo.
 const ACTA_TIPOS = {hojaSeparado:{ic:'📌', t:'Hoja de material separado', c:'#7c3aed'}, actaEntrega:{ic:'📜', t:'Acta de entrega (conteo)', c:'#16a34a'},
   actaRegreso:{ic:'↩️', t:'Acta de regreso', c:'#ea580c'}, hojaDia:{ic:'📋', t:'Hoja del día', c:'#3E5CDE'}};
-let actasCache = null;
+let actasCache = null, actasTab = 'hojaSeparado';
 async function abrirActas(){ actasCache = null; setView('actas'); }
 async function renderActas(){
   current = 'actas'; const mod = modulo();
@@ -8822,14 +8822,45 @@ async function renderActas(){
       ${(d.herrajes||[]).map(h=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;border-top:1px solid var(--line);padding:2px 0"><span>${nom(h.itemId)} · regresan ${fmtNum(h.q)}</span><span style="color:${h.tengo<h.q?'#dc2626':'#16a34a'}">${h.tengo<h.q?'tiene '+fmtNum(h.tengo):'✔ los tiene'}</span></div>`).join('')}
       ${(d.piezas||[]).map(r=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;border-top:1px solid var(--line);padding:2px 0"><span>${r.n==='Melamina (toda)'?'Melamina '+nom(r.itemId).replace('Melamina ',''):fmtNum(r.q)+' '+r.n+' '+(r.dim||'')}</span><span>${VD_TXT[r.d]||r.d}</span></div>`).join('')}`;
     return `<div class="hint">${(d.renglones||d.lista||[]).length} renglón(es)</div>`; };
-  const porDia = {}; actasCache.docs.forEach(d=>{ const k = String(d.fecha||'').slice(0,10) ? diaLocal(d.fecha) : '—'; (porDia[k]=porDia[k]||[]).push(d); });
+  const cuenta = k => actasCache.docs.filter(d=>d.tipo===k).length;
+  const chips = Object.keys(ACTA_TIPOS).map(k=>{ const T = ACTA_TIPOS[k], on = actasTab===k, n = cuenta(k);
+    return `<button class="chip ${on?'on':''}" style="${on?`background:${T.c};border-color:${T.c};color:#fff`:`border-color:${T.c};color:${T.c}`}" onclick="actasTab='${k}';renderActas()">${T.ic} ${T.t}${n?` <small>(${n})</small>`:''}</button>`; }).join('');
+  const porDia = {}; actasCache.docs.filter(d=>d.tipo===actasTab).forEach(d=>{ const k = String(d.fecha||'').slice(0,10) ? diaLocal(d.fecha) : '—'; (porDia[k]=porDia[k]||[]).push(d); });
   const dias = Object.keys(porDia).sort().reverse();
   $('#main').innerHTML = `<div class="card"><div style="font-size:18px;font-weight:900">📜 Actas firmadas · ${mod}</div>
     <p class="hint" style="margin:2px 0 0">Todo lo que firma el coordinador, por día. Toca una para verla.</p>
+    <div class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">${chips}</div>
     <button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="setView('home')">‹ Volver</button></div>
     ${dias.length ? dias.map(k=>`<div class="card" style="padding:12px"><div style="font-weight:900;font-size:15px">📅 ${k==='—'?'Sin fecha':new Date(k+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}</div>
-      ${porDia[k].map(d=>{ const T = ACTA_TIPOS[d.tipo]; return `<details style="margin-top:8px;border:2px solid ${T.c};border-radius:12px;padding:8px 10px"><summary style="cursor:pointer;list-style:none"><strong>${T.ic} ${T.t}</strong> <span class="hint" style="margin:0">${hora(d.fecha)}</span><div style="font-size:13px;margin-top:2px">${firmaTxt(d)}</div></summary>${cuerpo(d)}</details>`; }).join('')}</div>`).join('')
-      : '<div class="card">Todavía no hay actas en este módulo.</div>'}`;
+      ${porDia[k].map(d=>{ const T = ACTA_TIPOS[d.tipo]; return `<details style="margin-top:8px;border:2px solid ${T.c};border-radius:12px;padding:8px 10px"><summary style="cursor:pointer;list-style:none"><strong>${T.ic} ${T.t}</strong> <span class="hint" style="margin:0">${hora(d.fecha)}</span><div style="font-size:13px;margin-top:2px">${firmaTxt(d)}</div></summary>${cuerpo(d)}<button class="btn small" style="width:100%;margin-top:8px;background:${T.c}" onclick="actaPDF('${d.id}')">📄 Bajar PDF</button></details>`; }).join('')}</div>`).join('')
+      : `<div class="card">Todavía no hay ${ACTA_TIPOS[actasTab].t.toLowerCase()} en este módulo.</div>`}`;
+}
+const pdfS = t => String(t==null?'':t).replace(/[−–—]/g,'-').replace(/→/g,'->').replace(/[^\x00-\xFF]/g,'').replace(/\s+/g,' ').trim();
+const ACTA_RGB = {hojaSeparado:[124,58,237], actaEntrega:[22,163,74], actaRegreso:[234,88,12], hojaDia:[62,92,222]};
+async function actaPDF(id){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  const d = ((actasCache && actasCache.docs)||[]).find(x=>x.id===id); if(!d) return;
+  const T = ACTA_TIPOS[d.tipo], C = ACTA_RGB[d.tipo], nom = i => (CATALOGO.find(z=>z.id===i)||{}).nombre||i;
+  const fTxt = f => f ? new Date(f).toLocaleString('es-MX',{weekday:'long', day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'}) : '-';
+  const S = herrPdfBase(pdfS('Closets Vera · '+T.t+' · '+d.modulo), pdfS(fTxt(d.fecha)), C);
+  const VER=[22,128,74], ROJ=[185,28,28], MOR=[109,40,217];
+  if(d.tipo==='hojaSeparado'){
+    (d.lista||[]).forEach(x=>{ S.banda(pdfS(x.descripcion.split(' · ').slice(0,3).join(' · ')), pdfS(x.calle||''), C);
+      S.tabla([{t:'Material',w:118},{t:'Cant.',w:20},{t:'Queda',w:44}], x.renglones.map(r=>[pdfS(r.nombre+(r.piezas?' ('+r.piezas+')':'')), String(fmtNum(r.q)), {t:r.queda==='sep'?'SEPARADO':'SE CUENTA', col:r.queda==='sep'?MOR:VER, b:true}]), C, 5); });
+    S.vacio(pdfS('Declaro que tengo este material separado y completo. Lo separado no es parte de mi inventario.'));
+  } else if(d.tipo==='actaRegreso'){
+    S.banda(pdfS(String(d.descripcion||'').split(' · ').slice(0,3).join(' · ')), pdfS(d.calle||''), C);
+    if((d.herrajes||[]).length) S.tabla([{t:'Herraje',w:100},{t:'Regresan',w:26},{t:'Tiene',w:26},{t:'Falta',w:30}], d.herrajes.map(h=>[pdfS(nom(h.itemId)), String(fmtNum(h.q)), String(fmtNum(h.tengo)), h.tengo<h.q?{t:String(fmtNum(h.q-h.tengo)), col:ROJ, b:true}:'-']), C);
+    const DST = {inv:'Inventario', sob:'Sobrantes', merma:'Merma', falta:'NO LA TIENE'};
+    if((d.piezas||[]).length) S.tabla([{t:'Pieza de melamina / MDF',w:110},{t:'Cant.',w:20},{t:'Va a',w:52}], d.piezas.map(r=>[pdfS(r.n==='Melamina (toda)'?nom(r.itemId):r.n+' '+(r.dim||'')+' · '+nom(r.itemId).replace('Melamina ','')), String(fmtNum(r.q)), {t:DST[r.d]||r.d, col:r.d==='falta'||r.d==='merma'?ROJ:undefined, b:r.d==='falta'}]), C);
+    S.vacio(pdfS('Lo que firmo que si tengo entra a mi inventario. Lo que no, lo decide Direccion.'));
+  } else {
+    S.vacio(pdfS((d.renglones||d.lista||[]).length+' renglon(es)'));
+  }
+  const f = d.firma;
+  S.banda(f ? (f.ok===false ? pdfS('OBJETADA por '+String(f.por||'').split('@')[0]+' · '+fTxt(f.en)) : pdfS('FIRMADA por '+String(f.por||'').split('@')[0]+' · '+fTxt(f.en))) : 'SIN FIRMAR', '', f ? (f.ok===false?ROJ:VER) : [202,138,4]);
+  if(f && f.ok===false && f.nota) S.vacio(pdfS('Nota: '+f.nota));
+  await S.fin(pdfS(`${T.t.replace(/\s*\(.*\)/,'').replace(/ /g,'_')}_${d.modulo}_${d.fecha?diaLocal(d.fecha):''}.pdf`), pdfS('Closets Vera · '+T.t+' · '+d.modulo));
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
 // ✅ Se instaló → queda verificada. ❌ No se instaló → le sale el aviso de siempre para decidir (se instala hoy u otro
