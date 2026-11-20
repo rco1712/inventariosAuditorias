@@ -46,20 +46,32 @@ function esAdmin(){ return !miPerfil || miPerfil.rol==='admin'; }
 // el coordinador entra aprobado (igual que si lo capturara Dirección) y él mismo confirma sus instalaciones.
 let modoAuto = {activo:false};
 // v295: se prende y apaga por módulo (modoAuto.modulos = {Apodaca:true, …}). 'activo' viejo = todos.
-function modoAutoMod(m){ if(!modoAuto) return false; if(modoAuto.modulos) return !!modoAuto.modulos[m]; return !!modoAuto.activo; }
+// v297: el coordinador solo puede leer los documentos de SU módulo (permisos de Supabase), así que no veía
+// el documento global. Dirección guarda además una copia por módulo ('modoAuto_<módulo>') que él sí lee.
+let modoAutoLocal = {};
+function modoAutoMod(m){ if(modoAuto && modoAuto.modulos && m in modoAuto.modulos) return !!modoAuto.modulos[m]; if(m in modoAutoLocal) return !!modoAutoLocal[m]; if(modoAuto && !modoAuto.modulos) return !!modoAuto.activo; return false; }
+let _modoAutoEspejo = false;
+async function modoAutoEspejar(x){
+  if(!esAdmin() || !x || !x.modulos) return;
+  for(const m of MODULOS){ try{ await db.collection('config').doc('modoAuto_'+m.nombre).set({modulo:m.nombre, tipo:'modoAuto', on:!!x.modulos[m.nombre], por:x.por||'', en:x.en||new Date().toISOString()}); }catch(e){} }
+}
 function modoAutoOn(m){ return modoAutoMod(m || (typeof modulo==='function' ? modulo() : '')); }
 function modoAutoAlguno(){ return MODULOS.some(x=>modoAutoMod(x.nombre)); }
 // v296 (pedido por el usuario): el sistema nuevo (actas firmadas, material separado, hoja del día) se prende
 // POR MÓDULO, el día de su conteo inicial. Los módulos que aún no arrancan siguen viendo la app como antes.
 let sisNuevo = {modulos:{}};
-function sisNuevoMod(m){ m = m || (typeof modulo==='function' ? modulo() : ''); return !!(sisNuevo && sisNuevo.modulos && sisNuevo.modulos[m]); }
+let sisNuevoLocal = {};
+function sisNuevoMod(m){ m = m || (typeof modulo==='function' ? modulo() : ''); if(sisNuevo && sisNuevo.modulos && sisNuevo.modulos[m]) return true; return !!sisNuevoLocal[m]; }
 async function sisNuevoPrender(mod, on, sinPin){
   if(!esAdmin()) return false;
   if(!sinPin){ if(!confirm(on ? `🆕 ¿Prender el sistema nuevo en ${mod}?\n\nSu coordinador empieza a ver: Hoja de separado, Material separado, Acta de regreso firmada y las actas.` : `¿Apagar el sistema nuevo en ${mod}?\n\nVuelve a ver la app como antes. Las actas ya firmadas se quedan guardadas.`)) return false;
     const pin = prompt('🔒 Escribe el PIN de Dirección:'); if(pin===null) return false; if(pin!==(await getPinCero())) { alert('PIN incorrecto. No se cambió nada.'); return false; } }
   const mods = Object.assign({}, (sisNuevo&&sisNuevo.modulos)||{}); if(on) mods[mod] = mods[mod] || new Date().toISOString(); else delete mods[mod];
   const x = {modulo:'_global', modulos:mods, por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()};
-  await db.collection('config').doc('sistemaNuevo').set(x); sisNuevo = x; return true;
+  await db.collection('config').doc('sistemaNuevo').set(x); sisNuevo = x;
+  // copia por módulo: el coordinador solo puede leer los documentos de su módulo
+  await db.collection('config').doc('sisNuevo_'+mod).set({modulo:mod, tipo:'sistemaNuevo', on:!!on, desde:mods[mod]||null, por:x.por, en:x.en});
+  return true;
 }
 function estadoNuevoMovimiento(){ return (esAdmin() || modoAutoOn()) ? 'aprobado' : 'pendiente'; }
 // v181 (confirmado por el usuario): las INSTALACIONES se descuentan desde que el coordinador las
@@ -273,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v295';
+const APP_VERSION = 'v298';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -439,7 +451,17 @@ async function loadStock(){
       const cambioSN = JSON.stringify(sn.modulos||{}) !== JSON.stringify((sisNuevo&&sisNuevo.modulos)||{}); sisNuevo = sn; if(cambioSN && current==='home') renderHome();
       const d = snap.docs.find(x=>x.id==='modoAuto'); const nuevo = d ? (d.data()||{}) : {activo:false};
       const cambio = JSON.stringify(nuevo.modulos||nuevo.activo||null) !== JSON.stringify((modoAuto&&(modoAuto.modulos||modoAuto.activo))||null); modoAuto = nuevo;
+      if(d && esAdmin() && !_modoAutoEspejo){ _modoAutoEspejo = true; modoAutoEspejar(nuevo); } // una vez por sesión: copia por módulo
       if(cambio && current==='home') renderHome(); if(current==='conf') renderConf();
+    }));
+  }catch(e){}
+  try{
+    // v297: copia del modo automático de MI módulo (la que el coordinador sí puede leer)
+    const mMod = modulo();
+    sub(db.collection('config').where('modulo','==',mMod).onSnapshot(snap=>{
+      const sn = snap.docs.find(x=>x.id==='sisNuevo_'+mMod); if(sn){ const on2 = !!(sn.data()||{}).on; if(sisNuevoLocal[mMod]!==on2){ sisNuevoLocal[mMod] = on2; if(current==='home') renderHome(); } }
+      const d = snap.docs.find(x=>x.id==='modoAuto_'+mMod); if(!d) return; const on = !!(d.data()||{}).on;
+      const cambio = modoAutoLocal[mMod]!==on; modoAutoLocal[mMod] = on; if(cambio && current==='home') renderHome();
     }));
   }catch(e){}
   try{
@@ -12803,7 +12825,7 @@ async function modoAutoCambiar(mod, on){
   const pin = prompt('🔒 Escribe el PIN de Dirección:'); if(pin===null) return; if(pin!==(await getPinCero())) return alert('PIN incorrecto. No se cambió nada.');
   try{ const mods = {}; MODULOS.forEach(m=>{ mods[m.nombre] = modoAutoMod(m.nombre); }); mods[mod] = !!on;
     const x = {modulo:'_global', modulos:mods, activo:Object.values(mods).some(Boolean), por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()};
-    await db.collection('config').doc('modoAuto').set(x); modoAuto = x; toast(on?`⚡ Modo automático prendido en ${mod}.`:`Modo automático apagado en ${mod}.`); renderConf(); }
+    await db.collection('config').doc('modoAuto').set(x); modoAuto = x; await modoAutoEspejar(x); toast(on?`⚡ Modo automático prendido en ${mod}.`:`Modo automático apagado en ${mod}.`); renderConf(); }
   catch(e){ alert('Error: '+e.message); }
 }
 function renderConf(){
