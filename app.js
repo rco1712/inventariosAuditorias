@@ -6754,8 +6754,8 @@ const PIEZAS_AUDIT = [
   {key:'pgrande',     tipo:'mel', nombre:'Pieza grande de cajón',    dim:'46.4×16.5 cm',label:'Pieza grande de cajón',    rinde:'35 por hoja'},
   // v296 (medidas dadas por el usuario): el cajón Emma tiene frente y cuadro propios; el fondo es el mismo.
   {key:'frenteemma',  tipo:'mel', nombre:'Frente Emma',              dim:'19×54 cm',    label:'Frente de cajón Emma',     rinde:'24 por hoja'},
-  {key:'pchicaemma',  tipo:'mel', nombre:'Pieza chica de cajón Emma', dim:'33×15 cm',   label:'Pieza chica de cajón Emma', rinde:'56 por hoja'},
-  {key:'pgrandeemma', tipo:'mel', nombre:'Pieza grande de cajón Emma',dim:'46.4×15 cm', label:'Pieza grande de cajón Emma',rinde:'40 por hoja'},
+  {key:'pchicaemma',  tipo:'mel', nombre:'Pieza chica de cajón Emma', dim:'33×15 cm',   label:'Pieza chica de cajón Emma', rinde:'49 por hoja (es la chica normal con 1.5 cm menos)'},
+  {key:'pgrandeemma', tipo:'mel', nombre:'Pieza grande de cajón Emma',dim:'46.4×15 cm', label:'Pieza grande de cajón Emma',rinde:'35 por hoja (es la grande normal con 1.5 cm menos)'},
   {key:'pchicamax',   tipo:'mel', nombre:'Pieza chica de cajón Max', dim:'15×38 cm',    label:'Pieza chica de cajón Max', rinde:'45 por hoja'},
   {key:'pgrandemax',  tipo:'mel', nombre:'Pieza grande de cajón Max',dim:'15×52.5 cm',  label:'Pieza grande de cajón Max',rinde:'30 por hoja'},
   {key:'entzap',      tipo:'mel', nombre:'Entrepaño zapatera',       dim:'27×40 cm',    label:'Entrepaño de zapatera (27 o 30×40)', rinde:'24 por hoja'},
@@ -7302,8 +7302,8 @@ function piezasAConsumoReceta(piezas, color){
   Object.keys(largasPorColor).forEach(c=>addConsumo('Melamina '+c, largasPorColor[c]/35));
   Object.keys(cortasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, cortasMaxPorColor[c]/45));
   Object.keys(largasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, largasMaxPorColor[c]/30));
-  Object.keys(cortasEmmaPorColor).forEach(c=>addConsumo('Melamina '+c, cortasEmmaPorColor[c]/56));
-  Object.keys(largasEmmaPorColor).forEach(c=>addConsumo('Melamina '+c, largasEmmaPorColor[c]/40));
+  Object.keys(cortasEmmaPorColor).forEach(c=>addConsumo('Melamina '+c, cortasEmmaPorColor[c]/49));
+  Object.keys(largasEmmaPorColor).forEach(c=>addConsumo('Melamina '+c, largasEmmaPorColor[c]/35));
 
   // Entrepaños de zapatera: 24 por hoja (confirmado por el usuario), sin importar si son de
   // 27×40 o 30×40 — mismo rendimiento para ambos.
