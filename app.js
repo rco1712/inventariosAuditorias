@@ -8816,7 +8816,7 @@ function piezasMelDeInstalacion(l){
   }catch(e){ return null; }
 }
 let verifDest = null;
-const VD_TXT = {inv:'📦 Inventario', sob:'🧩 Sobrantes', merma:'🗑️ Merma'}, VD_COL = {inv:'#16a34a', sob:'#0e8a8a', merma:'#dc2626'};
+const VD_TXT = {inv:'📦 Inventario', sob:'🧩 Sobrantes', merma:'🗑️ Merma', falta:'❌ No la tengo'}, VD_COL = {inv:'#16a34a', sob:'#0e8a8a', merma:'#dc2626', falta:'#64748b'};
 async function verifDestino(id, dest){
   await cargarInstLog(); const x = (instLog||[]).find(l=>l.id===id); if(!x) return;
   if(regresoDeInstalacion(id)) return alert('Esta instalación ya se regresó al inventario.');
@@ -8827,7 +8827,9 @@ async function verifDestino(id, dest){
   mel.forEach(c=>{ const mias = pz.filter(p=>p.itemId===c.itemId), W = mias.reduce((a,p)=>a+p.q*p.w,0);
     if(!mias.length || !(W>0)) rows.push({n:'Melamina (toda)', dim:'', q:1, itemId:c.itemId, u:Number(c.cantidad), d:dest});
     else mias.forEach(p=>rows.push({n:p.n, dim:p.dim, q:p.q, itemId:c.itemId, u:Number(c.cantidad)*p.w/W, d:dest})); });
-  verifDest = {id, x, mel, otros, rows};
+  // v296 Acta de regreso: herraje por herraje, ¿cuántos tienes? Solo entra lo que firma que tiene.
+  const herr = otros.map(c=>({itemId:c.itemId, q:Number(c.cantidad), tengo:Number(c.cantidad)}));
+  verifDest = {id, x, mel, otros, rows, herr, firma:false};
   verifDestPintar();
 }
 function verifDestPintar(){
@@ -8836,41 +8838,53 @@ function verifDestPintar(){
   if(!ov){ ov = document.createElement('div'); ov.id = 'verif-dest'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto'; document.body.appendChild(ov); }
   const nom = id => ((CATALOGO.find(i=>i.id===id)||{}).nombre||'').replace('Melamina ','');
   const un = c => (CATALOGO.find(i=>i.id===c.itemId)||{}).unidad||'', nomC = c => (CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||'';
-  const tot = {inv:0, sob:0, merma:0}; V.rows.forEach(r=>{ tot[r.d] += r.q*r.u; });
+  const tot = {inv:0, sob:0, merma:0, falta:0}; V.rows.forEach(r=>{ tot[r.d] += r.q*r.u; });
   const btn = (i, d, on) => `<button class="btn small" style="flex:1;margin:0;min-height:38px;padding:2px 4px;font-size:12.5px;${on?`background:${VD_COL[d]}`:`background:transparent;color:${VD_COL[d]};border:1px solid ${VD_COL[d]};box-shadow:none`}" onclick="verifDestSet(${i},'${d}')">${VD_TXT[d]}</button>`;
   ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #dc2626;border-radius:18px;padding:14px;margin-top:8px">
-    <div class="row" style="justify-content:space-between"><div style="font-size:17px;font-weight:900">❌ No se instaló</div><button onclick="verifDest=null;verifDestPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div class="row" style="justify-content:space-between"><div style="font-size:17px;font-weight:900">↩️ Acta de regreso · no se instaló</div><button onclick="verifDest=null;verifDestPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <div style="font-weight:800;margin-top:2px">${V.x.descripcion.split(' · ').slice(0,3).join(' · ')}</div>${V.x.calle?`<div style="font-weight:700">📍 ${escCalle(V.x.calle)}</div>`:''}
-    ${V.otros.length?`<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(22,163,74,.12);border:1px solid rgba(22,163,74,.45)"><strong>🔩 Los herrajes regresan a tu inventario:</strong><div class="hint" style="margin:4px 0 0">${V.otros.map(c=>`${fmtNum(c.cantidad)} ${un(c)} ${nomC(c)}`).join(' · ')}</div></div>`:''}
+    ${V.herr.length?`<div style="margin-top:10px;font-size:15px;font-weight:900">🔩 Herrajes: ¿cuántos tienes?</div><div class="hint" style="margin:2px 0 0">Solo regresa a tu inventario lo que tienes.</div>
+    ${V.herr.map((h,i)=>{ const it = CATALOGO.find(z=>z.id===h.itemId)||{}, ok = h.tengo>=h.q-1e-9; return `<div style="margin-top:6px;padding:8px 10px;border-radius:12px;border:2px solid ${ok?'#16a34a':'#dc2626'};display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong>${it.nombre||''}</strong><div class="hint" style="margin:0">Regresan ${fmtNum(h.q)} ${it.unidad||''}${ok?' · <span style="color:#16a34a;font-weight:800">Sí los tengo</span>':` · <span style="color:#dc2626;font-weight:800">faltan ${fmtNum(h.q-h.tengo)}</span>`}</div></div>
+      <button class="btn small" style="margin:0;min-height:36px;width:36px;padding:0" onclick="verifDestTengo(${i},-1)">−</button><input type="number" min="0" max="${h.q}" value="${fmtNum(h.tengo)}" style="width:56px;min-width:56px;text-align:center;margin:0" onchange="verifDestTengoSet(${i},this.value)"><button class="btn small" style="margin:0;min-height:36px;width:36px;padding:0" onclick="verifDestTengo(${i},1)">+</button></div>`; }).join('')}`:''}
     ${V.rows.length?`<div style="margin-top:12px;font-size:15px;font-weight:900">🪵 ¿A dónde va cada pieza de melamina?</div>
     <div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap"><span class="hint" style="margin:0;white-space:nowrap">Todo a:</span>${['inv','sob','merma'].map(d=>`<button class="btn small" style="flex:1;margin:0;min-height:34px;padding:2px;font-size:12px;background:transparent;color:${VD_COL[d]};border:1px solid ${VD_COL[d]};box-shadow:none" onclick="verifDestTodo('${d}')">${VD_TXT[d]}</button>`).join('')}</div>
     ${V.rows.map((r,i)=>`<div style="margin-top:8px;padding:9px 10px;border-radius:12px;border:2px solid ${VD_COL[r.d]};background:linear-gradient(0deg,${VD_COL[r.d]}12,${VD_COL[r.d]}12),var(--card)">
       <div class="row" style="justify-content:space-between;gap:6px;flex-wrap:nowrap"><div style="min-width:0"><strong>${r.n==='Melamina (toda)'?'Melamina '+nom(r.itemId):`${fmtNum(r.q)} × ${r.n}`}</strong>${r.dim?` <span class="hint" style="margin:0">${r.dim} cm</span>`:''}<div class="hint" style="margin:0">${nom(r.itemId)} · ${fmtNum(r.q*r.u)} hoja</div></div>
       ${r.q>1 && r.q===Math.round(r.q)?`<button class="btn small" style="margin:0;padding:2px 8px;min-height:30px;font-size:12px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="verifDestSeparar(${i})">✂️ Separar</button>`:''}</div>
-      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap">${['inv','sob','merma'].map(d=>btn(i,d,r.d===d)).join('')}</div></div>`).join('')}
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap">${['inv','sob','merma','falta'].map(d=>btn(i,d,r.d===d)).join('')}</div></div>`).join('')}
     <div style="margin-top:12px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12)"><strong>Resumen de la melamina</strong>
-      ${['inv','sob','merma'].filter(d=>tot[d]>0.0005).map(d=>`<div class="row" style="justify-content:space-between"><span>${VD_TXT[d]}</span><strong style="color:${VD_COL[d]}">${fmtNum(tot[d])} hoja</strong></div>`).join('')}
+      ${['inv','sob','merma','falta'].filter(d=>tot[d]>0.0005).map(d=>`<div class="row" style="justify-content:space-between"><span>${VD_TXT[d]}</span><strong style="color:${VD_COL[d]}">${fmtNum(tot[d])} hoja</strong></div>`).join('')}
       <div class="hint" style="margin:4px 0 0">Total: ${fmtNum(V.mel.reduce((a,c)=>a+Number(c.cantidad),0))} hoja de melamina de estas piezas.${V.x.categoria==='Puerta'?' Las tiras de los lados de la hoja no regresan (casi siempre ya se usaron).':''}</div></div>`:''}
-    <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifDestGuardar()">✅ Guardar</button>
-    <p class="hint" style="margin:6px 0 0">Se aplica directo (Dirección ya lo revisó). Si después sí se instala, se captura otra vez como nueva.</p></div>`;
+    ${(()=>{ const fh = V.herr.filter(h=>h.tengo<h.q-1e-9), fm = V.rows.filter(r=>r.d==='falta'); return fh.length||fm.length ? `<div style="margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)"><strong>❌ Lo que no tienes</strong><div class="hint" style="margin:2px 0 0">${fh.map(h=>`${fmtNum(h.q-h.tengo)} ${((CATALOGO.find(z=>z.id===h.itemId)||{}).nombre||'')}`).concat(fm.map(r=>r.n==='Melamina (toda)'?'Melamina '+nom(r.itemId):`${fmtNum(r.q)} ${r.n} ${r.dim||''}`)).join(' · ')}</div><div class="hint" style="margin:4px 0 0">No entra a tu inventario. Dirección decide qué pasa.</div></div>` : ''; })()}
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="verifDest.firma=this.checked;verifDestPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> lo que marqué que sí tengo entra a mi inventario. Lo que no, lo decide Dirección.</span></label>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="verifDestGuardar()">${V.firma?'✅ Firmar y guardar':'✍️ Marca la firma para guardar'}</button>
+    <p class="hint" style="margin:6px 0 0">Si después sí se instala, se captura otra vez como nueva.</p></div>`;
 }
 function verifDestSet(i, d){ if(verifDest && verifDest.rows[i]){ verifDest.rows[i].d = d; verifDestPintar(); } }
+function verifDestTengo(i, d){ const h = verifDest && verifDest.herr[i]; if(!h) return; h.tengo = Math.max(0, Math.min(h.q, (Number(h.tengo)||0)+d)); verifDestPintar(); }
+function verifDestTengoSet(i, v){ const h = verifDest && verifDest.herr[i]; if(!h) return; h.tengo = Math.max(0, Math.min(h.q, Number(v)||0)); verifDestPintar(); }
 function verifDestTodo(d){ if(verifDest){ verifDest.rows.forEach(r=>r.d = d); verifDestPintar(); } }
 function verifDestSeparar(i){ const r = verifDest && verifDest.rows[i]; if(!r || !(r.q>1)) return;
   verifDest.rows.splice(i, 1, ...Array.from({length:r.q}, ()=>Object.assign({}, r, {q:1}))); verifDestPintar(); }
 async function verifDestGuardar(){
   const V = verifDest; if(!V) return; const x = V.x, id = V.id;
+  if(!V.firma) return alert('Marca la casilla ✍️ Firmo para guardar el acta de regreso.');
   if(regresoDeInstalacion(id)){ verifDest = null; verifDestPintar(); return alert('Esta instalación ya se regresó al inventario.'); }
   const r4 = n => Math.round(n*10000)/10000;
-  const porItem = {}; V.mel.forEach(c=>{ porItem[c.itemId] = {q:Number(c.cantidad), sob:0, merma:0, sobPz:[], mermaPz:[]}; });
-  V.rows.forEach(r=>{ const P = porItem[r.itemId]; if(!P || r.d==='inv') return; P[r.d] += r.q*r.u; P[r.d==='sob'?'sobPz':'mermaPz'].push(r); });
-  Object.values(porItem).forEach(P=>{ P.sob = Math.min(P.q, r4(P.sob)); P.merma = Math.min(P.q - P.sob, r4(P.merma)); });
+  const porItem = {}; V.mel.forEach(c=>{ porItem[c.itemId] = {q:Number(c.cantidad), sob:0, merma:0, falta:0, sobPz:[], mermaPz:[], faltaPz:[]}; });
+  V.rows.forEach(r=>{ const P = porItem[r.itemId]; if(!P || r.d==='inv') return; P[r.d] += r.q*r.u; P[r.d+'Pz'].push(r); });
+  Object.values(porItem).forEach(P=>{ P.falta = Math.min(P.q, r4(P.falta)); P.sob = Math.min(P.q - P.falta, r4(P.sob)); P.merma = Math.min(P.q - P.falta - P.sob, r4(P.merma)); });
+  const tengoH = {}; (V.herr||[]).forEach(h=>{ tengoH[h.itemId] = (tengoH[h.itemId]||0) + Number(h.tengo); });
   const pzTxt = rs => { const g = {}; rs.forEach(r=>{ const k = r.n==='Melamina (toda)' ? 'Melamina' : r.n+(r.dim?' '+r.dim:''); g[k]=(g[k]||0)+(r.n==='Melamina (toda)'?0:r.q); }); return Object.keys(g).map(k=>g[k]?`${fmtNum(g[k])} ${k}`:k); };
   const fecha = new Date().toISOString(), fechaM = new Date(Date.parse(fecha)+1).toISOString(), loteId = cryptoId(), estado = 'aprobado', creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
   const nota = 'No se instaló (Dirección) · '+x.descripcion+(x.calle?' · 📍 '+x.calle:'');
   try{
+    let nDev = 0; const faltan = [];
     for(const c of V.otros.concat(V.mel)){ const it = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:x.modulo, itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', instalacionId:id, cantidad:Number(c.cantidad), nota, fecha, estado, loteId, creadoPor, porRechazo:true});
+      const Pf = porItem[c.itemId], qDev = Pf ? r4(Number(c.cantidad) - Pf.falta) : Math.min(Number(c.cantidad), Number(tengoH[c.itemId]!=null?tengoH[c.itemId]:c.cantidad));
+      const qFal = r4(Number(c.cantidad) - qDev); if(qFal>0.00005) faltan.push({itemId:it.id, nombre:it.nombre, q:qFal, piezas:Pf?pzTxt(Pf.faltaPz):[]});
+      if(qDev>0.00005 || (!nDev && c===V.otros.concat(V.mel).slice(-1)[0])){ nDev++;
+        await db.collection('movimientos').doc(cryptoId()).set({modulo:x.modulo, itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', instalacionId:id, cantidad:Math.max(0,qDev), ...(qFal>0.00005?{faltaron:qFal}:{}), nota:nota+(qFal>0.00005?' · no tiene '+fmtNum(qFal):''), fecha, estado, loteId, creadoPor, porRechazo:true}); }
       const P = porItem[c.itemId]; if(!P) continue;
       if(P.merma>0.00005) await db.collection('movimientos').doc(cryptoId()).set({modulo:x.modulo, itemId:it.id, itemNombre:it.nombre, tipo:'merma', lado:'cortado', motivo:'regresoMerma', instalacionId:id, cantidad:P.merma, nota:'A merma: '+pzTxt(P.mermaPz).join(', ')+' · '+nota, fecha:fechaM, estado, loteId, creadoPor});
       if(P.sob>0.00005) await db.collection('movimientos').doc(cryptoId()).set({modulo:x.modulo, itemId:it.id, itemNombre:it.nombre, tipo:'sobrante', motivo:'regresoSobrante', instalacionId:id, cantidad:P.sob, nota:'A sobrantes: '+pzTxt(P.sobPz).join(', ')+' · '+nota, fecha:fechaM, estado, loteId, sobranteId:loteId, creadoPor});
@@ -8879,8 +8893,10 @@ async function verifDestGuardar(){
     if(sobIts.length){ const material = sobIts.map(k=>({itemId:k, cantidad:porItem[k].sob})), restante = {}; material.forEach(m=>{ restante[m.itemId]=m.cantidad; });
       const lineas = sobIts.flatMap(k=>pzTxt(porItem[k].sobPz).map(t=>t+' · '+((CATALOGO.find(i=>i.id===k)||{}).nombre||'').replace('Melamina ','')));
       await db.collection('sobrantes').doc(loteId).set({modulo:x.modulo, fecha, calle:x.calle||'', nota:'No se instaló: '+x.descripcion.split(' · ').slice(0,3).join(' · '), lineas, lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:id}); }
+    try{ await db.collection('piezasPrueba').doc('actaReg_'+id).set({tipo:'actaRegreso', modulo:x.modulo, instalacionId:id, descripcion:x.descripcion, calle:x.calle||'', fecha,
+      herrajes:(V.herr||[]).map(h=>({itemId:h.itemId, q:h.q, tengo:h.tengo})), piezas:V.rows.map(r=>({n:r.n, dim:r.dim||'', q:r.q, itemId:r.itemId, d:r.d})), faltan, firma:{por:creadoPor, en:fecha}}); }catch(e){}
     const algoSob = sobIts.length, algoMer = Object.values(porItem).some(P=>P.merma>0.00005);
-    await verifGuardar(id, Object.assign({}, x.verif||{}, {puertas: algoSob ? 'sobrantes' : (algoMer && !V.rows.some(r=>r.d==='inv') ? 'merma' : 'regreso'), visto:true, fechaDecision:fecha, directo:true}));
+    await verifGuardar(id, Object.assign({}, x.verif||{}, {puertas: algoSob ? 'sobrantes' : (algoMer && !V.rows.some(r=>r.d==='inv') ? 'merma' : 'regreso'), visto:true, fechaDecision:fecha, directo:true, ...(faltan.length?{faltan}:{})}));
     verifDest = null; verifDestPintar(); _verifCoordT = 0; _verifCoord = null;
     toast('✅ Guardado. Los herrajes regresaron a tu inventario.'+(algoSob?'<br><small>🧩 Lo que elegiste quedó en Sobrantes.</small>':''));
     renderHome(); window.scrollTo(0,0);
