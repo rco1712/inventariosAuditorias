@@ -1487,9 +1487,10 @@ function renderHome(){
   $('#main').innerHTML = `
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
     ${actaEntHtml()}
-    ${hojaDiaHtml()}
+    ${sisNuevoMod()&&!esAdmin()?'':hojaDiaHtml()}
+    ${pasosHtml()}
     ${hojaSepHtml()}
-    ${ayerBtnHtml()}
+    ${sisNuevoMod()&&!esAdmin()?'':ayerBtnHtml()}
     ${ccHomeBannerHtml()}
     ${hcFaltaHtml()}
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
@@ -1505,7 +1506,7 @@ function renderHome(){
     ${avisoInstalarHtml()}
     <div id="home-apr"></div>
     ${audHomeCardHtml()}
-    ${tilesHtml}
+    <div id="home-tiles"></div>${tilesHtml}
     <p class="hint" style="text-align:center;margin:14px 0 4px">Versión ${APP_VERSION}${versionServidor && numVersion(versionServidor)>numVersion(APP_VERSION)?` · <a href="#" onclick="actualizarApp();return false;">hay una nueva (${versionServidor})</a>`:' · ✅ al día'}</p>`;
   if(esAdmin()) contarAprobacionesPendientes();
   if(esAdministracion()){
@@ -9302,6 +9303,27 @@ async function ayerOtro(id){
 function ayerBtnHtml(){
   if(!modoAutoOn() || esAdmin() || esSoloLectura()) return '';
   return `<button class="btn" style="width:100%;min-height:62px;margin:0 0 12px;font-size:17px;background:linear-gradient(135deg,#0369a1,#075985)" onclick="ayerAbrir()">🚚 Instalaciones que se mandaron ayer</button>`;
+}
+// ===== v298 · Tus pasos de hoy (sistema nuevo, pedido por el usuario: más fácil para el coordinador) =====
+// Una sola tarjeta arriba del inicio con los 4 pasos en orden; cada uno se palomea solo.
+function pasosHtml(){
+  if(esAdmin() || esSoloLectura() || !sisNuevoMod()) return '';
+  hojaDiaCargar(); actaEntCargar();
+  if(_actaEnt.mod===modulo() && _actaEnt.doc) return ''; // primero el Acta de entrega (tarjeta propia)
+  const H = _hojaDia, hoyActa = H.acta && diaLocal(H.acta.firma.en) >= fechaHoyLocal();
+  const p1 = hojaDiaToca() ? 'now' : 'ok';
+  const conf = ((_verifCoord && _verifCoord.conf)||[]).length;
+  const cierre = typeof cierreHechoHoy==='function' && cierreHechoHoy();
+  const paso = (n, est, t, s, js, btn) => { const C = {ok:['#16a34a','✓','#f0fdf4'], now:['#ea580c',n,'#fff7ed'], next:['#64748b',n,'var(--card)']}[est];
+    return `<div ${js&&est!=='ok'?`onclick="${js}"`:''} style="display:flex;gap:10px;align-items:center;padding:10px;margin-top:8px;border-radius:14px;border:2px solid ${est==='next'?'var(--line)':C[0]};background:${C[2]};${js&&est!=='ok'?'cursor:pointer':''}${est==='now'?';box-shadow:0 0 0 3px rgba(234,88,12,.18)':''}">
+      <div style="width:34px;height:34px;min-width:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;color:#fff;background:${C[0]}">${C[1]}</div>
+      <div style="flex:1;min-width:0"><div style="font-weight:900;font-size:16px;color:var(--ink)">${t}</div><div class="hint" style="margin:0">${s}</div></div>${est==='now'&&btn?`<span class="tag" style="background:#ea580c;color:#fff;border-color:#ea580c">${btn}</span>`:''}</div>`; };
+  return `<div class="card" style="padding:12px;border:2px solid #3E5CDE"><div style="font-size:13px;font-weight:900;color:var(--sub);letter-spacing:.5px">TUS PASOS DE HOY</div>
+    ${paso(1, p1, 'Hoja del día', p1==='ok'?(hoyActa?'Hoy firmaste el Acta de entrega':'Firmada ✓'):'Revisa tu inventario y fírmala', 'hojaDiaAbrir()', 'Empezar')}
+    ${paso(2, p1==='ok'?'now':'next', 'Captura lo de hoy', 'Con los botones de abajo ⬇️', p1==='ok'?"document.getElementById('home-tiles').scrollIntoView({behavior:'smooth'})":'', 'Ahora')}
+    ${paso(3, cierre?'ok':(p1==='ok'?'next':'next'), 'Cierre del turno y hoja de corte', cierre?'Hecho ✓':'En la tarde: lo que se cortó', p1==='ok'?"irA('cierre')":'')}
+    ${paso(4, conf?(p1==='ok'?'now':'next'):'ok', 'Confirma tus instalaciones', conf?conf+' por confirmar':'Al corriente ✓', conf?(modoAutoOn()?'ayerAbrir()':"document.getElementById('coord-conf')&&document.getElementById('coord-conf').scrollIntoView({behavior:'smooth'})"):'', 'Revisar')}
+  </div>`;
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
 // ✅ Se instaló → queda verificada. ❌ No se instaló → le sale el aviso de siempre para decidir (se instala hoy u otro
