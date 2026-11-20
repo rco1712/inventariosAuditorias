@@ -9163,8 +9163,8 @@ async function hojaDiaGenerar(){
       && ((l.separado && !l.separado.resuelto) || (l.pospuesta && !l.verif && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
     if(sep.length) G.push({t:'📌 Material separado', sep:true, rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:(l.separado&&!l.separado.resuelto?'Separada · se instala '+fCorta(diaValorInst(l)):(l.noSalio?'No salió · esperando a Dirección':'Apartada · se instala '+fCorta(diaValorInst(l)))), sep:true}))}); }catch(e){}
   const doc = {tipo:'hojaDia', modulo:mod, dia:hoy, fecha:new Date().toISOString(), desde, desdeConteo, grupos:G, firma:null, resol:{}};
-  await db.collection('piezasPrueba').doc('dia_'+mod+'_'+hoy).set(doc);
-  _hojaDia.doc = Object.assign({id:'dia_'+mod+'_'+hoy}, doc); return _hojaDia.doc;
+  await db.collection('piezasPrueba').doc('hdia_'+mod+'_'+hoy).set(doc);
+  _hojaDia.doc = Object.assign({id:'hdia_'+mod+'_'+hoy}, doc); return _hojaDia.doc;
 }
 function hojaDiaHtml(){
   if(!hojaDiaToca()) return '';
