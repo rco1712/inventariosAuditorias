@@ -8184,7 +8184,7 @@ function verifDetalleHtml(l){
   const hojas = cs.filter(x=>esHoja(x.it)), otros = cs.filter(x=>!esHoja(x.it));
   const fila = x => `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)"><span>${x.it.nombre}</span><strong style="white-space:nowrap">${fmtNum(x.q)} ${x.it.unidad}</strong></div>`;
   const cap = l.fecha ? new Date(l.fecha).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'}) : '';
-  return `${l.noSalio && !(l.verif&&l.verif.estado)?`<div style="margin:4px 0;padding:6px 8px;border-radius:8px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:800;font-size:13px">⚠️ El coordinador dice que NO salió (Hoja del día ${fCorta(diaLocal(l.noSalio.en))})</div>`:''}${extrasLogHtml(l)}
+  return `${l.salioOk && !l.noSalio && !(l.verif&&l.verif.estado)?`<div style="margin:4px 0;padding:6px 8px;border-radius:8px;background:rgba(22,163,74,.12);color:#15803d;font-weight:800;font-size:13px">🚚 El coordinador dice que sí salió (Hoja del día ${fCorta(diaLocal(l.salioOk.en))})</div>`:''}${l.noSalio && !(l.verif&&l.verif.estado)?`<div style="margin:4px 0;padding:6px 8px;border-radius:8px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:800;font-size:13px">⚠️ El coordinador dice que NO salió (Hoja del día ${fCorta(diaLocal(l.noSalio.en))})</div>`:''}${extrasLogHtml(l)}
     <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12.5px;color:var(--sub);list-style:none">📦 ${verifMat(l)} <span style="color:var(--brand);font-weight:700;white-space:nowrap">· Ver todo ▾</span></summary>
       <div style="margin-top:6px;padding:8px 10px;border-radius:10px;background:var(--bg);border:1px solid var(--line);font-size:13px">
         ${hojas.length?`<div style="font-weight:800;margin-bottom:2px">🪵 Melamina / MDF</div>${hojas.map(fila).join('')}`:''}
@@ -9212,6 +9212,8 @@ async function hojaDiaFirmar(){
   const mal = Object.keys(V.no).filter(k=>!rows[k].inst && (!V.mot[k] || (!rows[k].sep && (V.tengo[k]===undefined || V.tengo[k]==='' || isNaN(Number(V.tengo[k]))))));
   if(mal.length) return alert('En los renglones con "No" escribe cuánto tienes y elige por qué.');
   const noSal = Object.keys(V.no).filter(k=>rows[k].inst).map(k=>rows[k].logId);
+  const siSal = []; V.d.grupos.forEach(g=>g.rows.forEach(r=>{ if(r.inst && !V.no[r.k]) siSal.push(r.logId); }));
+  for(const id of siSal){ try{ await db.collection('instalacionesLog').doc(id).update({salioOk:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), hojaDia:V.d.id}}); }catch(e){} }
   for(const id of noSal){ try{ await db.collection('instalacionesLog').doc(id).update({noSalio:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), hojaDia:V.d.id}}); }catch(e){} }
   const difs = Object.keys(V.no).filter(k=>!rows[k].inst).map(k=>{ const r = rows[k], tengo = r.sep ? null : Number(V.tengo[k]); return Object.assign({}, r, {tengo, dif:r.sep?null:fmtNum(tengo - r.d), motivo:V.mot[k]}); });
   try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, noSalio:noSal, firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
