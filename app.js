@@ -9121,11 +9121,18 @@ async function hojaDiaGenerar(){
   const G = [], it = id => CATALOGO.find(i=>i.id===id)||{};
   // 1) Hojas completas y 2) herrajes / otros (inventario oficial)
   const hojas = [], otros = [];
+  // v298 (pedido por el usuario): por renglón, qué pasó desde la hoja anterior (entró, se cortó, instalaciones, mermas…).
+  const mvTxt = (f1, f0, hoja) => { const d = k => fmtNum((Number(f1[k])||0)-(Number(f0[k])||0)), out = [];
+    if(d('entradas')) out.push('+'+d('entradas')+' entró'); if(d('ajustes')) out.push((d('ajustes')>0?'+':'')+d('ajustes')+' ajuste');
+    if(hoja && d('cortes')) out.push('−'+d('cortes')+' se cortaron');
+    if(!hoja && d('instalaciones')) out.push('−'+d('instalaciones')+' instalaciones'); if(!hoja && d('garantias')) out.push('−'+d('garantias')+' garantías');
+    if(d('mermas')) out.push('−'+d('mermas')+' merma'); if(d('salidas')) out.push('−'+d('salidas')+' salidas');
+    return out.join(' · '); };
   CATALOGO.forEach(i=>{ const f1 = calcFormulaHasta(i.id, null), f0 = calcFormulaHasta(i.id, desde);
     if(esHoja(i)){ const t = fmtNum(f0.completas), d = fmtNum(f1.completas); if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
-      hojas.push({k:'h_'+i.id, itemId:i.id, n:i.nombre.replace(/^Melamina /,''), t, d, u:'hojas', lado:'completas'}); }
+      hojas.push({k:'h_'+i.id, itemId:i.id, n:i.nombre.replace(/^Melamina /,''), t, d, u:'hojas', lado:'completas', mv:mvTxt(f1,f0,true)}); }
     else { const t = fmtNum(f0.final), d = fmtNum(f1.final); if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
-      otros.push({k:'o_'+i.id, itemId:i.id, n:i.nombre, t, d, u:i.unidad||'', cat:i.cat}); } });
+      otros.push({k:'o_'+i.id, itemId:i.id, n:i.nombre, t, d, u:i.unidad||'', cat:i.cat, mv:mvTxt(f1,f0,false)}); } });
   if(hojas.length) G.push({t:'Hojas completas', rows:hojas});
   // 3) Piezas por color (inventario de piezas)
   try{ await pzpCargar(mod); const R1 = pzpCalcular(pzpD);
@@ -9137,7 +9144,10 @@ async function hojaDiaGenerar(){
           const t = R0 ? fmtNum(((R0.T||{})[k]||0)-((R0.AC||{})[k]||0)) : fmtNum(((R1.F||{})[k]||{}).ini||0) - fmtNum(arm);
           if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
           const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNorm(N.dim));
-          rows.push({k:'p_'+k, itemId:id, pk:P?P.key:null, n:/\d×\d/.test(N.n)?N.n:N.n+' '+String(N.dim||'').replace(/ cm$/,''), t, d, u:'pzas', arm, area:pzpArea(N.dim)}); });
+          const F1 = (R1.F||{})[k]||{}, F0 = R0 ? ((R0.F||{})[k]||{}) : {ini:F1.ini}, dd = x => fmtNum((Number(F1[x])||0)-(Number(F0[x])||0)), mvp = [];
+          if(dd('corte')+dd('ret')) mvp.push('+'+fmtNum(dd('corte')+dd('ret'))+' se cortaron'); if(dd('inst')) mvp.push(dd('inst')+' instalaciones'); if(dd('regreso')) mvp.push('+'+dd('regreso')+' regresaron');
+          if(dd('salida')) mvp.push(dd('salida')+' garantía/merma'); if(dd('recorte')) mvp.push(dd('recorte')+' recorte'); if(dd('otro')) mvp.push((dd('otro')>0?'+':'')+dd('otro')+' otros');
+          rows.push({mv:mvp.join(' · ').replace(/--/g,'−').replace(/ -(\d)/g,' −$1').replace(/^-(\d)/,'−$1'), k:'p_'+k, itemId:id, pk:P?P.key:null, n:/\d×\d/.test(N.n)?N.n:N.n+' '+String(N.dim||'').replace(/ cm$/,''), t, d, u:'pzas', arm, area:pzpArea(N.dim)}); });
         if(rows.length) G.push({t:'Piezas sueltas · '+pzpColor(id), rows}); }); } }catch(e){}
   // 4) herrajes
   const corr = otros.filter(r=>/corredera/i.test(r.n)), resto = otros.filter(r=>!/corredera/i.test(r.n));
@@ -9179,7 +9189,7 @@ function hojaDiaPintar(){
   const fila = r => { const no = !!V.no[r.k], dif = fmtNum(r.d - r.t);
     return `<div style="padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${no?'#dc2626':(recon.has(r.k)?'#ca8a04':'var(--line)')};background:${no?'rgba(220,38,38,.08)':'transparent'}">
       <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700">${r.n}</strong>${recon.has(r.k)?' <span style="color:#ca8a04;font-weight:800">🔁 recontar</span>':''}
-        ${r.sep?`<div class="hint" style="margin:0">${r.det||''}</div>`:`<div class="hint" style="margin:0">Tenías ${fmtNum(r.t)}${dif?` · ${dif>0?'+':''}${fmtNum(dif)}`:' · sin movimiento'}${r.arm&&r.arm>0?` · ${fmtNum(r.arm)} más en armados`:''}</div>${r.det?`<div class="hint" style="margin:0;font-size:11.5px">${r.det}</div>`:''}`}</div>
+        ${r.sep?`<div class="hint" style="margin:0">${r.det||''}</div>`:`<div class="hint" style="margin:0">Empezaste con <strong>${fmtNum(r.t)}</strong>${dif?'':' · sin movimiento'}${r.arm&&r.arm>0?` · ${fmtNum(r.arm)} más en armados`:''}</div>${r.mv?`<div style="font-size:12.5px;margin:1px 0 0;color:var(--ink)">${r.mv}</div>`:(dif?`<div style="font-size:12.5px;margin:1px 0 0">${dif>0?'+':''}${fmtNum(dif)}</div>`:'')}${r.det?`<div class="hint" style="margin:0;font-size:11.5px">${r.det}</div>`:''}`}</div>
         ${r.sep?'':`<div style="text-align:right"><div style="font-size:18px;font-weight:900;line-height:1">${fmtNum(r.d)}</div><div class="hint" style="margin:0;font-size:11px">debes tener</div></div>`}
         <button class="btn small" style="margin:0;min-width:46px;min-height:38px;padding:0;background:${no?'#dc2626':'#16a34a'}" onclick="hojaDiaNo('${q(r.k)}')">${no?'No':'Sí'}</button></div>
       ${no&&r.inst?`<div class="hint" style="margin:6px 0 0;color:#dc2626;font-weight:800">No salió: queda apartada y Dirección la verifica con el grupo.</div>`:''}
