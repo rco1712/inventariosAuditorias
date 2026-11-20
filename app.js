@@ -1045,7 +1045,7 @@ function esCoordinador(){ return miPerfil && miPerfil.rol==='coordinador'; }
 // Abre una pantalla con opciones ya elegidas (p. ej. Entradas/Salidas en "Corte" de Melamina).
 function irA(v, opts){
   opts = opts||{};
-  if(v!=='home' && typeof actaBloquea==='function' && actaBloquea()){ alert('📜 Primero firma el Acta de entrega en tu Inicio.\n\nHasta firmarla no se puede capturar nada.'); v = 'home'; }
+  if(v!=='home' && typeof actaBloquea==='function' && actaBloquea()){ alert((_actaEnt.doc?'📜 Primero firma el Acta de entrega en tu Inicio.':'📋 Primero firma tu Hoja del día en tu Inicio.')+'\n\nHasta firmarla no se puede capturar nada.'); v = 'home'; }
   if(v==='mov'){ if(opts.tipo && opts.tipo!==movTipo){ movVals={}; movBuscar=''; } if(opts.tipo) movTipo=opts.tipo; if(opts.cat) movCat=opts.cat; else if(opts.tipo==='corte' && !esHoja(CATALOGO.find(i=>i.cat===movCat))) movCat='Melamina'; }
   if(v==='hist' && opts.tab) histTab=opts.tab;
   setView(v);
@@ -1469,6 +1469,7 @@ function renderHome(){
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
     ${actaEntHtml()}
+    ${hojaDiaHtml()}
     ${hojaSepHtml()}
     ${sepHtml()}
     ${coordConfHtml()}
@@ -8843,6 +8844,8 @@ async function renderActas(){
     if(d.tipo==='actaRegreso') return `<div style="margin-top:4px"><strong>${String(d.descripcion||'').split(' · ').slice(0,3).join(' · ')}</strong>${d.calle?` · 📍 ${escCalle(d.calle)}`:''}</div>
       ${(d.herrajes||[]).map(h=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;border-top:1px solid var(--line);padding:2px 0"><span>${nom(h.itemId)} · regresan ${fmtNum(h.q)}</span><span style="color:${h.tengo<h.q?'#dc2626':'#16a34a'}">${h.tengo<h.q?'tiene '+fmtNum(h.tengo):'✔ los tiene'}</span></div>`).join('')}
       ${(d.piezas||[]).map(r=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;border-top:1px solid var(--line);padding:2px 0"><span>${r.n==='Melamina (toda)'?'Melamina '+nom(r.itemId).replace('Melamina ',''):fmtNum(r.q)+' '+r.n+' '+(r.dim||'')}</span><span>${VD_TXT[r.d]||r.d}</span></div>`).join('')}`;
+    if(d.tipo==='hojaDia'){ const df = {}; (d.difs||[]).forEach(x=>{ df[x.k]=x; }); const RS = {ok:'✅ aceptada', deuda:'💰 deuda', recontar:'🔁 recontar'};
+      return (d.grupos||[]).map(g=>`<div style="margin-top:6px;font-weight:800;font-size:13px">${g.t}</div>${g.rows.map(r=>{ const x = df[r.k], rs = (d.resol||{})[r.k]; return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:13px;border-top:1px solid var(--line);padding:2px 0"><span>${r.n}${x?`<span style="display:block;color:#dc2626;font-weight:700">${x.sep?'':'tiene '+fmtNum(x.tengo)+' · '}${x.motivo}${rs?' · '+RS[rs.acc]:' · por decidir'}</span>`:''}</span><strong style="white-space:nowrap">${r.sep?'':fmtNum(r.t)+' → '+fmtNum(r.d)}</strong></div>`; }).join('')}`).join(''); }
     if(d.tipo==='actaEntrega'){ const ob = new Set(((d.firma&&d.firma.objeciones)||[]).map(o=>o.k)), nt = {}; ((d.firma&&d.firma.objeciones)||[]).forEach(o=>{ nt[o.k]=o.nota; });
       return (d.grupos||[]).map(g=>`<div style="margin-top:6px;font-weight:800;font-size:13px">${g.t}</div>${g.rows.map(r=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:13.5px;border-top:1px solid var(--line);padding:2px 0"><span>${r.n}${ob.has(r.k)?`<span style="display:block;color:#dc2626;font-weight:700">❌ ${String(nt[r.k]||'').replace(/</g,'&lt;')}</span>`:''}</span><strong>${fmtNum(r.q)}</strong></div>`).join('')}`).join(''); }
     return `<div class="hint">${(d.renglones||d.lista||[]).length} renglón(es)</div>`; };
@@ -8878,6 +8881,11 @@ async function actaPDF(id){
     const DST = {inv:'Inventario', sob:'Sobrantes', merma:'Merma', falta:'NO LA TIENE'};
     if((d.piezas||[]).length) S.tabla([{t:'Pieza de melamina / MDF',w:110},{t:'Cant.',w:20},{t:'Va a',w:52}], d.piezas.map(r=>[pdfS(r.n==='Melamina (toda)'?nom(r.itemId):r.n+' '+(r.dim||'')+' · '+nom(r.itemId).replace('Melamina ','')), String(fmtNum(r.q)), {t:DST[r.d]||r.d, col:r.d==='falta'||r.d==='merma'?ROJ:undefined, b:r.d==='falta'}]), C);
     S.vacio(pdfS('Lo que firmo que si tengo entra a mi inventario. Lo que no, lo decide Direccion.'));
+  } else if(d.tipo==='hojaDia'){
+    const df = {}; (d.difs||[]).forEach(x=>{ df[x.k]=x; }); const RS = {ok:'aceptada', deuda:'DEUDA', recontar:'recontar'};
+    (d.grupos||[]).forEach(g=>S.tabla([{t:pdfS(g.t),w:84},{t:'Tenia',w:18},{t:'+/-',w:16},{t:'Debe',w:18},{t:'Tiene?',w:46}], g.rows.map(r=>{ const x = df[r.k], rs = (d.resol||{})[r.k], dif = r.sep?'':fmtNum(r.d-r.t);
+      return [pdfS(r.n), r.sep?'':String(fmtNum(r.t)), r.sep?'':(dif?(dif>0?'+':'')+dif:'-'), r.sep?'':String(fmtNum(r.d)), x?{t:pdfS('NO '+(x.sep?'':fmtNum(x.tengo)+' ')+x.motivo+(rs?' ('+RS[rs.acc]+')':'')), col:ROJ, b:true}:{t:d.firma?'SI':'', col:VER}]; }), C));
+    S.vacio(pdfS('Revise todo mi inventario. Las diferencias tienen su motivo.'));
   } else if(d.tipo==='actaEntrega'){
     const ob = {}; ((d.firma&&d.firma.objeciones)||[]).forEach(o=>{ ob[o.k] = o.nota; });
     S.vacio(pdfS('Conteo del '+fTxt(d.fechaConteo)+(d.auditor?' · '+d.auditor:'')+'. Lo separado no viene aqui.'));
@@ -9001,9 +9009,9 @@ function actaEntCargar(){
   db.collection('piezasPrueba').where('modulo','==',mod).get().then(sn=>{ const d = sn.docs.map(x=>({id:x.id, ...x.data()})).filter(x=>x.tipo==='actaEntrega' && !x.firma).sort((x,y)=>String(y.fecha).localeCompare(String(x.fecha)))[0] || null;
     const antes = _actaEnt.doc && _actaEnt.doc.id; _actaEnt.doc = d; if((d&&d.id)!==antes && current==='home') renderHome(); }).catch(()=>{});
 }
-function actaBloquea(){ if(esAdmin() || esSoloLectura() || !sisNuevoMod()) return false; actaEntCargar(); return !!(_actaEnt.mod===modulo() && _actaEnt.doc); }
+function actaBloquea(){ if(esAdmin() || esSoloLectura() || !sisNuevoMod()) return false; actaEntCargar(); return !!(_actaEnt.mod===modulo() && _actaEnt.doc) || hojaDiaToca(); }
 function actaEntHtml(){
-  if(!actaBloquea()) return ''; const d = _actaEnt.doc, n = d.grupos.reduce((s,g)=>s+g.rows.length,0);
+  if(!actaBloquea() || !(_actaEnt.mod===modulo() && _actaEnt.doc)) return ''; const d = _actaEnt.doc, n = d.grupos.reduce((s,g)=>s+g.rows.length,0);
   return `<div class="card" style="padding:14px;border:3px solid #16a34a;background:linear-gradient(0deg,rgba(22,163,74,.10),rgba(22,163,74,.10)),var(--card)">
     <div style="font-size:18px;font-weight:900">📜 Firma tu Acta de entrega</div>
     <p style="margin:4px 0 0">Es el inventario que se contó contigo el ${new Date(d.fechaConteo||d.fecha).toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}. Revisa ${n} renglones y fírmala.</p>
@@ -9041,6 +9049,164 @@ async function actaEntFirmar(){
   try{ await db.collection('piezasPrueba').doc(V.d.id).update({firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!obj.length, objeciones:obj, nota:obj.length?obj.map(o=>o.n+': '+o.nota).join(' · '):''}});
     actaEntV = null; actaEntPintar(); _actaEnt.doc = null; _actaEnt.t = Date.now(); toast(obj.length?'✍️ Firmada. Dirección revisa lo marcado ❌.':'✍️ Acta firmada. Ya puedes capturar.'); renderHome(); }
   catch(e){ alert('Error: '+e.message); }
+}
+// ===== v296 · Hoja del día (pedido por el usuario) =====
+// Cada mañana, antes de capturar, el coordinador revisa TODO su inventario renglón por renglón:
+// tenías (lo que dijo la app al firmar la hoja anterior o el acta) + entró − salió = debes tener → ¿lo tienes?
+// "Tenías" SIEMPRE es lo de la app: un faltante no se borra solo. Dirección decide cada diferencia:
+// ✅ aceptar (se da de baja como merma), 💰 deuda (baja + deuda) o 🔁 recontar (sale marcado mañana).
+function calcFormulaHasta(itemId, hastaISO){
+  const resetFecha = resetMap[modulo()];
+  const doc = inicialMap[itemId]!==undefined ? {cantidad:inicialMap[itemId], cortado:inicialCortadoMap[itemId], fecha:inicialFechaMap[itemId]} : null;
+  const b = lineaBase(resetFecha, doc);
+  const lista = movs.filter(m=>m.itemId===itemId && (!b.desde || m.fecha>b.desde) && (!hastaISO || m.fecha<=hastaISO) && cuentaEnInventario(m));
+  return calcularFormula(itemId, b.inicial, b.inicialCortado, lista);
+}
+const HD_HOJA = 122*244;
+let _hojaDia = {t:0, mod:null, hoy:null, doc:null, previa:null, acta:null}, hojaDiaV = null;
+function hojaDiaCargar(){
+  const mod = modulo(), hoy = fechaHoyLocal(); if(Date.now()-_hojaDia.t < 15000 && _hojaDia.mod===mod && _hojaDia.hoy===hoy) return;
+  _hojaDia.t = Date.now(); _hojaDia.mod = mod; _hojaDia.hoy = hoy;
+  db.collection('piezasPrueba').where('modulo','==',mod).get().then(sn=>{ const ds = sn.docs.map(x=>({id:x.id, ...x.data()}));
+    const hojas = ds.filter(x=>x.tipo==='hojaDia').sort((a,b)=>String(b.fecha).localeCompare(String(a.fecha)));
+    const actas = ds.filter(x=>x.tipo==='actaEntrega' && x.firma).sort((a,b)=>String(b.fecha).localeCompare(String(a.fecha)));
+    const antes = JSON.stringify([_hojaDia.doc&&_hojaDia.doc.id, _hojaDia.doc&&!!_hojaDia.doc.firma, !!_hojaDia.acta]);
+    _hojaDia.doc = hojas.find(x=>x.dia===hoy) || null; _hojaDia.previa = hojas.find(x=>x.dia<hoy && x.firma) || null; _hojaDia.acta = actas[0] || null;
+    if(JSON.stringify([_hojaDia.doc&&_hojaDia.doc.id, _hojaDia.doc&&!!_hojaDia.doc.firma, !!_hojaDia.acta])!==antes && current==='home') renderHome(); }).catch(()=>{});
+}
+// ¿Le toca hoja hoy? Solo en el sistema nuevo, después de firmar el Acta de entrega y no el mismo día del acta.
+function hojaDiaToca(){
+  if(esAdmin() || esSoloLectura() || !sisNuevoMod()) return false; hojaDiaCargar();
+  const H = _hojaDia; if(H.mod!==modulo() || !H.acta) return false;
+  const hoy = fechaHoyLocal(); if(diaLocal(H.acta.firma.en) >= hoy) return false;
+  return !(H.doc && H.doc.firma);
+}
+async function hojaDiaGenerar(){
+  const mod = modulo(), hoy = fechaHoyLocal(), H = _hojaDia;
+  const desde = H.previa ? H.previa.firma.en : H.acta.firma.en;
+  const desdeConteo = !H.previa;
+  const G = [], it = id => CATALOGO.find(i=>i.id===id)||{};
+  // 1) Hojas completas y 2) herrajes / otros (inventario oficial)
+  const hojas = [], otros = [];
+  CATALOGO.forEach(i=>{ const f1 = calcFormula(i.id), f0 = calcFormulaHasta(i.id, desde);
+    if(esHoja(i)){ const t = fmtNum(f0.completas), d = fmtNum(f1.completas); if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
+      hojas.push({k:'h_'+i.id, itemId:i.id, n:i.nombre.replace(/^Melamina /,''), t, d, u:'hojas', lado:'completas'}); }
+    else { const t = fmtNum(f0.final), d = fmtNum(f1.final); if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
+      otros.push({k:'o_'+i.id, itemId:i.id, n:i.nombre, t, d, u:i.unidad||'', cat:i.cat}); } });
+  if(hojas.length) G.push({t:'Hojas completas', rows:hojas});
+  // 3) Piezas por color (inventario de piezas)
+  try{ await pzpCargar(mod); const R1 = pzpCalcular(pzpD);
+    if(R1){ const R0 = desdeConteo ? null : pzpCalcular(pzpD, sumarDiasISO(H.previa.dia, -1));
+      const ids = [...new Set(Object.values(R1.N).map(n=>n.itemId))].sort((a,b)=>pzpColor(a).localeCompare(pzpColor(b)));
+      ids.forEach(id=>{ const rows = [];
+        Object.keys(R1.N).filter(k=>R1.N[k].itemId===id).sort((a,b)=>R1.N[b].area-R1.N[a].area).forEach(k=>{ const N = R1.N[k];
+          const d = fmtNum((R1.T[k]||0)-(R1.AC[k]||0)), arm = fmtNum(R1.AC[k]||0);
+          const t = R0 ? fmtNum(((R0.T||{})[k]||0)-((R0.AC||{})[k]||0)) : fmtNum(((R1.F||{})[k]||{}).ini||0) - fmtNum(arm);
+          if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
+          const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNorm(N.dim));
+          rows.push({k:'p_'+k, itemId:id, pk:P?P.key:null, n:/\d×\d/.test(N.n)?N.n:N.n+' '+String(N.dim||'').replace(/ cm$/,''), t, d, u:'pzas', arm, area:pzpArea(N.dim)}); });
+        if(rows.length) G.push({t:'Piezas sueltas · '+pzpColor(id), rows}); }); } }catch(e){}
+  // 4) herrajes
+  const corr = otros.filter(r=>/corredera/i.test(r.n)), resto = otros.filter(r=>!/corredera/i.test(r.n));
+  if(corr.length) G.push({t:'Correderas', rows:corr.map(r=>Object.assign(r, {det:'Juegos completos. Las hembras puestas en cajoneras y los machos en cajones armados también cuentan.'}))});
+  if(resto.length) G.push({t:'Herrajes y otros', rows:resto});
+  // 5) separado: lo de Paso 0 y lo que está apartado para otro día
+  try{ const sn = await db.collection('instalacionesLog').where('modulo','==',mod).get(); const ls = sn.docs.map(d=>({id:d.id, ...d.data()}));
+    const sep = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
+      && ((l.separado && !l.separado.resuelto) || (l.pospuesta && !l.verif && diaValorInst(l) > hoy)));
+    if(sep.length) G.push({t:'📌 Material separado', sep:true, rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:(l.separado&&!l.separado.resuelto?'Separada':'Apartada')+' · se instala '+fCorta(diaValorInst(l)), sep:true}))}); }catch(e){}
+  const doc = {tipo:'hojaDia', modulo:mod, dia:hoy, fecha:new Date().toISOString(), desde, desdeConteo, grupos:G, firma:null, resol:{}};
+  await db.collection('piezasPrueba').doc('dia_'+mod+'_'+hoy).set(doc);
+  _hojaDia.doc = Object.assign({id:'dia_'+mod+'_'+hoy}, doc); return _hojaDia.doc;
+}
+function hojaDiaHtml(){
+  if(!hojaDiaToca()) return '';
+  return `<div class="card" style="padding:14px;border:3px solid #3E5CDE;background:linear-gradient(0deg,rgba(62,92,222,.10),rgba(62,92,222,.10)),var(--card)">
+    <div style="font-size:18px;font-weight:900">📋 Tu Hoja del día</div>
+    <p style="margin:4px 0 0">Antes de empezar: revisa que tengas todo tu inventario y fírmala.</p>
+    <p class="hint" style="margin:4px 0 0">🔒 Hasta firmarla no puedes capturar nada.</p>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#3E5CDE,#2b44b8)" onclick="hojaDiaAbrir()">📋 ${_hojaDia.doc?'Seguir con':'Hacer'} mi Hoja del día</button></div>`;
+}
+async function hojaDiaAbrir(){
+  try{ const d = _hojaDia.doc || await hojaDiaGenerar(); hojaDiaV = {d, no:{}, tengo:{}, mot:{}, firma:false, abiertos:{}, open:null}; hojaDiaPintar(); }catch(e){ alert('Error: '+e.message); }
+}
+function hojaDiaNo(k){ const V = hojaDiaV; if(V.no[k]){ delete V.no[k]; delete V.tengo[k]; delete V.mot[k]; } else V.no[k] = true; hojaDiaPintar(); }
+const HD_MOT = ['Se rompió / dañó','Se usó y no se capturó','No sé','Tengo de más','Otro'];
+function hojaDiaPintar(){
+  let ov = document.getElementById('hoja-dia'); const V = hojaDiaV;
+  if(!V){ if(ov) ov.remove(); return; }
+  const top = ov ? ov.scrollTop : 0;
+  if(!ov){ ov = document.createElement('div'); ov.id = 'hoja-dia'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto'; document.body.appendChild(ov); }
+  const d = V.d, nNo = Object.keys(V.no).length, recon = new Set(((_hojaDia.previa&&_hojaDia.previa.recontar)||[]));
+  const q = k => String(k).replace(/'/g,"\\'");
+  const fila = r => { const no = !!V.no[r.k], dif = fmtNum(r.d - r.t);
+    return `<div style="padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${no?'#dc2626':(recon.has(r.k)?'#ca8a04':'var(--line)')};background:${no?'rgba(220,38,38,.08)':'transparent'}">
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700">${r.n}</strong>${recon.has(r.k)?' <span style="color:#ca8a04;font-weight:800">🔁 recontar</span>':''}
+        ${r.sep?`<div class="hint" style="margin:0">${r.det||''}</div>`:`<div class="hint" style="margin:0">Tenías ${fmtNum(r.t)}${dif?` · ${dif>0?'+':''}${fmtNum(dif)}`:' · sin movimiento'}${r.arm&&r.arm>0?` · ${fmtNum(r.arm)} más en armados`:''}</div>${r.det?`<div class="hint" style="margin:0;font-size:11.5px">${r.det}</div>`:''}`}</div>
+        ${r.sep?'':`<div style="text-align:right"><div style="font-size:18px;font-weight:900;line-height:1">${fmtNum(r.d)}</div><div class="hint" style="margin:0;font-size:11px">debes tener</div></div>`}
+        <button class="btn small" style="margin:0;min-width:46px;min-height:38px;padding:0;background:${no?'#dc2626':'#16a34a'}" onclick="hojaDiaNo('${q(r.k)}')">${no?'No':'Sí'}</button></div>
+      ${no?`<div style="display:flex;gap:6px;margin-top:6px;align-items:center">${r.sep?'':`<input type="number" inputmode="decimal" placeholder="Tengo" value="${V.tengo[r.k]??''}" oninput="hojaDiaV.tengo['${q(r.k)}']=this.value" style="width:80px;min-width:80px;margin:0">`}
+        <select onchange="hojaDiaV.mot['${q(r.k)}']=this.value" style="flex:1;min-width:0;margin:0"><option value="">¿Por qué?</option>${HD_MOT.map(m=>`<option ${V.mot[r.k]===m?'selected':''}>${m}</option>`).join('')}</select></div>`:''}</div>`; };
+  ov.innerHTML = `<div style="width:100%;max-width:470px;background:var(--card);color:var(--ink);border:2px solid #3E5CDE;border-radius:18px;padding:14px;margin-top:8px">
+    <div style="display:flex;justify-content:space-between"><div style="font-size:18px;font-weight:900">📋 Hoja del día · ${d.modulo}</div><button onclick="hojaDiaV=null;hojaDiaPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <p class="hint" style="margin:2px 0 6px">${new Date(d.dia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}. Revisa cada renglón: <strong>Sí</strong> lo tengo, o <strong>No</strong> + cuánto tienes + por qué. Abre cada grupo (${d.grupos.filter((g,gi)=>V.abiertos[gi]).length} de ${d.grupos.length}).</p>
+    ${d.grupos.map((g,gi)=>{ const nNoG = g.rows.filter(r=>V.no[r.k]).length, vis = !!V.abiertos[gi]; return `<details ${V.open===gi?'open':''} ontoggle="if(this.open){hojaDiaV.abiertos[${gi}]=true;if(hojaDiaV.open!==${gi}){hojaDiaV.open=${gi};hojaDiaPintar();}}else if(hojaDiaV.open===${gi}){hojaDiaV.open=null;}" style="margin-top:8px;border:2px solid ${nNoG?'#dc2626':(vis?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
+      <summary style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:900;font-size:14px">${g.t}</span><span style="white-space:nowrap;font-weight:800;color:${nNoG?'#dc2626':(vis?'#16a34a':'var(--sub)')}">${nNoG?'No: '+nNoG:(vis?'✅ revisado':g.rows.length+' ▾')}</span></summary>
+      ${g.rows.map(fila).join('')}</details>`; }).join('')}
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="hojaDiaV.firma=this.checked;hojaDiaPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> revisé todo mi inventario.${nNo?` Las diferencias (${nNo}) tienen su motivo.`:''}</span></label>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="hojaDiaFirmar()">${V.firma?'✍️ Firmar hoja':'Marca la firma para guardar'}</button></div>`;
+  ov.scrollTop = top;
+}
+async function hojaDiaFirmar(){
+  const V = hojaDiaV; if(!V) return; if(!V.firma) return alert('Marca la casilla ✍️ Firmo.');
+  const sinVer = V.d.grupos.filter((g,gi)=>!V.abiertos[gi]); if(sinVer.length) return alert('Falta revisar '+sinVer.length+' grupo(s): '+sinVer.slice(0,4).map(g=>g.t).join(', ')+(sinVer.length>4?'…':'')+'.');
+  const rows = {}; V.d.grupos.forEach(g=>g.rows.forEach(r=>{ rows[r.k] = Object.assign({grupo:g.t}, r); }));
+  const mal = Object.keys(V.no).filter(k=>!V.mot[k] || (!rows[k].sep && (V.tengo[k]===undefined || V.tengo[k]==='' || isNaN(Number(V.tengo[k])))));
+  if(mal.length) return alert('En los renglones con "No" escribe cuánto tienes y elige por qué.');
+  const difs = Object.keys(V.no).map(k=>{ const r = rows[k], tengo = r.sep ? null : Number(V.tengo[k]); return Object.assign({}, r, {tengo, dif:r.sep?null:fmtNum(tengo - r.d), motivo:V.mot[k]}); });
+  try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
+    hojaDiaV = null; hojaDiaPintar(); _hojaDia.t = 0; if(_hojaDia.doc) _hojaDia.doc.firma = {ok:!difs.length}; toast(difs.length?'✍️ Firmada. Dirección revisa las diferencias.':'✍️ Hoja firmada. ¡Buen día!'); renderHome(); }
+  catch(e){ alert('Error: '+e.message); }
+}
+// Dirección: diferencias por decidir.
+let _hdDifs = {t:0, mod:null, docs:[]};
+function hdDifsCargar(mod){
+  if(Date.now()-_hdDifs.t < 15000 && _hdDifs.mod===mod) return; _hdDifs.t = Date.now(); _hdDifs.mod = mod;
+  db.collection('piezasPrueba').where('modulo','==',mod).get().then(sn=>{ const ds = sn.docs.map(x=>({id:x.id, ...x.data()})).filter(x=>x.tipo==='hojaDia' && (x.difs||[]).some(d=>!(x.resol||{})[d.k]));
+    const antes = JSON.stringify(_hdDifs.docs.map(x=>x.id)); _hdDifs.docs = ds; if(JSON.stringify(ds.map(x=>x.id))!==antes && current==='home') renderHome(); }).catch(()=>{});
+}
+function hdDifsHtml(mod){
+  if(!esAdmin() || !sisNuevoMod(mod)) return ''; hdDifsCargar(mod);
+  const xs = []; (_hdDifs.mod===mod ? _hdDifs.docs : []).forEach(h=>(h.difs||[]).filter(d=>!(h.resol||{})[d.k]).forEach(d=>xs.push({h, d})));
+  if(!xs.length) return '';
+  const q = k => String(k).replace(/'/g,"\\'");
+  return `<div class="card" style="padding:12px;border:2px solid #ca8a04"><div style="font-size:16px;font-weight:900">💰 Diferencias de la Hoja del día (${xs.length})</div><p class="hint" style="margin:2px 0 0">Tú decides cada una. Nada se cobra solo.</p>
+    ${xs.map(({h,d})=>`<div style="margin-top:8px;padding:10px;border-radius:12px;border:1px solid var(--line)"><strong>${d.grupo.replace('Piezas sueltas · ','')} · ${d.n}</strong>
+      <div style="font-size:14px">${d.sep?'Separado: no está completo':`Debía tener <strong>${fmtNum(d.d)}</strong> · tiene <strong>${fmtNum(d.tengo)}</strong> · <strong style="color:${d.dif<0?'#dc2626':'#16a34a'}">${d.dif>0?'+':''}${fmtNum(d.dif)}</strong>`}</div>
+      <div class="hint" style="margin:2px 0 0">“${d.motivo}” · ${fCorta(h.dia)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+        <button class="btn small" style="margin:0;padding:2px;background:#16a34a" onclick="hdResolver('${h.id}','${q(d.k)}','ok')">✅ Aceptar</button>
+        <button class="btn small" style="margin:0;padding:2px;background:#ca8a04" ${d.dif>0||d.sep?'disabled':''} onclick="hdResolver('${h.id}','${q(d.k)}','deuda')">💰 Deuda</button>
+        <button class="btn small" style="margin:0;padding:2px;background:#3E5CDE" onclick="hdResolver('${h.id}','${q(d.k)}','recontar')">🔁 Recontar</button></div></div>`).join('')}</div>`;
+}
+async function hdResolver(hid, k, acc){
+  const h = _hdDifs.docs.find(x=>x.id===hid); if(!h) return; const d = (h.difs||[]).find(x=>x.k===k); if(!d) return;
+  const it = CATALOGO.find(i=>i.id===d.itemId)||{}, quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
+  const TXT = {ok:d.dif>0?'Aceptar: se SUMA lo que tiene de más':'Aceptar: se da de baja como merma (sin deuda)', deuda:'Deuda: se da de baja y queda como deuda del coordinador', recontar:'Recontar: no se mueve nada; mañana sale marcado para contarlo otra vez'};
+  if(!confirm(`${d.n}\n${d.sep?'':'Diferencia: '+(d.dif>0?'+':'')+fmtNum(d.dif)+'\n'}\n${TXT[acc]}\n\n¿Seguir?`)) return;
+  try{
+    if((acc==='ok' || acc==='deuda') && !d.sep && Math.abs(d.dif)>0.0005 && d.itemId){
+      const esPz = String(k).startsWith('p_'), hojasEq = esPz ? Math.round(Math.abs(d.dif)*(d.area||0)/HD_HOJA*10000)/10000 : Math.abs(d.dif);
+      const base = {modulo:h.modulo, itemId:d.itemId, itemNombre:it.nombre||d.n, fecha:ahora, estado:'aprobado', creadoPor:quien, hojaDiaId:hid, motivo:'hojaDia', nota:`Hoja del día ${fCorta(h.dia)} · ${d.n} · ${d.motivo}`};
+      if(d.dif<0){ await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'merma', cantidad:hojasEq, ...(esPz?{lado:'cortado', ...(d.pk?{piezasPz:[{k:d.pk, q:Math.abs(d.dif)}]}:{})}:(d.lado?{lado:d.lado}:{}))})); }
+      else { await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'ajuste', cantidad:hojasEq, completasDelta:esPz?0:(d.lado==='completas'?hojasEq:0), cortadoDelta:esPz?hojasEq:0})); }
+      if(acc==='deuda') await db.collection('deudasAuditoria').doc(cryptoId()).set({modulo:h.modulo, hojaDiaId:hid, fechaAuditoria:h.fecha, auditor:'Hoja del día', itemId:d.itemId, itemNombre:(it.nombre||'')+(esPz?' · '+d.n:''), unidad:esPz?'hojas':(it.unidad||''), lado:esPz?'cortado':(d.lado||null), cantidad:hojasEq, piezas:esPz?Math.abs(d.dif):null, estado:'pendiente', creadoPor:quien, creado:ahora});
+    }
+    const resol = Object.assign({}, h.resol||{}, {[k]:{acc, por:quien, en:ahora}}), upd = {resol};
+    if(acc==='recontar') upd.recontar = [...new Set((h.recontar||[]).concat([k]))];
+    await db.collection('piezasPrueba').doc(hid).update(upd); h.resol = resol; if(upd.recontar) h.recontar = upd.recontar;
+    _hdDifs.docs = _hdDifs.docs.filter(x=>(x.difs||[]).some(z=>!(x.resol||{})[z.k])); toast(acc==='recontar'?'🔁 Sale marcado mañana':'✅ Listo'); renderHome();
+  }catch(e){ alert('Error: '+e.message); }
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
 // ✅ Se instaló → queda verificada. ❌ No se instaló → le sale el aviso de siempre para decidir (se instala hoy u otro
@@ -12854,6 +13020,7 @@ function renderHomeModDir(){
       <p class="hint" style="margin:2px 0 0">Todo lo que veas o anotes aquí es de ${mod}.</p>
       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:#5b21b6" onclick="volverDireccion()">‹ Volver a Dirección</button><button class="btn" style="flex:1;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="irElegirModulo('home')">🔄 Otro módulo</button></div>
     </div>
+    ${hdDifsHtml(mod)}
     <div class="card" style="padding:12px;border:2px solid #7c3aed;cursor:pointer" onclick="abrirPaso0()"><div style="font-size:16px;font-weight:900">📌 Paso 0 · antes del conteo</div><p class="hint" style="margin:2px 0 0">Decide qué instalaciones sin verificar quedan separadas, se cuentan o ya se fueron, y manda la Hoja de separado a firmar.</p></div>
     ${cp.length?`<div class="card" style="padding:12px"><div class="pend"><div>✂️ <strong>Corte sin anotar</strong>: ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}</div><button class="btn small" onclick="irA('cierre')">Cierre</button></div></div>`:''}
     ${fV.length?`<div class="card" style="padding:12px;border:2px solid #ca8a04;cursor:pointer" onclick="pedSub='camino';irA('ped')"><strong>🚚 Ferretería en camino a ${mod}</strong><p class="hint" style="margin:2px 0 0">${fV.reduce((s,m)=>s+ferPiezas(m),0)} pieza(s). Falta que ${mod} toque "Ya lo recibí". Toca para verlo.</p></div>`:''}
