@@ -8837,20 +8837,24 @@ function hojaSepHtml(){
     <p class="hint" style="margin:2px 0 6px">Dirección la mandó antes del conteo. Revisa que tengas todo esto apartado.</p>
     ${H.lista.map(x=>`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--card)"><strong>${x.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${x.calle?`<div style="font-weight:800">📍 ${escCalle(x.calle)}</div>`:''}
       ${x.renglones.map(r=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:14px;padding:3px 0;border-top:1px solid var(--line)"><span>${r.nombre} · ${fmtNum(r.q)}${r.piezas?`<span class="hint" style="display:block;margin:0">${r.piezas}</span>`:''}</span><strong style="color:${r.queda==='sep'?'#7c3aed':'#16a34a'};white-space:nowrap">${r.queda==='sep'?'📌 separado':'📦 se cuenta'}</strong></div>`).join('')}</div>`).join('')}
-    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:10px;padding:10px 12px;border-radius:12px;border:2px solid #ca8a04;background:rgba(202,138,4,.10);cursor:pointer"><input type="checkbox" id="hs-firma" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> tengo este material <strong>separado y completo</strong>. Va aparte de mi inventario, pero está registrado y se cuenta en la auditoría.</span></label>
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:10px;padding:10px 12px;border-radius:12px;border:2px solid #ca8a04;background:rgba(202,138,4,.10);cursor:pointer"><input type="checkbox" id="hs-firma" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Yo, ${firmanteDe(modulo())}, firmo:</strong> tengo este material <strong>separado y completo</strong>. Va aparte de mi inventario, pero está registrado y se cuenta en la auditoría.</span></label>
     <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:linear-gradient(135deg,#7c3aed,#5b21b6)" onclick="hojaSepFirmar('${H.id}')">✍️ Firmar hoja</button>
     <button class="btn small" style="width:100%;margin-top:6px;background:transparent;color:#dc2626;border:1px solid var(--line);box-shadow:none" onclick="hojaSepObjetar('${H.id}')">❌ Algo no está completo</button></div>`;
 }
 async function hojaSepFirmar(id){
   if(!(document.getElementById('hs-firma')||{}).checked) return alert('Marca la casilla ✍️ Firmo.');
-  try{ await db.collection('piezasPrueba').doc(id).update({firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:true}});
+  try{ await db.collection('piezasPrueba').doc(id).update({firma:{nombre:firmanteDe(modulo()), por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:true}});
     _hojaSep.t = 0; _hojaSep.docs = _hojaSep.docs.filter(x=>x.id!==id); toast('✅ Hoja firmada'); renderHome(); }catch(e){ alert('Error: '+e.message); }
 }
 async function hojaSepObjetar(id){
   const nota = prompt('¿Qué no está completo? (instalación y qué falta)'); if(!nota || !nota.trim()) return;
-  try{ await db.collection('piezasPrueba').doc(id).update({firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:false, nota:nota.trim()}});
+  try{ await db.collection('piezasPrueba').doc(id).update({firma:{nombre:firmanteDe(modulo()), por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:false, nota:nota.trim()}});
     _hojaSep.t = 0; _hojaSep.docs = _hojaSep.docs.filter(x=>x.id!==id); toast('📝 Se avisó a Dirección'); renderHome(); }catch(e){ alert('Error: '+e.message); }
 }
+// v298 (pedido por el usuario): quién firma las actas en cada módulo.
+const FIRMANTES = {Apodaca:'Roberto', Escobedo:'Alexis', Saltillo:'Alexis'};
+function firmanteDe(mod){ return FIRMANTES[mod] || String((getCurrentUserEmail?getCurrentUserEmail():'')||'').split('@')[0]; }
+function firmaNom(f){ return (f && (f.nombre || String(f.por||'').split('@')[0])) || ''; }
 // ===== v296 · Registro de actas firmadas, por día (pedido por el usuario) =====
 // Todo lo que firma el coordinador queda aquí: Hoja de material separado, Acta de entrega (conteo inicial),
 // Acta de regreso y Hoja del día. Se guardan en 'piezasPrueba' con su tipo.
@@ -8867,7 +8871,7 @@ async function renderActas(){
   const nom = id => (CATALOGO.find(i=>i.id===id)||{}).nombre||id;
   const hora = f => f ? new Date(f).toLocaleTimeString('es-MX',{hour:'2-digit', minute:'2-digit'}) : '';
   const firmaTxt = d => { const f = d.firma; if(!f) return '<strong style="color:#ca8a04">⏳ Sin firmar</strong>';
-    return f.ok===false ? `<strong style="color:#dc2626">❌ Objetó: “${String(f.nota||'').replace(/</g,'&lt;')}”</strong> · ${String(f.por||'').split('@')[0]} ${hora(f.en)}` : `<strong style="color:#16a34a">✍️ Firmada</strong> · ${String(f.por||'').split('@')[0]} ${hora(f.en)}`; };
+    return f.ok===false ? `<strong style="color:#dc2626">❌ Objetó: “${String(f.nota||'').replace(/</g,'&lt;')}”</strong> · ${firmaNom(f)} ${hora(f.en)}` : `<strong style="color:#16a34a">✍️ Firmada</strong> · ${firmaNom(f)} ${hora(f.en)}`; };
   const cuerpo = d => {
     if(d.tipo==='hojaSeparado') return (d.lista||[]).map(x=>`<div style="margin-top:6px"><strong>${x.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${x.calle?` · 📍 ${escCalle(x.calle)}`:''}
       ${x.renglones.map(r=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:13.5px;border-top:1px solid var(--line);padding:2px 0"><span>${r.nombre} · ${fmtNum(r.q)}${r.piezas?`<span class="hint" style="display:block;margin:0">${r.piezas}</span>`:''}</span><span style="color:${r.queda==='sep'?'#7c3aed':'#16a34a'};white-space:nowrap">${r.queda==='sep'?'📌 separado':'📦 se cuenta'}</span></div>`).join('')}</div>`).join('');
@@ -8925,7 +8929,7 @@ async function actaPDF(id){
     S.vacio(pdfS((d.renglones||d.lista||[]).length+' renglon(es)'));
   }
   const f = d.firma;
-  S.banda(f ? (f.ok===false ? pdfS('OBJETADA por '+String(f.por||'').split('@')[0]+' · '+fTxt(f.en)) : pdfS('FIRMADA por '+String(f.por||'').split('@')[0]+' · '+fTxt(f.en))) : 'SIN FIRMAR', '', f ? (f.ok===false?ROJ:VER) : [202,138,4]);
+  S.banda(f ? (f.ok===false ? pdfS('OBJETADA por '+firmaNom(f)+' · '+fTxt(f.en)) : pdfS('FIRMADA por '+firmaNom(f)+' · '+fTxt(f.en))) : 'SIN FIRMAR', '', f ? (f.ok===false?ROJ:VER) : [202,138,4]);
   if(f && f.ok===false && f.nota) S.vacio(pdfS('Nota: '+f.nota));
   await S.fin(pdfS(`${T.t.replace(/\s*\(.*\)/,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ /g,'_')}_${d.modulo}_${d.fecha?diaLocal(d.fecha):''}.pdf`), pdfS('Closets Vera · '+T.t+' · '+d.modulo));
 }
@@ -9067,7 +9071,7 @@ function actaEntPintar(){
         ${no?`<input placeholder="¿Cuánto tienes? / qué pasa" value="${String(V.nota[r.k]||'').replace(/"/g,'&quot;')}" oninput="actaEntV.nota['${r.k.replace(/'/g,"\\'")}']=this.value" style="margin:4px 0 0;width:100%">`:''}</div>
         <strong style="white-space:nowrap">${fmtNum(r.q)} <span class="hint" style="margin:0">${r.u}</span></strong>
         <button class="btn small" style="margin:0;min-width:44px;min-height:36px;padding:0;background:${no?'#dc2626':'#16a34a'}" onclick="actaEntNo('${r.k.replace(/'/g,"\\'")}')">${no?'❌':'✅'}</button></div>`; }).join('')}</details>`; }).join('')}
-    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="actaEntV.firma=this.checked;actaEntPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> recibo este inventario.${nNo?` Lo marcado ❌ (${nNo}) lo revisa Dirección.`:''}</span></label>
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="actaEntV.firma=this.checked;actaEntPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Yo, ${firmanteDe(modulo())}, firmo:</strong> recibo este inventario.${nNo?` Lo marcado ❌ (${nNo}) lo revisa Dirección.`:''}</span></label>
     <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="actaEntFirmar()">${V.firma?'✍️ Firmar acta':'Marca la firma para guardar'}</button></div>`;
   ov.scrollTop = top;
 }
@@ -9076,7 +9080,7 @@ async function actaEntFirmar(){
   const sinVer = V.d.grupos.filter((g,gi)=>!V.abiertos[gi]); if(sinVer.length) return alert('Falta revisar '+sinVer.length+' grupo(s): '+sinVer.slice(0,4).map(g=>g.t).join(', ')+(sinVer.length>4?'…':'')+'.\n\nÁbrelos para revisarlos.');
   const falt = Object.keys(V.no).filter(k=>!String(V.nota[k]||'').trim()); if(falt.length) return alert('Escribe cuánto tienes en los renglones marcados ❌.');
   const obj = Object.keys(V.no).map(k=>{ let r = null; V.d.grupos.forEach(g=>g.rows.forEach(x=>{ if(x.k===k) r = Object.assign({grupo:g.t}, x); })); return Object.assign({}, r, {nota:V.nota[k]}); });
-  try{ await db.collection('piezasPrueba').doc(V.d.id).update({firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!obj.length, objeciones:obj, nota:obj.length?obj.map(o=>o.n+': '+o.nota).join(' · '):''}});
+  try{ await db.collection('piezasPrueba').doc(V.d.id).update({firma:{nombre:firmanteDe(modulo()), por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!obj.length, objeciones:obj, nota:obj.length?obj.map(o=>o.n+': '+o.nota).join(' · '):''}});
     actaEntV = null; actaEntPintar(); _actaEnt.doc = null; _actaEnt.t = Date.now(); toast(obj.length?'✍️ Firmada. Dirección revisa lo marcado ❌.':'✍️ Acta firmada. Ya puedes capturar.'); renderHome(); }
   catch(e){ alert('Error: '+e.message); }
 }
@@ -9217,7 +9221,7 @@ function hojaDiaPintar(){
         return mv.map(fila).join('') + (qu.length ? `<div style="margin-top:6px;padding:8px 10px;border-radius:10px;border:1.5px dashed ${quNo?'#dc2626':'#94a3b8'};background:rgba(127,127,127,.06)">
           <div><strong>😴 Sin movimiento desde ayer (${qu.length})</strong><div class="hint" style="margin:0">También tienes que tenerlo. Revisa que esté todo; si algo no está, toca <strong>Sí</strong> para cambiarlo a <strong>No</strong>.</div></div>
           ${qu.map(r=>V.no[r.k] ? fila(r) : `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--line)"><span style="flex:1;min-width:0;font-size:14px">${r.n}${r.arm&&r.arm>0?` <span class="hint" style="margin:0">(+${fmtNum(r.arm)} en armados)</span>`:''}</span><strong style="font-size:16px;white-space:nowrap">${fmtNum(r.d)} <span class="hint" style="margin:0;font-weight:400">${r.u||''}</span></strong><button class="btn small" style="margin:0;min-width:44px;min-height:32px;padding:0;background:#16a34a" onclick="hojaDiaNo('${q(r.k)}')">Sí</button></div>`).join('')}</div>` : ''); })()}</details>`; }).join('')}
-    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="hojaDiaV.firma=this.checked;hojaDiaPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> verifiqué en físico que tengo <strong>todo</strong> lo de esta hoja.${nNo?` Las diferencias (${nNo}) tienen su motivo.`:''} Si firmo sin revisar, es mi responsabilidad.</span></label>
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="hojaDiaV.firma=this.checked;hojaDiaPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Yo, ${firmanteDe(modulo())}, firmo:</strong> verifiqué en físico que tengo <strong>todo</strong> lo de esta hoja.${nNo?` Las diferencias (${nNo}) tienen su motivo.`:''} Si firmo sin revisar, es mi responsabilidad.</span></label>
     <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="hojaDiaFirmar()">${V.firma?'✍️ Firmar hoja':'Marca la firma para guardar'}</button></div>`;
   ov.scrollTop = top;
 }
@@ -9236,7 +9240,7 @@ async function hojaDiaFirmar(){
   // conteo a ciegas: si no coincide, también es diferencia
   cg.forEach(k=>{ if(!rows[k] || V.no[k]) return; const t = Number(V.ciego[k]); if(Math.abs(t - Number(rows[k].d)) > 0.005) difs.push(Object.assign({}, rows[k], {tengo:t, dif:fmtNum(t - rows[k].d), motivo:'Conteo a ciegas'})); });
   const ciegoRes = cg.map(k=>({k, n:rows[k]&&rows[k].n, debe:rows[k]&&rows[k].d, conto:Number(V.ciego[k])}));
-  try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, noSalio:noSal, ciegoRes, firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
+  try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, noSalio:noSal, ciegoRes, firma:{nombre:firmanteDe(modulo()), por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
     hojaDiaV = null; hojaDiaPintar(); _hojaDia.t = 0; if(_hojaDia.doc) _hojaDia.doc.firma = {ok:!difs.length}; toast(difs.length?'✍️ Firmada. Dirección revisa las diferencias.':'✍️ Hoja firmada. ¡Buen día!'); renderHome(); }
   catch(e){ alert('Error: '+e.message); }
 }
@@ -9611,7 +9615,7 @@ function verifDestPintar(){
       <div class="hint" style="margin:4px 0 0">Total: ${fmtNum(V.mel.reduce((a,c)=>a+Number(c.cantidad),0))} hoja de melamina de estas piezas.${V.x.categoria==='Puerta'?' Las tiras de los lados de la hoja no regresan (casi siempre ya se usaron).':''}</div></div>`:''}
     ${(()=>{ const fh = V.herr.filter(h=>h.tengo<h.q-1e-9), fm = V.rows.filter(r=>r.d==='falta'); return fh.length||fm.length ? `<div style="margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)"><strong>❌ Lo que no tienes</strong><div class="hint" style="margin:2px 0 0">${fh.map(h=>`${fmtNum(h.q-h.tengo)} ${((CATALOGO.find(z=>z.id===h.itemId)||{}).nombre||'')}`).concat(fm.map(r=>r.n==='Melamina (toda)'?'Melamina '+nom(r.itemId):`${fmtNum(r.q)} ${r.n} ${r.dim||''}`)).join(' · ')}</div><div class="hint" style="margin:4px 0 0">No entra a tu inventario. Dirección decide qué pasa.</div></div>` : ''; })()}
     ${!V.nuevo && V.otros.length?`<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(22,163,74,.12);font-size:14px">🔩 Los herrajes regresan a tu inventario: ${V.otros.map(c=>fmtNum(c.cantidad)+' '+nomC(c)).join(' · ')}</div>`:''}
-    ${V.nuevo?'':'<!--'}<label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="verifDest.firma=this.checked;verifDestPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> lo que marqué que sí tengo entra a mi inventario. Lo que no, lo decide Dirección.</span></label>${V.nuevo?'':'-->'}
+    ${V.nuevo?'':'<!--'}<label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="verifDest.firma=this.checked;verifDestPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Yo, ${firmanteDe(modulo())}, firmo:</strong> lo que marqué que sí tengo entra a mi inventario. Lo que no, lo decide Dirección.</span></label>${V.nuevo?'':'-->'}
     <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="verifDestGuardar()">${!V.nuevo?'✅ Guardar':(V.firma?'✅ Firmar y guardar':'✍️ Marca la firma para guardar')}</button>
     <p class="hint" style="margin:6px 0 0">Si después sí se instala, se captura otra vez como nueva.</p></div>`;
 }
@@ -9649,7 +9653,7 @@ async function verifDestGuardar(){
       const lineas = sobIts.flatMap(k=>pzTxt(porItem[k].sobPz).map(t=>t+' · '+((CATALOGO.find(i=>i.id===k)||{}).nombre||'').replace('Melamina ','')));
       await db.collection('sobrantes').doc(loteId).set({modulo:x.modulo, fecha, calle:x.calle||'', nota:'No se instaló: '+x.descripcion.split(' · ').slice(0,3).join(' · '), lineas, lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:id}); }
     if(V.nuevo) try{ await db.collection('piezasPrueba').doc('actaReg_'+id).set({tipo:'actaRegreso', modulo:x.modulo, instalacionId:id, descripcion:x.descripcion, calle:x.calle||'', fecha,
-      herrajes:(V.herr||[]).map(h=>({itemId:h.itemId, q:h.q, tengo:h.tengo})), piezas:V.rows.map(r=>({n:r.n, dim:r.dim||'', q:r.q, itemId:r.itemId, d:r.d})), faltan, firma:{por:creadoPor, en:fecha, ok:true}}); }catch(e){}
+      herrajes:(V.herr||[]).map(h=>({itemId:h.itemId, q:h.q, tengo:h.tengo})), piezas:V.rows.map(r=>({n:r.n, dim:r.dim||'', q:r.q, itemId:r.itemId, d:r.d})), faltan, firma:{nombre:firmanteDe(x.modulo), por:creadoPor, en:fecha, ok:true}}); }catch(e){}
     if(x.separado && !x.separado.resuelto){ try{ await db.collection('instalacionesLog').doc(id).update({separado:Object.assign({}, x.separado, {resuelto:'regreso', en2:fecha})}); }catch(e){} }
     const algoSob = sobIts.length, algoMer = Object.values(porItem).some(P=>P.merma>0.00005);
     await verifGuardar(id, Object.assign({}, x.verif||{}, {puertas: algoSob ? 'sobrantes' : (algoMer && !V.rows.some(r=>r.d==='inv') ? 'merma' : 'regreso'), visto:true, fechaDecision:fecha, directo:true, ...(faltan.length?{faltan}:{})}));
