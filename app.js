@@ -9162,7 +9162,13 @@ async function hojaDiaGenerar(){
     const sep = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
       && ((l.separado && !l.separado.resuelto) || (l.pospuesta && !l.verif && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
     if(sep.length) G.push({t:'📌 Material separado', sep:true, rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:(l.separado&&!l.separado.resuelto?'Separada · se instala '+fCorta(diaValorInst(l)):(l.noSalio?'No salió · esperando a Dirección':'Apartada · se instala '+fCorta(diaValorInst(l)))), sep:true}))}); }catch(e){}
-  const doc = {tipo:'hojaDia', modulo:mod, dia:hoy, fecha:new Date().toISOString(), desde, desdeConteo, grupos:G, firma:null, resol:{}};
+  // v298 (pedido por el usuario): para que no tarde tanto, lo que NO se movió va agrupado ("sigue igual") y cada día
+  // la app escoge 3 renglones al azar de lo que no se movió para contarlos "a ciegas" (sin ver cuánto debe haber).
+  const quietos = []; G.forEach(g=>{ if(g.sep || g.inst) return; g.rows.forEach(r=>{ if(!r.sep && Math.abs((Number(r.d)||0)-(Number(r.t)||0))<0.005 && !r.mv && Number(r.d)>0) quietos.push(r.k); }); });
+  let seed = 0; for(const ch of (mod+hoy)) seed = (seed*31 + ch.charCodeAt(0)) % 2147483647;
+  const rnd = () => (seed = (seed*48271) % 2147483647) / 2147483647, ciegos = [];
+  while(ciegos.length < Math.min(3, quietos.length)){ const k = quietos[Math.floor(rnd()*quietos.length)]; if(!ciegos.includes(k)) ciegos.push(k); }
+  const doc = {tipo:'hojaDia', modulo:mod, dia:hoy, fecha:new Date().toISOString(), desde, desdeConteo, grupos:G, ciegos, firma:null, resol:{}};
   await db.collection('piezasPrueba').doc('hdia_'+mod+'_'+hoy).set(doc);
   _hojaDia.doc = Object.assign({id:'hdia_'+mod+'_'+hoy}, doc); return _hojaDia.doc;
 }
@@ -9175,7 +9181,7 @@ function hojaDiaHtml(){
     <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:linear-gradient(135deg,#3E5CDE,#2b44b8)" onclick="hojaDiaAbrir()">📋 ${_hojaDia.doc?'Seguir con':'Hacer'} mi Hoja del día</button></div>`;
 }
 async function hojaDiaAbrir(){
-  try{ const d = _hojaDia.doc || await hojaDiaGenerar(); hojaDiaV = {d, no:{}, tengo:{}, mot:{}, firma:false, abiertos:{}, open:null}; hojaDiaPintar(); }catch(e){ alert('Error: '+e.message); }
+  try{ const d = _hojaDia.doc || await hojaDiaGenerar(); hojaDiaV = {d, no:{}, tengo:{}, mot:{}, firma:false, abiertos:{}, open:null, ciego:{}, verQ:{}}; hojaDiaPintar(); }catch(e){ alert('Error: '+e.message); }
 }
 function hojaDiaNo(k){ const V = hojaDiaV; if(V.no[k]){ delete V.no[k]; delete V.tengo[k]; delete V.mot[k]; } else V.no[k] = true; hojaDiaPintar(); }
 const HD_MOT = ['Se rompió / dañó','Se usó y no se capturó','No sé','Tengo de más','Otro'];
@@ -9195,18 +9201,30 @@ function hojaDiaPintar(){
       ${no&&r.inst?`<div class="hint" style="margin:6px 0 0;color:#dc2626;font-weight:800">No salió: <u>sepárala</u> y <u>no la cuentes</u> en tu inventario de abajo. Queda apartada y Dirección la verifica con el grupo.</div>`:''}
       ${no&&!r.inst?`<div style="display:flex;gap:6px;margin-top:6px;align-items:center">${r.sep?'':`<input type="number" inputmode="decimal" placeholder="Tengo" value="${V.tengo[r.k]??''}" oninput="hojaDiaV.tengo['${q(r.k)}']=this.value" style="width:80px;min-width:80px;margin:0">`}
         <select onchange="hojaDiaV.mot['${q(r.k)}']=this.value" style="flex:1;min-width:0;margin:0"><option value="">¿Por qué?</option>${HD_MOT.map(m=>`<option ${V.mot[r.k]===m?'selected':''}>${m}</option>`).join('')}</select></div>`:''}</div>`; };
+  const mueve = r => r.sep || r.inst || Math.abs((Number(r.d)||0)-(Number(r.t)||0))>=0.005 || !!r.mv || recon.has(r.k);
+  const rowsAll = {}; d.grupos.forEach(g=>g.rows.forEach(r=>{ rowsAll[r.k] = Object.assign({grupo:g.t}, r); }));
+  const ciegos = (d.ciegos||[]).filter(k=>rowsAll[k]);
+  const ciegoHtml = ciegos.length ? `<div style="margin-top:8px;border:2px solid ${ciegos.every(k=>V.ciego[k]!==undefined && V.ciego[k]!=='')?'#16a34a':'#ca8a04'};border-radius:12px;padding:8px 10px;background:rgba(202,138,4,.06)">
+      <div style="font-weight:900;font-size:14px">🔍 Cuenta estos ${ciegos.length} (sin ver la app)</div><div class="hint" style="margin:2px 0 4px">Cada día la app escoge al azar. Cuenta en físico y escribe cuántos hay.</div>
+      ${ciegos.map(k=>{ const r = rowsAll[k]; return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div style="flex:1;min-width:0"><strong>${r.n}</strong><div class="hint" style="margin:0">${r.grupo.replace('Piezas sueltas · ','Piezas · ')}${r.arm&&r.arm>0?' · solo las sueltas':''}</div></div><input type="number" inputmode="decimal" placeholder="¿Cuántos?" value="${V.ciego[k]??''}" oninput="hojaDiaV.ciego['${q(k)}']=this.value" style="width:96px;min-width:96px;margin:0"></div>`; }).join('')}</div>` : '';
   ov.innerHTML = `<div style="width:100%;max-width:470px;background:var(--card);color:var(--ink);border:2px solid #3E5CDE;border-radius:18px;padding:14px;margin-top:8px">
     <div style="display:flex;justify-content:space-between"><div style="font-size:18px;font-weight:900">📋 Hoja del día · ${d.modulo}</div><button onclick="hojaDiaV=null;hojaDiaPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
-    <p class="hint" style="margin:2px 0 6px">${new Date(d.dia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}. Revisa cada renglón: <strong>Sí</strong> lo tengo, o <strong>No</strong> + cuánto tienes + por qué. Abre cada grupo (${d.grupos.filter((g,gi)=>V.abiertos[gi]).length} de ${d.grupos.length}).</p>
+    <p class="hint" style="margin:2px 0 6px">${new Date(d.dia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}. Revisa cada renglón: <strong>Sí</strong> lo tengo, o <strong>No</strong> + cuánto tienes + por qué. Abre cada grupo (${d.grupos.filter((g,gi)=>V.abiertos[gi]).length} de ${d.grupos.length}). Lo que <strong>no se movió</strong> va junto: solo revisa que siga igual.</p>
+    ${ciegoHtml}
     ${d.grupos.map((g,gi)=>{ const nNoG = g.rows.filter(r=>V.no[r.k]).length, vis = !!V.abiertos[gi]; return `<details ${V.open===gi?'open':''} ontoggle="if(!hojaDiaV)return;if(this.open){hojaDiaV.abiertos[${gi}]=true;if(hojaDiaV.open!==${gi}){hojaDiaV.open=${gi};hojaDiaPintar();}}else if(hojaDiaV.open===${gi}){hojaDiaV.open=null;}" style="margin-top:8px;border:2px solid ${nNoG?'#dc2626':(vis?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
       <summary style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:900;font-size:14px">${g.t}</span><span style="white-space:nowrap;font-weight:800;color:${nNoG?'#dc2626':(vis?'#16a34a':'var(--sub)')}">${nNoG?'No: '+nNoG:(vis?'✅ revisado':g.rows.length+' ▾')}</span></summary>
-      ${g.rows.map(fila).join('')}</details>`; }).join('')}
+      ${(()=>{ const mv = g.rows.filter(mueve), qu = g.rows.filter(r=>!mueve(r)), quNo = qu.filter(r=>V.no[r.k]).length;
+        return mv.map(fila).join('') + (qu.length ? `<div style="margin-top:6px;padding:8px 10px;border-radius:10px;border:1.5px dashed ${quNo?'#dc2626':'#94a3b8'};background:rgba(127,127,127,.06)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><strong>😴 Sin movimiento (${qu.length})</strong><div class="hint" style="margin:0">${V.verQ[gi]?'Si algo no está, tócalo y pon No.':'Revisa que todo siga igual que ayer.'}</div></div>
+          <button class="btn small" style="margin:0;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="hojaDiaV.verQ[${gi}]=!hojaDiaV.verQ[${gi}];hojaDiaPintar()">${V.verQ[gi]?'Ocultar':'Ver / corregir'}</button></div>
+          ${V.verQ[gi] ? qu.map(fila).join('') : (quNo?`<div class="hint" style="margin:4px 0 0;color:#dc2626;font-weight:800">${quNo} marcado(s) No</div>`:`<div class="hint" style="margin:4px 0 0">${qu.slice(0,6).map(r=>r.n.replace(/ \d.*$/,'')+' '+fmtNum(r.d)).join(' · ')}${qu.length>6?' …':''}</div>`)}</div>` : ''); })()}</details>`; }).join('')}
     <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="hojaDiaV.firma=this.checked;hojaDiaPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> revisé todo mi inventario.${nNo?` Las diferencias (${nNo}) tienen su motivo.`:''}</span></label>
     <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="hojaDiaFirmar()">${V.firma?'✍️ Firmar hoja':'Marca la firma para guardar'}</button></div>`;
   ov.scrollTop = top;
 }
 async function hojaDiaFirmar(){
   const V = hojaDiaV; if(!V) return; if(!V.firma) return alert('Marca la casilla ✍️ Firmo.');
+  const cg = (V.d.ciegos||[]); if(cg.some(k=>V.ciego[k]===undefined || V.ciego[k]==='' || isNaN(Number(V.ciego[k])))) return alert('Arriba: cuenta los renglones de «🔍 Cuenta estos» y escribe cuántos hay.');
   const sinVer = V.d.grupos.filter((g,gi)=>!V.abiertos[gi]); if(sinVer.length) return alert('Falta revisar '+sinVer.length+' grupo(s): '+sinVer.slice(0,4).map(g=>g.t).join(', ')+(sinVer.length>4?'…':'')+'.');
   const rows = {}; V.d.grupos.forEach(g=>g.rows.forEach(r=>{ rows[r.k] = Object.assign({grupo:g.t}, r); }));
   const mal = Object.keys(V.no).filter(k=>!rows[k].inst && (!V.mot[k] || (!rows[k].sep && (V.tengo[k]===undefined || V.tengo[k]==='' || isNaN(Number(V.tengo[k]))))));
@@ -9216,7 +9234,10 @@ async function hojaDiaFirmar(){
   for(const id of siSal){ try{ await db.collection('instalacionesLog').doc(id).update({salioOk:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), hojaDia:V.d.id}}); }catch(e){} }
   for(const id of noSal){ try{ await db.collection('instalacionesLog').doc(id).update({noSalio:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), hojaDia:V.d.id}}); }catch(e){} }
   const difs = Object.keys(V.no).filter(k=>!rows[k].inst).map(k=>{ const r = rows[k], tengo = r.sep ? null : Number(V.tengo[k]); return Object.assign({}, r, {tengo, dif:r.sep?null:fmtNum(tengo - r.d), motivo:V.mot[k]}); });
-  try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, noSalio:noSal, firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
+  // conteo a ciegas: si no coincide, también es diferencia
+  cg.forEach(k=>{ if(!rows[k] || V.no[k]) return; const t = Number(V.ciego[k]); if(Math.abs(t - Number(rows[k].d)) > 0.005) difs.push(Object.assign({}, rows[k], {tengo:t, dif:fmtNum(t - rows[k].d), motivo:'Conteo a ciegas'})); });
+  const ciegoRes = cg.map(k=>({k, n:rows[k]&&rows[k].n, debe:rows[k]&&rows[k].d, conto:Number(V.ciego[k])}));
+  try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, noSalio:noSal, ciegoRes, firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
     hojaDiaV = null; hojaDiaPintar(); _hojaDia.t = 0; if(_hojaDia.doc) _hojaDia.doc.firma = {ok:!difs.length}; toast(difs.length?'✍️ Firmada. Dirección revisa las diferencias.':'✍️ Hoja firmada. ¡Buen día!'); renderHome(); }
   catch(e){ alert('Error: '+e.message); }
 }
