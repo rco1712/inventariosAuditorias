@@ -7977,6 +7977,8 @@ function regresarInstalacion(logId){
   if(regresoDeInstalacion(logId)) return alert('Esta instalación ya se regresó al inventario.');
   const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
   if(!cons.length) return alert('Esta instalación no tiene material registrado.');
+  // v298: en el sistema nuevo el regreso completo también pasa por el Acta de regreso firmada.
+  if(sisNuevoMod(x.modulo)){ (async()=>{ try{ if(!x.verif || x.verif.estado!=='no'){ try{ await verifAprobarSiPend(x); }catch(e){} await verifGuardar(logId, {estado:'no', puertas:'pendiente', visto:true, porCoord:!esAdmin()}); } await verifDestino(logId, 'inv'); }catch(e){ alert('Error: '+e.message); } })(); return; }
   regInstSel = logId; regMerma = {}; regSob = {}; regMotivo = '';
   mostrarRegresoInst();
 }
@@ -9223,7 +9225,8 @@ async function hdResolver(hid, k, acc){
       const esPz = String(k).startsWith('p_'), hojasEq = esPz ? Math.round(Math.abs(d.dif)*(d.area||0)/HD_HOJA*10000)/10000 : Math.abs(d.dif);
       const base = {modulo:h.modulo, itemId:d.itemId, itemNombre:it.nombre||d.n, fecha:ahora, estado:'aprobado', creadoPor:quien, hojaDiaId:hid, motivo:'hojaDia', nota:`Hoja del día ${fCorta(h.dia)} · ${d.n} · ${d.motivo}`};
       if(d.dif<0){ await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'merma', cantidad:hojasEq, ...(esPz?{lado:'cortado', ...(d.pk?{piezasPz:[{k:d.pk, q:Math.abs(d.dif)}]}:{})}:(d.lado?{lado:d.lado}:{}))})); }
-      else { await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'ajuste', cantidad:hojasEq, completasDelta:esPz?0:(d.lado==='completas'?hojasEq:0), cortadoDelta:esPz?hojasEq:0})); }
+      else if(esPz){ await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'devolucion', motivo:'piezasEncontradas', cantidad:hojasEq, piezasDetalle:[fmtNum(d.dif)+' '+d.n], ...(d.pk?{piezasPz:[{k:d.pk, q:Math.abs(d.dif)}]}:{})})); }
+      else { await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'ajuste', cantidad:hojasEq, completasDelta:d.lado==='completas'?hojasEq:0, cortadoDelta:0})); }
       if(acc==='deuda') await db.collection('deudasAuditoria').doc(cryptoId()).set({modulo:h.modulo, hojaDiaId:hid, fechaAuditoria:h.fecha, auditor:'Hoja del día', itemId:d.itemId, itemNombre:(it.nombre||'')+(esPz?' · '+d.n:''), unidad:esPz?'hojas':(it.unidad||''), lado:esPz?'cortado':(d.lado||null), cantidad:hojasEq, piezas:esPz?Math.abs(d.dif):null, estado:'pendiente', creadoPor:quien, creado:ahora});
     }
     const resol = Object.assign({}, h.resol||{}, {[k]:{acc, por:quien, en:ahora}}), upd = {resol};
@@ -17825,6 +17828,8 @@ function pzpOtroAuto(D, m){
   if(m && m.tipo==='merma' && Array.isArray(m.piezasPz) && m.piezasPz.length) return {modo:'piezas', piezas:m.piezasPz.map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:0, auto:true};
   // v291: piezas que salieron de un sobrante registrado (al transformarlo): suben como piezas; lo hecho a medida, al retazo.
   if(m && m.tipo==='devolucion' && m.motivo==='deSobrante' && (Array.isArray(m.piezasPz) || Number(m.extraRetA)>0)) return {modo:'piezas', piezas:(m.piezasPz||[]).map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:Number(m.extraRetA)||0, auto:true, deSobrante:true};
+  // v298: piezas que sobraron en la Hoja del día y Dirección aceptó: suben al inventario de piezas.
+  if(m && m.tipo==='devolucion' && m.motivo==='piezasEncontradas' && Array.isArray(m.piezasPz) && m.piezasPz.length) return {modo:'piezas', piezas:m.piezasPz.map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:0, auto:true};
   if(!m || !m.instalacionId) return null;
   // v274: lo que sobró de las hojas de puertas y se mandó a sobrantes sale de lo apartado para puertas de ese color.
   if(m.tipo==='sobrante' && m.motivo==='sobranteCortePuertas') return {modo:'puertaSob', auto:true};
