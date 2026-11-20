@@ -49,6 +49,18 @@ let modoAuto = {activo:false};
 function modoAutoMod(m){ if(!modoAuto) return false; if(modoAuto.modulos) return !!modoAuto.modulos[m]; return !!modoAuto.activo; }
 function modoAutoOn(m){ return modoAutoMod(m || (typeof modulo==='function' ? modulo() : '')); }
 function modoAutoAlguno(){ return MODULOS.some(x=>modoAutoMod(x.nombre)); }
+// v296 (pedido por el usuario): el sistema nuevo (actas firmadas, material separado, hoja del día) se prende
+// POR MÓDULO, el día de su conteo inicial. Los módulos que aún no arrancan siguen viendo la app como antes.
+let sisNuevo = {modulos:{}};
+function sisNuevoMod(m){ m = m || (typeof modulo==='function' ? modulo() : ''); return !!(sisNuevo && sisNuevo.modulos && sisNuevo.modulos[m]); }
+async function sisNuevoPrender(mod, on, sinPin){
+  if(!esAdmin()) return false;
+  if(!sinPin){ if(!confirm(on ? `🆕 ¿Prender el sistema nuevo en ${mod}?\n\nSu coordinador empieza a ver: Hoja de separado, Material separado, Acta de regreso firmada y las actas.` : `¿Apagar el sistema nuevo en ${mod}?\n\nVuelve a ver la app como antes. Las actas ya firmadas se quedan guardadas.`)) return false;
+    const pin = prompt('🔒 Escribe el PIN de Dirección:'); if(pin===null) return false; if(pin!==(await getPinCero())) { alert('PIN incorrecto. No se cambió nada.'); return false; } }
+  const mods = Object.assign({}, (sisNuevo&&sisNuevo.modulos)||{}); if(on) mods[mod] = mods[mod] || new Date().toISOString(); else delete mods[mod];
+  const x = {modulo:'_global', modulos:mods, por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()};
+  await db.collection('config').doc('sistemaNuevo').set(x); sisNuevo = x; return true;
+}
 function estadoNuevoMovimiento(){ return (esAdmin() || modoAutoOn()) ? 'aprobado' : 'pendiente'; }
 // v181 (confirmado por el usuario): las INSTALACIONES se descuentan desde que el coordinador las
 // captura (aunque estén pendientes); si Dirección las rechaza, el material regresa solo. Todo lo
@@ -423,6 +435,8 @@ async function loadStock(){
   try{
     // v294: Modo automático (lo prende Dirección en Configuración)
     sub(db.collection('config').where('modulo','==','_global').onSnapshot(snap=>{
+      const dn = snap.docs.find(x=>x.id==='sistemaNuevo'); const sn = dn ? (dn.data()||{}) : {modulos:{}};
+      const cambioSN = JSON.stringify(sn.modulos||{}) !== JSON.stringify((sisNuevo&&sisNuevo.modulos)||{}); sisNuevo = sn; if(cambioSN && current==='home') renderHome();
       const d = snap.docs.find(x=>x.id==='modoAuto'); const nuevo = d ? (d.data()||{}) : {activo:false};
       const cambio = JSON.stringify(nuevo.modulos||nuevo.activo||null) !== JSON.stringify((modoAuto&&(modoAuto.modulos||modoAuto.activo))||null); modoAuto = nuevo;
       if(cambio && current==='home') renderHome(); if(current==='conf') renderConf();
@@ -8746,7 +8760,7 @@ async function paso0Guardar(){
   const faltan = P.logs.filter(l=>!P.dec[l.id] || (P.dec[l.id]==='fue' && !P.fuera[l.id]));
   if(faltan.length) return alert('Falta decidir '+faltan.length+' instalación(es). Si el material está en el almacén, no puede ser "🚚 Ya se fue".');
   const nC = P.logs.filter(l=>P.dec[l.id]==='cuenta').length, nS = P.logs.filter(l=>P.dec[l.id]==='sep').length, nF = P.logs.filter(l=>P.dec[l.id]==='fue').length;
-  if(!confirm(`Paso 0 · ${P.mod}\n\n📌 Separadas: ${nS}\n🔢 Se cuentan (regresan al inventario): ${nC}\n🚚 Ya se fueron: ${nF}\n\n¿Guardar?${nS?'\nSe manda la Hoja de material separado al coordinador para que la firme.':''}`)) return;
+  if(!confirm(`Paso 0 · ${P.mod}${sisNuevoMod(P.mod)?'':'\n🆕 Con esto '+P.mod+' entra al sistema nuevo.'}\n\n📌 Separadas: ${nS}\n🔢 Se cuentan (regresan al inventario): ${nC}\n🚚 Ya se fueron: ${nF}\n\n¿Guardar?${nS?'\nSe manda la Hoja de material separado al coordinador para que la firme.':''}`)) return;
   const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), lista = [];
   try{
     for(const l of P.logs){ const d = P.dec[l.id], cons = paso0Cons(l), loteId = cryptoId();
@@ -8766,6 +8780,7 @@ async function paso0Guardar(){
           renglones:cons.map(c=>({itemId:c.itemId, nombre:(CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||c.itemId, q:Number(c.cantidad), piezas:esHojaId(c.itemId)?paso0PzTxt(l,c.itemId):'', queda:m[c.itemId]==='cuenta'?'cuenta':'sep'}))});
       } else if(d==='fue' && l.separado) await db.collection('instalacionesLog').doc(l.id).update({separado:null});
     }
+    if(!sisNuevoMod(P.mod)) await sisNuevoPrender(P.mod, true, true);
     if(lista.length) await db.collection('piezasPrueba').doc('sep_'+P.mod+'_'+fechaHoyLocal()).set({tipo:'hojaSeparado', modulo:P.mod, fecha:ahora, por:quien, lista, firma:null});
     paso0 = null; toast('✅ Paso 0 guardado.'+(lista.length?'<br><small>📤 Hoja de separado enviada al coordinador.</small>':''));
     setView('home');
@@ -8780,7 +8795,7 @@ function hojaSepCargar(){
     const antes = JSON.stringify(_hojaSep.docs); _hojaSep.docs = docs; if(JSON.stringify(docs)!==antes && current==='home') renderHome(); }).catch(()=>{});
 }
 function hojaSepHtml(){
-  if(esAdmin() || esSoloLectura()) return ''; hojaSepCargar();
+  if(esAdmin() || esSoloLectura() || !sisNuevoMod()) return ''; hojaSepCargar();
   const H = (_hojaSep.mod===modulo() && _hojaSep.docs[0]) || null; if(!H) return '';
   return `<div class="card" style="padding:12px;border:3px solid #7c3aed;background:linear-gradient(0deg,rgba(124,58,237,.08),rgba(124,58,237,.08)),var(--card)">
     <div style="font-size:17px;font-weight:900">📌 Firma tu Hoja de material separado</div>
@@ -8874,7 +8889,7 @@ async function actaPDF(id){
 //  ❌ Ya no va: Acta de regreso (pieza por pieza, firmada).
 let sepSale = null, sepOtro = null;
 function sepHtml(){
-  if(esAdmin() || esSoloLectura() || !_verifCoord) return '';
+  if(esAdmin() || esSoloLectura() || !_verifCoord || !sisNuevoMod()) return '';
   const xs = _verifCoord.sep||[]; if(!xs.length) return '';
   const hoy = fechaHoyLocal();
   const fila = l => { const d = diaValorInst(l), hoyT = d<=hoy;
@@ -9107,8 +9122,8 @@ async function verifDestino(id, dest){
     if(!mias.length || !(W>0)) rows.push({n:'Melamina (toda)', dim:'', q:1, itemId:c.itemId, u:Number(c.cantidad), d:dest});
     else mias.forEach(p=>rows.push({n:p.n, dim:p.dim, q:p.q, itemId:c.itemId, u:Number(c.cantidad)*p.w/W, d:dest})); });
   // v296 Acta de regreso: herraje por herraje, ¿cuántos tienes? Solo entra lo que firma que tiene.
-  const herr = otros.map(c=>({itemId:c.itemId, q:Number(c.cantidad), tengo:Number(c.cantidad)}));
-  verifDest = {id, x, mel, otros, rows, herr, firma:false};
+  const nuevo = sisNuevoMod(x.modulo), herr = nuevo ? otros.map(c=>({itemId:c.itemId, q:Number(c.cantidad), tengo:Number(c.cantidad)})) : [];
+  verifDest = {id, x, mel, otros, rows, herr, firma:!nuevo, nuevo};
   verifDestPintar();
 }
 function verifDestPintar(){
@@ -9120,7 +9135,7 @@ function verifDestPintar(){
   const tot = {inv:0, sob:0, merma:0, falta:0}; V.rows.forEach(r=>{ tot[r.d] += r.q*r.u; });
   const btn = (i, d, on) => `<button class="btn small" style="flex:1;margin:0;min-height:38px;padding:2px 4px;font-size:12.5px;${on?`background:${VD_COL[d]}`:`background:transparent;color:${VD_COL[d]};border:1px solid ${VD_COL[d]};box-shadow:none`}" onclick="verifDestSet(${i},'${d}')">${VD_TXT[d]}</button>`;
   ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #dc2626;border-radius:18px;padding:14px;margin-top:8px">
-    <div class="row" style="justify-content:space-between"><div style="font-size:17px;font-weight:900">↩️ Acta de regreso · no se instaló</div><button onclick="verifDest=null;verifDestPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div class="row" style="justify-content:space-between"><div style="font-size:17px;font-weight:900">${V.nuevo?'↩️ Acta de regreso · no se instaló':'❌ No se instaló'}</div><button onclick="verifDest=null;verifDestPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <div style="font-weight:800;margin-top:2px">${V.x.descripcion.split(' · ').slice(0,3).join(' · ')}</div>${V.x.calle?`<div style="font-weight:700">📍 ${escCalle(V.x.calle)}</div>`:''}
     ${V.herr.length?`<div style="margin-top:10px;font-size:15px;font-weight:900">🔩 Herrajes: ¿cuántos tienes?</div><div class="hint" style="margin:2px 0 0">Solo regresa a tu inventario lo que tienes.</div>
     ${V.herr.map((h,i)=>{ const it = CATALOGO.find(z=>z.id===h.itemId)||{}, ok = h.tengo>=h.q-1e-9; return `<div style="margin-top:6px;padding:8px 10px;border-radius:12px;border:2px solid ${ok?'#16a34a':'#dc2626'};display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong>${it.nombre||''}</strong><div class="hint" style="margin:0">Regresan ${fmtNum(h.q)} ${it.unidad||''}${ok?' · <span style="color:#16a34a;font-weight:800">Sí los tengo</span>':` · <span style="color:#dc2626;font-weight:800">faltan ${fmtNum(h.q-h.tengo)}</span>`}</div></div>
@@ -9130,13 +9145,14 @@ function verifDestPintar(){
     ${V.rows.map((r,i)=>`<div style="margin-top:8px;padding:9px 10px;border-radius:12px;border:2px solid ${VD_COL[r.d]};background:linear-gradient(0deg,${VD_COL[r.d]}12,${VD_COL[r.d]}12),var(--card)">
       <div class="row" style="justify-content:space-between;gap:6px;flex-wrap:nowrap"><div style="min-width:0"><strong>${r.n==='Melamina (toda)'?'Melamina '+nom(r.itemId):`${fmtNum(r.q)} × ${r.n}`}</strong>${r.dim?` <span class="hint" style="margin:0">${r.dim} cm</span>`:''}<div class="hint" style="margin:0">${nom(r.itemId)} · ${fmtNum(r.q*r.u)} hoja</div></div>
       ${r.q>1 && r.q===Math.round(r.q)?`<button class="btn small" style="margin:0;padding:2px 8px;min-height:30px;font-size:12px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="verifDestSeparar(${i})">✂️ Separar</button>`:''}</div>
-      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap">${['inv','sob','merma','falta'].map(d=>btn(i,d,r.d===d)).join('')}</div></div>`).join('')}
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:nowrap">${(V.nuevo?['inv','sob','merma','falta']:['inv','sob','merma']).map(d=>btn(i,d,r.d===d)).join('')}</div></div>`).join('')}
     <div style="margin-top:12px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12)"><strong>Resumen de la melamina</strong>
       ${['inv','sob','merma','falta'].filter(d=>tot[d]>0.0005).map(d=>`<div class="row" style="justify-content:space-between"><span>${VD_TXT[d]}</span><strong style="color:${VD_COL[d]}">${fmtNum(tot[d])} hoja</strong></div>`).join('')}
       <div class="hint" style="margin:4px 0 0">Total: ${fmtNum(V.mel.reduce((a,c)=>a+Number(c.cantidad),0))} hoja de melamina de estas piezas.${V.x.categoria==='Puerta'?' Las tiras de los lados de la hoja no regresan (casi siempre ya se usaron).':''}</div></div>`:''}
     ${(()=>{ const fh = V.herr.filter(h=>h.tengo<h.q-1e-9), fm = V.rows.filter(r=>r.d==='falta'); return fh.length||fm.length ? `<div style="margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid #dc2626;background:rgba(220,38,38,.08)"><strong>❌ Lo que no tienes</strong><div class="hint" style="margin:2px 0 0">${fh.map(h=>`${fmtNum(h.q-h.tengo)} ${((CATALOGO.find(z=>z.id===h.itemId)||{}).nombre||'')}`).concat(fm.map(r=>r.n==='Melamina (toda)'?'Melamina '+nom(r.itemId):`${fmtNum(r.q)} ${r.n} ${r.dim||''}`)).join(' · ')}</div><div class="hint" style="margin:4px 0 0">No entra a tu inventario. Dirección decide qué pasa.</div></div>` : ''; })()}
-    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="verifDest.firma=this.checked;verifDestPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> lo que marqué que sí tengo entra a mi inventario. Lo que no, lo decide Dirección.</span></label>
-    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="verifDestGuardar()">${V.firma?'✅ Firmar y guardar':'✍️ Marca la firma para guardar'}</button>
+    ${!V.nuevo && V.otros.length?`<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(22,163,74,.12);font-size:14px">🔩 Los herrajes regresan a tu inventario: ${V.otros.map(c=>fmtNum(c.cantidad)+' '+nomC(c)).join(' · ')}</div>`:''}
+    ${V.nuevo?'':'<!--'}<label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="verifDest.firma=this.checked;verifDestPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> lo que marqué que sí tengo entra a mi inventario. Lo que no, lo decide Dirección.</span></label>${V.nuevo?'':'-->'}
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:${V.firma?'linear-gradient(135deg,#16a34a,#15803d)':'#94a3b8'}" onclick="verifDestGuardar()">${!V.nuevo?'✅ Guardar':(V.firma?'✅ Firmar y guardar':'✍️ Marca la firma para guardar')}</button>
     <p class="hint" style="margin:6px 0 0">Si después sí se instala, se captura otra vez como nueva.</p></div>`;
 }
 function verifDestSet(i, d){ if(verifDest && verifDest.rows[i]){ verifDest.rows[i].d = d; verifDestPintar(); } }
@@ -9172,7 +9188,7 @@ async function verifDestGuardar(){
     if(sobIts.length){ const material = sobIts.map(k=>({itemId:k, cantidad:porItem[k].sob})), restante = {}; material.forEach(m=>{ restante[m.itemId]=m.cantidad; });
       const lineas = sobIts.flatMap(k=>pzTxt(porItem[k].sobPz).map(t=>t+' · '+((CATALOGO.find(i=>i.id===k)||{}).nombre||'').replace('Melamina ','')));
       await db.collection('sobrantes').doc(loteId).set({modulo:x.modulo, fecha, calle:x.calle||'', nota:'No se instaló: '+x.descripcion.split(' · ').slice(0,3).join(' · '), lineas, lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:id}); }
-    try{ await db.collection('piezasPrueba').doc('actaReg_'+id).set({tipo:'actaRegreso', modulo:x.modulo, instalacionId:id, descripcion:x.descripcion, calle:x.calle||'', fecha,
+    if(V.nuevo) try{ await db.collection('piezasPrueba').doc('actaReg_'+id).set({tipo:'actaRegreso', modulo:x.modulo, instalacionId:id, descripcion:x.descripcion, calle:x.calle||'', fecha,
       herrajes:(V.herr||[]).map(h=>({itemId:h.itemId, q:h.q, tengo:h.tengo})), piezas:V.rows.map(r=>({n:r.n, dim:r.dim||'', q:r.q, itemId:r.itemId, d:r.d})), faltan, firma:{por:creadoPor, en:fecha, ok:true}}); }catch(e){}
     if(x.separado && !x.separado.resuelto){ try{ await db.collection('instalacionesLog').doc(id).update({separado:Object.assign({}, x.separado, {resuelto:'regreso', en2:fecha})}); }catch(e){} }
     const algoSob = sobIts.length, algoMer = Object.values(porItem).some(P=>P.merma>0.00005);
@@ -12473,6 +12489,10 @@ function renderConf(){
   $('#main').innerHTML = `<div class="card" style="padding:12px"><div style="font-size:18px;font-weight:900">⚙️ Configuración</div><p class="hint" style="margin:2px 0 0">Lo que casi no se usa o es delicado. Solo Dirección.</p></div>
     ${grp('👥','Personal','#0369a1', fila('Usuarios','altas y roles',"irA('usr')"))}
     ${grp('📚','Catálogo','#0891b2', fila('Artículos y colores','lista',"irA('cat')") + fila('Despiece','piezas por modelo',"irA('desp')") + fila('Stock mínimo','avisos de poco material',"minVals=null;irA('min')") + fila('⭐ Valor de cada modelo','instalaciones',"valEdit=null;irA('valinst')"))}
+    <div class="card" style="border:2px solid #7c3aed">
+      <div style="font-size:16px;font-weight:900">🆕 Sistema nuevo (actas y material separado)</div>
+      <p class="hint" style="margin:4px 0 0;line-height:1.45">Se prende <strong>solo</strong> en cada módulo cuando guardas su <strong>Paso 0</strong> (el día de su conteo). Los demás siguen viendo la app como antes.</p>
+      <div style="display:grid;gap:6px;margin-top:10px">${MODULOS.map(m=>{ const on = sisNuevoMod(m.nombre), f = on && sisNuevo.modulos[m.nombre]; return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;border:1px solid var(--line)"><span style="width:12px;height:12px;border-radius:50%;background:${m.color}"></span><strong style="flex:1">${m.nombre}${on?`<span class="hint" style="display:block;margin:0;font-weight:400">desde ${new Date(f).toLocaleDateString('es-MX',{day:'numeric',month:'short'})}</span>`:''}</strong><span class="tag" style="color:${on?'#7c3aed':'#64748b'};border-color:currentColor">${on?'NUEVO':'como antes'}</span><button class="btn small" style="margin:0;min-width:90px;background:${on?'#64748b':'#7c3aed'}" onclick="sisNuevoPrender('${m.nombre}',${!on}).then(ok=>{ if(ok){ toast('Listo'); renderConf(); } })">${on?'Apagar':'Prender'}</button></div>`; }).join('')}</div></div>
     <div class="card" style="border:2px solid ${modoAutoAlguno()?'#16a34a':'#64748b'}">
       <div style="font-size:16px;font-weight:900">⚡ Modo automático</div>
       <p class="hint" style="margin:4px 0 0;line-height:1.45">Temporal, mientras se reestructura la app. <strong>Prendido en un módulo:</strong> todo lo que captura su coordinador entra <strong>aprobado</strong> (entradas, salidas, mermas, garantías, regresos, sobrantes, mermas del corte, herramienta y vehículos) y <strong>él confirma sus instalaciones</strong> (✅ se instaló / ❌ no se instaló). Todo queda en el historial con quién lo capturó.</p>
