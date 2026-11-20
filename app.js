@@ -9167,7 +9167,7 @@ async function hojaDiaGenerar(){
   const quietos = []; G.forEach(g=>{ if(g.sep || g.inst) return; g.rows.forEach(r=>{ if(!r.sep && Math.abs((Number(r.d)||0)-(Number(r.t)||0))<0.005 && !r.mv && Number(r.d)>0) quietos.push(r.k); }); });
   let seed = 0; for(const ch of (mod+hoy)) seed = (seed*31 + ch.charCodeAt(0)) % 2147483647;
   const rnd = () => (seed = (seed*48271) % 2147483647) / 2147483647, ciegos = [];
-  while(ciegos.length < Math.min(3, quietos.length)){ const k = quietos[Math.floor(rnd()*quietos.length)]; if(!ciegos.includes(k)) ciegos.push(k); }
+  // (pedido por el usuario: se quitó el conteo de 3 al azar; ellos verifican todo)
   const doc = {tipo:'hojaDia', modulo:mod, dia:hoy, fecha:new Date().toISOString(), desde, desdeConteo, grupos:G, ciegos, firma:null, resol:{}};
   await db.collection('piezasPrueba').doc('hdia_'+mod+'_'+hoy).set(doc);
   _hojaDia.doc = Object.assign({id:'hdia_'+mod+'_'+hoy}, doc); return _hojaDia.doc;
