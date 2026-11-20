@@ -8184,7 +8184,7 @@ function verifDetalleHtml(l){
   const hojas = cs.filter(x=>esHoja(x.it)), otros = cs.filter(x=>!esHoja(x.it));
   const fila = x => `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)"><span>${x.it.nombre}</span><strong style="white-space:nowrap">${fmtNum(x.q)} ${x.it.unidad}</strong></div>`;
   const cap = l.fecha ? new Date(l.fecha).toLocaleString('es-MX',{weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'}) : '';
-  return `${extrasLogHtml(l)}
+  return `${l.noSalio && !(l.verif&&l.verif.estado)?`<div style="margin:4px 0;padding:6px 8px;border-radius:8px;background:rgba(220,38,38,.12);color:#dc2626;font-weight:800;font-size:13px">⚠️ El coordinador dice que NO salió (Hoja del día ${fCorta(diaLocal(l.noSalio.en))})</div>`:''}${extrasLogHtml(l)}
     <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12.5px;color:var(--sub);list-style:none">📦 ${verifMat(l)} <span style="color:var(--brand);font-weight:700;white-space:nowrap">· Ver todo ▾</span></summary>
       <div style="margin-top:6px;padding:8px 10px;border-radius:10px;background:var(--bg);border:1px solid var(--line);font-size:13px">
         ${hojas.length?`<div style="font-weight:800;margin-bottom:2px">🪵 Melamina / MDF</div>${hojas.map(fila).join('')}`:''}
@@ -9060,7 +9060,7 @@ function actaEntPintar(){
     <div style="display:flex;justify-content:space-between"><div style="font-size:18px;font-weight:900">📜 Acta de entrega · ${d.modulo}</div><button onclick="actaEntV=null;actaEntPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <p class="hint" style="margin:2px 0 6px">Lo que se contó contigo. Si un renglón <strong>no</strong> está bien, tócalo ❌ y escribe cuánto tienes. Lo separado no viene aquí.</p>
     <div class="hint" style="margin:0 0 4px"><strong>Abre cada grupo</strong> para revisarlo (${d.grupos.filter((g,gi)=>V.abiertos[gi]).length} de ${d.grupos.length} revisados).</div>
-    ${d.grupos.map((g,gi)=>{ const nNoG = g.rows.filter(r=>V.no[r.k]).length, vis = !!V.abiertos[gi]; return `<details ${V.open===gi?'open':''} ontoggle="if(this.open){actaEntV.abiertos[${gi}]=true;if(actaEntV.open!==${gi}){actaEntV.open=${gi};actaEntPintar();}}else if(actaEntV.open===${gi}){actaEntV.open=null;}" style="margin-top:8px;border:2px solid ${nNoG?'#dc2626':(vis?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
+    ${d.grupos.map((g,gi)=>{ const nNoG = g.rows.filter(r=>V.no[r.k]).length, vis = !!V.abiertos[gi]; return `<details ${V.open===gi?'open':''} ontoggle="if(!actaEntV)return;if(this.open){actaEntV.abiertos[${gi}]=true;if(actaEntV.open!==${gi}){actaEntV.open=${gi};actaEntPintar();}}else if(actaEntV.open===${gi}){actaEntV.open=null;}" style="margin-top:8px;border:2px solid ${nNoG?'#dc2626':(vis?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
       <summary style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:900;font-size:14px">${g.t}</span><span style="white-space:nowrap;font-weight:800;color:${nNoG?'#dc2626':(vis?'#16a34a':'var(--sub)')}">${nNoG?'❌ '+nNoG:(vis?'✅ revisado':g.rows.length+' ▾')}</span></summary>
       ${g.rows.map(r=>{ const no = !!V.no[r.k]; return `<div style="display:flex;align-items:center;gap:8px;padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${no?'#dc2626':'var(--line)'};background:${no?'rgba(220,38,38,.08)':'transparent'}">
         <div style="flex:1;min-width:0"><span>${r.n}</span>${r.det?`<div class="hint" style="margin:0;font-size:11.5px">${r.det}</div>`:''}
@@ -9085,11 +9085,14 @@ async function actaEntFirmar(){
 // tenías (lo que dijo la app al firmar la hoja anterior o el acta) + entró − salió = debes tener → ¿lo tienes?
 // "Tenías" SIEMPRE es lo de la app: un faltante no se borra solo. Dirección decide cada diferencia:
 // ✅ aceptar (se da de baja como merma), 💰 deuda (baja + deuda) o 🔁 recontar (sale marcado mañana).
+// v298 (pedido por el usuario): Dirección aprueba a medio día, así que la Hoja del día cuenta TODO lo que el
+// coordinador capturó (aprobado y pendiente; lo rechazado no). Si Dirección rechaza algo, la siguiente hoja ya no lo cuenta.
+const hdCuenta = m => cuentaEnInventario(m) || m.estado==='pendiente';
 function calcFormulaHasta(itemId, hastaISO){
   const resetFecha = resetMap[modulo()];
   const doc = inicialMap[itemId]!==undefined ? {cantidad:inicialMap[itemId], cortado:inicialCortadoMap[itemId], fecha:inicialFechaMap[itemId]} : null;
   const b = lineaBase(resetFecha, doc);
-  const lista = movs.filter(m=>m.itemId===itemId && (!b.desde || m.fecha>b.desde) && (!hastaISO || m.fecha<=hastaISO) && cuentaEnInventario(m));
+  const lista = movs.filter(m=>m.itemId===itemId && (!b.desde || m.fecha>b.desde) && (!hastaISO || m.fecha<=hastaISO) && hdCuenta(m));
   return calcularFormula(itemId, b.inicial, b.inicialCortado, lista);
 }
 const HD_HOJA = 122*244;
@@ -9118,7 +9121,7 @@ async function hojaDiaGenerar(){
   const G = [], it = id => CATALOGO.find(i=>i.id===id)||{};
   // 1) Hojas completas y 2) herrajes / otros (inventario oficial)
   const hojas = [], otros = [];
-  CATALOGO.forEach(i=>{ const f1 = calcFormula(i.id), f0 = calcFormulaHasta(i.id, desde);
+  CATALOGO.forEach(i=>{ const f1 = calcFormulaHasta(i.id, null), f0 = calcFormulaHasta(i.id, desde);
     if(esHoja(i)){ const t = fmtNum(f0.completas), d = fmtNum(f1.completas); if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
       hojas.push({k:'h_'+i.id, itemId:i.id, n:i.nombre.replace(/^Melamina /,''), t, d, u:'hojas', lado:'completas'}); }
     else { const t = fmtNum(f0.final), d = fmtNum(f1.final); if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
@@ -9142,9 +9145,13 @@ async function hojaDiaGenerar(){
   if(resto.length) G.push({t:'Herrajes y otros', rows:resto});
   // 5) separado: lo de Paso 0 y lo que está apartado para otro día
   try{ const sn = await db.collection('instalacionesLog').where('modulo','==',mod).get(); const ls = sn.docs.map(d=>({id:d.id, ...d.data()}));
+    // v298: respaldo mientras Dirección verifica con el grupo: lo que mandó desde la hoja anterior. Él dice si salió o no.
+    const d0 = diaLocal(desde), env = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.separado && !l.separado.resuelto)
+      && l.fechaDia>=d0 && l.fechaDia<hoy && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)) && !(l.verif && l.verif.estado)).sort((a,b)=>String(a.calle||'').localeCompare(String(b.calle||'')));
+    if(env.length) G.unshift({t:'🚚 Instalaciones que mandaste', inst:true, rows:env.map(l=>({k:'i_'+l.id, logId:l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:fCorta(l.fechaDia)+' · ¿Salió? Si NO salió y el material sigue aquí, toca No.', sep:true, inst:true}))});
     const sep = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
-      && ((l.separado && !l.separado.resuelto) || (l.pospuesta && !l.verif && diaValorInst(l) > hoy)));
-    if(sep.length) G.push({t:'📌 Material separado', sep:true, rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:(l.separado&&!l.separado.resuelto?'Separada':'Apartada')+' · se instala '+fCorta(diaValorInst(l)), sep:true}))}); }catch(e){}
+      && ((l.separado && !l.separado.resuelto) || (l.pospuesta && !l.verif && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
+    if(sep.length) G.push({t:'📌 Material separado', sep:true, rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:(l.separado&&!l.separado.resuelto?'Separada · se instala '+fCorta(diaValorInst(l)):(l.noSalio?'No salió · esperando a Dirección':'Apartada · se instala '+fCorta(diaValorInst(l)))), sep:true}))}); }catch(e){}
   const doc = {tipo:'hojaDia', modulo:mod, dia:hoy, fecha:new Date().toISOString(), desde, desdeConteo, grupos:G, firma:null, resol:{}};
   await db.collection('piezasPrueba').doc('dia_'+mod+'_'+hoy).set(doc);
   _hojaDia.doc = Object.assign({id:'dia_'+mod+'_'+hoy}, doc); return _hojaDia.doc;
@@ -9175,12 +9182,13 @@ function hojaDiaPintar(){
         ${r.sep?`<div class="hint" style="margin:0">${r.det||''}</div>`:`<div class="hint" style="margin:0">Tenías ${fmtNum(r.t)}${dif?` · ${dif>0?'+':''}${fmtNum(dif)}`:' · sin movimiento'}${r.arm&&r.arm>0?` · ${fmtNum(r.arm)} más en armados`:''}</div>${r.det?`<div class="hint" style="margin:0;font-size:11.5px">${r.det}</div>`:''}`}</div>
         ${r.sep?'':`<div style="text-align:right"><div style="font-size:18px;font-weight:900;line-height:1">${fmtNum(r.d)}</div><div class="hint" style="margin:0;font-size:11px">debes tener</div></div>`}
         <button class="btn small" style="margin:0;min-width:46px;min-height:38px;padding:0;background:${no?'#dc2626':'#16a34a'}" onclick="hojaDiaNo('${q(r.k)}')">${no?'No':'Sí'}</button></div>
-      ${no?`<div style="display:flex;gap:6px;margin-top:6px;align-items:center">${r.sep?'':`<input type="number" inputmode="decimal" placeholder="Tengo" value="${V.tengo[r.k]??''}" oninput="hojaDiaV.tengo['${q(r.k)}']=this.value" style="width:80px;min-width:80px;margin:0">`}
+      ${no&&r.inst?`<div class="hint" style="margin:6px 0 0;color:#dc2626;font-weight:800">No salió: queda apartada y Dirección la verifica con el grupo.</div>`:''}
+      ${no&&!r.inst?`<div style="display:flex;gap:6px;margin-top:6px;align-items:center">${r.sep?'':`<input type="number" inputmode="decimal" placeholder="Tengo" value="${V.tengo[r.k]??''}" oninput="hojaDiaV.tengo['${q(r.k)}']=this.value" style="width:80px;min-width:80px;margin:0">`}
         <select onchange="hojaDiaV.mot['${q(r.k)}']=this.value" style="flex:1;min-width:0;margin:0"><option value="">¿Por qué?</option>${HD_MOT.map(m=>`<option ${V.mot[r.k]===m?'selected':''}>${m}</option>`).join('')}</select></div>`:''}</div>`; };
   ov.innerHTML = `<div style="width:100%;max-width:470px;background:var(--card);color:var(--ink);border:2px solid #3E5CDE;border-radius:18px;padding:14px;margin-top:8px">
     <div style="display:flex;justify-content:space-between"><div style="font-size:18px;font-weight:900">📋 Hoja del día · ${d.modulo}</div><button onclick="hojaDiaV=null;hojaDiaPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <p class="hint" style="margin:2px 0 6px">${new Date(d.dia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})}. Revisa cada renglón: <strong>Sí</strong> lo tengo, o <strong>No</strong> + cuánto tienes + por qué. Abre cada grupo (${d.grupos.filter((g,gi)=>V.abiertos[gi]).length} de ${d.grupos.length}).</p>
-    ${d.grupos.map((g,gi)=>{ const nNoG = g.rows.filter(r=>V.no[r.k]).length, vis = !!V.abiertos[gi]; return `<details ${V.open===gi?'open':''} ontoggle="if(this.open){hojaDiaV.abiertos[${gi}]=true;if(hojaDiaV.open!==${gi}){hojaDiaV.open=${gi};hojaDiaPintar();}}else if(hojaDiaV.open===${gi}){hojaDiaV.open=null;}" style="margin-top:8px;border:2px solid ${nNoG?'#dc2626':(vis?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
+    ${d.grupos.map((g,gi)=>{ const nNoG = g.rows.filter(r=>V.no[r.k]).length, vis = !!V.abiertos[gi]; return `<details ${V.open===gi?'open':''} ontoggle="if(!hojaDiaV)return;if(this.open){hojaDiaV.abiertos[${gi}]=true;if(hojaDiaV.open!==${gi}){hojaDiaV.open=${gi};hojaDiaPintar();}}else if(hojaDiaV.open===${gi}){hojaDiaV.open=null;}" style="margin-top:8px;border:2px solid ${nNoG?'#dc2626':(vis?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
       <summary style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:900;font-size:14px">${g.t}</span><span style="white-space:nowrap;font-weight:800;color:${nNoG?'#dc2626':(vis?'#16a34a':'var(--sub)')}">${nNoG?'No: '+nNoG:(vis?'✅ revisado':g.rows.length+' ▾')}</span></summary>
       ${g.rows.map(fila).join('')}</details>`; }).join('')}
     <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:10px 12px;border-radius:12px;border:2px solid ${V.firma?'#16a34a':'#ca8a04'};background:${V.firma?'rgba(22,163,74,.10)':'rgba(202,138,4,.10)'};cursor:pointer"><input type="checkbox" ${V.firma?'checked':''} onchange="hojaDiaV.firma=this.checked;hojaDiaPintar()" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> revisé todo mi inventario.${nNo?` Las diferencias (${nNo}) tienen su motivo.`:''}</span></label>
@@ -9191,10 +9199,12 @@ async function hojaDiaFirmar(){
   const V = hojaDiaV; if(!V) return; if(!V.firma) return alert('Marca la casilla ✍️ Firmo.');
   const sinVer = V.d.grupos.filter((g,gi)=>!V.abiertos[gi]); if(sinVer.length) return alert('Falta revisar '+sinVer.length+' grupo(s): '+sinVer.slice(0,4).map(g=>g.t).join(', ')+(sinVer.length>4?'…':'')+'.');
   const rows = {}; V.d.grupos.forEach(g=>g.rows.forEach(r=>{ rows[r.k] = Object.assign({grupo:g.t}, r); }));
-  const mal = Object.keys(V.no).filter(k=>!V.mot[k] || (!rows[k].sep && (V.tengo[k]===undefined || V.tengo[k]==='' || isNaN(Number(V.tengo[k])))));
+  const mal = Object.keys(V.no).filter(k=>!rows[k].inst && (!V.mot[k] || (!rows[k].sep && (V.tengo[k]===undefined || V.tengo[k]==='' || isNaN(Number(V.tengo[k]))))));
   if(mal.length) return alert('En los renglones con "No" escribe cuánto tienes y elige por qué.');
-  const difs = Object.keys(V.no).map(k=>{ const r = rows[k], tengo = r.sep ? null : Number(V.tengo[k]); return Object.assign({}, r, {tengo, dif:r.sep?null:fmtNum(tengo - r.d), motivo:V.mot[k]}); });
-  try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
+  const noSal = Object.keys(V.no).filter(k=>rows[k].inst).map(k=>rows[k].logId);
+  for(const id of noSal){ try{ await db.collection('instalacionesLog').doc(id).update({noSalio:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), hojaDia:V.d.id}}); }catch(e){} }
+  const difs = Object.keys(V.no).filter(k=>!rows[k].inst).map(k=>{ const r = rows[k], tengo = r.sep ? null : Number(V.tengo[k]); return Object.assign({}, r, {tengo, dif:r.sep?null:fmtNum(tengo - r.d), motivo:V.mot[k]}); });
+  try{ await db.collection('piezasPrueba').doc(V.d.id).update({difs, noSalio:noSal, firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:!difs.length, nota:difs.map(x=>x.n+': '+(x.sep?'':('tengo '+fmtNum(x.tengo)+' · '))+x.motivo).join(' · ')}});
     hojaDiaV = null; hojaDiaPintar(); _hojaDia.t = 0; if(_hojaDia.doc) _hojaDia.doc.firma = {ok:!difs.length}; toast(difs.length?'✍️ Firmada. Dirección revisa las diferencias.':'✍️ Hoja firmada. ¡Buen día!'); renderHome(); }
   catch(e){ alert('Error: '+e.message); }
 }
@@ -17587,12 +17597,29 @@ function hcHoja2Html(){
 function hcObjDe(pre){ return pre==='rf' ? hcRF : pre==='rc' ? hcRC : hcMR; }
 function hcSalioAdd(pre){ const o = hcObjDe(pre); if(!o) return; const k = (document.getElementById(pre+'-k')||{}).value, q = Math.round(Number((document.getElementById(pre+'-q')||{}).value)||0); if(!k || !(q>0)) return alert('Elige la pieza y cuántas.'); o.salio = o.salio||[]; const r = o.salio.find(x=>x.k===k); if(r) r.q += q; else o.salio.push({k, q}); hcRender(); }
 function hcSalioLimpiar(pre){ const o = hcObjDe(pre); if(o){ o.salio = []; hcRender(); } }
+// v298 (pedido por el usuario): revisar que las piezas de verdad quepan (no solo por área): cada pieza tiene que
+// caber por medida y, si son todas iguales, se acomodan como el cortador (3 mm de sierra) para saber el máximo.
+const KERF = 0.3;
+function cabenMax(W, H, a, b, prof){ prof = prof||0; if(W<Math.min(a,b)-1e-6 || H<Math.min(a,b)-1e-6 || prof>3) return 0; let best = 0;
+  for(const [x,y] of [[a,b],[b,a]]){ const c = Math.floor((W+KERF+1e-6)/(x+KERF)), r = Math.floor((H+KERF+1e-6)/(y+KERF)); if(c<1 || r<1) continue;
+    const n = c*r, wU = c*(x+KERF), hU = r*(y+KERF), wR = W - wU, hR = H - hU;
+    const op1 = cabenMax(wR, H, a, b, prof+1) + cabenMax(wU-KERF, hR, a, b, prof+1), op2 = cabenMax(W, hR, a, b, prof+1) + cabenMax(wR, hU-KERF, a, b, prof+1);
+    best = Math.max(best, n + Math.max(op1, op2, 0)); }
+  return best; }
+// Devuelve '' si cabe, o el motivo si no.
+function noCabeTxt(W, H, salio){
+  const ps = (salio||[]).map(r=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); const d = P && pzpDims(P.dim); return d ? {P, a:d[0], b:d[1], q:Number(r.q)||0} : null; }).filter(x=>x && x.q>0);
+  for(const x of ps){ if(!((x.a<=W+1e-6 && x.b<=H+1e-6) || (x.a<=H+1e-6 && x.b<=W+1e-6))) return `${x.P.label} (${x.P.dim.replace(/ cm$/,'')}) no cabe en ${fmtNum(W)}×${fmtNum(H)}: es más grande.`; }
+  if(ps.length===1){ const m = cabenMax(W, H, ps[0].a, ps[0].b); if(ps[0].q > m) return `En ${fmtNum(W)}×${fmtNum(H)} salen máximo ${m} de ${ps[0].P.label} (${ps[0].P.dim.replace(/ cm$/,'')}). Anotaste ${ps[0].q}.`; }
+  else { const aP = ps.reduce((t,x)=>t+x.q*(x.a+KERF)*(x.b+KERF),0), aR = (W+KERF)*(H+KERF); if(aP > aR + 1) return `Esas piezas ocupan ${Math.round(aP/aR*100)}% de ${fmtNum(W)}×${fmtNum(H)} (contando el corte de la sierra): no caben.`; }
+  return ''; }
 function hcAreaSalio(l){ return (l||[]).reduce((t,r)=>{ const P = PIEZAS_AUDIT.find(x=>x.key===r.k); return t + (P ? r.q*pzpArea(P.dim) : 0); }, 0); }
 function hcRFGuardar(){ const o = hcRF, w = Number(o.w), h = Number(o.h); if(!(w>0 && h>0)) return alert('Escribe la medida del retazo.'); if(Math.min(w,h)>122 || Math.max(w,h)>244) return alert('Una hoja mide 122×244. Revisa la medida.'); if(!(o.salio||[]).length) return alert('Anota qué piezas salieron (pieza, cuántas y +).');
-  if(hcAreaSalio(o.salio) > w*h + 1) return alert(`Esas piezas no caben en un retazo de ${fmtNum(w)}×${fmtNum(h)}. Revisa.`);
+  { const nc = noCabeTxt(w, h, o.salio); if(nc) return alert('⛔ No cabe.\n\n'+nc+'\n\nRevisa: ¿salieron de otro retazo u hoja? ¿Es otra medida?'); }
   hcCap.retFilas.push({itemId:o.itemId, w, h, salio:o.salio, resto:o.resto}); hcRF = null; hcBorrGuardar(); toast('✔ Renglón agregado'); hcRender(); }
 function hcRCGuardar(){ const o = hcRC, q = Math.round(Number(o.q)||0), P = PIEZAS_AUDIT.find(x=>x.key===o.k); if(!P || !(q>0)) return alert('Elige la pieza y cuántas.'); if(!(o.salio||[]).length) return alert('Anota qué piezas salieron.');
   if(hcAreaSalio(o.salio) > q*pzpArea(P.dim) + 1) return alert(`Esas piezas no caben en ${q} ${P.label}. Revisa.`);
+  { const d = pzpDims(P.dim); if(d){ const per = (o.salio||[]).map(r=>({k:r.k, q:Math.ceil((Number(r.q)||0)/q)})); const nc = noCabeTxt(d[0], d[1], per); if(nc) return alert('⛔ No cabe.\n\n'+nc); } }
   hcCap.recortes.push({itemId:o.itemId, k:o.k, q, salio:o.salio, resto:o.resto}); hcRC = null; hcBorrGuardar(); toast('✔ Renglón agregado'); hcRender(); }
 function hcMRGuardar(){ const o = hcMR, q = Math.round(Number(o.q)||0), P = PIEZAS_AUDIT.find(x=>x.key===o.k); if(!P || !(q>0)) return alert('Elige la pieza y cuántas.');
   if(o.dest==='aprov' && hcAreaSalio(o.salio) > q*pzpArea(P.dim) + 1) return alert('Lo aprovechado no cabe en lo que se dañó. Revisa.');
@@ -17730,7 +17757,8 @@ async function hcGuardar(){
   const cortes = hcCortesCierre(), malos = [], dif = [];
   Object.keys(corte).forEach(id=>{ const H = Number(cortes[id])>0 ? Number(cortes[id]) : corte[id].hojasPapel; if(H>0 && hcAreaColor(id) > H*PZP_A + 1) malos.push(pzpColor(id));
     if(Number(cortes[id])>0 && corte[id].hojasPapel>0 && Math.abs(Number(cortes[id])-corte[id].hojasPapel)>0.01) dif.push(`${pzpColor(id)}: cierre ${fmtNum(cortes[id])}, hoja ${fmtNum(corte[id].hojasPapel)}`); });
-  if((malos.length || dif.length) && !confirm(`Revisa antes de guardar:\n\n${malos.length?'⛔ No cabe lo anotado en: '+malos.join(', ')+'\n':''}${dif.length?'⚠️ Hojas cortadas distintas:\n'+dif.join('\n'):''}\n\n¿Guardar así? A Dirección le llega el aviso.`)) return;
+  if(malos.length) return alert('⛔ No cabe lo anotado en: '+malos.join(', ')+'\n\nLas piezas anotadas ocupan más que las hojas cortadas. Revisa las cantidades o las hojas cortadas.');
+  if((dif.length) && !confirm(`Revisa antes de guardar:\n\n${malos.length?'⛔ No cabe lo anotado en: '+malos.join(', ')+'\n':''}${dif.length?'⚠️ Hojas cortadas distintas:\n'+dif.join('\n'):''}\n\n¿Guardar así? A Dirección le llega el aviso.`)) return;
   // v276: se lee la hoja guardada directo de la base (no de la copia en memoria) para conservar qué mermas del
   // corte ya se crearon (desperdicioMov / basuraMov): así una corrección actualiza esa merma y nunca crea otra.
   let prev = (pzpD.dias||[]).find(x=>x.fecha===f) || {};
