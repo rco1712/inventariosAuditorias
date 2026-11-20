@@ -5047,7 +5047,7 @@ function vaciarConteoAud(){
 const FAMILIAS_PIEZA = [
   // v272 (pedido por el usuario): mismo orden, mismos grupos y mismos colores que la hoja de corte en papel.
   {k:'est', t:'Estructura', ic:'🧱', c:'#3b6fd8', keys:['pared','entrepano','maletero','zoclo','cargador']},
-  {k:'caj', t:'Cajones', ic:'🗄️', c:'#c99a1e', keys:['frente','pchica','pgrande','fondocajon','fondocajonera']},
+  {k:'caj', t:'Cajones', ic:'🗄️', c:'#c99a1e', keys:['frente','pchica','pgrande','frenteemma','pchicaemma','pgrandeemma','fondocajon','fondocajonera']},
   {k:'pta', t:'Puertitas', ic:'🚪', c:'#e0742a', keys:['puertita3','puertita5','puertitamax']},
   {k:'zap', t:'Zapatera', ic:'👟', c:'#2f9e5e', keys:['entzap','puertazap','zoclozap12','zoclozap','entzapg','tapazapg','zoclozapg']},
   {k:'max', t:'MAX', ic:'⭐', c:'#9b5de5', keys:['frentemax','pchicamax','pgrandemax','zoclomax','paredmax','entmaxlargo','entmaxcorto','respaldomax','fondomax']},
@@ -6752,6 +6752,10 @@ const PIEZAS_AUDIT = [
   {key:'frentemax',   tipo:'mel', nombre:'Frente Max',               dim:'60×20 cm',    label:'Frente de cajón Max',      rinde:'23 por hoja'},
   {key:'pchica',      tipo:'mel', nombre:'Pieza chica de cajón',     dim:'33×16.5 cm',  label:'Pieza chica de cajón',     rinde:'49 por hoja'},
   {key:'pgrande',     tipo:'mel', nombre:'Pieza grande de cajón',    dim:'46.4×16.5 cm',label:'Pieza grande de cajón',    rinde:'35 por hoja'},
+  // v296 (medidas dadas por el usuario): el cajón Emma tiene frente y cuadro propios; el fondo es el mismo.
+  {key:'frenteemma',  tipo:'mel', nombre:'Frente Emma',              dim:'19×54 cm',    label:'Frente de cajón Emma',     rinde:'24 por hoja'},
+  {key:'pchicaemma',  tipo:'mel', nombre:'Pieza chica de cajón Emma', dim:'33×15 cm',   label:'Pieza chica de cajón Emma', rinde:'56 por hoja'},
+  {key:'pgrandeemma', tipo:'mel', nombre:'Pieza grande de cajón Emma',dim:'46.4×15 cm', label:'Pieza grande de cajón Emma',rinde:'40 por hoja'},
   {key:'pchicamax',   tipo:'mel', nombre:'Pieza chica de cajón Max', dim:'15×38 cm',    label:'Pieza chica de cajón Max', rinde:'45 por hoja'},
   {key:'pgrandemax',  tipo:'mel', nombre:'Pieza grande de cajón Max',dim:'15×52.5 cm',  label:'Pieza grande de cajón Max',rinde:'30 por hoja'},
   {key:'entzap',      tipo:'mel', nombre:'Entrepaño zapatera',       dim:'27×40 cm',    label:'Entrepaño de zapatera (27 o 30×40)', rinde:'24 por hoja'},
@@ -6822,7 +6826,7 @@ function armadoVariantes(tipo){
 }
 const ARMADO_CORREDERA = {hembra:'Hembra (la que va en la cajonera)', macho:'Macho (la que va en el cajón)'};
 const ARMADO_CAJONERAS = {'1':'De 1 cajón','2':'De 2 cajones','3':'De 3 cajones','5':'De 5 cajones','6':'De 6 cajones','8':'De 8 cajones','10':'De 10 cajones','emma':'Emma (4 cajones)','max':'Max (4 cajones)'};
-const PIEZAS_DE_CAJON = ['Frente','Frente Max','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
+const PIEZAS_DE_CAJON = ['Frente','Frente Max','Frente Emma','Pieza chica de cajón Emma','Pieza grande de cajón Emma','Pieza chica de cajón','Pieza grande de cajón','Pieza chica de cajón Max','Pieza grande de cajón Max','Fondo de cajón (MDF 3mm)','Fondo de cajón (MDF 5mm, Max)','Jaladera (por cajón)','Juego de corredera','Correderas de extensión'];
 function armadoTienePuertitas(variante){ return ['3','5','emma','max'].includes(variante); }
 function armadoUsaCorredera(a){ return (a.tipo==='cajonera' || a.tipo==='cajon' || a.tipo==='corredera') && a.variante!=='max'; }
 
@@ -6883,6 +6887,11 @@ function piezasDeArmado(a){
       add('Pieza chica de cajón Max', 2, '15×38 cm', a.colorCuadro);
       add('Pieza grande de cajón Max', 2, '15×52.5 cm', a.colorCuadro);
       add('Fondo de cajón (MDF 5mm, Max)', 1, '55.5×37.9 cm', '—');
+    } else if(a.variante==='emma'){
+      add('Frente Emma', 1, '19×54 cm', a.color);
+      add('Pieza chica de cajón Emma', 2, '33×15 cm', a.colorCuadro);
+      add('Pieza grande de cajón Emma', 2, '46.4×15 cm', a.colorCuadro);
+      add('Fondo de cajón (MDF 3mm)', 1, '49.4×33 cm', '—');
     } else {
       add('Frente', 1, '18×54 cm', a.color);
       add('Pieza chica de cajón', 2, '33×16.5 cm', a.colorCuadro);
@@ -7009,9 +7018,9 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     add('Pared',2,'191×40 cm',color,'ok','Cajonera Emma: 2 paredes + 4 entrepaños + 5 zóclos de 10×52 + 4 cajones (confirmado por el usuario)');
     add('Entrepaño',4,'52×40 cm',color,'ok');
     add('Zóclo normal',5,'10×52 cm',color,'ok','Emma lleva 5 zóclos de 10×52 (confirmado por el usuario; distinto de los 2 de una cajonera/entrepañera normal)');
-    add('Frente',4,'18×54 cm',color,'ok');
-    add('Pieza chica de cajón',4*2,'33×16.5 cm',color,'ok');
-    add('Pieza grande de cajón',4*2,'46.4×16.5 cm',color,'ok');
+    add('Frente Emma',4,'19×54 cm',color,'ok','Cajón Emma (medidas del usuario, v296)');
+    add('Pieza chica de cajón Emma',4*2,'33×15 cm',color,'ok');
+    add('Pieza grande de cajón Emma',4*2,'46.4×15 cm',color,'ok');
     add('Fondo de cajón (MDF 3mm)',4,'49.4×33 cm','—','ok');
     // Confirmado por el usuario: la Emma puede llevar corredera normal o de extensión.
     if(correderaExt) add('Correderas de extensión',4,'—','—','ok','1 por cajón (Emma con corredera de extensión)');
@@ -7063,9 +7072,10 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
     const n = Math.max(1, Number(extra && extra.cantidad)||1), v = (extra && extra.variante) || 'normal', cuadro = (extra && extra.colorCuadro) || color;
     if(v==='max') piezasCajonesMax(add, n, color, cuadro);
     else {
-      add('Frente', n, '18×54 cm', color, 'ok', 'Cajón suelto '+(v==='emma'?'Emma':'normal')+': frente del color elegido');
-      add('Pieza chica de cajón', n*2, '33×16.5 cm', cuadro, 'ok', 'Cuadro del cajón');
-      add('Pieza grande de cajón', n*2, '46.4×16.5 cm', cuadro, 'ok');
+      const E = v==='emma';
+      add(E?'Frente Emma':'Frente', n, E?'19×54 cm':'18×54 cm', color, 'ok', 'Cajón suelto '+(E?'Emma':'normal')+': frente del color elegido');
+      add(E?'Pieza chica de cajón Emma':'Pieza chica de cajón', n*2, E?'33×15 cm':'33×16.5 cm', cuadro, 'ok', 'Cuadro del cajón');
+      add(E?'Pieza grande de cajón Emma':'Pieza grande de cajón', n*2, E?'46.4×15 cm':'46.4×16.5 cm', cuadro, 'ok');
       add('Fondo de cajón (MDF 3mm)', n, '49.4×33 cm', '—', 'ok');
       if(correderaExt) add('Correderas de extensión', n, '—', '—', 'ok', '1 por cajón');
       else add('Juego de corredera', n, '—', '—', 'ok', '1 por cajón');
@@ -7097,7 +7107,7 @@ function buildAdicionalPiezas(tipo, cajones, color, correderaExt, conPuerta, ext
   return piezas;
 }
 const PIEZAS_ZAPATERA_FRENTE = ['Zóclo zapatera','Zóclo zapatera grande','Puerta de zapatera','Jaladera (zapatera)'];
-const PIEZAS_COLOR_FRENTE = ['Zóclo normal','Zóclo Max','Zóclo especial','Marco de espejo','Frente','Frente Max','Puertita de cajonera'];
+const PIEZAS_COLOR_FRENTE = ['Zóclo normal','Zóclo Max','Zóclo especial','Marco de espejo','Frente','Frente Max','Frente Emma','Puertita de cajonera'];
 
 // Traduce el valor del selector "por muebles" (MUEBLE_TIPO_OPCIONES) a buildAdicionalPiezas
 function buildMueblePiezasComp(value, cajonesManual, color, correderaExt){
@@ -7262,9 +7272,9 @@ function piezasAConsumoReceta(piezas, color){
   // v264: cada frente se descuenta en SU color (antes todos iban al color del modelo; un extra con
   // frentes de otro color se descontaba en el color equivocado).
   const frentesPorColor = {};
-  piezas.forEach(p=>{ if(p.estado!=='ok' || typeof p.cantidad!=='number' || (p.nombre!=='Frente' && p.nombre!=='Frente Max')) return;
+  piezas.forEach(p=>{ if(p.estado!=='ok' || typeof p.cantidad!=='number' || (p.nombre!=='Frente' && p.nombre!=='Frente Max' && p.nombre!=='Frente Emma')) return;
     const c = (p.colorDestino && p.colorDestino!=='—') ? p.colorDestino : color;
-    frentesPorColor[c] = (frentesPorColor[c]||0) + (p.nombre==='Frente' ? p.cantidad/24 : p.cantidad/FRENTES_MAX_POR_HOJA); });
+    frentesPorColor[c] = (frentesPorColor[c]||0) + ((p.nombre==='Frente' || p.nombre==='Frente Emma') ? p.cantidad/24 : p.cantidad/FRENTES_MAX_POR_HOJA); });
   Object.keys(frentesPorColor).forEach(c=>addConsumo('Melamina '+c, frentesPorColor[c]));
 
   // Melamina de Cajonera Max / Entrepañera Max: 1 hoja por unidad, ya expresada en hojas (no se divide),
@@ -7278,18 +7288,22 @@ function piezasAConsumoReceta(piezas, color){
 
   // Piezas de cajón: cortas 49/hoja, largas 35/hoja
   const cortasPorColor = {}, largasPorColor = {};
-  const cortasMaxPorColor = {}, largasMaxPorColor = {};
+  const cortasMaxPorColor = {}, largasMaxPorColor = {}, cortasEmmaPorColor = {}, largasEmmaPorColor = {};
   piezas.forEach(p=>{
     if(p.estado!=='ok' || typeof p.cantidad!=='number') return;
     if(p.nombre==='Pieza chica de cajón') cortasPorColor[p.colorDestino]=(cortasPorColor[p.colorDestino]||0)+p.cantidad;
     if(p.nombre==='Pieza grande de cajón') largasPorColor[p.colorDestino]=(largasPorColor[p.colorDestino]||0)+p.cantidad;
     if(p.nombre==='Pieza chica de cajón Max') cortasMaxPorColor[p.colorDestino]=(cortasMaxPorColor[p.colorDestino]||0)+p.cantidad;
+    if(p.nombre==='Pieza chica de cajón Emma') cortasEmmaPorColor[p.colorDestino]=(cortasEmmaPorColor[p.colorDestino]||0)+p.cantidad;
+    if(p.nombre==='Pieza grande de cajón Emma') largasEmmaPorColor[p.colorDestino]=(largasEmmaPorColor[p.colorDestino]||0)+p.cantidad;
     if(p.nombre==='Pieza grande de cajón Max') largasMaxPorColor[p.colorDestino]=(largasMaxPorColor[p.colorDestino]||0)+p.cantidad;
   });
   Object.keys(cortasPorColor).forEach(c=>addConsumo('Melamina '+c, cortasPorColor[c]/49));
   Object.keys(largasPorColor).forEach(c=>addConsumo('Melamina '+c, largasPorColor[c]/35));
   Object.keys(cortasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, cortasMaxPorColor[c]/45));
   Object.keys(largasMaxPorColor).forEach(c=>addConsumo('Melamina '+c, largasMaxPorColor[c]/30));
+  Object.keys(cortasEmmaPorColor).forEach(c=>addConsumo('Melamina '+c, cortasEmmaPorColor[c]/56));
+  Object.keys(largasEmmaPorColor).forEach(c=>addConsumo('Melamina '+c, largasEmmaPorColor[c]/40));
 
   // Entrepaños de zapatera: 24 por hoja (confirmado por el usuario), sin importar si son de
   // 27×40 o 30×40 — mismo rendimiento para ambos.
@@ -16762,7 +16776,7 @@ function hcSet(id, campo, v){ const cc = hcCorte(id); cc[campo] = v; hcBorrGuard
 function hcStep(val, js, w){ return `<div style="display:flex;align-items:center;gap:4px;flex:none"><button type="button" onclick="${js}(-1,true)" style="all:unset;cursor:pointer;width:34px;height:36px;border:1px solid var(--line);border-radius:8px;text-align:center;font-weight:900;font-size:18px;line-height:36px">−</button><input type="number" inputmode="numeric" min="0" value="${val||''}" placeholder="0" onchange="${js}(this.value,false)" style="width:${w||62}px;min-height:36px;margin:0;text-align:center;font-weight:900;font-size:17px;padding:2px;border:2px solid var(--ink)"><button type="button" onclick="${js}(1,true)" style="all:unset;cursor:pointer;width:34px;height:36px;border:1px solid var(--line);border-radius:8px;text-align:center;font-weight:900;font-size:18px;line-height:36px">+</button></div>`; }
 // Nombres tal como vienen en la hoja de papel del cortador.
 const HC_NOMBRE = {pared:'Pared (o maletero chico)', entrepano:'Entrepaño', maletero:'Maletero grande', zoclo:'Zóclo', cargador:'Cargador',
-  frente:'Frente de cajón', pchica:'Pieza chica de cajón', pgrande:'Pieza grande de cajón', puertita3:'Puertita de 3', puertita5:'Puertita de 5 / Emma', puertitamax:'Puertita Max',
+  frente:'Frente de cajón', pchica:'Pieza chica de cajón', pgrande:'Pieza grande de cajón', frenteemma:'Frente de cajón Emma', pchicaemma:'Pieza chica cajón Emma', pgrandeemma:'Pieza grande cajón Emma', puertita3:'Puertita de 3', puertita5:'Puertita de 5 / Emma', puertitamax:'Puertita Max',
   entzap:'Entrepaño zapatera (y tapa)', puertazap:'Puerta de zapatera', zoclozap12:'Zóclo zapatera con puerta', zoclozap:'Zóclo de zapatera', entzapg:'Entrepaño zapatera GRANDE', tapazapg:'Tapa zapatera GRANDE', zoclozapg:'Zóclo zapatera GRANDE',
   frentemax:'Frente de cajón Max', pchicamax:'Pieza chica cajón Max', pgrandemax:'Pieza grande cajón Max', zoclomax:'Zóclo Max', paredmax:'Pared Max', entmaxlargo:'Entrepaño Max largo', entmaxcorto:'Entrepaño Max corto', respaldomax:'Respaldo Max',
   espzoclo16:'Zóclo de espejo', espzoclo18:'Zóclo de espejo', espmarco160:'Marco espejo largo', espmarco35:'Marco espejo corto', espzoclo16max:'Zóclo espejo Max', espzoclo18max:'Zóclo espejo Max', espmarco160max:'Marco espejo Max largo',
