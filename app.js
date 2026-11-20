@@ -9335,7 +9335,10 @@ function pasosHtml(){
   if(esAdmin() || esSoloLectura() || !sisNuevoMod()) return '';
   hojaDiaCargar(); actaEntCargar();
   if(_actaEnt.mod===modulo() && _actaEnt.doc) return ''; // primero el Acta de entrega (tarjeta propia)
-  const H = _hojaDia, hoyActa = H.acta && diaLocal(H.acta.firma.en) >= fechaHoyLocal();
+  const H = _hojaDia;
+  // Sistema nuevo prendido pero todavía sin conteo: solo un aviso (sirve también para probar que ya le llegó).
+  if(H.mod===modulo() && !H.acta) return `<div class="card" style="padding:12px;border:2px solid #7c3aed"><div style="font-weight:900;font-size:16px">🆕 Sistema nuevo activo en ${modulo()}</div><p class="hint" style="margin:2px 0 0">Empieza con tu conteo con Dirección. Después, cada mañana firmarás tu Hoja del día.</p></div>`;
+  const hoyActa = H.acta && diaLocal(H.acta.firma.en) >= fechaHoyLocal();
   const p1 = hojaDiaToca() ? 'now' : 'ok';
   const conf = ((_verifCoord && _verifCoord.conf)||[]).length;
   const cierre = typeof cierreHechoHoy==='function' && cierreHechoHoy();
