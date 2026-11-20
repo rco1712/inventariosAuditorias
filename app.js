@@ -1454,6 +1454,7 @@ function renderHome(){
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
     ${hojaSepHtml()}
+    ${sepHtml()}
     ${coordConfHtml()}
     ${prestHomeHtml()}
     ${riHomeHtml()}
@@ -7938,7 +7939,7 @@ function regresarInstalacion(logId){
 }
 function regCons(){ const x = (instLog||[]).find(l=>l.id===regInstSel); if(!x) return [];
   // v296 Paso 0: lo que se regresó para contarse en el conteo inicial ya no regresa otra vez.
-  const yaC = (x.separado && x.separado.cuenta) || {};
+  const yaC = (x.separado && x.separado.resuelto!=='sale' && x.separado.cuenta) || {};
   const cons = (x.consumo||[]).map(c=>yaC[c.itemId] ? Object.assign({}, c, {cantidad:Math.max(0, Math.round((Number(c.cantidad)-Number(yaC[c.itemId]))*10000)/10000)}) : c)
     .filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
   // v200 (confirmado por el usuario): de unas puertas solo regresan las piezas de las puertas, no las tiras
@@ -8079,7 +8080,7 @@ function instEnAprobaciones(l){ return l.estado==='pendiente' && !instSeVerifica
 function verifSinRevisar(logs, regresadas){ return verifRevisables(logs, regresadas).filter(verifPorRevisar); }
 // Puertas que el coordinador marcó como reinstaladas: Dirección las vuelve a verificar ese día.
 function verifReinstPend(l){ const v = l.verif; return !!(v && v.puertas==='reinstalada' && v.fechaReinst && !v.reEstado); }
-function verifPorRevisar(l){ return !l.verif || verifReinstPend(l); }
+function verifPorRevisar(l){ return !(l.separado && !l.separado.resuelto) && (!l.verif || verifReinstPend(l)); }
 function verifCalcDir(logs, movsAll){
   const reg = regresadasDe(movsAll||[]); const xs = verifSinRevisar(logs, reg);
   const porMod = {}; xs.forEach(l=>{ porMod[l.modulo]=(porMod[l.modulo]||0)+1; });
@@ -8669,9 +8670,10 @@ async function verifCoordCargar(){
     const logs = todos.filter(l=>l.verif && l.verif.estado && l.verif.estado!=='ok'), posp = instPospuestas(todos);
     // v294 (modo automático): las instalaciones que el coordinador confirma él mismo (últimos 14 días, hasta hoy).
     const hoy = fechaHoyLocal(), desde = verifDesde();
-    const conf = todos.filter(l=>{ const d = diaValorInst(l); return d <= hoy && d >= desde && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.cambioDe && l.estado==='pendiente') && (!l.verif || verifReinstPend(l)) && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)); })
+    const conf = todos.filter(l=>{ const d = diaValorInst(l); return d <= hoy && d >= desde && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.cambioDe && l.estado==='pendiente') && (!l.verif || verifReinstPend(l)) && !(l.separado && !l.separado.resuelto) && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)); })
       .sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)) || String(a.calle||'').localeCompare(String(b.calle||'')));
-    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp, conf};
+    const sep = todos.filter(l=>l.separado && !l.separado.resuelto && l.estado!=='rechazado' && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))).sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)));
+    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp, conf, sep};
     if(JSON.stringify(_verifCoord)!==antes && current==='home' && !esAdmin()) renderHome();
   }catch(e){}
 }
@@ -8683,10 +8685,11 @@ async function verifCoordCargar(){
 //  🚚 Ya se fue: el material ya no está en el almacén; se verifica después como siempre.
 // Luego se manda la Hoja de material separado al coordinador para que la firme.
 let paso0 = null;
+const sepAbierto = l => !!(l && l.separado && !l.separado.resuelto);
 function paso0Candidatas(todos){
   return (todos||[]).filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.cambioDe && l.estado==='pendiente')
     && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
-    && (l.separado || !l.verif || verifReinstPend(l) || (l.verif.estado==='no' && ['pendiente','reinstalar'].includes(l.verif.puertas)))
+    && (sepAbierto(l) || !l.verif || verifReinstPend(l) || (l.verif.estado==='no' && ['pendiente','reinstalar'].includes(l.verif.puertas)))
     && diaValorInst(l) >= sumarDiasISO(fechaHoyLocal(), -30))
     .sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)) || String(a.calle||'').localeCompare(String(b.calle||'')));
 }
@@ -8696,7 +8699,7 @@ async function abrirPaso0(){
   try{ const snap = await db.collection('instalacionesLog').where('modulo','==',mod).get();
     const todos = snap.docs.map(d=>({id:d.id, ...d.data()})); const logs = paso0Candidatas(todos);
     const dec = {}, items = {}, fuera = {};
-    logs.forEach(l=>{ if(l.separado){ dec[l.id] = 'sep'; items[l.id] = Object.assign({}, l.separado.items||{}); } });
+    logs.forEach(l=>{ if(sepAbierto(l)){ dec[l.id] = 'sep'; items[l.id] = Object.assign({}, l.separado.items||{}); } });
     paso0 = {mod, logs, dec, items, fuera};
   }catch(e){ return alert('Error: '+e.message); }
   setView('paso0');
@@ -8862,6 +8865,80 @@ async function actaPDF(id){
   if(f && f.ok===false && f.nota) S.vacio(pdfS('Nota: '+f.nota));
   await S.fin(pdfS(`${T.t.replace(/\s*\(.*\)/,'').replace(/ /g,'_')}_${d.modulo}_${d.fecha?diaLocal(d.fecha):''}.pdf`), pdfS('Closets Vera · '+T.t+' · '+d.modulo));
 }
+// ===== v296 · Día de lo separado (pedido por el usuario) =====
+// La instalación separada no entra a "Confirma tus instalaciones" ni a la verificación de Dirección mientras
+// esté separada. El coordinador la ve en "📌 Material separado" y decide:
+//  🚚 Sale: marca qué tiene; SOLO se descuenta lo que no estaba separado (lo que se contó en el Paso 0 y lo
+//     que le falte). Luego se confirma como cualquier instalación.
+//  ⏳ Otro día: cambia la fecha; no se mueve nada.
+//  ❌ Ya no va: Acta de regreso (pieza por pieza, firmada).
+let sepSale = null, sepOtro = null;
+function sepHtml(){
+  if(esAdmin() || esSoloLectura() || !_verifCoord) return '';
+  const xs = _verifCoord.sep||[]; if(!xs.length) return '';
+  const hoy = fechaHoyLocal();
+  const fila = l => { const d = diaValorInst(l), hoyT = d<=hoy;
+    return `<div style="padding:10px;border-radius:12px;border:2px solid ${hoyT?'#7c3aed':'var(--line)'};margin-top:8px;background:var(--card)">
+      <strong>${l.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${calleHtml(l)}
+      <div class="hint" style="margin:2px 0 0">${hoyT?'<strong style="color:#7c3aed">📅 Se instala HOY</strong>':'Se instala el '+fCorta(d)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+        <button class="btn small" style="margin:0;min-height:44px;padding:2px;background:#16a34a" onclick="sepSaleAbrir('${l.id}')">🚚 Sale</button>
+        <button class="btn small" style="margin:0;min-height:44px;padding:2px;background:#ea580c" onclick="sepOtro='${l.id}';renderHome()">⏳ Otro día</button>
+        <button class="btn small" style="margin:0;min-height:44px;padding:2px;background:#dc2626" onclick="sepYaNoVa('${l.id}')">❌ Ya no va</button></div>
+      ${sepOtro===l.id?`<div style="display:flex;gap:6px;margin-top:6px"><input type="date" id="sep-f-${l.id}" min="${sumarDiasISO(hoy,1)}" value="${sumarDiasISO(hoy,1)}" style="flex:1;min-width:0;margin:0"><button class="btn small" style="margin:0;background:#ea580c" onclick="sepOtroGuardar('${l.id}')">Guardar</button></div>`:''}</div>`; };
+  const nHoy = xs.filter(l=>diaValorInst(l)<=hoy).length;
+  return `<details class="card" style="padding:12px;border:2px solid #7c3aed" ${nHoy?'open':''}><summary style="cursor:pointer;list-style:none">
+    <div style="font-size:16px;font-weight:900">📌 Material separado (${xs.length})${nHoy?` · <span style="color:#7c3aed">${nHoy} hoy</span>`:''}</div>
+    <div class="hint" style="margin:2px 0 0">No es parte de tu inventario. El día que se instale, toca 🚚 Sale.</div></summary>${xs.map(fila).join('')}</details>`;
+}
+function sepSaleAbrir(id){
+  const l = ((_verifCoord && _verifCoord.sep)||[]).find(x=>x.id===id); if(!l) return;
+  const S = l.separado, cons = paso0Cons(l), rows = cons.map(c=>{ const cu = Number((S.cuenta||{})[c.itemId]||0), q = Number(c.cantidad);
+    return {itemId:c.itemId, q, cuenta:Math.min(q, cu), sep:Math.max(0, q-cu), tengo:Math.max(0, q-cu), piezas:esHojaId(c.itemId)?paso0PzTxt(l,c.itemId):''}; });
+  sepSale = {id, l, rows}; sepSalePintar();
+}
+function sepSaleTengo(i, d){ const r = sepSale && sepSale.rows[i]; if(!r) return; r.tengo = Math.max(0, Math.min(r.sep, Math.round(((Number(r.tengo)||0)+d)*1000)/1000)); sepSalePintar(); }
+function sepSalePintar(){
+  let ov = document.getElementById('sep-sale'); const V = sepSale;
+  if(!V){ if(ov) ov.remove(); return; }
+  if(!ov){ ov = document.createElement('div'); ov.id = 'sep-sale'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto'; document.body.appendChild(ov); }
+  const it = id => CATALOGO.find(z=>z.id===id)||{};
+  const desc = V.rows.map(r=>({r, q:Math.round((r.cuenta + (r.sep - r.tengo))*10000)/10000})).filter(z=>z.q>0.00005);
+  ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #16a34a;border-radius:18px;padding:14px;margin-top:8px">
+    <div style="display:flex;justify-content:space-between"><div style="font-size:17px;font-weight:900">🚚 Sale el material separado</div><button onclick="sepSale=null;sepSalePintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div style="font-weight:800;margin-top:2px">${V.l.descripcion.split(' · ').slice(0,3).join(' · ')}</div>${calleHtml(V.l)}
+    <div class="hint" style="margin:8px 0 4px">¿Tienes todo lo separado? Si te falta algo, bájale: eso se toma de tu inventario.</div>
+    ${V.rows.map((r,i)=>{ const falta = r.sep - r.tengo; return `<div style="margin-top:6px;padding:8px 10px;border-radius:12px;border:2px solid ${r.cuenta>0&&!r.sep?'#0369a1':(falta>0.0005?'#dc2626':'#7c3aed')}">
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong>${it(r.itemId).nombre||''}</strong>${r.piezas?`<div class="hint" style="margin:0">${r.piezas}</div>`:''}
+        <div class="hint" style="margin:0">${r.sep>0?`📌 separado ${fmtNum(r.sep)}`:''}${r.cuenta>0?`${r.sep>0?' · ':''}<span style="color:#0369a1;font-weight:800">📦 ${fmtNum(r.cuenta)} se toma del inventario</span>`:''}${falta>0.0005?` · <span style="color:#dc2626;font-weight:800">falta ${fmtNum(falta)} → del inventario</span>`:''}</div></div>
+        ${r.sep>0?`<button class="btn small" style="margin:0;min-height:34px;width:34px;padding:0" onclick="sepSaleTengo(${i},-${esHojaId(r.itemId)?0.25:1})">−</button><strong style="min-width:40px;text-align:center">${fmtNum(r.tengo)}</strong><button class="btn small" style="margin:0;min-height:34px;width:34px;padding:0" onclick="sepSaleTengo(${i},${esHojaId(r.itemId)?0.25:1})">+</button>`:''}</div></div>`; }).join('')}
+    <div style="margin-top:12px;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12)"><strong>Se descuenta de tu inventario:</strong>
+      <div class="hint" style="margin:4px 0 0">${desc.length?desc.map(z=>`${fmtNum(z.q)} ${it(z.r.itemId).unidad||''} ${it(z.r.itemId).nombre||''}`).join(' · '):'Nada: todo estaba separado.'}</div></div>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="sepSaleGuardar()">🚚 Sale hoy</button>
+    <p class="hint" style="margin:6px 0 0">Mañana la confirmas como cualquier instalación (✅ se instaló / ❌ no se instaló).</p></div>`;
+}
+async function sepSaleGuardar(){
+  const V = sepSale; if(!V) return; const l = V.l, mod = l.modulo, hoy = fechaHoyLocal();
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), loteId = cryptoId(), estado = estadoNuevoMovimiento();
+  const nota = 'Sale material separado · '+l.descripcion+(l.calle?' · 📍 '+l.calle:'');
+  try{
+    for(const r of V.rows){ const q = Math.round((r.cuenta + (r.sep - r.tengo))*10000)/10000; if(!(q>0.00005)) continue; const it = CATALOGO.find(z=>z.id===r.itemId);
+      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod, itemId:it.id, itemNombre:it.nombre, tipo:'salida', motivo:'separadoSale', instalacionId:l.id, cantidad:q, nota:nota+(r.cuenta>0&&!(r.sep-r.tengo>0.0005)?'':(r.sep-r.tengo>0.0005?' · no estaba completo':'')), fecha:ahora, estado, loteId, creadoPor:quien}); }
+    const faltaron = V.rows.filter(r=>r.sep - r.tengo > 0.0005).map(r=>({itemId:r.itemId, q:Math.round((r.sep-r.tengo)*10000)/10000}));
+    await db.collection('instalacionesLog').doc(l.id).update({separado:Object.assign({}, l.separado, {resuelto:'sale', saleEn:ahora, salePor:quien, faltaron}), fechaDia:hoy,
+      pospuesta:Object.assign({}, l.pospuesta||{}, {primero:(l.pospuesta&&l.pospuesta.primero)||l.fechaDia, a:hoy, en:ahora, por:quien, nota:'Salió el material separado'})});
+    sepSale = null; sepSalePintar(); _verifCoordT = 0; _verifCoord = null;
+    toast('🚚 Salió.'+(faltaron.length?'<br><small>Lo que faltaba se tomó del inventario.</small>':'')); renderHome();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function sepOtroGuardar(id){
+  const l = ((_verifCoord && _verifCoord.sep)||[]).find(x=>x.id===id); if(!l) return;
+  const el = document.getElementById('sep-f-'+id), nueva = el && el.value; if(!nueva || nueva<=fechaHoyLocal()) return alert('Elige un día de mañana en adelante.');
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), P = l.pospuesta || {};
+  try{ await db.collection('instalacionesLog').doc(id).update({fechaDia:nueva, pospuesta:{primero:P.primero||l.fechaDia, a:nueva, veces:(P.veces||0)+1, por:quien, en:ahora, nota:'Separada: pasa al '+fCorta(nueva), historial:(P.historial||[]).concat([{de:l.fechaDia, a:nueva, en:ahora, por:quien}])}});
+    sepOtro = null; _verifCoordT = 0; _verifCoord = null; toast('⏳ Pasó al '+fCorta(nueva)+'. No se movió nada.'); renderHome(); }catch(e){ alert('Error: '+e.message); }
+}
+function sepYaNoVa(id){ if(!confirm('¿Ya NO se va a instalar?\n\nSe abre el Acta de regreso: decides pieza por pieza a dónde va (inventario, sobrantes o merma) y la firmas.')) return; verifDestino(id, 'inv'); }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
 // ✅ Se instaló → queda verificada. ❌ No se instaló → le sale el aviso de siempre para decidir (se instala hoy u otro
 // día · regresa al inventario · sobrantes · merma).
@@ -9097,6 +9174,7 @@ async function verifDestGuardar(){
       await db.collection('sobrantes').doc(loteId).set({modulo:x.modulo, fecha, calle:x.calle||'', nota:'No se instaló: '+x.descripcion.split(' · ').slice(0,3).join(' · '), lineas, lineasData:[], material, restante, estado:'abierto', transformaciones:[], creadoPor, deInstalacion:id}); }
     try{ await db.collection('piezasPrueba').doc('actaReg_'+id).set({tipo:'actaRegreso', modulo:x.modulo, instalacionId:id, descripcion:x.descripcion, calle:x.calle||'', fecha,
       herrajes:(V.herr||[]).map(h=>({itemId:h.itemId, q:h.q, tengo:h.tengo})), piezas:V.rows.map(r=>({n:r.n, dim:r.dim||'', q:r.q, itemId:r.itemId, d:r.d})), faltan, firma:{por:creadoPor, en:fecha, ok:true}}); }catch(e){}
+    if(x.separado && !x.separado.resuelto){ try{ await db.collection('instalacionesLog').doc(id).update({separado:Object.assign({}, x.separado, {resuelto:'regreso', en2:fecha})}); }catch(e){} }
     const algoSob = sobIts.length, algoMer = Object.values(porItem).some(P=>P.merma>0.00005);
     await verifGuardar(id, Object.assign({}, x.verif||{}, {puertas: algoSob ? 'sobrantes' : (algoMer && !V.rows.some(r=>r.d==='inv') ? 'merma' : 'regreso'), visto:true, fechaDecision:fecha, directo:true, ...(faltan.length?{faltan}:{})}));
     verifDest = null; verifDestPintar(); _verifCoordT = 0; _verifCoord = null;
