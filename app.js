@@ -8792,7 +8792,7 @@ async function paso0Guardar(){
   const faltan = P.logs.filter(l=>!P.dec[l.id] || (P.dec[l.id]==='fue' && !P.fuera[l.id]));
   if(faltan.length) return alert('Falta decidir '+faltan.length+' instalación(es). Si el material está en el almacén, no puede ser "🚚 Ya se fue".');
   const nC = P.logs.filter(l=>P.dec[l.id]==='cuenta').length, nS = P.logs.filter(l=>P.dec[l.id]==='sep').length, nF = P.logs.filter(l=>P.dec[l.id]==='fue').length;
-  if(!confirm(`Paso 0 · ${P.mod}${sisNuevoMod(P.mod)?'':'\n🆕 Con esto '+P.mod+' entra al sistema nuevo.'}\n\n📌 Separadas: ${nS}\n🔢 Se cuentan (regresan al inventario): ${nC}\n🚚 Ya se fueron: ${nF}\n\n¿Guardar?${nS?'\nSe manda la Hoja de material separado al coordinador para que la firme.':''}`)) return;
+  if(!confirm(`Paso 0 · ${P.mod}${sisNuevoMod(P.mod)?'':'\n🆕 Con esto '+P.mod+' entra al sistema nuevo'+(modoAutoMod(P.mod)?' y se APAGA su modo automático (vuelves a aprobar y verificar tú).':'.')}\n\n📌 Separadas: ${nS}\n🔢 Se cuentan (regresan al inventario): ${nC}\n🚚 Ya se fueron: ${nF}\n\n¿Guardar?${nS?'\nSe manda la Hoja de material separado al coordinador para que la firme.':''}`)) return;
   const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), lista = [];
   try{
     for(const l of P.logs){ const d = P.dec[l.id], cons = paso0Cons(l), loteId = cryptoId();
@@ -8813,6 +8813,9 @@ async function paso0Guardar(){
       } else if(d==='fue' && l.separado) await db.collection('instalacionesLog').doc(l.id).update({separado:null});
     }
     if(!sisNuevoMod(P.mod)) await sisNuevoPrender(P.mod, true, true);
+    // v298 (pedido por el usuario): con el sistema nuevo se acaba el modo automático en ese módulo.
+    if(modoAutoMod(P.mod)){ try{ const mods = {}; MODULOS.forEach(m=>{ mods[m.nombre] = modoAutoMod(m.nombre); }); mods[P.mod] = false;
+      const x = {modulo:'_global', modulos:mods, activo:Object.values(mods).some(Boolean), por:quien, en:ahora}; await db.collection('config').doc('modoAuto').set(x); modoAuto = x; await modoAutoEspejar(x); }catch(e){} }
     if(lista.length) await db.collection('piezasPrueba').doc('sep_'+P.mod+'_'+fechaHoyLocal()).set({tipo:'hojaSeparado', modulo:P.mod, fecha:ahora, por:quien, lista, firma:null});
     paso0 = null; toast('✅ Paso 0 guardado.'+(lista.length?'<br><small>📤 Hoja de separado enviada al coordinador.</small>':''));
     setView('home');
@@ -9322,7 +9325,7 @@ function pasosHtml(){
     ${paso(1, p1, 'Hoja del día', p1==='ok'?(hoyActa?'Hoy firmaste el Acta de entrega':'Firmada ✓'):'Revisa tu inventario y fírmala', 'hojaDiaAbrir()', 'Empezar')}
     ${paso(2, p1==='ok'?'now':'next', 'Captura lo de hoy', 'Con los botones de abajo ⬇️', p1==='ok'?"document.getElementById('home-tiles').scrollIntoView({behavior:'smooth'})":'', 'Ahora')}
     ${paso(3, cierre?'ok':(p1==='ok'?'next':'next'), 'Cierre del turno y hoja de corte', cierre?'Hecho ✓':'En la tarde: lo que se cortó', p1==='ok'?"irA('cierre')":'')}
-    ${paso(4, conf?(p1==='ok'?'now':'next'):'ok', 'Confirma tus instalaciones', conf?conf+' por confirmar':'Al corriente ✓', conf?(modoAutoOn()?'ayerAbrir()':"document.getElementById('coord-conf')&&document.getElementById('coord-conf').scrollIntoView({behavior:'smooth'})"):'', 'Revisar')}
+    ${!modoAutoOn()?'':paso(4, conf?(p1==='ok'?'now':'next'):'ok', 'Confirma tus instalaciones', conf?conf+' por confirmar':'Al corriente ✓', conf?'ayerAbrir()':'', 'Revisar')}
   </div>`;
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
