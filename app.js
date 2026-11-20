@@ -723,6 +723,7 @@ function setView(v){
   }
   document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
   if(v==='home') renderHome();
+  if(v==='paso0') renderPaso0();
   if(v==='gar'){ if(garSub==='sobrante') salirSobrante(); renderGar(); }
   if(v==='ini') renderIni();
   if(v==='movhist') renderMovHist();
@@ -1451,6 +1452,7 @@ function renderHome(){
     ${hcFaltaHtml()}
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
+    ${hojaSepHtml()}
     ${coordConfHtml()}
     ${prestHomeHtml()}
     ${riHomeHtml()}
@@ -7934,7 +7936,10 @@ function regresarInstalacion(logId){
   mostrarRegresoInst();
 }
 function regCons(){ const x = (instLog||[]).find(l=>l.id===regInstSel); if(!x) return [];
-  const cons = (x.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
+  // v296 Paso 0: lo que se regresó para contarse en el conteo inicial ya no regresa otra vez.
+  const yaC = (x.separado && x.separado.cuenta) || {};
+  const cons = (x.consumo||[]).map(c=>yaC[c.itemId] ? Object.assign({}, c, {cantidad:Math.max(0, Math.round((Number(c.cantidad)-Number(yaC[c.itemId]))*10000)/10000)}) : c)
+    .filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId));
   // v200 (confirmado por el usuario): de unas puertas solo regresan las piezas de las puertas, no las tiras
   // de los lados de la hoja (esas casi siempre se aprovechan en otros muebles y ya no existen).
   const net = melNetaPuerta(x); if(net==null) return cons;
@@ -8668,6 +8673,129 @@ async function verifCoordCargar(){
     const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp, conf};
     if(JSON.stringify(_verifCoord)!==antes && current==='home' && !esAdmin()) renderHome();
   }catch(e){}
+}
+// ===== v296 · Paso 0 del conteo inicial (pedido por el usuario) =====
+// Antes de contar, Dirección revisa las instalaciones que todavía no se verifican y decide, una por una:
+//  📌 Separado: el material está apartado para esa instalación. No se cuenta ni suma al inventario.
+//     Se puede marcar renglón por renglón lo que sí se cuenta (📦), por ejemplo los herrajes.
+//  🔢 Se cuenta: ya no va; regresa al inventario ANTES del conteo y la instalación se quita.
+//  🚚 Ya se fue: el material ya no está en el almacén; se verifica después como siempre.
+// Luego se manda la Hoja de material separado al coordinador para que la firme.
+let paso0 = null;
+function paso0Candidatas(todos){
+  return (todos||[]).filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.cambioDe && l.estado==='pendiente')
+    && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
+    && (l.separado || !l.verif || verifReinstPend(l) || (l.verif.estado==='no' && ['pendiente','reinstalar'].includes(l.verif.puertas)))
+    && diaValorInst(l) >= sumarDiasISO(fechaHoyLocal(), -30))
+    .sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)) || String(a.calle||'').localeCompare(String(b.calle||'')));
+}
+function sumarDiasISO(f, n){ const d = new Date(f+'T12:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+async function abrirPaso0(){
+  const mod = modulo();
+  try{ const snap = await db.collection('instalacionesLog').where('modulo','==',mod).get();
+    const todos = snap.docs.map(d=>({id:d.id, ...d.data()})); const logs = paso0Candidatas(todos);
+    const dec = {}, items = {}, fuera = {};
+    logs.forEach(l=>{ if(l.separado){ dec[l.id] = 'sep'; items[l.id] = Object.assign({}, l.separado.items||{}); } });
+    paso0 = {mod, logs, dec, items, fuera};
+  }catch(e){ return alert('Error: '+e.message); }
+  setView('paso0');
+}
+function paso0PzTxt(l, itemId){ try{ const pz = (piezasMelDeInstalacion(l)||[]).filter(p=>p.itemId===itemId && Number(p.q)>0); const g = {};
+  pz.forEach(p=>{ const k = p.n+(p.dim?' '+String(p.dim).replace(/ cm$/,''):''); g[k] = (g[k]||0)+Number(p.q); }); return Object.keys(g).map(k=>fmtNum(g[k])+' '+k).join(' · '); }catch(e){ return ''; } }
+function paso0Cons(l){ return (l.consumo||[]).filter(c=>Number(c.cantidad)>0 && CATALOGO.find(i=>i.id===c.itemId)); }
+function paso0Resto(){ const P = paso0; if(!P) return; const xs = P.logs.filter(l=>!P.dec[l.id] || (P.dec[l.id]==='fue' && !P.fuera[l.id]));
+  if(!confirm(`¿Las ${xs.length} que faltan ya NO están en el almacén (ya se instalaron o ya salieron)?\n\nSi alguna sigue en el almacén, márcala como 📌 separado o 🔢 se cuenta.`)) return;
+  xs.forEach(l=>{ P.dec[l.id] = 'fue'; P.fuera[l.id] = true; }); renderPaso0(); }
+function paso0Dec(id, d){ if(!paso0) return; paso0.dec[id] = d; if(d==='sep' && !paso0.items[id]) paso0.items[id] = {}; renderPaso0(); }
+function paso0Item(id, itemId){ const m = paso0.items[id] = paso0.items[id] || {}; if(m[itemId]==='cuenta') delete m[itemId]; else m[itemId] = 'cuenta'; renderPaso0(); }
+function paso0Herrajes(id){ const l = paso0.logs.find(x=>x.id===id); if(!l) return; const m = paso0.items[id] = {}; paso0Cons(l).forEach(c=>{ if(!esHojaId(c.itemId)) m[c.itemId]='cuenta'; }); renderPaso0(); }
+function renderPaso0(){
+  current = 'paso0';
+  const P = paso0; if(!P || P.mod!==modulo()){ $('#main').innerHTML = `<div class="card"><button class="btn" onclick="abrirPaso0()">📌 Abrir Paso 0</button></div>`; return; }
+  const nom = id => (CATALOGO.find(i=>i.id===id)||{}).nombre||id, un = id => (CATALOGO.find(i=>i.id===id)||{}).unidad||'';
+  const COL = {sep:'#7c3aed', cuenta:'#16a34a', fue:'#0369a1'}, TXT = {sep:'📌 Separado', cuenta:'🔢 Se cuenta', fue:'🚚 Ya se fue'};
+  const fila = l => { const d = P.dec[l.id], cons = paso0Cons(l);
+    const bt = k => `<button class="btn small" style="flex:1;margin:0;min-height:42px;padding:2px 4px;font-size:13px;${d===k?`background:${COL[k]}`:`background:transparent;color:${COL[k]};border:1.5px solid ${COL[k]};box-shadow:none`}" onclick="paso0Dec('${l.id}','${k}')">${TXT[k]}</button>`;
+    let det = '';
+    if(d==='sep'){ const m = P.items[l.id]||{};
+      det = `<div class="hint" style="margin:8px 0 4px">Toca un renglón para cambiarlo: <strong style="color:#7c3aed">📌 separado</strong> (no se cuenta) o <strong style="color:#16a34a">📦 se cuenta</strong> (regresa al inventario y se cuenta).</div>
+        ${cons.map(c=>{ const k = m[c.itemId]==='cuenta'; return `<div onclick="paso0Item('${l.id}','${c.itemId}')" style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;padding:7px 10px;margin-top:4px;border-radius:10px;border:1.5px solid ${k?'#16a34a':'#7c3aed'};background:${k?'rgba(22,163,74,.08)':'rgba(124,58,237,.08)'}"><span>${nom(c.itemId)} <span class="hint" style="margin:0">${fmtNum(c.cantidad)} ${un(c.itemId)}</span>${esHojaId(c.itemId)&&paso0PzTxt(l,c.itemId)?`<span class="hint" style="display:block;margin:0">${paso0PzTxt(l,c.itemId)}</span>`:''}</span><strong style="color:${k?'#16a34a':'#7c3aed'};white-space:nowrap">${k?'📦 se cuenta':'📌 separado'}</strong></div>`; }).join('')}
+        <button class="btn small" style="margin-top:6px;background:transparent;color:#16a34a;border:1px solid var(--line);box-shadow:none" onclick="paso0Herrajes('${l.id}')">🔩 Los herrajes se cuentan, solo la melamina se separa</button>`; }
+    else if(d==='cuenta') det = `<div class="hint" style="margin:8px 0 0">Ya no va: todo regresa al inventario <strong>antes</strong> de contar y la instalación se quita.</div>`;
+    else if(d==='fue') det = `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;padding:8px 10px;border-radius:10px;border:2px solid ${P.fuera[l.id]?'#0369a1':'#dc2626'};cursor:pointer"><input type="checkbox" ${P.fuera[l.id]?'checked':''} onchange="paso0.fuera['${l.id}']=this.checked;renderPaso0()" style="width:22px;height:22px;min-width:22px;margin:0"><span><strong>¿Este material está en el almacén ahora?</strong><br>Marca aquí solo si <strong>NO</strong> está (ya salió). Si está ahí, es 📌 separado o 🔢 se cuenta.</span></label>`;
+    return `<div style="padding:10px;border-radius:12px;border:2px solid ${d?COL[d]:'var(--line)'};margin-top:10px;background:var(--card)">
+      <strong>${l.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${calleHtml(l)}
+      <div class="hint" style="margin:2px 0 0">${fCorta(diaValorInst(l))} · ${cons.map(c=>fmtNum(c.cantidad)+' '+nom(c.itemId).replace('Melamina ','')).slice(0,4).join(' · ')}${cons.length>4?' …':''}</div>
+      <div style="display:flex;gap:6px;margin-top:8px">${bt('sep')}${bt('cuenta')}${bt('fue')}</div>${det}</div>`; };
+  const faltan = P.logs.filter(l=>!P.dec[l.id] || (P.dec[l.id]==='fue' && !P.fuera[l.id])).length;
+  const nSep = P.logs.filter(l=>P.dec[l.id]==='sep').length;
+  $('#main').innerHTML = `<div class="card" style="border:2px solid #7c3aed">
+    <div style="font-size:18px;font-weight:900">📌 Paso 0 · antes de contar</div>
+    <p class="hint" style="margin:4px 0 0">${P.mod} · Instalaciones que todavía no se verifican. Decide cada una <strong>antes</strong> del conteo: lo separado no se cuenta ni suma.</p>
+    ${faltan>1?`<button class="btn small" style="width:100%;margin-top:10px;background:transparent;color:#0369a1;border:1.5px solid #0369a1;box-shadow:none" onclick="paso0Resto()">🚚 Las que faltan ya se fueron (no están en el almacén)</button>`:''}
+    ${P.logs.length ? P.logs.map(fila).join('') : '<p style="margin:10px 0 0">✅ No hay instalaciones sin verificar. Puedes empezar el conteo.</p>'}
+    <button class="btn" style="width:100%;min-height:54px;margin-top:14px;background:${faltan?'#94a3b8':'linear-gradient(135deg,#7c3aed,#5b21b6)'}" onclick="paso0Guardar()">${faltan?`Faltan ${faltan} por decidir`:(nSep?`💾 Guardar y 📤 mandar Hoja de separado (${nSep})`:'💾 Guardar')}</button>
+    <button class="btn small" style="margin-top:8px;background:transparent;color:var(--brand);border:1px solid var(--line);box-shadow:none" onclick="paso0=null;setView('home')">Cancelar</button></div>`;
+}
+async function paso0Guardar(){
+  const P = paso0; if(!P) return;
+  const faltan = P.logs.filter(l=>!P.dec[l.id] || (P.dec[l.id]==='fue' && !P.fuera[l.id]));
+  if(faltan.length) return alert('Falta decidir '+faltan.length+' instalación(es). Si el material está en el almacén, no puede ser "🚚 Ya se fue".');
+  const nC = P.logs.filter(l=>P.dec[l.id]==='cuenta').length, nS = P.logs.filter(l=>P.dec[l.id]==='sep').length, nF = P.logs.filter(l=>P.dec[l.id]==='fue').length;
+  if(!confirm(`Paso 0 · ${P.mod}\n\n📌 Separadas: ${nS}\n🔢 Se cuentan (regresan al inventario): ${nC}\n🚚 Ya se fueron: ${nF}\n\n¿Guardar?${nS?'\nSe manda la Hoja de material separado al coordinador para que la firme.':''}`)) return;
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), lista = [];
+  try{
+    for(const l of P.logs){ const d = P.dec[l.id], cons = paso0Cons(l), loteId = cryptoId();
+      if(d==='cuenta'){
+        for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
+          await db.collection('movimientos').doc(cryptoId()).set({modulo:P.mod, itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'regresoInstalacion', instalacionId:l.id, cantidad:Number(c.cantidad), nota:'Paso 0 · se cuenta en el conteo inicial · '+l.descripcion+(l.calle?' · 📍 '+l.calle:''), fecha:ahora, estado:'aprobado', loteId, creadoPor:quien, paso0:true}); }
+        await verifGuardar(l.id, {estado:'no', puertas:'regreso', visto:true, directo:true, paso0:true, nota:'Paso 0: se contó en el conteo inicial'});
+        if(l.separado) await db.collection('instalacionesLog').doc(l.id).update({separado:null});
+      } else if(d==='sep'){
+        const m = P.items[l.id]||{}, cuenta = {}, ya = (l.separado && l.separado.cuenta) || {};
+        for(const c of cons){ if(m[c.itemId]!=='cuenta') continue; const q = Math.max(0, Number(c.cantidad) - Number(ya[c.itemId]||0)); cuenta[c.itemId] = Number(c.cantidad);
+          if(q>0.00005){ const it = CATALOGO.find(i=>i.id===c.itemId);
+            await db.collection('movimientos').doc(cryptoId()).set({modulo:P.mod, itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'paso0Cuenta', instalacionId:l.id, cantidad:q, nota:'Paso 0 · separada, pero esto se cuenta · '+l.descripcion+(l.calle?' · 📍 '+l.calle:''), fecha:ahora, estado:'aprobado', loteId, creadoPor:quien, paso0:true}); } }
+        const sep = {en:ahora, por:quien, items:m, cuenta:Object.assign({}, ya, cuenta)};
+        await db.collection('instalacionesLog').doc(l.id).update({separado:sep});
+        lista.push({id:l.id, descripcion:l.descripcion, calle:l.calle||'', dia:diaValorInst(l),
+          renglones:cons.map(c=>({itemId:c.itemId, nombre:(CATALOGO.find(i=>i.id===c.itemId)||{}).nombre||c.itemId, q:Number(c.cantidad), piezas:esHojaId(c.itemId)?paso0PzTxt(l,c.itemId):'', queda:m[c.itemId]==='cuenta'?'cuenta':'sep'}))});
+      } else if(d==='fue' && l.separado) await db.collection('instalacionesLog').doc(l.id).update({separado:null});
+    }
+    if(lista.length) await db.collection('piezasPrueba').doc('sep_'+P.mod+'_'+fechaHoyLocal()).set({tipo:'hojaSeparado', modulo:P.mod, fecha:ahora, por:quien, lista, firma:null});
+    paso0 = null; toast('✅ Paso 0 guardado.'+(lista.length?'<br><small>📤 Hoja de separado enviada al coordinador.</small>':''));
+    setView('home');
+  }catch(e){ alert('Error: '+e.message); }
+}
+// Coordinador: firma de la Hoja de material separado.
+let _hojaSep = {t:0, mod:null, docs:[]};
+function hojaSepCargar(){
+  const mod = modulo(); if(Date.now()-_hojaSep.t < 15000 && _hojaSep.mod===mod) return;
+  _hojaSep.t = Date.now(); _hojaSep.mod = mod;
+  db.collection('piezasPrueba').where('modulo','==',mod).get().then(sn=>{ const docs = sn.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.tipo==='hojaSeparado' && !x.firma);
+    const antes = JSON.stringify(_hojaSep.docs); _hojaSep.docs = docs; if(JSON.stringify(docs)!==antes && current==='home') renderHome(); }).catch(()=>{});
+}
+function hojaSepHtml(){
+  if(esAdmin() || esSoloLectura()) return ''; hojaSepCargar();
+  const H = (_hojaSep.mod===modulo() && _hojaSep.docs[0]) || null; if(!H) return '';
+  return `<div class="card" style="padding:12px;border:3px solid #7c3aed;background:linear-gradient(0deg,rgba(124,58,237,.08),rgba(124,58,237,.08)),var(--card)">
+    <div style="font-size:17px;font-weight:900">📌 Firma tu Hoja de material separado</div>
+    <p class="hint" style="margin:2px 0 6px">Dirección la mandó antes del conteo. Revisa que tengas todo esto apartado.</p>
+    ${H.lista.map(x=>`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--card)"><strong>${x.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${x.calle?`<div style="font-weight:800">📍 ${escCalle(x.calle)}</div>`:''}
+      ${x.renglones.map(r=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:14px;padding:3px 0;border-top:1px solid var(--line)"><span>${r.nombre} · ${fmtNum(r.q)}${r.piezas?`<span class="hint" style="display:block;margin:0">${r.piezas}</span>`:''}</span><strong style="color:${r.queda==='sep'?'#7c3aed':'#16a34a'};white-space:nowrap">${r.queda==='sep'?'📌 separado':'📦 se cuenta'}</strong></div>`).join('')}</div>`).join('')}
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:10px;padding:10px 12px;border-radius:12px;border:2px solid #ca8a04;background:rgba(202,138,4,.10);cursor:pointer"><input type="checkbox" id="hs-firma" style="width:24px;height:24px;min-width:24px;margin:2px 0 0"><span><strong>✍️ Firmo:</strong> tengo este material <strong>separado y completo</strong>. Lo separado no es parte de mi inventario.</span></label>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:10px;background:linear-gradient(135deg,#7c3aed,#5b21b6)" onclick="hojaSepFirmar('${H.id}')">✍️ Firmar hoja</button>
+    <button class="btn small" style="width:100%;margin-top:6px;background:transparent;color:#dc2626;border:1px solid var(--line);box-shadow:none" onclick="hojaSepObjetar('${H.id}')">❌ Algo no está completo</button></div>`;
+}
+async function hojaSepFirmar(id){
+  if(!(document.getElementById('hs-firma')||{}).checked) return alert('Marca la casilla ✍️ Firmo.');
+  try{ await db.collection('piezasPrueba').doc(id).update({firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:true}});
+    _hojaSep.t = 0; _hojaSep.docs = _hojaSep.docs.filter(x=>x.id!==id); toast('✅ Hoja firmada'); renderHome(); }catch(e){ alert('Error: '+e.message); }
+}
+async function hojaSepObjetar(id){
+  const nota = prompt('¿Qué no está completo? (instalación y qué falta)'); if(!nota || !nota.trim()) return;
+  try{ await db.collection('piezasPrueba').doc(id).update({firma:{por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString(), ok:false, nota:nota.trim()}});
+    _hojaSep.t = 0; _hojaSep.docs = _hojaSep.docs.filter(x=>x.id!==id); toast('📝 Se avisó a Dirección'); renderHome(); }catch(e){ alert('Error: '+e.message); }
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
 // ✅ Se instaló → queda verificada. ❌ No se instaló → le sale el aviso de siempre para decidir (se instala hoy u otro
@@ -12475,6 +12603,7 @@ function renderHomeModDir(){
       <p class="hint" style="margin:2px 0 0">Todo lo que veas o anotes aquí es de ${mod}.</p>
       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" style="flex:1;background:#5b21b6" onclick="volverDireccion()">‹ Volver a Dirección</button><button class="btn" style="flex:1;background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none" onclick="irElegirModulo('home')">🔄 Otro módulo</button></div>
     </div>
+    <div class="card" style="padding:12px;border:2px solid #7c3aed;cursor:pointer" onclick="abrirPaso0()"><div style="font-size:16px;font-weight:900">📌 Paso 0 · antes del conteo</div><p class="hint" style="margin:2px 0 0">Decide qué instalaciones sin verificar quedan separadas, se cuentan o ya se fueron, y manda la Hoja de separado a firmar.</p></div>
     ${cp.length?`<div class="card" style="padding:12px"><div class="pend"><div>✂️ <strong>Corte sin anotar</strong>: ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}</div><button class="btn small" onclick="irA('cierre')">Cierre</button></div></div>`:''}
     ${fV.length?`<div class="card" style="padding:12px;border:2px solid #ca8a04;cursor:pointer" onclick="pedSub='camino';irA('ped')"><strong>🚚 Ferretería en camino a ${mod}</strong><p class="hint" style="margin:2px 0 0">${fV.reduce((s,m)=>s+ferPiezas(m),0)} pieza(s). Falta que ${mod} toque "Ya lo recibí". Toca para verlo.</p></div>`:''}
     ${stockBajoHtml()}
