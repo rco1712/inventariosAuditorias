@@ -1464,13 +1464,13 @@ function renderHome(){
   const faltoCierre = esCoordinador() && !esSoloLectura() && !cierreHechoHoy() ? diasSinCierre() : [];
   $('#main').innerHTML = `
     <div class="hello">Hola${nombre?' '+nombre:''} 👋<div class="hint" style="margin:2px 0 0;font-size:14px">¿Qué quieres hacer en <strong>${modulo()}</strong>?</div></div>
+    ${actaEntHtml()}
+    ${hojaDiaHtml()}
+    ${hojaSepHtml()}
     ${ccHomeBannerHtml()}
     ${hcFaltaHtml()}
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
     ${verifCoordHtml()}
-    ${actaEntHtml()}
-    ${hojaDiaHtml()}
-    ${hojaSepHtml()}
     ${sepHtml()}
     ${coordConfHtml()}
     ${prestHomeHtml()}
@@ -6340,7 +6340,8 @@ async function aplicarAuditoriaBase(id, a, opts){
     await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor, deudasCreadas:faltantes.length, ajustoCortado:ajustarCortado, ...(opts.sinDeuda?{aplicadaComoBase:true}:{}), ...(sobCerrar.length?{sobrantesCerrados:sobCerrados}:{})});
     alert(`Auditoría aplicada. ${reales.length} ajuste(s) al inventario${faltantes.length?` y ${faltantes.length} faltante(s) guardados como deuda`:''}.`);
     // v296: en el sistema nuevo, al aplicar el conteo se manda el Acta de entrega al coordinador para que la firme.
-    if(sisNuevoMod(a.modulo) && !solo){ try{ await actaEntregaCrear(id, Object.assign({}, a, {id})); toast('📜 Acta de entrega enviada al coordinador para que la firme.'); }catch(e){ alert('No se pudo crear el Acta de entrega: '+e.message); } }
+    const completaYa = !solo || !ccFilasColor(a).filter(f=>Math.abs(f.dif)>=0.005).map(f=>f.itemId).some(x=>!aplicTras.has(x) && !yaNo.has(x));
+    if(sisNuevoMod(a.modulo) && completaYa){ try{ await actaEntregaCrear(id, Object.assign({}, a, {id})); toast('📜 Acta de entrega enviada al coordinador para que la firme.'); }catch(e){ alert('No se pudo crear el Acta de entrega: '+e.message); } }
     // v273: el conteo aplicado es el arranque del inventario de piezas y de la hoja de corte del coordinador.
     if(a.cierreConteo && !(a.aplicadosItems||[]).length && !((_pzpCfgs||{})[a.modulo] && _pzpCfgs[a.modulo].auditoriaId===id && _pzpCfgs[a.modulo].hojaCoord) && confirm(`✂️ ¿Empezar desde este conteo el inventario de piezas de ${a.modulo}?\n\nDesde aquí, el coordinador captura la Hoja de corte del cortador y la app lleva las piezas (sin mover el inventario oficial, que sigue en hojas).`)) await pzpArrancarDesde(a.modulo, id);
     if(current==='cpzrev') renderCpzRev(); else renderHist();
@@ -8897,7 +8898,7 @@ async function actaPDF(id){
   const f = d.firma;
   S.banda(f ? (f.ok===false ? pdfS('OBJETADA por '+String(f.por||'').split('@')[0]+' · '+fTxt(f.en)) : pdfS('FIRMADA por '+String(f.por||'').split('@')[0]+' · '+fTxt(f.en))) : 'SIN FIRMAR', '', f ? (f.ok===false?ROJ:VER) : [202,138,4]);
   if(f && f.ok===false && f.nota) S.vacio(pdfS('Nota: '+f.nota));
-  await S.fin(pdfS(`${T.t.replace(/\s*\(.*\)/,'').replace(/ /g,'_')}_${d.modulo}_${d.fecha?diaLocal(d.fecha):''}.pdf`), pdfS('Closets Vera · '+T.t+' · '+d.modulo));
+  await S.fin(pdfS(`${T.t.replace(/\s*\(.*\)/,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ /g,'_')}_${d.modulo}_${d.fecha?diaLocal(d.fecha):''}.pdf`), pdfS('Closets Vera · '+T.t+' · '+d.modulo));
 }
 // ===== v296 · Día de lo separado (pedido por el usuario) =====
 // La instalación separada no entra a "Confirma tus instalaciones" ni a la verificación de Dirección mientras
@@ -8984,7 +8985,7 @@ function actaEntregaFilas(a){
   const compl = res.filter(r=>r.teoricoCompletas!==undefined && Number(r.fisicoCompletas)>0);
   if(compl.length) G.push({t:'Hojas completas', rows:compl.map(r=>({k:'h_'+r.itemId, n:r.nombre, q:Number(r.fisicoCompletas), u:'hojas'}))});
   const porGrupo = {}; (a.piezasContadas||[]).filter(p=>Number(p.cantidad)>0).forEach(p=>{ (porGrupo[p.grupo]=porGrupo[p.grupo]||[]).push(p); });
-  Object.keys(porGrupo).sort().forEach(g=>G.push({t:'Piezas sueltas · '+g.replace('Melamina ',''), rows:porGrupo[g].map((p,i)=>({k:'p_'+g+'_'+p.pieza+'_'+p.dim, n:p.pieza+' '+String(p.dim||'').replace(/ cm$/,''), q:Number(p.cantidad), u:'pzas'}))}));
+  Object.keys(porGrupo).sort().forEach(g=>G.push({t:'Piezas sueltas · '+g.replace('Melamina ',''), rows:porGrupo[g].map((p,i)=>({k:'p_'+g+'_'+p.pieza+'_'+p.dim, n:/\d×\d/.test(p.pieza)?p.pieza:p.pieza+' '+String(p.dim||'').replace(/ cm$/,''), q:Number(p.cantidad), u:'pzas'}))}));
   const arm = (a.armadosContados||[]).filter(x=>Number(x.cantidad)>0);
   if(arm.length) G.push({t:'Muebles armados', rows:arm.map((x,i)=>({k:'a_'+i, n:x.descripcion||(x.tipo+' '+(x.color||'')), q:Number(x.cantidad), u:'pzas', det:(()=>{ try{ return piezasDeArmado(x).map(z=>fmtNum(z.cantidad)+' '+z.nombre).join(' · '); }catch(e){ return ''; } })()}))});
   const ret = a.retazos||[];
