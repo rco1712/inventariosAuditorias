@@ -1467,6 +1467,7 @@ function renderHome(){
     ${actaEntHtml()}
     ${hojaDiaHtml()}
     ${hojaSepHtml()}
+    ${ayerBtnHtml()}
     ${ccHomeBannerHtml()}
     ${hcFaltaHtml()}
     ${pend.length?`<div class="card" style="padding:12px">${pend.join('')}</div>`:''}
@@ -9208,6 +9209,74 @@ async function hdResolver(hid, k, acc){
     await db.collection('piezasPrueba').doc(hid).update(upd); h.resol = resol; if(upd.recontar) h.recontar = upd.recontar;
     _hdDifs.docs = _hdDifs.docs.filter(x=>(x.difs||[]).some(z=>!(x.resol||{})[z.k])); toast(acc==='recontar'?'🔁 Sale marcado mañana':'✅ Listo'); renderHome();
   }catch(e){ alert('Error: '+e.message); }
+}
+// ===== v296 · TEMPORAL (pedido por el usuario, 3 o 4 días): "Instalaciones que se mandaron ayer" =====
+// Solo con el modo automático. El coordinador ve las instalaciones de ayer como las ve Dirección y decide:
+// ✅ Se instaló · ↩️ No se instaló: regresa a mi inventario · ⏳ Se instala otro día.
+let ayerV = null;
+function ayerDia(){ const h = fechaHoyLocal(), d = new Date(h+'T12:00:00'); d.setDate(d.getDate()-1); if(d.getDay()===0) d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); }
+async function ayerCargar(){
+  const mod = modulo(), dia = ayerDia();
+  const sn = await db.collection('instalacionesLog').where('modulo','==',mod).get();
+  try{ await cargarInstLog(); }catch(e){}
+  const ls = sn.docs.map(d=>({id:d.id, ...d.data()})).filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.separado && !l.separado.resuelto) && (l.fechaDia===dia || diaValorInst(l)===dia || ((l.pospuesta&&l.pospuesta.historial)||[]).some(h=>h.de===dia)))
+    .sort((a,b)=>String(a.calle||'').localeCompare(String(b.calle||'')));
+  return {mod, dia, ls};
+}
+function ayerEstado(l){
+  if(regresoDeInstalacion(l.id)) return {t:'↩️ Regresó a tu inventario', c:'#ea580c'};
+  const v = l.verif; if(diaValorInst(l) > ayerDia()) return {t:'⏳ Pasó al '+fCorta(diaValorInst(l)), c:'#7c3aed'};
+  if(v && v.estado==='ok') return {t:'✅ Se instaló', c:'#16a34a'};
+  if(v && v.estado==='no' && v.puertas==='pendiente') return {t:'❌ Falta decidir', c:'#dc2626', pend:true};
+  if(v && v.estado==='no') return {t:'❌ No se instaló', c:'#dc2626'};
+  return null;
+}
+async function ayerAbrir(){ try{ ayerV = await ayerCargar(); ayerV.otro = null; ayerPintar(); }catch(e){ alert('Error: '+e.message); } }
+function ayerPintar(){
+  let ov = document.getElementById('ayer-ov'); const V = ayerV;
+  if(!V){ if(ov) ov.remove(); return; }
+  const top = ov ? ov.scrollTop : 0;
+  if(!ov){ ov = document.createElement('div'); ov.id = 'ayer-ov'; ov.style.cssText = 'position:fixed;inset:0;z-index:9997;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto'; document.body.appendChild(ov); }
+  const man = sumarDiasISO(fechaHoyLocal(), 1), nPend = V.ls.filter(l=>{ const e = ayerEstado(l); return !e || e.pend; }).length;
+  const fila = l => { const e = ayerEstado(l), pl = l.categoria==='Puerta';
+    return `<div style="padding:12px;border-radius:14px;border:2px solid ${e?e.c:'var(--line)'};margin-top:10px;background:var(--card)">
+      <div style="display:flex;gap:8px;align-items:flex-start"><span style="font-size:22px">${pl?'🚪':'🗄️'}</span><div style="flex:1;min-width:0">
+        <strong style="font-size:16px">${l.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${calleHtml(l)}
+        ${typeof verifDetalleHtml==='function'?verifDetalleHtml(l):''}</div></div>
+      ${e && !e.pend ? `<div style="margin-top:8px;font-weight:900;color:${e.c}">${e.t}</div>` : `
+      <button class="btn" style="width:100%;min-height:50px;margin-top:10px;background:#16a34a" onclick="ayerOk('${l.id}')">✅ Se instal${pl?'aron':'ó'}</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+        <button class="btn small" style="margin:0;min-height:50px;padding:4px;background:#ea580c" onclick="ayerRegresa('${l.id}')">↩️ No se instaló:<br>regresa a mi inventario</button>
+        <button class="btn small" style="margin:0;min-height:50px;padding:4px;background:#7c3aed" onclick="ayerV.otro='${l.id}';ayerPintar()">⏳ Se instala<br>otro día</button></div>
+      ${V.otro===l.id?`<div style="display:flex;gap:6px;margin-top:6px"><input type="date" id="ayer-f" min="${fechaHoyLocal()}" value="${man}" style="flex:1;min-width:0;margin:0"><button class="btn small" style="margin:0;background:#7c3aed" onclick="ayerOtro('${l.id}')">Guardar</button></div><div class="hint" style="margin:4px 0 0">El material se queda apartado. No la vuelvas a capturar.</div>`:''}`}</div>`; };
+  ov.innerHTML = `<div style="width:100%;max-width:470px;background:var(--bg);color:var(--ink);border-radius:18px;padding:14px;margin-top:8px">
+    <div style="display:flex;justify-content:space-between"><div style="font-size:19px;font-weight:900">🚚 Instalaciones que se mandaron ayer</div><button onclick="ayerV=null;ayerPintar();renderHome()" style="all:unset;cursor:pointer;font-size:22px;color:var(--sub)">✕</button></div>
+    <p class="hint" style="margin:2px 0 0">${new Date(V.dia+'T12:00:00').toLocaleDateString('es-MX',{weekday:'long', day:'numeric', month:'long'})} · ${V.mod}. Revisa con el reporte del grupo.${nPend?` <strong>Faltan ${nPend}.</strong>`:' <strong style="color:#16a34a">✅ Todas listas.</strong>'}</p>
+    ${V.ls.length ? V.ls.map(fila).join('') : '<div class="card" style="margin-top:10px">No hay instalaciones capturadas ese día.</div>'}</div>`;
+  ov.scrollTop = top;
+}
+async function ayerRecargar(){ try{ const o = ayerV && ayerV.otro; ayerV = await ayerCargar(); ayerV.otro = null; ayerPintar(); _verifCoordT = 0; _verifCoord = null; }catch(e){} }
+async function ayerOk(id){
+  const l = ayerV.ls.find(x=>x.id===id); if(!l) return;
+  try{ try{ await verifAprobarSiPend(l); }catch(e){} await verifGuardar(id, {estado:'ok', porCoord:true}); toast('✅ '+(l.calle||'Listo')); await ayerRecargar(); }catch(e){ alert('Error: '+e.message); }
+}
+async function ayerRegresa(id){
+  const l = ayerV.ls.find(x=>x.id===id); if(!l) return;
+  if(!confirm(`↩️ ${l.descripcion.split(' · ').slice(0,2).join(' · ')}${l.calle?'\n📍 '+l.calle:''}\n\nNo se instaló y el material regresa a tu inventario.\n\nEn la siguiente pantalla revisas pieza por pieza y guardas.`)) return;
+  try{ try{ await verifAprobarSiPend(l); }catch(e){} await verifGuardar(id, {estado:'no', puertas:'pendiente', visto:true, porCoord:true});
+    ayerV = null; ayerPintar(); await verifDestino(id, 'inv'); }catch(e){ alert('Error: '+e.message); }
+}
+async function ayerOtro(id){
+  const l = ayerV.ls.find(x=>x.id===id); if(!l) return; const el = document.getElementById('ayer-f'), nueva = el && el.value;
+  if(!nueva || nueva<fechaHoyLocal()) return alert('Elige hoy o un día después.');
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), P = l.pospuesta || {};
+  try{ try{ await verifAprobarSiPend(l); }catch(e){}
+    await db.collection('instalacionesLog').doc(id).update({fechaDia:nueva, verif:null, pospuesta:{primero:P.primero||l.fechaDia, a:nueva, veces:(P.veces||0)+1, por:quien, en:ahora, nota:'El coordinador dice que no se instaló; se instala el '+fCorta(nueva), historial:(P.historial||[]).concat([{de:l.fechaDia, a:nueva, en:ahora, por:quien}])}});
+    toast('⏳ Pasó al '+fCorta(nueva)+'. No la vuelvas a capturar.'); await ayerRecargar(); }catch(e){ alert('Error: '+e.message); }
+}
+function ayerBtnHtml(){
+  if(!modoAutoOn() || esAdmin() || esSoloLectura()) return '';
+  return `<button class="btn" style="width:100%;min-height:62px;margin:0 0 12px;font-size:17px;background:linear-gradient(135deg,#0369a1,#075985)" onclick="ayerAbrir()">🚚 Instalaciones que se mandaron ayer</button>`;
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
 // ✅ Se instaló → queda verificada. ❌ No se instaló → le sale el aviso de siempre para decidir (se instala hoy u otro
