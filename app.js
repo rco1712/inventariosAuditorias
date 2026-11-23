@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v301';
+const APP_VERSION = 'v302';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -10321,7 +10321,7 @@ const GAR_TIPOS = {
   puertas:{ic:'🚪', t:'Puertas', s:'Completas, 1 puerta, el fijo… (por medida del hueco)'},
   pieza:  {ic:'🧩', t:'Pieza', s:'Pared, entrepaño, maletero, frente, pieza de cajón, fondo…'},
   medida: {ic:'📐', t:'Pieza a medida', s:'Cualquier pieza con ancho y alto (marco, repisa…)'},
-  armado: {ic:'📦', t:'Mueble armado', s:'Cajonera, cajón completo, cuadro de cajón'},
+  armado: {ic:'📦', t:'Mueble armado', s:'Cajonera, cajón, cuadro, espejo, zapatera'},
   item:   {ic:'🔩', t:'Herraje u otro', s:'Jaladera, espejo, correderas, bisagras…'}
 };
 const GAR_MEDIDA_NOMBRES = ['Puerta','Marco','Fijo','Pared falsa','Extensión de fijo','Repisa','Otra pieza'];
@@ -10487,17 +10487,18 @@ function renderGar(){
       </div>
       <p class="hint">Se descuenta la parte de la hoja que usa; si la pieza ocupa la hoja entera (como una puerta), se descuenta 1 hoja.</p>`;
   } else if(garTipo==='armado'){
-    const esCaj = f.armTipo==='cajonera';
+    const esCaj = f.armTipo==='cajonera' || f.armTipo==='cajonera_espejo';
     const vars = armadoVariantes(f.armTipo);
     if(!vars[f.armVar]) f.armVar = Object.keys(vars)[0];
-    const tipos = {cajonera:'Cajonera (sin cajones)', cajon:'Cajón completo', cuadro_fondo:'Cuadro de cajón con fondo', cuadro_sin:'Cuadro de cajón sin fondo'};
+    // v302 (pedido por el usuario): también cajonera de espejo, puerta de espejo y puerta de zapatera.
+    const tipos = {cajonera:'Cajonera (sin cajones)', cajon:'Cajón completo', cuadro_fondo:'Cuadro de cajón con fondo', cuadro_sin:'Cuadro de cajón sin fondo', cajonera_espejo:'Cajonera de espejo', puerta_espejo:'Puerta de espejo (marcos, espejo y herrajes)', puerta_zapatera:'Puerta de zapatera'};
     campos = `<label class="hint">¿Qué mueble?</label>
       <select style="margin-top:4px" onchange="garForm.armTipo=this.value;renderGar()">${Object.keys(tipos).map(k=>`<option value="${k}" ${k===f.armTipo?'selected':''}>${tipos[k]}</option>`).join('')}</select>
       <div class="grid2" style="margin-top:10px">
         <div><label class="hint">Tipo</label><select style="margin-top:4px" onchange="garForm.armVar=this.value;renderGar()">${Object.keys(vars).map(k=>`<option value="${k}" ${k===f.armVar?'selected':''}>${vars[k]}</option>`).join('')}</select></div>
-        <div><label class="hint">${esCaj?'Color de la cajonera':(f.armTipo==='cajon'?'Color del frente':'Color del cuadro')}</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select></div>
+        <div><label class="hint">${esCaj?'Color de la cajonera':(f.armTipo==='cajon'?'Color del frente':f.armTipo==='puerta_espejo'?'Color de los marcos':f.armTipo==='puerta_zapatera'?'Color':'Color del cuadro')}</label><select style="margin-top:4px" onchange="garForm.color=this.value">${colorOpts(f.color)}</select></div>
         ${f.armTipo==='cajon' && f.armVar!=='max'?`<div><label class="hint">Color del cuadro</label><select style="margin-top:4px" onchange="garForm.colorCuadro=this.value">${colorOpts(f.colorCuadro)}</select></div>`:''}
-        ${esCaj && f.armVar!=='max'?`<div><label class="hint">Color de frentes y zóclos</label><select style="margin-top:4px" onchange="garForm.colorFrente=this.value">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
+        ${esCaj && f.armVar!=='max'?`<div><label class="hint">${f.armTipo==='cajonera_espejo'?'Color de los zóclos':'Color de frentes y zóclos'}</label><select style="margin-top:4px" onchange="garForm.colorFrente=this.value">${colorOpts(f.colorFrente||f.color)}</select></div>`:''}
         <div><label class="hint">¿Cuántos?</label><input type="number" min="1" inputmode="numeric" style="margin-top:4px" value="${f.cantidad}" oninput="garForm.cantidad=this.value" placeholder="1"></div>
       </div>
       ${(f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? `<label class="row" style="margin-top:10px;gap:10px;font-size:14px;flex-wrap:nowrap"><input type="checkbox" style="width:22px;min-height:22px;flex:0 0 22px" ${f.ext?'checked':''} onchange="garForm.ext=this.checked"> Lleva corredera de extensión</label>`:''}
@@ -10581,7 +10582,7 @@ function agregarLineaGar(){
       l = {tipo:'puertas', pTipo:f.pTipo, pAlto:al, pAncho:an, color:f.color, pModo:'completas', pHerrajes:!!f.pHerrajes, pJaladera:f.pJaladera, cantidad:n};
     }
   }
-  else if(garTipo==='armado'){ l = {tipo:'armado', armTipo:f.armTipo, armVar:f.armVar, color:f.color, colorCuadro:f.colorCuadro, colorFrente:(f.armTipo==='cajonera' && f.colorFrente && f.colorFrente!==f.color)?f.colorFrente:undefined, ext: (f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? !!f.ext : false, cantidad:n}; }
+  else if(garTipo==='armado'){ l = {tipo:'armado', armTipo:f.armTipo, armVar:f.armVar, color:f.color, colorCuadro:f.colorCuadro, colorFrente:((f.armTipo==='cajonera'||f.armTipo==='cajonera_espejo') && f.colorFrente && f.colorFrente!==f.color)?f.colorFrente:undefined, ext: (f.armTipo==='cajonera'||f.armTipo==='cajon') && f.armVar!=='max' ? !!f.ext : false, cantidad:n}; }
   else { l = {tipo:'item', itemId:f.itemId, cantidad:n}; }
   garLineas.push(l);
   garForm.cantidad=''; garForm.ancho=''; garForm.alto='';
