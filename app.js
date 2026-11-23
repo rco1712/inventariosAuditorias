@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v299';
+const APP_VERSION = 'v300';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4614,6 +4614,16 @@ async function generarConteoInicialPDF(a){
     S.tabla([{t:'Armado',w:152},{t:'Cantidad',w:30}], a.armadosContados.map(x=>[x.descripcion||'', {t:fmtNum(x.cantidad), b:true}]), col); }
   if((a.melaminasFuera||[]).length){ const col = [100,116,139]; S.banda('Melaminas que ya no se usan (solo registro)', '', col);
     S.tabla([{t:'Color',w:152},{t:'Hojas',w:30}], a.melaminasFuera.map(x=>[x.nombre, fmtNum(x.hojas)]), col); }
+  // v300 (pedido por el usuario): el PDF del conteo sirve como cierre del día; trae las entradas de ese día que se
+  // capturaron ANTES del conteo (ya están dentro de lo contado, es solo registro).
+  try{ const sn = await db.collection('movimientos').where('modulo','==',a.modulo).get(), dia = diaLocal(a.fecha), tope = String(a.fecha||'');
+    const ents = sn.docs.map(d=>Object.assign({id:d.id}, d.data())).filter(m=>m.tipo==='entrada' && m.estado!=='rechazado' && diaLocal(m.fecha)===dia && String(m.fecha||'')<=tope)
+      .sort((x,y)=>String(x.fecha).localeCompare(String(y.fecha)));
+    const col = [22,163,74]; S.banda('Entradas de hoy antes del conteo', ents.length ? `${ents.length} · ya están dentro de lo contado` : 'ninguna', col);
+    if(ents.length) S.tabla([{t:'Hora',w:20},{t:'Artículo',w:74},{t:'Cantidad',w:26},{t:'De dónde',w:62}], ents.map(m=>{ const it = CATALOGO.find(i=>i.id===m.itemId)||{}, o = origenDeEntrada(m);
+      return [new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}), pdfS(m.itemNombre||it.nombre||m.itemId), {t:fmtNum(m.cantidad)+' '+(it.unidad||''), b:true}, pdfS(o.txt + (m.estado==='pendiente'?' (pendiente)':''))]; }), col);
+    else S.vacio('No hubo entradas de material este día antes del conteo.');
+  }catch(e){ console.warn('entradas del dia', e); }
   if(S.y > S.pageH-40){ doc.addPage(); S.y = 20; }
   S.y += 18; const fw = (S.W-16)/3;
   ['Contó','Coordinador','Dirección'].forEach((t,i)=>{ const x = S.L + i*(fw+8); doc.setDrawColor(60,60,60); doc.line(x, S.y, x+fw, S.y); doc.setFontSize(9); doc.setTextColor(60,60,60); doc.text(t, x+fw/2, S.y+5, {align:'center'}); });
