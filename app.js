@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v300';
+const APP_VERSION = 'v301';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -6482,6 +6482,21 @@ async function aplicarAuditoria(id, a, opts){
   const _vm = _valMedidaMod; _valMedidaMod = (a && a.modulo) || _vm;
   try{ return await aplicarAuditoriaBase(id, a, opts); } finally { _valMedidaMod = _vm; }
 }
+// v301: en el sistema nuevo, el conteo del módulo es el NUEVO punto de partida del inventario de piezas (lo que usan
+// la Hoja del día, la auditoría y la hoja de corte). Se arranca ANTES de aplicar (v276: así lo contado se convierte a
+// hojas por medida y no nace descuadrado). Solo conteos completos (no parciales) y solo la primera vez que se aplica.
+async function sisNuevoArranquePiezas(id, a){
+  try{
+    if(!a || !sisNuevoMod(a.modulo) || a.tipo==='parcial' || (a.aplicadosItems||[]).length) return false;
+    if(!((a.piezasContadas||[]).length || (a.armadosContados||[]).length || (a.resultados||[]).length)) return false;
+    const d = await db.collection('piezasPrueba').doc('cfg_'+a.modulo).get(), c = d && d.data ? d.data() : null;
+    if(c && c.activo && c.auditoriaId===id) return false;
+    await pzpArrancarDesde(a.modulo, id, 'auditoria');
+    _hcCfg[a.modulo] = Object.assign({}, c||{}, {tipo:'cfg', modulo:a.modulo, activo:true, auditoriaId:id, hojaCoord:true, modo:'real'});
+    toast('✂️ Las piezas de '+a.modulo+' arrancan desde este conteo.');
+    return true;
+  }catch(e){ console.warn('arranque piezas', e); return false; }
+}
 async function aplicarAuditoriaBase(id, a, opts){
   opts = opts || {};
   if(!esAdmin()) return alert('Solo Dirección puede aplicar una auditoría al inventario.');
@@ -6494,6 +6509,7 @@ async function aplicarAuditoriaBase(id, a, opts){
   if(hayHojaConCortado && !contoCortado && a.tipo!=='parcial'){
     ajustarCortado = confirm('Esta auditoría NO contó piezas cortadas ni armados, pero el inventario dice que sí hay material cortado.\n\nAceptar = ajustar también el cortado (quedará en 0 y lo que había se va a deuda).\nCancelar = ajustar SOLO las hojas completas y dejar el cortado como está.');
   }
+  await sisNuevoArranquePiezas(id, a);
   const calc = calcularAjustesAuditoria(a, ajustarCortado);
   // v272 (pedido por el usuario): en el cierre con conteo se aplica por color; lo ya aplicado no se repite.
   const yaAplic = new Set(a.aplicadosItems||[]), yaNo = new Set(a.noAplicadosItems||[]);
