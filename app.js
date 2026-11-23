@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v303';
+const APP_VERSION = 'v304';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5702,7 +5702,22 @@ async function usarConteoComoInicial(id, a){
     }
     await db.collection('inicialHist').doc(cryptoId()).set({modulo:a.modulo, origen:'Conteo inicial', auditoriaId:id, fecha:new Date().toISOString(), creadoPor, articulos:conAlgo, hojasCompletas:fmtNum(tc), hojasCortadas:fmtNum(tk)});
     await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor, usadoComoInicial:true});
-    alert(`✅ Listo. ${a.modulo} ya arranca con este conteo como stock inicial.`);
+    // v304 (pedido por el usuario): el módulo empieza EXACTAMENTE con lo contado.
+    // 1) Sobrantes: se cierran todos los abiertos del módulo (lo que había ya se contó en Retazo y sobrante, o ya no está).
+    let sobC = 0;
+    try{ const sn = await db.collection('sobrantes').get();
+      for(const d of sn.docs){ const x = d.data(); if(x.modulo!==a.modulo || x.estado!=='abierto') continue;
+        await db.collection('sobrantes').doc(d.id).update({estado:'cerrado', cerradoEn:new Date().toISOString(), cerradoPorDireccion:creadoPor, cerradoPorConteo:id, restante:{}}); sobC++; }
+      if(sobC) await db.collection('auditorias').doc(id).update({sobrantesCerrados:sobC});
+    }catch(e){ console.warn('cerrar sobrantes', e); }
+    // 2) Sistema nuevo: el inventario de piezas (retazo incluido) arranca de este conteo y el coordinador firma el Acta de entrega.
+    let arr = false, acta = false;
+    if(sisNuevoMod(a.modulo)){
+      arr = await sisNuevoArranquePiezas(id, Object.assign({}, a, {aplicadosItems:[]}));
+      try{ await actaEntregaCrear(id, Object.assign({}, a, {id})); acta = true; }catch(e){ alert('No se pudo crear el Acta de entrega: '+e.message); }
+    }
+    alert(`✅ Listo. ${a.modulo} ya arranca con este conteo como stock inicial.${sobC?`\n\n📦 Se cerraron ${sobC} sobrante(s) abiertos.`:''}${arr?`\n✂️ Las piezas de ${a.modulo} arrancan desde este conteo.`:''}${acta?`\n📜 Acta de entrega enviada al coordinador para que la firme.`:''}`);
+    if(confirm('¿Quieres descargar el PDF del CONTEO INICIAL de '+a.modulo+'? (sirve como cierre de hoy)')){ try{ await generarConteoInicialPDF(Object.assign({}, a, {id})); }catch(e){ alert('No se pudo generar el PDF: '+e.message); } }
     if(current==='hist') renderHist();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -6524,7 +6539,12 @@ async function aplicarAuditoriaBase(id, a, opts){
   const faltantes = opts.sinDeuda ? [] : calc.faltantes.filter(deEstos); // "Aplicar como base" = sin pasar faltantes a deuda
   const aplicTras = new Set([...yaAplic, ...(solo||[])]);
   // Un sobrante abierto se cierra cuando ya se aplicaron todos sus colores.
-  const sobCerrar = (a.cierreConteo || a.retazoContado) ? (a.sobrantesApp||[]).filter(sb=>(sb.restante||[]).every(x=>aplicTras.has(x.itemId)) && !(a.sobrantesCerradosIds||[]).includes(sb.id)) : [];
+  let sobCerrar = (a.cierreConteo || a.retazoContado) ? (a.sobrantesApp||[]).filter(sb=>(sb.restante||[]).every(x=>aplicTras.has(x.itemId)) && !(a.sobrantesCerradosIds||[]).includes(sb.id)) : [];
+  // v304 (pedido por el usuario): el conteo inicial (completo, de una vez) deja el módulo EXACTAMENTE con lo contado:
+  // se cierran TODOS los sobrantes abiertos del módulo (lo que había ya se contó como sobrante/retazo o ya no existe).
+  if(!solo && (a.conteoInicial || a.retazoContado) && a.tipo!=='parcial'){
+    try{ const sn = await db.collection('sobrantes').get();
+      sobCerrar = sn.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.modulo===a.modulo && x.estado==='abierto'); }catch(e){} }
   const reales = ajustes.filter(x=>x.total || x.completasDelta || x.cortadoDelta);
   const resumen = reales.slice(0,12).map(x=>`• ${x.it.nombre}: ${x.total>0?'+':''}${fmtNum(x.total)}${(x.completasDelta&&x.cortadoDelta)?` (compl. ${fmtNum(x.completasDelta)}, cort. ${fmtNum(x.cortadoDelta)})`:(x.cortadoDelta?' (cortado)':'')}`).join('\n') + (reales.length>12?`\n… y ${reales.length-12} más`:'');
   if(!confirm(`${opts.sinDeuda?'📌 Aplicar COMO BASE (sin deuda) el ':'Aplicar '}${a.cierreConteo?'CIERRE CON CONTEO DE PIEZAS':(a.tipo==='melamina'?'auditoría de MELAMINA Y MDF':'auditoría')} del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:${a.tipo==='melamina'?'\n(Solo se mueven Melamina y MDF. Herrajes y lo demás NO se tocan.)':''}\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?${solo?`\n\n🎨 Solo estos colores: ${[...solo].map(x=>pzpColor(x)).join(', ')}`:''}${sobCerrar.length?`\n\n📦 Se cierran ${sobCerrar.length} sobrante(s) que la app tenía abiertos: ya se contaron en el conteo.`:''}${opts.sinDeuda?'\n\nLo que falte NO pasa a deuda.':''}`)) return;
