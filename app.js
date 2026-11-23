@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v302';
+const APP_VERSION = 'v303';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4049,7 +4049,10 @@ const AUD_SECCIONES_CIERRE = [AUD_SECCIONES_TODAS.find(x=>x.k==='__piezas'), AUD
 function audSeccionesSync(){
   const want = modoCierreConteo() ? AUD_SECCIONES_CIERRE
     : (audEdit && audEdit.cierreConteo) ? AUD_SECCIONES_TODAS.filter(x=>AUD_CATS_MEL.includes(x.k) || ['__piezas','__armados'].includes(x.k)).concat([AUD_SEC_RETAZO, AUD_SECCIONES_TODAS.find(x=>x.k==='__revisar')])
-    : esMelAud() ? AUD_SECCIONES_TODAS.filter(x=>AUD_CATS_MEL.includes(x.k) || ['__piezas','__armados','__revisar'].includes(x.k)) : AUD_SECCIONES_TODAS;
+    : esMelAud() ? AUD_SECCIONES_TODAS.filter(x=>AUD_CATS_MEL.includes(x.k) || ['__piezas','__armados','__revisar'].includes(x.k))
+    // v303 (pedido por el usuario): el conteo completo también cuenta retazo y sobrante (antes solo el cierre con conteo).
+    : (esParcialAud() || esComplementoAud()) ? AUD_SECCIONES_TODAS
+    : AUD_SECCIONES_TODAS.filter(x=>x.k!=='__revisar').concat([AUD_SEC_RETAZO, AUD_SECCIONES_TODAS.find(x=>x.k==='__revisar')]);
   if(AUD_SECCIONES.length===want.length && AUD_SECCIONES.every((x,i)=>x===want[i])) return;
   const cat = auditCat; AUD_SECCIONES.splice(0, AUD_SECCIONES.length, ...want);
   const i = AUD_SECCIONES.findIndex(x=>x.k===cat); audPaso = i<0 ? 0 : i; auditCat = AUD_SECCIONES[audPaso].k;
@@ -5527,8 +5530,9 @@ async function saveAudit(){
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
     const bc = melA ? [] : balanceCorrederas();
     if(bc.length) doc.correderas = bc;
-    if(cc){
-      doc.cierreConteo = true; doc.completasDelCierre = true;
+    const conRet = cc || (!melA && !parcial && !comp);
+    if(conRet){
+      if(cc){ doc.cierreConteo = true; doc.completasDelCierre = true; } else doc.retazoContado = true;
       const rh = r => fmtNum(retHojasTotal(r));
       doc.retazos = auditRetazos.filter(r=>r.clase!=='danada').map(r=>Object.assign({}, r, {desc:retDescribir(r), hojas:rh(r)}));
       doc.danadas = auditRetazos.filter(r=>r.clase==='danada').map(r=>Object.assign({}, r, {desc:retDescribir(r), hojas:rh(r)}));
@@ -5538,7 +5542,7 @@ async function saveAudit(){
         .map(x=>({id:x.id, fecha:x.fecha||'', nota:x.nota||'', restante:Object.keys(x.restante||{}).filter(k=>Number(x.restante[k])>0.0005 && AUD_CATS_MEL.includes((CATALOGO.find(i=>i.id===k)||{}).cat)).map(k=>({itemId:k, cantidad:fmtNum(x.restante[k])}))})).filter(x=>x.restante.length); }catch(e){ doc.sobrantesApp = []; }
       const sl = retSobAppLista(); doc.sobrantesResp = Object.assign({}, auditSobResp);
       doc.sobrantesNoTiene = (Array.isArray(sl)?sl:[]).filter(x=>auditSobResp[x.id]==='no').map(x=>({id:x.id, desc:[x.colores.join(', '), retSobFecha(x.fecha), x.calle, String(x.nota||'').replace(/ \(ancho×alto\)/,'')].filter(Boolean).join(' · ')}));
-      doc.posposAlContar = instPospuestas(instLog||[]).map(l=>({id:l.id, calle:l.calle||'', desc:String(l.descripcion||'').split(' · ').slice(0,2).join(' · ')}));
+      if(cc) doc.posposAlContar = instPospuestas(instLog||[]).map(l=>({id:l.id, calle:l.calle||'', desc:String(l.descripcion||'').split(' · ').slice(0,2).join(' · ')}));
     }
     let audId = cryptoId();
     if(audEdit){
@@ -5553,7 +5557,7 @@ async function saveAudit(){
       Object.assign(doc, {fecha:viejo.fecha, tipo:viejo.tipo||doc.tipo, creadoPor:viejo.creadoPor||doc.creadoPor, correcciones:viejo.correcciones||[],
         ediciones:(viejo.ediciones||[]).concat([{fecha:new Date().toISOString(), por:getCurrentUserEmail?getCurrentUserEmail():'', cambios}])});
       if(viejo.conteoInicial) doc.conteoInicial = true;
-      if(viejo.cierreConteo){ ['cierreConteo','completasDelCierre','sobrantesApp','posposAlContar','sobrantesResp','sobrantesNoTiene','piezasArrancoSinAplicar'].forEach(k=>{ if(viejo[k]!==undefined) doc[k] = viejo[k]; });
+      if(viejo.cierreConteo || viejo.retazoContado){ ['cierreConteo','retazoContado','completasDelCierre','sobrantesApp','posposAlContar','sobrantesResp','sobrantesNoTiene','piezasArrancoSinAplicar'].forEach(k=>{ if(viejo[k]!==undefined) doc[k] = viejo[k]; });
         doc.retazos = auditRetazos.filter(r=>r.clase!=='danada').map(r=>Object.assign({}, r, {desc:retDescribir(r), hojas:fmtNum(retHojasTotal(r))}));
         doc.danadas = auditRetazos.filter(r=>r.clase==='danada').map(r=>Object.assign({}, r, {desc:retDescribir(r), hojas:fmtNum(retHojasTotal(r))})); }
       if(!doc.piezasContadas) doc.piezasContadas = []; if(!doc.armadosContados) doc.armadosContados = [];
@@ -6520,7 +6524,7 @@ async function aplicarAuditoriaBase(id, a, opts){
   const faltantes = opts.sinDeuda ? [] : calc.faltantes.filter(deEstos); // "Aplicar como base" = sin pasar faltantes a deuda
   const aplicTras = new Set([...yaAplic, ...(solo||[])]);
   // Un sobrante abierto se cierra cuando ya se aplicaron todos sus colores.
-  const sobCerrar = a.cierreConteo ? (a.sobrantesApp||[]).filter(sb=>(sb.restante||[]).every(x=>aplicTras.has(x.itemId)) && !(a.sobrantesCerradosIds||[]).includes(sb.id)) : [];
+  const sobCerrar = (a.cierreConteo || a.retazoContado) ? (a.sobrantesApp||[]).filter(sb=>(sb.restante||[]).every(x=>aplicTras.has(x.itemId)) && !(a.sobrantesCerradosIds||[]).includes(sb.id)) : [];
   const reales = ajustes.filter(x=>x.total || x.completasDelta || x.cortadoDelta);
   const resumen = reales.slice(0,12).map(x=>`• ${x.it.nombre}: ${x.total>0?'+':''}${fmtNum(x.total)}${(x.completasDelta&&x.cortadoDelta)?` (compl. ${fmtNum(x.completasDelta)}, cort. ${fmtNum(x.cortadoDelta)})`:(x.cortadoDelta?' (cortado)':'')}`).join('\n') + (reales.length>12?`\n… y ${reales.length-12} más`:'');
   if(!confirm(`${opts.sinDeuda?'📌 Aplicar COMO BASE (sin deuda) el ':'Aplicar '}${a.cierreConteo?'CIERRE CON CONTEO DE PIEZAS':(a.tipo==='melamina'?'auditoría de MELAMINA Y MDF':'auditoría')} del ${new Date(a.fecha).toLocaleString()} al inventario de ${a.modulo}:${a.tipo==='melamina'?'\n(Solo se mueven Melamina y MDF. Herrajes y lo demás NO se tocan.)':''}\n\n${reales.length? resumen : 'No hay diferencias que ajustar.'}\n\n${faltantes.length} faltante(s) se guardarán como DEUDA.\n\n¿Continuar?${solo?`\n\n🎨 Solo estos colores: ${[...solo].map(x=>pzpColor(x)).join(', ')}`:''}${sobCerrar.length?`\n\n📦 Se cierran ${sobCerrar.length} sobrante(s) que la app tenía abiertos: ya se contaron en el conteo.`:''}${opts.sinDeuda?'\n\nLo que falte NO pasa a deuda.':''}`)) return;
