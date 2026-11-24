@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v305';
+const APP_VERSION = 'v306';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -10663,9 +10663,19 @@ async function confirmarGar(){
     const creadoPor = getCurrentUserEmail?getCurrentUserEmail():'';
     const logId = cryptoId();
     const nota = `Garantía${cliente?' · '+cliente:''}${motivo?' · '+motivo:''}`;
+    // v306: qué piezas lleva (solo si TODO es pieza de lista, mueble armado o herraje; puertas y piezas a medida se
+    // siguen decidiendo en la hoja de corte).
+    let pzG = null;
+    try{ if(garLineas.length && garLineas.every(l=>['pieza','armado','item'].includes(l.tipo))){
+      const arms = garLineas.filter(l=>l.tipo==='armado').map(l=>({tipo:l.armTipo, variante:l.armVar, color:l.color, colorCuadro:l.colorCuadro, colorFrente:l.colorFrente, ext:l.ext, cantidad:Number(l.cantidad)||0}));
+      const R = pzpPiezasDeArmados(arms);
+      if(!R.falta.length){ pzG = R.out;
+        garLineas.filter(l=>l.tipo==='pieza').forEach(l=>{ const P = PIEZAS_AUDIT.find(x=>x.key===l.pieza); if(!P) return; const it = P.tipo==='mdf' ? null : itemByName('Melamina '+l.color);
+          let id = it && it.id; if(P.tipo==='mdf'){ try{ id = ((piezasAConsumo([{nombre:P.nombre, cantidad:Number(l.cantidad)||0, dim:P.dim, colorDestino:'—', estado:'ok'}], '—')||[]).find(r=>esHojaId(r.itemId))||{}).itemId; }catch(e){} }
+          if(!id){ pzG = null; return; } if(!pzG) return; (pzG[id] = pzG[id]||[]); const r = pzG[id].find(x=>x.k===P.key); if(r) r.q += Number(l.cantidad)||0; else pzG[id].push({k:P.key, q:Number(l.cantidad)||0}); }); } } }catch(e){ pzG = null; }
     for(const c of garPreview.consumo){
       const it = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:mod,itemId:c.itemId,itemNombre:it.nombre,tipo:'garantia',cantidad:c.cantidad,nota,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor});
+      await db.collection('movimientos').doc(cryptoId()).set(Object.assign({modulo:mod,itemId:c.itemId,itemNombre:it.nombre,tipo:'garantia',cantidad:c.cantidad,nota,fecha:new Date().toISOString(),estado,loteId:logId,creadoPor}, (pzG && esHojaId(c.itemId)) ? {piezasPz:pzG[c.itemId]||[]} : {}));
     }
     for(const x of (garPreview.sobrantes||[])){
       const it = CATALOGO.find(i=>i.id===x.itemId);
@@ -15175,8 +15185,15 @@ async function guardarPzEnc(){
   try{
     const estado = estadoNuevoMovimiento(), creadoPor = getCurrentUserEmail?getCurrentUserEmail():'', fecha = new Date().toISOString(), loteId = cryptoId();
     const nota = 'Piezas encontradas'+(pzNota.trim()?' · '+pzNota.trim():'');
-    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId);
-      await db.collection('movimientos').doc(cryptoId()).set({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'piezasEncontradas', cantidad:c.cantidad, nota, piezasDetalle:detalle, fecha, estado, loteId, creadoPor});
+    // v306: también dice QUÉ piezas son (piezasPz) y lo hecho a medida (extraRetA, va al retazo), para que suban
+    // al inventario de piezas del sistema nuevo.
+    const pzI = {}, o = id => (pzI[id] = pzI[id] || {pz:[], extraA:0});
+    pool.forEach(p=>{ const P = PIEZAS_AUDIT.find(x=>x.key===p.key); if(!P) return; let ids = [];
+      try{ ids = (piezasAConsumo([{nombre:P.nombre, cantidad:p.cantidad, dim:P.dim, colorDestino:P.tipo==='mel'?p.grupo:'—', estado:'ok'}], P.tipo==='mel'?p.grupo:'—')||[]).filter(r=>esHojaId(r.itemId) && r.cantidad>0).map(r=>r.itemId); }catch(e){}
+      if(ids[0]) o(ids[0]).pz.push({k:p.key, q:Number(p.cantidad)||0}); });
+    (pzMedidas||[]).forEach(m=>{ const it = m.color===AUD_GRUPO_MDF ? null : itemByName('Melamina '+m.color); const a = (Number(m.ancho)||0)*(Number(m.alto)||0)*(Number(m.cantidad)||0); if(it && a>0) o(it.id).extraA += a; });
+    for(const c of cons){ const it = CATALOGO.find(i=>i.id===c.itemId), d = pzI[c.itemId];
+      await db.collection('movimientos').doc(cryptoId()).set(Object.assign({modulo:modulo(), itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'piezasEncontradas', cantidad:c.cantidad, nota, piezasDetalle:detalle, fecha, estado, loteId, creadoPor}, d ? {piezasPz:d.pz, extraRetA:Math.round(d.extraA)} : {}));
     }
     pzVals = {}; pzNota = ''; pzMedidas = [];
     toast(estado==='pendiente' ? '✅ Guardado.<br><small>Dirección lo aprueba y se suma al inventario.</small>' : '✅ Piezas sumadas al inventario.');
@@ -17482,6 +17499,10 @@ function pzpDiaAntes(d){ const x = new Date(d+'T12:00:00'); x.setDate(x.getDate(
 function pzpFmtDia(d){ try{ return new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'}); }catch(e){ return d; } }
 function pzpH(a){ return fmtNum(a/PZP_A); } // cm² → hojas
 // Piezas (con su material) que tiene adentro un armado (mismo motor que la auditoría; sin herrajes).
+// v306: piezas (clave de PIEZAS_AUDIT) por color que lleva una lista de armados / piezas. Para que la garantía y la merma
+// de un armado bajen solas del inventario de piezas (antes había que decirlo a mano en la hoja de corte).
+function pzpKeyDeDim(itemId, dim){ const mdf = /^mdf/.test(String(itemId)); const P = PIEZAS_AUDIT.find(x=>(mdf ? x.tipo==='mdf' : x.tipo==='mel') && pzpNorm(x.dim)===pzpNorm(dim)); return P ? P.key : null; }
+function pzpPiezasDeArmados(arms){ const out = {}, falta = []; (arms||[]).forEach(a=>pzpContArmado(a).forEach(p=>{ const k = pzpKeyDeDim(p.itemId, p.dim); if(!k){ falta.push(p.n); return; } (out[p.itemId] = out[p.itemId]||[]); const r = out[p.itemId].find(x=>x.k===k); if(r) r.q += p.q; else out[p.itemId].push({k, q:p.q}); })); return {out, falta}; }
 function pzpContArmado(a){
   let pz = [];
   try{ pz = piezasDeArmado(Object.assign({}, a)).filter(p=>typeof p.cantidad==='number').map(p=>Object.assign({}, p, {estado:'ok'})); }catch(e){ return []; }
@@ -18330,8 +18351,12 @@ function pzpOtroAuto(D, m){
   if(m && m.tipo==='merma' && Array.isArray(m.piezasPz) && m.piezasPz.length) return {modo:'piezas', piezas:m.piezasPz.map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:0, auto:true};
   // v291: piezas que salieron de un sobrante registrado (al transformarlo): suben como piezas; lo hecho a medida, al retazo.
   if(m && m.tipo==='devolucion' && m.motivo==='deSobrante' && (Array.isArray(m.piezasPz) || Number(m.extraRetA)>0)) return {modo:'piezas', piezas:(m.piezasPz||[]).map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:Number(m.extraRetA)||0, auto:true, deSobrante:true};
+  // v306: garantía que trae qué piezas lleva (piezas de lista y muebles armados): bajan solas.
+  if(m && m.tipo==='garantia' && Array.isArray(m.piezasPz)) return {modo:'piezas', piezas:m.piezasPz.map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:0, auto:true};
+  // v306: merma de un mueble armado: sus piezas se saben por la receta del armado.
+  if(m && m.tipo==='merma' && m.motivo==='mermaArmado' && m.armado){ const R = pzpPiezasDeArmados([m.armado]); if(!R.falta.length) return {modo:'piezas', piezas:(R.out[m.itemId]||[]).map(r=>({k:r.k, q:r.q})), extraRet:0, auto:true}; }
   // v298: piezas que sobraron en la Hoja del día y Dirección aceptó: suben al inventario de piezas.
-  if(m && m.tipo==='devolucion' && m.motivo==='piezasEncontradas' && Array.isArray(m.piezasPz) && m.piezasPz.length) return {modo:'piezas', piezas:m.piezasPz.map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:0, auto:true};
+  if(m && m.tipo==='devolucion' && m.motivo==='piezasEncontradas' && ((Array.isArray(m.piezasPz) && m.piezasPz.length) || Number(m.extraRetA)>0)) return {modo:'piezas', piezas:(m.piezasPz||[]).map(r=>({k:r.k, q:Number(r.q)||0})), extraRet:Number(m.extraRetA)||0, auto:true};
   if(!m || !m.instalacionId) return null;
   // v274: lo que sobró de las hojas de puertas y se mandó a sobrantes sale de lo apartado para puertas de ese color.
   if(m.tipo==='sobrante' && m.motivo==='sobranteCortePuertas') return {modo:'puertaSob', auto:true};
