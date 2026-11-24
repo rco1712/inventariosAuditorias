@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v304';
+const APP_VERSION = 'v305';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -4051,7 +4051,7 @@ function audSeccionesSync(){
     : (audEdit && audEdit.cierreConteo) ? AUD_SECCIONES_TODAS.filter(x=>AUD_CATS_MEL.includes(x.k) || ['__piezas','__armados'].includes(x.k)).concat([AUD_SEC_RETAZO, AUD_SECCIONES_TODAS.find(x=>x.k==='__revisar')])
     : esMelAud() ? AUD_SECCIONES_TODAS.filter(x=>AUD_CATS_MEL.includes(x.k) || ['__piezas','__armados','__revisar'].includes(x.k))
     // v303 (pedido por el usuario): el conteo completo también cuenta retazo y sobrante (antes solo el cierre con conteo).
-    : (esParcialAud() || esComplementoAud()) ? AUD_SECCIONES_TODAS
+    : esParcialAud() ? AUD_SECCIONES_TODAS
     : AUD_SECCIONES_TODAS.filter(x=>x.k!=='__revisar').concat([AUD_SEC_RETAZO, AUD_SECCIONES_TODAS.find(x=>x.k==='__revisar')]);
   if(AUD_SECCIONES.length===want.length && AUD_SECCIONES.every((x,i)=>x===want[i])) return;
   const cat = auditCat; AUD_SECCIONES.splice(0, AUD_SECCIONES.length, ...want);
@@ -5530,7 +5530,7 @@ async function saveAudit(){
     if(auditArmados.length) doc.armadosContados = auditArmados.map(a=>({descripcion:describirArmado(a), cantidad:a.cantidad, ...a}));
     const bc = melA ? [] : balanceCorrederas();
     if(bc.length) doc.correderas = bc;
-    const conRet = cc || (!melA && !parcial && !comp);
+    const conRet = cc || (!melA && !parcial); // v305: el complemento también puede traer retazo
     if(conRet){
       if(cc){ doc.cierreConteo = true; doc.completasDelCierre = true; } else doc.retazoContado = true;
       const rh = r => fmtNum(retHojasTotal(r));
@@ -5767,7 +5767,17 @@ async function sumarComplementoInicial(id, a){
       await db.collection('inicial').doc(inicialKey(a.modulo, it.id)).set(d);
     }
     await db.collection('auditorias').doc(id).update({aplicada:true, fechaAplicada:new Date().toISOString(), aplicadaPor:creadoPor});
-    alert(`✅ Listo. Se sumaron ${res.length} artículo(s) al stock inicial de ${a.modulo}.${juntados.length?'\n\n'+juntados.join('\n'):''}`);
+    // v305 (pedido por el usuario): lo que trae el complemento (retazo, piezas, armados) también entra al punto de partida
+    // del inventario de piezas: se agrega al conteo inicial que es la base, como si se hubiera contado ese día.
+    let pzTxt = '';
+    try{ const rd = await db.collection('resets').doc(a.modulo).get(), rs = rd && rd.data ? rd.data() : null, baseId = rs && rs.porConteo;
+      const extra = {ret:(a.retazos||[]), pz:(a.piezasContadas||[]), arm:(a.armadosContados||[])};
+      if(baseId && (extra.ret.length || extra.pz.length || extra.arm.length)){
+        const bd = await db.collection('auditorias').doc(baseId).get(), b = bd && bd.data ? bd.data() : null;
+        if(b){ await db.collection('auditorias').doc(baseId).update({retazos:(b.retazos||[]).concat(extra.ret), piezasContadas:(b.piezasContadas||[]).concat(extra.pz), armadosContados:(b.armadosContados||[]).concat(extra.arm),
+            complementosPz:(b.complementosPz||[]).concat([{id, en:new Date().toISOString(), ret:extra.ret.length, pz:extra.pz.length, arm:extra.arm.length}])});
+          pzTxt = `\n✂️ Se agregó al inventario de piezas: ${[extra.ret.length?extra.ret.length+' retazo(s)':'', extra.pz.length?extra.pz.length+' renglón(es) de piezas':'', extra.arm.length?extra.arm.length+' armado(s)':''].filter(Boolean).join(' · ')}.`; } } }catch(e){ console.warn('complemento piezas', e); }
+    alert(`✅ Listo. Se sumaron ${res.length} artículo(s) al stock inicial de ${a.modulo}.${juntados.length?'\n\n'+juntados.join('\n'):''}${pzTxt}`);
     if(current==='hist') renderHist();
   }catch(e){ alert('Error: '+e.message); }
 }
