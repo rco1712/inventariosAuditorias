@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v306';
+const APP_VERSION = 'v307';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8493,7 +8493,7 @@ function verifPintar(){
   // Un módulo a la vez (confirmado por el usuario, v182): cada módulo se compara con su reporte del grupo.
   const todasAll = verifRevisables(verifLogs, verifRegresadas), sinRevAll = todasAll.filter(verifPorRevisar);
   const otrosMod = n => verifEsperando(verifLogs).some(e=>e.l.modulo===n);
-  const modsCon = MODULOS.map(m=>m.nombre).filter(n=>todasAll.some(l=>l.modulo===n) || otrosMod(n));
+  const modsCon = MODULOS.map(m=>m.nombre).filter(n=>todasAll.some(l=>l.modulo===n) || otrosMod(n) || verifAgendadas(n).length);
   const primeroPend = MODULOS.map(m=>m.nombre).find(n=>sinRevAll.some(l=>l.modulo===n));
   if(!verifMod || !modsCon.includes(verifMod)) verifMod = primeroPend || modsCon[0] || '';
   const modChips = MODULOS.filter(m=>modsCon.includes(m.nombre)).map(m=>{ const xs = sinRevAll.filter(l=>l.modulo===m.nombre), on = m.nombre===verifMod, rojoM = xs.some(l=>verifDiasAtras(diaValorInst(l))>VERIF_DIAS_ROJO);
@@ -8549,12 +8549,33 @@ function verifPintar(){
     ${verifReverifHtml(todasAll.filter(l=>l.modulo===verifMod && verifEsReverif(l)))}
     ${verifReinstHtml(verifMod)}
     ${verifEsperandoHtml(verifMod)}
+    ${verifAgendadasHtml(verifMod)}
     ${!pend.length && verifDia ? `<div class="card" style="border:2px solid var(--ok)"><strong>✅ Ya revisaste las de ${verifMod} de este día.</strong>${sinRev.length?`<p class="hint" style="margin:4px 0 0">Faltan ${sinRev.length} de otro(s) día(s): elígelos arriba.</p>`:''}${sigMod?`<button class="btn" style="width:100%;margin-top:10px;background:${(MODULOS.find(m=>m.nombre===sigMod)||{}).color||'var(--brand)'}" onclick="verifMod='${sigMod}';verifDia='';verifPanel=null;verifPintar();window.scrollTo(0,0)">Siguiente: ${sigMod} (${sinRevAll.filter(l=>l.modulo===sigMod).length}) ›</button>`:''}</div>` : ''}
     ${pend.map((l,i)=>{ const k = calleK(l), prev = i>0 ? calleK(pend[i-1]) : null;
       const cab = k && nCalle[k]>1 && k!==prev ? `<div style="margin:14px 2px 4px;font-weight:900;font-size:14px;color:#0e7490">📍 ${escCalle(l.calle)} · ${nCalle[k]} instalaciones en este domicilio</div>` : '';
       return cab + tarjeta(l); }).join('')}
     ${pend.length>1 || (pend.length===1 && hechas.length) ? `${verifTodasEnCurso?`<button class="btn" disabled style="width:100%;min-height:54px;background:#0e7490;opacity:.8">⏳ Verificando… no lo toques otra vez</button>`:`<button class="btn" style="width:100%;min-height:54px;background:linear-gradient(135deg,#16a34a,#15803d)" onclick="verifTodasOk()">✅ Todas las demás de ${verifMod} sí se instalaron (${pend.length})</button>`}` : ''}
     ${hechas.length?`<div class="card" style="padding:12px"><strong>Ya revisadas · ${hechas.length}</strong>${hechas.map(l=>`<div class="movitem" style="padding:8px 10px;margin-top:6px;align-items:flex-start"><span style="min-width:0;flex:1"><span class="invname">${l.categoria==='Puerta'?'🚪':'🗄️'} ${l.descripcion}</span>${calleHtml(l)}<span class="hint" style="display:block;margin:2px 0 0">${l.modulo}${(l.verif||{}).nota?' · “'+l.verif.nota+'”':''}</span><span style="display:block;margin-top:4px">${verifEstadoTxt(l)}</span></span>${(l.verif||{}).estado==='ok'?`<button class="btn small" style="background:transparent;color:var(--sub);border:1px solid var(--line);box-shadow:none" onclick="verifDeshacer('${l.id}')">Deshacer</button>`:''}</div>`).join('')}</div>`:''}`;
+}
+// v307 (pedido por el usuario): las instalaciones agendadas para hoy o después también se pueden verificar ya, si en el
+// grupo ya reportaron que se instalaron, para no dejar pendientes que se olviden.
+function verifAgendadas(mod){ const hoy = fechaHoyLocal();
+  return (verifLogs||[]).filter(l=>l.modulo===mod && !l.verif && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.cambioDe && l.estado==='pendiente') && !(l.separado && !l.separado.resuelto) && diaValorInst(l) >= hoy)
+    .sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)) || String(a.calle||'').localeCompare(String(b.calle||''))); }
+function verifAgendadasHtml(mod){
+  const xs = verifAgendadas(mod); if(!xs.length) return '';
+  const nomDia = d => new Date(d+'T12:00:00').toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'});
+  return `<details class="card" style="padding:12px;border:2px solid #7c3aed"><summary style="cursor:pointer;font-weight:900;font-size:15px">📅 Agendadas para hoy o después · ${xs.length}</summary>
+    <p class="hint" style="margin:4px 0 0">Si en el grupo ya reportaron que se instaló, la puedes verificar desde ya. No se mueve material.</p>
+    ${xs.map(l=>`<div style="padding:10px;border-radius:12px;border:1px solid var(--line);margin-top:8px">
+      <div style="font-weight:800">${escCalle(l.calle||'')}</div><div class="hint" style="margin:2px 0 0">${l.descripcion||''} · agendada ${nomDia(diaValorInst(l))}${l.estado==='pendiente'?' · sin aprobar':''}</div>
+      <button class="btn small" style="margin-top:8px;background:#16a34a" onclick="verifAdelantar('${l.id}')">✅ Ya se instaló</button></div>`).join('')}</details>`;
+}
+async function verifAdelantar(id){
+  const l = verifLog(id); if(!l) return;
+  if(!confirm(`¿Ya se instaló ${l.calle||''}?\n${l.descripcion||''}\n\nQueda verificada (✅). No se mueve material.`)) return;
+  try{ await verifAprobarSiPend(l); await verifGuardar(id, {estado:'ok', adelantada:true}); l.verif = {estado:'ok', adelantada:true};
+    toast('✅ Verificada.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
 }
 function verifReinstHtml(mod){
   const xs = (verifLogs||[]).filter(l=>l.verif && l.verif.puertas==='reinstalar' && (!mod || l.modulo===mod)).map(l=>({l, dias:verifDiasAtras(diaLocal(l.verif.fechaDecision||l.verif.fecha||l.fecha))})).sort((a,b)=>b.dias-a.dias);
