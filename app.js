@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v312';
+const APP_VERSION = 'v313';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -13719,6 +13719,7 @@ function renderHomeModDir(){
     </div>
     ${hdDifsHtml(mod)}
     <div class="card" style="padding:12px;border:2px solid #0f172a;cursor:pointer" onclick="audVAbrir()"><div style="font-size:16px;font-weight:900">🔍 Auditoría (verificar)</div><p class="hint" style="margin:2px 0 0">Te sale todo lo que debe haber en ${mod}. Solo verificas ✅ / ❌ y cuentas lo que no cuadre. Al final: teórico vs físico.</p></div>
+    ${hcActivo(mod)?`<div class="card" style="padding:12px;border:2px solid #0e7490;cursor:pointer" onclick="hcFecha=null;hcCap=null;pzpD=null;irA('hcorte')"><div style="font-size:16px;font-weight:900">✂️ Hoja de corte (ver, corregir y PDF)</div><p class="hint" style="margin:2px 0 0">Lo que capturó el coordinador de la hoja del cortador, por día. Puedes corregirla y bajar el PDF.</p></div>`:''}
     <div class="card" style="padding:12px;border:2px solid #7c3aed;cursor:pointer" onclick="abrirPaso0()"><div style="font-size:16px;font-weight:900">📌 Paso 0 · antes del conteo</div><p class="hint" style="margin:2px 0 0">Decide qué instalaciones sin verificar quedan separadas, se cuentan o ya se fueron, y manda la Hoja de separado a firmar.</p></div>
     ${cp.length?`<div class="card" style="padding:12px"><div class="pend"><div>✂️ <strong>Corte sin anotar</strong>: ${cp.map(x=>`${fmtNum(x.f.autoCortes)} hoja(s) de ${x.it.nombre.replace('Melamina ','')}`).join(', ')}</div><button class="btn small" onclick="irA('cierre')">Cierre</button></div></div>`:''}
     ${fV.length?`<div class="card" style="padding:12px;border:2px solid #ca8a04;cursor:pointer" onclick="pedSub='camino';irA('ped')"><strong>🚚 Ferretería en camino a ${mod}</strong><p class="hint" style="margin:2px 0 0">${fV.reduce((s,m)=>s+ferPiezas(m),0)} pieza(s). Falta que ${mod} toque "Ya lo recibí". Toca para verlo.</p></div>`:''}
@@ -18173,6 +18174,34 @@ function difRetSobHtml(resalta){
     ${box(resalta==='sob','🧩','SOBRANTE','Material que el coordinador <b>manda a Sobrantes</b> en la app (regresó de una instalación, puertas que no se instalaron…). Está <b>fuera del inventario</b> hasta que lo <b>transformes</b> en 🧩 Sobrantes.','#0e8a8a')}
   </div>`;
 }
+// v313 (pedido por el usuario): PDF de la hoja de corte capturada (para revisar qué se anotó).
+async function hcPDF(){
+  if(!(window.jspdf && window.jspdf.jsPDF)) return alert('No se pudo cargar el generador de PDF. Revisa tu conexión a internet.');
+  if(!hcCap) return; const cortes = hcCortesCierre(), C = [14,116,144], ROJ = [185,28,28];
+  const guardada = (pzpD.dias||[]).find(x=>x.fecha===hcFecha && x.hojaGuardado);
+  const S = herrPdfBase(pdfS('Hoja de corte · '+modulo()), pdfS(pzpFmtDia(hcFecha)+(hcCap.hojaCortador?' · cortador: '+hcCap.hojaCortador:'')+(guardada?' · guardada '+new Date(guardada.hojaGuardado).toLocaleString('es-MX',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}):' · SIN GUARDAR')), C);
+  const P = k => PIEZAS_AUDIT.find(x=>x.key===k) || {label:k, dim:''};
+  const lbl = k => pdfS(String(P(k).label||P(k).nombre||k).replace(/\s*\(.*?\)/g,''));
+  const dimT = k => pdfS(String(P(k).dimTxt||P(k).dim||'').replace(/ cm$/,''));
+  const ids = [...new Set([...Object.keys(hcCap.corte||{}), ...Object.keys(cortes).filter(k=>Number(cortes[k])>0)])];
+  if(!ids.length) S.vacio('No hay nada capturado en esta hoja.');
+  ids.forEach(id=>{ const cc = (hcCap.corte||{})[id]||{}, rows = [];
+    (cc.piezas||[]).filter(r=>Number(r.q)>0).forEach(r=>rows.push([lbl(r.k), dimT(r.k), String(fmtNum(r.q))]));
+    (cc.otras||[]).filter(r=>Number(r.q)>0).forEach(r=>rows.push([pdfS('Otra medida'+(r.n?' ('+r.n+')':'')), pdfS(fmtNum(r.w)+'x'+fmtNum(r.h)), String(fmtNum(r.q))]));
+    if(Number(cc.puertasOtroDia)>0) rows.push([pdfS('Hojas para puertas'+(cc.puertasDir?' · '+cc.puertasDir:'')), '', {t:String(fmtNum(cc.puertasOtroDia))+' hoja(s)', b:true}]);
+    (cc.retazos||[]).forEach(r=>rows.push(['Retazo que sobro', pdfS(fmtNum(r.w)+'x'+fmtNum(r.h)), String(fmtNum(r.q||1))]));
+    const hc = Number(cortes[id])||0, hp = Number(cc.hojasPapel)||0;
+    S.banda(pdfS(pzpColor(id)), pdfS(`Hojas cortadas (cierre): ${fmtNum(hc)} · en la hoja de papel: ${fmtNum(hp)}${cc.sobrante?' · lo que sobro: '+(cc.sobrante==='desperdicio'?'tiro':cc.sobrante):''}`), C);
+    if(rows.length) S.tabla([{t:'Pieza',w:110},{t:'Medida',w:40},{t:'Cantidad',w:32}], rows, C);
+    else S.vacio(pdfS(hc>0?'Se cortaron '+fmtNum(hc)+' hoja(s) pero no se anoto ninguna pieza.':'Sin piezas.')); });
+  const sal = xs => pdfS((xs||[]).filter(x=>Number(x.q)>0).map(x=>fmtNum(x.q)+' '+lbl(x.k)+' '+dimT(x.k)).join(', ')||'-');
+  if((hcCap.retFilas||[]).length || (hcCap.recortes||[]).length){
+    S.seccion(pdfS('Hoja 2 · retazo y recortada'), '', C);
+    if((hcCap.retFilas||[]).length) S.tabla([{t:'Color',w:30},{t:'Retazo',w:28},{t:'Salio',w:96},{t:'Lo que quedo',w:28}], hcCap.retFilas.map(r=>[pdfS(pzpColor(r.itemId)), pdfS(fmtNum(r.w)+'x'+fmtNum(r.h)), sal(r.salio), pdfS(r.resto||'')]), C);
+    if((hcCap.recortes||[]).length) S.tabla([{t:'Color',w:30},{t:'Se recorto',w:42},{t:'Salio',w:82},{t:'Lo que quedo',w:28}], hcCap.recortes.map(r=>[pdfS(pzpColor(r.itemId)), pdfS(fmtNum(r.q)+' '+lbl(r.k)), sal(r.salio), pdfS(r.resto||'')]), C); }
+  if((hcCap.mermas||[]).length) S.tabla([{t:'Merma',w:182}], hcCap.mermas.map(m=>[pdfS(typeof m==='string'?m:[m.itemId?pzpColor(m.itemId):'', m.k?lbl(m.k):'', m.q!=null?'x'+fmtNum(m.q):'', m.nota||''].filter(Boolean).join(' · '))]), ROJ);
+  await S.fin(`Hoja_de_corte_${modulo()}_${hcFecha}.pdf`, 'Closets Vera · Hoja de corte');
+}
 function hcHoja2Html(){
   const hojas = CATALOGO.filter(i=>esHoja(i) && /^Melamina|^MDF/.test(i.nombre));
   const optsColor = sel => hojas.map(i=>`<option value="${i.id}" ${i.id===sel?'selected':''}>${pzpColor(i.id)}</option>`).join('');
@@ -18267,12 +18296,14 @@ function hcRender(){
     <div class="card" style="border-top:6px solid #0e7490"><div style="font-size:17px;font-weight:900">${swatchHtml(CATALOGO.find(i=>i.id===hcColor).nombre)} ${pzpColor(hcColor)}</div>${hcColorHtml(hcColor)}</div>`;
   $('#main').innerHTML = `<div class="card"><div style="font-size:17px;font-weight:800">✂️ Hoja de corte · ${modulo()}</div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="date" value="${hcFecha}" min="${dMin}" max="${fechaHoyLocal()}" onchange="hcFecha=this.value;hcCap=null;hcRender()" style="width:auto;margin:0"><input placeholder="Cortador" value="${herrEsc(hcCap.hojaCortador||'')}" onchange="hcCap.hojaCortador=this.value;hcBorrGuardar()" style="flex:1;min-width:0;margin:0"></div>
+      <p class="hint" style="margin:6px 0 0;font-weight:700">📅 Para ver o corregir un día anterior, cambia la fecha. También puedes bajar el PDF (abajo).</p>
       ${cfg.modo!=='real'?'<div style="margin-top:8px;padding:8px 10px;border-radius:10px;border:2px dashed #7c3aed;background:rgba(124,58,237,.08);font-size:13px;font-weight:700;color:#6d28d9">🎓 Práctica: lo que captures aquí no cambia tu inventario.</div>':''}
       ${guardada?`<p class="hint" style="margin:6px 0 0;color:var(--ok)">✔ Hoja de este día guardada ${new Date(guardada.hojaGuardado).toLocaleString('es-MX',{hour:'numeric',minute:'2-digit'})}. Puedes corregirla y volver a guardar.</p>`:'<p class="hint" style="margin:6px 0 0">Copia la hoja del cortador renglón por renglón: mismo orden y mismos colores que el papel.</p>'}
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${tabs}</div></div>
     ${hcPuertasHtml(hcPuertasPend())}
     ${cuerpo}
-    <div class="card"><button class="btn" style="width:100%;min-height:54px;font-size:16px;background:#0e7490" onclick="hcGuardar()">💾 Guardar hoja de corte del ${pzpFmtDia(hcFecha)}</button></div>`;
+    <div class="card"><button class="btn" style="width:100%;min-height:54px;font-size:16px;background:#0e7490" onclick="hcGuardar()">💾 Guardar hoja de corte del ${pzpFmtDia(hcFecha)}</button>
+      <button class="btn" style="width:100%;min-height:48px;margin-top:8px;background:transparent;color:#0e7490;border:2px solid #0e7490;box-shadow:none" onclick="hcPDF()">📄 PDF de la hoja del ${pzpFmtDia(hcFecha)}</button></div>`;
 }
 // v273 (pedido por el usuario): el desperdicio del corte (orillas, tiras, sierra) que mide la hoja del cortador se
 // manda como MERMA del cortado, PENDIENTE de que Dirección la apruebe, para que el inventario oficial no se infle.
