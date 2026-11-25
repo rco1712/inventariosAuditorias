@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v313';
+const APP_VERSION = 'v314';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5863,7 +5863,7 @@ function renderMovHist(){
     <div class="wrap-x" style="margin-top:6px"><table><tr><th>Hora</th><th>Artículo</th><th>Tipo</th><th>Cant.</th><th>Nota</th><th>Quién</th></tr>
     ${porDia[d].map(m=>`<tr style="${m.anulado?'opacity:.55;text-decoration:line-through':(movPosibleDuplicado(m)?'background:rgba(220,38,38,.12)':'')}"><td>${new Date(m.fecha).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemNombre||nom(m.itemId)}</td>
       <td class="${m.tipo==='entrada'||m.tipo==='devolucion'||(m.tipo==='ajuste'&&m.cantidad>0)?'pos':(m.tipo==='corte'?'':'neg')}">${etiquetaTipoMov(m)}${m.estado==='pendiente'?' '+badgeEstado('pendiente'):''}</td>
-      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}${esAdmin() && m.tipo==='corte' && m.estado!=='rechazado' ? `<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="borrarCorte('${m.id}')">🗑️ Corte mal capturado</button>` : ''}${movCorregible(m) ? `<button class="btn small" style="display:block;margin-top:4px;background:linear-gradient(135deg,#d97706,#b45309);white-space:nowrap" onclick="movCorrAbrir('${m.id}')">✏️ Corregir</button>` : ''}${m.anulado?`<div style="color:var(--bad);font-weight:800;font-size:12px">ANULADO</div>`:''}${!m.anulado&&movPosibleDuplicado(m)?`<div style="color:#f87171;font-weight:800;font-size:12px;white-space:nowrap">⚠️ ¿Repetida?</div>`:''}</td></tr>`).join('')}
+      <td>${m.tipo==='ajuste'&&m.cantidad>0?'+':''}${fmtNum(m.cantidad)} ${uni(m.itemId)}</td><td>${m.nota||''}</td><td>${(m.creadoPor||'').split('@')[0]}${esAdmin() && m.tipo==='corte' && m.estado!=='rechazado' ? `<button class="btn small" style="display:block;margin-top:4px;background:transparent;color:var(--bad);border:1px solid var(--line);box-shadow:none;white-space:nowrap" onclick="borrarCorte('${m.id}')">🗑️ Corte mal capturado</button><button class="btn small" style="display:block;margin-top:4px;background:transparent;color:#d97706;border:1px solid #d97706;box-shadow:none;white-space:nowrap" onclick="corregirCorte('${m.id}')">✏️ Corregir hojas cortadas</button>` : ''}${movCorregible(m) ? `<button class="btn small" style="display:block;margin-top:4px;background:linear-gradient(135deg,#d97706,#b45309);white-space:nowrap" onclick="movCorrAbrir('${m.id}')">✏️ Corregir</button>` : ''}${m.anulado?`<div style="color:var(--bad);font-weight:800;font-size:12px">ANULADO</div>`:''}${!m.anulado&&movPosibleDuplicado(m)?`<div style="color:#f87171;font-weight:800;font-size:12px;white-space:nowrap">⚠️ ¿Repetida?</div>`:''}</td></tr>`).join('')}
     </table></div></div>`).join('')}`;
 }
 // Dirección puede borrar un corte mal capturado (p. ej. pusieron las hojas que TENÍAN en vez de las que
@@ -5963,6 +5963,23 @@ async function movCorrGuardar(anular){
   }
   try{ await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); if(anular && VERIF_MOT_REG.includes(m.motivo)) await verifReabrirSiSeRechaza([m.instalacionId]); }catch(e){ return alert('Error: '+e.message); }
   movCorrCerrar(); entrCache = null; salCache = null; toast(anular?'🗑️ Movimiento anulado':'✏️ Movimiento corregido'); movCorrRefrescar();
+}
+// v314 (pedido por el usuario): Dirección corrige cuántas hojas se cortaron (p. ej. el cierre dijo 4 y fueron 5).
+// Cambia solo ese corte: la diferencia sale de "completas" y pasa a "cortado". Queda anotado qué decía antes.
+async function corregirCorte(id){
+  if(!esAdmin()) return;
+  const m = movs.find(x=>x.id===id); if(!m) return;
+  const r = prompt(`✏️ ${m.itemNombre} · ${new Date(m.fecha).toLocaleDateString('es-MX',{weekday:'short', day:'numeric', month:'short'})}\n\nDice que se cortaron ${fmtNum(m.cantidad)} hoja(s).\n¿Cuántas se cortaron en realidad?`, String(fmtNum(m.cantidad)));
+  if(r===null) return; const v = Number(String(r).replace(',','.'));
+  if(!(v>0) || Math.abs(v-Number(m.cantidad))<0.0005) return v>0 ? null : alert('Escribe un número mayor que 0.');
+  const nota = prompt('¿Por qué se corrige? (queda anotado)', 'La hoja del cortador dice '+fmtNum(v)); if(nota===null) return;
+  if(!confirm(`✏️ ${m.itemNombre}: de ${fmtNum(m.cantidad)} a ${fmtNum(v)} hojas cortadas.\n\n${v>m.cantidad?'Bajan':'Suben'} ${fmtNum(Math.abs(v-m.cantidad))} hoja(s) completas y ${v>m.cantidad?'suben':'bajan'} en cortado.\n\n¿Guardar?`)) return;
+  if(!(await pedirPinAdmin('corregir el corte'))) return;
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
+  try{ const hist = (m.correcciones||[]).concat([{en:ahora, por:quien, antes:Number(m.cantidad), ahora:v, nota}]);
+    await db.collection('movimientos').doc(id).update({cantidad:v, correcciones:hist, nota:(m.nota||'')+` · Corregido por Dirección: ${fmtNum(m.cantidad)} → ${fmtNum(v)} (${nota})`});
+    m.cantidad = v; m.correcciones = hist; toast('✏️ Corte corregido'); try{ await loadStock(); }catch(e){} renderMovHist();
+  }catch(e){ alert('Error: '+e.message); }
 }
 async function borrarCorte(id){
   if(!esAdmin()) return;
@@ -9441,7 +9458,7 @@ async function hojaDiaGenerar(){
           const d = fmtNum(R1.T[k]||0), arm = 0;
           const t = R0 ? fmtNum((R0.T||{})[k]||0) : fmtNum(((R1.F||{})[k]||{}).ini||0);
           if(Math.abs(t)<0.005 && Math.abs(d)<0.005) return;
-          const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNorm(N.dim));
+          const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNormPz(N.dim));
           const F1 = (R1.F||{})[k]||{}, F0 = R0 ? ((R0.F||{})[k]||{}) : {ini:F1.ini}, dd = x => fmtNum((Number(F1[x])||0)-(Number(F0[x])||0)), mvp = [];
           if(dd('corte')+dd('ret')) mvp.push('+'+fmtNum(dd('corte')+dd('ret'))+' se cortaron'); if(dd('inst')) mvp.push(dd('inst')+' instalaciones'); if(dd('regreso')) mvp.push('+'+dd('regreso')+' regresaron');
           if(dd('salida')) mvp.push(dd('salida')+' garantía/merma'); if(dd('recorte')) mvp.push(dd('recorte')+' recorte'); if(dd('otro')) mvp.push((dd('otro')>0?'+':'')+dd('otro')+' otros');
@@ -9727,7 +9744,7 @@ async function audVGrupos(mod){
       ids.forEach(id=>{ const rows = [];
         Object.keys(R.N).filter(k=>R.N[k].itemId===id).sort((a,b)=>R.N[b].area-R.N[a].area).forEach(k=>{ const N = R.N[k], d = fmtNum(R.T[k]||0);
           // v299: el teórico es TODO lo que debe haber de esa pieza, suelta o armada (el stock armado no se captura).
-          if(Math.abs(d)<0.005) return; const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNorm(N.dim));
+          if(Math.abs(d)<0.005) return; const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNormPz(N.dim));
           rows.push({k:'p_'+k, itemId:id, pk:P?P.key:null, n:/\d×\d/.test(N.n)?N.n:N.n+' '+String(N.dim||'').replace(/ cm$/,''), d, u:'pzas', area:pzpArea(N.dim)}); });
         const rt = (R.ret||{})[id]||0; if(rt > 0.005*PZP_A) rows.push({k:'r_'+id, itemId:id, n:'♻️ Retazo (total)', d:fmtNum(rt/PZP_A), u:'hoja equiv.', ret:true, nota:true});
         if(rows.length) G.push({t:'Piezas · '+pzpColor(id), rows}); }); } }catch(e){}
@@ -9756,7 +9773,7 @@ function audVArmCalc(V){
   const A = {}, add = (k, q, info) => { if(!(q>0)) return; A[k] = (A[k]||0) + q; if(info && !V._armInfo[k]) V._armInfo[k] = info; };
   V._armInfo = {}; const pool = [];
   (V.arm||[]).forEach(a=>{
-    pzpContArmado(a).forEach(p=>add('p_'+pzpKey(p.itemId, p.dim), p.q, {itemId:p.itemId, dim:pzpNorm(p.dim), n:pzpNombre(p.dim, p.n)}));
+    pzpContArmado(a).forEach(p=>add('p_'+pzpKey(p.itemId, p.dim), p.q, {itemId:p.itemId, dim:pzpNormPz(p.dim), n:pzpNombre(p.dim, p.n)}));
     try{ piezasDeArmado(Object.assign({}, a)).forEach(p=>pool.push(p)); }catch(e){} });
   const porColor = {}; pool.filter(p=>!/^Corredera (hembra|macho)/.test(p.nombre)).forEach(p=>{ (porColor[p.colorDestino]=porColor[p.colorDestino]||[]).push(p); });
   Object.keys(porColor).forEach(c=>{ try{ piezasAConsumo(porColor[c], c).forEach(r=>{ if(!esHojaId(r.itemId) && !/^(Cintilla|PVC|Pegamento|Sticker)/.test((CATALOGO.find(i=>i.id===r.itemId)||{}).nombre||'')) add('o_'+r.itemId, Number(r.cantidad)||0); }); }catch(e){} });
@@ -9769,7 +9786,7 @@ function audVArmCalc(V){
   Object.keys(A).forEach(k=>{ if(audVRow(k)) return;
     if(k.startsWith('p_')){ const I = V._armInfo[k]; if(!I) return; const t = 'Piezas · '+pzpColor(I.itemId); let g = V.G.find(x=>x.t===t);
       if(!g){ g = {t, rows:[]}; const i = V.G.findIndex(x=>/^(Correderas|Herrajes|🧩|📌)/.test(x.t)); V.G.splice(i<0?V.G.length:i, 0, g); }
-      const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNorm(I.dim));
+      const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNormPz(I.dim));
       g.rows.push({k, itemId:I.itemId, pk:P?P.key:null, n:/\d×\d/.test(I.n)?I.n:I.n+' '+String(I.dim||'').replace(/ cm$/,''), d:0, u:'pzas', area:pzpArea(I.dim)}); }
     else { const id = k.slice(2), it = CATALOGO.find(i=>i.id===id); if(!it) return; const t = /corredera/i.test(it.nombre) ? 'Correderas' : 'Herrajes y otros'; let g = V.G.find(x=>x.t===t);
       if(!g){ g = {t, rows:[]}; const i = V.G.findIndex(x=>/^(🧩|📌)/.test(x.t)); V.G.splice(i<0?V.G.length:i, 0, g); }
@@ -17632,8 +17649,10 @@ let pzpFecha = null, pzpCap = null, pzpCapFecha = null, pzpTab = 'captura', pzpC
 function pzpDims(dim){ const m = String(dim||'').match(/([\d.]+)\s*×\s*([\d.]+)/); return m ? [Number(m[1]), Number(m[2])] : null; }
 function pzpArea(dim){ const d = pzpDims(dim); return d ? d[0]*d[1] : 0; }
 function pzpNorm(dim){ const d = pzpDims(dim); return d ? d.slice().sort((a,b)=>b-a).map(x=>fmtNum(x)).join('×') : String(dim||''); }
-function pzpKey(itemId, dim){ return itemId+'|'+pzpNorm(dim); }
-function pzpNombre(dim, n){ const nd = pzpNorm(dim); const p = PIEZAS_AUDIT.find(x=>pzpNorm(x.dim)===nd); return p ? p.label : ((n||'Pieza')+' '+nd); }
+// v314: el entrepaño de zapatera de 30×40 es la misma pieza que la de 27×40 ("27 o 30×40" en el conteo y en la hoja de corte).
+function pzpNormPz(dim){ const n = pzpNorm(dim); return n==='40×30' ? '40×27' : n; }
+function pzpKey(itemId, dim){ return itemId+'|'+pzpNormPz(dim); }
+function pzpNombre(dim, n){ const nd = pzpNormPz(dim); const p = PIEZAS_AUDIT.find(x=>pzpNorm(x.dim)===nd); return p ? p.label : ((n||'Pieza')+' '+nd); }
 function pzpItemDeGrupo(grupo, nombrePieza){ if(grupo==='MDF') return itemByName(/5mm/.test(nombrePieza||'')?'MDF 5mm':'MDF 3mm'); return itemByName(grupo); }
 function pzpColor(itemId){ const it = CATALOGO.find(i=>i.id===itemId); return it ? it.nombre.replace(/^Melamina /,'') : itemId; }
 function pzpPiezasDe(itemId){
@@ -17647,7 +17666,7 @@ function pzpH(a){ return fmtNum(a/PZP_A); } // cm² → hojas
 // Piezas (con su material) que tiene adentro un armado (mismo motor que la auditoría; sin herrajes).
 // v306: piezas (clave de PIEZAS_AUDIT) por color que lleva una lista de armados / piezas. Para que la garantía y la merma
 // de un armado bajen solas del inventario de piezas (antes había que decirlo a mano en la hoja de corte).
-function pzpKeyDeDim(itemId, dim){ const mdf = /^mdf/.test(String(itemId)); const P = PIEZAS_AUDIT.find(x=>(mdf ? x.tipo==='mdf' : x.tipo==='mel') && pzpNorm(x.dim)===pzpNorm(dim)); return P ? P.key : null; }
+function pzpKeyDeDim(itemId, dim){ const mdf = /^mdf/.test(String(itemId)); const P = PIEZAS_AUDIT.find(x=>(mdf ? x.tipo==='mdf' : x.tipo==='mel') && pzpNorm(x.dim)===pzpNormPz(dim)); return P ? P.key : null; }
 function pzpPiezasDeArmados(arms){ const out = {}, falta = []; (arms||[]).forEach(a=>pzpContArmado(a).forEach(p=>{ const k = pzpKeyDeDim(p.itemId, p.dim); if(!k){ falta.push(p.n); return; } (out[p.itemId] = out[p.itemId]||[]); const r = out[p.itemId].find(x=>x.k===k); if(r) r.q += p.q; else out[p.itemId].push({k, q:p.q}); })); return {out, falta}; }
 function pzpContArmado(a){
   let pz = [];
@@ -17707,7 +17726,7 @@ function pzpCalcular(D, hasta, borrador){
   // v258 (pedido por el usuario): F lleva de dónde vino cada movimiento de piezas, para el reporte
   // "iniciaste con tantas, cortaste tantas, se fueron tantas en instalaciones, debe haber tantas".
   const F = {}, FD = {}; let curDia = null;
-  const add = (itemId, dim, q, n, src) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNorm(dim), n:pzpNombre(dim, n), area:pzpArea(dim)}; const f = F[k] = F[k]||{}; f[src||'otro'] = (f[src||'otro']||0) + q; const fd = FD[k] = FD[k]||{}, dd = fd[curDia] = fd[curDia]||{}; dd[src||'otro'] = (dd[src||'otro']||0) + q; };
+  const add = (itemId, dim, q, n, src) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNormPz(dim), n:pzpNombre(dim, n), area:pzpArea(pzpNormPz(dim))}; const f = F[k] = F[k]||{}; f[src||'otro'] = (f[src||'otro']||0) + q; const fd = FD[k] = FD[k]||{}, dd = fd[curDia] = fd[curDia]||{}; dd[src||'otro'] = (dd[src||'otro']||0) + q; };
   curDia = diaLocal(base.fecha);
   (base.piezasContadas||[]).forEach(pc=>{
     const P = piezaAuditDeLabel(pc.pieza, pc.dim);
@@ -17856,7 +17875,7 @@ function pzpCalcular(D, hasta, borrador){
     porDia[dia] = info;
   });
   const AC = {};
-  arm.forEach(a=>pzpContArmado(a).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); AC[k] = (AC[k]||0) + p.q; if(!N[k]) N[k] = {itemId:p.itemId, dim:pzpNorm(p.dim), n:pzpNombre(p.dim, p.n), area:pzpArea(p.dim)}; }));
+  arm.forEach(a=>pzpContArmado(a).forEach(p=>{ const k = pzpKey(p.itemId, p.dim); AC[k] = (AC[k]||0) + p.q; if(!N[k]) N[k] = {itemId:p.itemId, dim:pzpNormPz(p.dim), n:pzpNombre(p.dim, p.n), area:pzpArea(p.dim)}; }));
   Object.keys(N).forEach(k=>{ const su = fmtNum((T[k]||0) - (AC[k]||0)); if(su < 0) avisos.push({id:N[k].itemId, t:pzpColor(N[k].itemId)+': faltan '+fmtNum(-su)+' '+N[k].n+' sueltas (se usó o armó más de lo anotado en el corte).'}); });
   Object.keys(ret).forEach(id=>{ if(ret[id] < -PZP_A*0.02) avisos.push({id, t:pzpColor(id)+': el retazo quedó en negativo ('+pzpH(ret[id])+' hojas). Se usó material que no estaba anotado.'}); });
   return {base, T, N, F, FD, AC, ret, des, pend, pendInfo, sinCap, vie, arm, avisos, dias:lista, capt, porDia};
@@ -18804,7 +18823,7 @@ async function pzpGuardar(){
 // Resultado: el conteo final (otra auditoría con piezas) contra lo que dice la prueba. Es lo que dice si funciona.
 function pzpTotalesAud(a){
   const T = {}, N = {}, ret = {};
-  const add = (itemId, dim, q, n) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNorm(dim), n:pzpNombre(dim, n), area:pzpArea(dim)}; };
+  const add = (itemId, dim, q, n) => { if(!itemId || !q) return; const k = pzpKey(itemId, dim); T[k] = (T[k]||0) + q; if(!N[k]) N[k] = {itemId, dim:pzpNormPz(dim), n:pzpNombre(dim, n), area:pzpArea(pzpNormPz(dim))}; };
   (a.piezasContadas||[]).forEach(pc=>{ const P = piezaAuditDeLabel(pc.pieza, pc.dim);
     const it = pzpItemDeGrupo(pc.grupo, P ? P.nombre : ''); if(it) add(it.id, pc.dim, Number(pc.cantidad)||0, P ? P.nombre : pc.pieza); });
   (a.armadosContados||[]).forEach(x=>pzpContArmado(x).forEach(p=>add(p.itemId, p.dim, p.q, p.n)));
