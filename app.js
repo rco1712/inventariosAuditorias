@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v309';
+const APP_VERSION = 'v310';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -750,6 +750,8 @@ async function editInicial(itemId){
 }
 
 function setView(v){
+  // v310 (detectado con el usuario): la barra de abajo se saltaba el bloqueo del acta; ahora también bloquea.
+  if(!['home','actas','cargando','elegirmod'].includes(v) && typeof actaBloquea==='function' && actaBloquea()){ alert((_actaEnt.doc?'📜 Primero firma el Acta de entrega en tu Inicio.':'📋 Primero firma tu Hoja del día en tu Inicio.')+'\n\nHasta firmarla no se puede capturar nada.'); v = 'home'; }
   if(esSoloReportes() && !(v==='repver' && repSec==='rinstDir')){ repSec = 'rinstDir'; if(!repRiDia) repRiDia = fechaHoyLocal(); v = 'repver'; }
   if(enDirModo() && VISTAS_MODULO.includes(v)) return renderElegirModulo(v); // Dirección: primero ¿de qué módulo?
   current=v;
