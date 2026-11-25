@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v311';
+const APP_VERSION = 'v312';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -17471,6 +17471,9 @@ async function dupCargar(){
   vivos.filter(abierta).forEach(o=>{ if(!o.calle) return; const n = vivos.find(x=>x.id!==o.id && x.modulo===o.modulo && x.descripcion===o.descripcion && String(x.calle||'').trim().toLowerCase()===String(o.calle).trim().toLowerCase()
       && (x.fecha||'') > marcada(o) && Date.parse(x.fecha) - Date.parse(o.fecha) < 15*864e5 && !abierta(x));
     if(n) grupos.push({tipo:'recap', modulo:o.modulo, items:[n, o], clave:'recap:'+[n.id, o.id].join(',')}); });
+  // 1c) v312: si ya se quitó la vieja y la nueva sigue, se puede cambiar: regresar la vieja y quitar la nueva.
+  logs.filter(o=>o.duplicadoAnulado && o.separado && o.separado.resuelto==='duplicado' && o.duplicadoDe).forEach(o=>{
+    const n = vivos.find(x=>x.id===o.duplicadoDe); if(n) grupos.push({tipo:'recapX', modulo:o.modulo, items:[n, o], clave:'recapX:'+[n.id, o.id].join(',')}); });
   // 2) Lotes de movimientos iguales (no instalaciones: esas van arriba; no traspasos: van abajo)
   const lotes = {}; movsT.filter(m=>m.estado!=='rechazado' && !m.duplicadoAnulado && m.tipo!=='instalacion' && !/^Traspaso |^Devolución de préstamo /.test(m.nota||'')).forEach(m=>{ const k = m.loteId||m.id; (lotes[k]=lotes[k]||[]).push(m); });
   const loteArr = Object.keys(lotes).map(k=>({id:k, movs:lotes[k], fecha:lotes[k].map(m=>m.fecha).sort()[0], modulo:lotes[k][0].modulo}));
@@ -17503,15 +17506,16 @@ function dupPintar(){
   const quien = x => String(x.creadoPor||((x.movs||[])[0]||{}).creadoPor||'').split('@')[0];
   const lista = arr => arr.map(m=>{ const it = CATALOGO.find(i=>i.id===m.itemId); return `${fmtNum(m.cantidad)} ${it?it.unidad:''} ${it?it.nombre:(m.itemNombre||m.itemId)}`; }).join(' · ');
   const estadoTxt = x => { const e = x.estado || ((x.movs||[]).some(m=>m.estado==='pendiente') ? 'pendiente' : 'aprobado'); return e==='pendiente' ? '<span class="tag" style="color:#d97706;border-color:#d97706">pendiente</span>' : '<span class="tag pos">aprobado</span>'; };
-  const titulo = g => g.tipo==='recap' ? `🔁 Se apartó y se volvió a capturar · ${g.items[0].descripcion}` : g.tipo==='inst' ? `🔧 Instalación repetida · ${g.items[0].descripcion}` : g.tipo==='tras' ? `🔄 Traspaso repetido · ${g.items[0].origen} → ${g.items[0].destino}` : g.tipo==='reg' ? `↩️ La misma instalación se regresó ${g.items.length} veces${g.log?' · '+g.log.descripcion:''}` : `📦 Captura repetida · ${(TIPO_LABEL[g.items[0].movs[0].tipo]||g.items[0].movs[0].tipo)}${g.items[0].movs[0].motivo?' ('+etiquetaTipoMov(g.items[0].movs[0])+')':''}`;
+  const titulo = g => g.tipo==='recapX' ? `↩️ Ya quitaste la vieja · ${g.items[0].descripcion}` : g.tipo==='recap' ? `🔁 Se apartó y se volvió a capturar · ${g.items[0].descripcion}` : g.tipo==='inst' ? `🔧 Instalación repetida · ${g.items[0].descripcion}` : g.tipo==='tras' ? `🔄 Traspaso repetido · ${g.items[0].origen} → ${g.items[0].destino}` : g.tipo==='reg' ? `↩️ La misma instalación se regresó ${g.items.length} veces${g.log?' · '+g.log.descripcion:''}` : `📦 Captura repetida · ${(TIPO_LABEL[g.items[0].movs[0].tipo]||g.items[0].movs[0].tipo)}${g.items[0].movs[0].motivo?' ('+etiquetaTipoMov(g.items[0].movs[0])+')':''}`;
   const copia = (g, x, i) => { const f = g.tipo==='lote'||g.tipo==='reg' ? x.fecha : x.fecha;
-    const det = (g.tipo==='inst' || g.tipo==='recap') ? `<div style="font-weight:700;margin-bottom:2px">📅 Instalada el ${x.fechaDia?fCorta(x.fechaDia):'—'} · ${x.calle?'📍 '+escCalle(x.calle):'<span style="color:#d97706">📍 sin calle</span>'}</div>${x.nota?`<div class="hint" style="margin:0 0 2px">📝 ${escCalle(x.nota)}</div>`:''}${x.verif&&VERIF_TAG[x.verif.estado]?`<div style="margin:2px 0 4px">${verifEstadoTxt(x)}</div>`:''}` + lista(x.consumo||[]) : g.tipo==='tras' ? `${fmtNum(x.cantidad)} ${x.unidad||''} ${x.itemNombre}` : lista(x.movs);
+    const det = (g.tipo==='inst' || g.tipo==='recap' || g.tipo==='recapX') ? `<div style="font-weight:700;margin-bottom:2px">📅 Instalada el ${x.fechaDia?fCorta(x.fechaDia):'—'} · ${x.calle?'📍 '+escCalle(x.calle):'<span style="color:#d97706">📍 sin calle</span>'}</div>${x.nota?`<div class="hint" style="margin:0 0 2px">📝 ${escCalle(x.nota)}</div>`:''}${x.verif&&VERIF_TAG[x.verif.estado]?`<div style="margin:2px 0 4px">${verifEstadoTxt(x)}</div>`:''}` + lista(x.consumo||[]) : g.tipo==='tras' ? `${fmtNum(x.cantidad)} ${x.unidad||''} ${x.itemNombre}` : lista(x.movs);
     return `<div style="padding:10px;border-radius:12px;border:1px solid ${i?'#dc2626':'var(--line)'};margin-top:8px">
-      <div class="row" style="justify-content:space-between;gap:8px"><strong>${g.tipo==='recap'?(i?'📌 La vieja (apartada / no se instaló)':'✅ La que se volvió a capturar (se queda)'):(i?'Copia '+(i+1):'Primera')}</strong>${g.tipo==='tras'?'':estadoTxt(x)}</div>
+      <div class="row" style="justify-content:space-between;gap:8px"><strong>${g.tipo==='recapX'?(i?'📌 La vieja (ya quitada)':'🆕 La nueva (sigue descontando)'):g.tipo==='recap'?(i?'📌 La vieja (apartada / no se instaló)':'🆕 La nueva (se volvió a capturar)'):(i?'Copia '+(i+1):'Primera')}</strong>${g.tipo==='tras'?'':(x.duplicadoAnulado?'<span class="tag" style="color:#dc2626;border-color:#dc2626">quitada</span>':estadoTxt(x))}</div>
       <div class="hint" style="margin:2px 0 0">🕒 ${hora(f)}${quien(x)?' · '+quien(x):''}</div>
       <div style="font-size:13px;margin-top:4px">${det}</div>
-      ${i?`<button class="btn small" style="margin-top:8px;background:#dc2626" onclick="dupQuitar('${g.clave}',${i})">🗑️ ${g.tipo==='recap'?'Quitar la vieja (es la misma)':'Quitar esta copia'}</button>`:''}</div>`; };
-  const ayuda = g => g.tipo==='recap' ? `<p class="hint" style="margin:8px 0 0">💡 Es la misma casa y el mismo mueble. Si de verdad es uno solo, quita la vieja: se cierra sin moverse nada más y solo cuenta la nueva. Si fueron dos muebles distintos, toca <strong>No es duplicado</strong>.</p>` : g.tipo==='inst' ? `<p class="hint" style="margin:8px 0 0">💡 ¿Fueron dos muebles iguales en la misma casa? Pregúntale a ${quien(g.items[0])||'el coordinador'} o compáralo con el reporte del grupo de ese día. Si fue uno solo, quita la copia; si fueron dos, toca <strong>No es duplicado</strong>.</p>` : '';
+      ${g.tipo==='recapX'?(i?'':`<button class="btn small" style="margin-top:8px;background:#b45309" onclick="dupCambiarRecap('${g.clave}')">↩️ Mejor quitar esta nueva y dejar la vieja como instalada</button>`):i?`<button class="btn small" style="margin-top:8px;background:#dc2626" onclick="dupQuitar('${g.clave}',${i})">🗑️ ${g.tipo==='recap'?'Quitar la vieja (es la misma)':'Quitar esta copia'}</button>`:''}
+      ${!i && g.tipo==='recap'?`<button class="btn small" style="margin-top:8px;background:#b45309" onclick="dupQuitar('${g.clave}',0)">🗑️ Quitar esta nueva (su material ya se había descontado)</button>`:''}</div>`; };
+  const ayuda = g => g.tipo==='recapX' ? `<p class="hint" style="margin:8px 0 0">💡 Si el material de la vieja ya no se contó en el conteo, la nueva lo está descontando dos veces. Con el botón café la vieja regresa como <strong>instalada</strong> (sin mover nada) y el material de la nueva regresa al inventario. Si está bien así, toca <strong>No es duplicado</strong> para que ya no salga.</p>` : g.tipo==='recap' ? `<p class="hint" style="margin:8px 0 0">💡 Es la misma casa y el mismo mueble: solo una debe descontar.<br>• <strong>Quitar la vieja</strong>: cuenta la nueva.<br>• <strong>Quitar la nueva</strong>: su material regresa y la vieja queda como instalada ese día, sin mover nada (úsalo si el material de la vieja ya no se contó en el conteo).<br>Si fueron dos muebles distintos, toca <strong>No es duplicado</strong>.</p>` : g.tipo==='inst' ? `<p class="hint" style="margin:8px 0 0">💡 ¿Fueron dos muebles iguales en la misma casa? Pregúntale a ${quien(g.items[0])||'el coordinador'} o compáralo con el reporte del grupo de ese día. Si fue uno solo, quita la copia; si fueron dos, toca <strong>No es duplicado</strong>.</p>` : '';
   const mods = MODULOS.map(m=>({n:m.nombre, c:m.color, k:G.filter(g=>g.modulo===m.nombre).length}));
   const xs = G.filter(g=>g.modulo===dupMod);
   $('#main').innerHTML = `
@@ -17530,7 +17534,7 @@ async function dupQuitar(clave, idx){
   const g = (dupCache.grupos||[]).find(x=>x.clave===clave); if(!g) return;
   const x = g.items[idx]; if(!x) return;
   const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
-  const que = g.tipo==='recap' ? 'la instalación vieja (apartada / no instalada): solo cuenta la que se volvió a capturar' : g.tipo==='inst' ? 'esta instalación repetida (su material vuelve al inventario)' : g.tipo==='tras' ? 'este traspaso repetido (su salida, su entrada y su préstamo)' : g.tipo==='reg' ? 'este regreso repetido (su material deja de sumarse)' : 'esta captura repetida (deja de contar en el inventario)';
+  const que = g.tipo==='recap' ? (idx===0 ? 'la instalación NUEVA: su material regresa al inventario y la vieja queda como instalada el '+fCorta(g.items[0].fechaDia)+' (sin mover nada)' : 'la instalación vieja (apartada / no instalada): solo cuenta la que se volvió a capturar') : g.tipo==='inst' ? 'esta instalación repetida (su material vuelve al inventario)' : g.tipo==='tras' ? 'este traspaso repetido (su salida, su entrada y su préstamo)' : g.tipo==='reg' ? 'este regreso repetido (su material deja de sumarse)' : 'esta captura repetida (deja de contar en el inventario)';
   if(!confirm(`🗑️ Quitar ${que}?\n\nLa primera se queda igual. Esta copia queda en el historial como "anulada por duplicado".`)) return;
   if(!(await pedirPinAdmin('quitar un duplicado'))) return;
   const anular = async id => db.collection('movimientos').doc(id).update({estado:'rechazado', duplicadoAnulado:true, revisadoEn:ahora, revisadoPor:quien});
@@ -17539,8 +17543,12 @@ async function dupQuitar(clave, idx){
       // recap: también lo que se movió después por esa instalación (regresos, apartados que regresaron), para que solo cuente la nueva.
       for(const m of dupCache.movsT.filter(m=>(m.loteId===x.id || (g.tipo==='recap' && m.instalacionId===x.id)) && m.estado!=='rechazado')) await anular(m.id);
       if(g.tipo==='recap'){ try{ const s = await db.collection('sobrantes').doc(x.id).get(); if(s && s.exists) await db.collection('sobrantes').doc(x.id).update({estado:'anulado', duplicadoAnulado:true}); }catch(e){} }
-      await db.collection('instalacionesLog').doc(x.id).update(Object.assign({estado:'rechazado', duplicadoAnulado:true, duplicadoDe:g.items[0].id, verif:{estado:'ok', auto:'duplicado', fecha:ahora, por:quien}},
+      await db.collection('instalacionesLog').doc(x.id).update(Object.assign({estado:'rechazado', duplicadoAnulado:true, duplicadoDe:g.items[idx===0?1:0].id, verif:{estado:'ok', auto:'duplicado', fecha:ahora, por:quien}},
         g.tipo==='recap' && x.separado ? {separado:Object.assign({}, x.separado, {resuelto:'duplicado'})} : {}));
+      // v312: si se quita la NUEVA, la vieja queda como instalada el día de la nueva, sin ningún movimiento.
+      if(g.tipo==='recap' && idx===0){ const o = g.items[1];
+        await db.collection('instalacionesLog').doc(o.id).update(Object.assign({fechaDia:x.fechaDia||fechaHoyLocal(), noSalio:null, verif:{estado:'ok', fecha:ahora, por:quien, nota:'Se volvió a capturar por error; queda esta (la otra se quitó)'}},
+          o.separado ? {separado:Object.assign({}, o.separado, {resuelto:'sale', resueltoEn:ahora, resueltoPor:quien})} : {})); }
     } else if(g.tipo==='lote' || g.tipo==='reg'){
       for(const m of x.movs) await anular(m.id);
       try{ const s = await db.collection('sobrantes').doc(x.id).get(); if(s && s.data) await db.collection('sobrantes').doc(x.id).update({estado:'anulado', duplicadoAnulado:true}); }catch(e){}
@@ -17551,6 +17559,23 @@ async function dupQuitar(clave, idx){
       await db.collection('prestamos').doc(x.id).update({estado:'anulado', pendiente:0, duplicadoAnulado:true});
     }
     toast('🗑️ Listo, se quitó la copia.'); await dupCargar(); dupPintar(); cargarPendDir(true);
+  }catch(e){ alert('Error: '+e.message); }
+}
+// v312: cambiar la decisión de "Quitar la vieja": la vieja vuelve (con sus movimientos como estaban) y se quita la nueva.
+async function dupCambiarRecap(clave){
+  const g = (dupCache.grupos||[]).find(x=>x.clave===clave); if(!g) return; const n = g.items[0], o = g.items[1];
+  if(!confirm(`↩️ ${n.descripcion}${n.calle?'\n📍 '+n.calle:''}\n\n• La vieja regresa y queda INSTALADA el ${fCorta(n.fechaDia)} (sin mover nada).\n• La nueva se quita: su material regresa al inventario.\n\n¿Continuar?`)) return;
+  if(!(await pedirPinAdmin('cambiar cuál se queda'))) return;
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
+  try{
+    for(const m of dupCache.movsT.filter(m=>(m.loteId===o.id || m.instalacionId===o.id) && m.duplicadoAnulado)) await db.collection('movimientos').doc(m.id).update({estado:'aprobado', duplicadoAnulado:false, restauradoEn:ahora, restauradoPor:quien});
+    await db.collection('instalacionesLog').doc(o.id).update({estado:'aprobado', duplicadoAnulado:false, duplicadoDe:null});
+    const anular = id => db.collection('movimientos').doc(id).update({estado:'rechazado', duplicadoAnulado:true, revisadoEn:ahora, revisadoPor:quien});
+    for(const m of dupCache.movsT.filter(m=>(m.loteId===n.id || m.instalacionId===n.id) && m.estado!=='rechazado')) await anular(m.id);
+    await db.collection('instalacionesLog').doc(n.id).update({estado:'rechazado', duplicadoAnulado:true, duplicadoDe:o.id, verif:{estado:'ok', auto:'duplicado', fecha:ahora, por:quien}});
+    await db.collection('instalacionesLog').doc(o.id).update(Object.assign({fechaDia:n.fechaDia||fechaHoyLocal(), noSalio:null, verif:{estado:'ok', fecha:ahora, por:quien, nota:'Se volvió a capturar por error; queda esta (la otra se quitó)'}},
+      o.separado ? {separado:Object.assign({}, o.separado, {resuelto:'sale', resueltoEn:ahora, resueltoPor:quien})} : {}));
+    toast('↩️ Listo: la vieja quedó instalada y el material de la nueva regresó.'); await dupCargar(); dupPintar(); cargarPendDir(true);
   }catch(e){ alert('Error: '+e.message); }
 }
 async function dupIgnorar(clave){
