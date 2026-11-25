@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v307';
+const APP_VERSION = 'v308';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -11680,6 +11680,11 @@ function prestAplicarEventos(bases, evs){
         const q = Math.min(Number(ev.cantidad)||0, Math.max(0, Number(p.cantidad) - Number(p.devuelto||0))); if(!(q>0)) return;
         p.devuelto = Number(p.devuelto||0) + q;
         p.devoluciones.push({fecha:ev.fecha, cantidad:q, itemId:p.itemId, itemNombre:p.itemNombre, compensacion:true, conMod:p.destino, por:ev.creadoPor}); }
+      else if(ev.tipo==='saldaDir'){ if(p.estado==='encamino' || p.estado==='cancelado') return;
+        // v308 (pedido por el usuario): Dirección borra una deuda que ya se arregló por fuera. No mueve inventario.
+        const q = Math.min(Number(ev.cantidad)||0, Math.max(0, Number(p.cantidad) - Number(p.devuelto||0))); if(!(q>0)) return;
+        p.devuelto = Number(p.devuelto||0) + q;
+        p.devoluciones.push({fecha:ev.fecha, cantidad:q, itemId:p.itemId, itemNombre:p.itemNombre, saldado:true, por:ev.creadoPor, motivo:ev.motivo||''}); }
       else if(ev.tipo==='traspConf'){ if(p.estado!=='encamino') return;
         if(ev.llego){ p.estado='pendiente'; p.recibido={fecha:ev.fecha, por:ev.creadoPor, yaContadasEnCierre:!!ev.yaContadas}; prestRecibidoTrasp(p, ev.recibido, ev.fecha, ev); }
         else { p.estado='cancelado'; p.canceladoEn=ev.fecha; p.canceladoPor=ev.creadoPor; } }
@@ -12123,6 +12128,7 @@ function prestHistPar(mod, otro){
     if(p.estado!=='cancelado') ev.push({f:p.fecha, t:`${p.origen} → ${p.destino}: ${fmtNum(p.enviado||p.cantidad)} ${p.itemNombre}`, s:p.estado==='encamino'?'🚚 en camino':(p.faltante?`llegaron ${fmtNum(p.cantidad)}`:'')});
     (p.envios||[]).forEach(e=>{ if(e.estado!=='cancelado') ev.push({f:e.fecha, t:`${p.destino} → ${p.origen}: ${fmtNum(e.enviado||e.cantidad)} ${e.itemNombre} (pago)`, s:e.estado==='encamino'?'🚚 en camino':(e.faltante?`llegaron ${fmtNum(e.cantidad)}`:'')}); });
     (p.devoluciones||[]).filter(d=>d.compensacion).forEach(d=>ev.push({f:d.fecha, t:`🔁 Se restaron ${fmtNum(d.cantidad)} ${p.esMelamina?'hojas':p.itemNombre} (se debían los dos)`, s:''}));
+    (p.devoluciones||[]).filter(d=>d.saldado).forEach(d=>ev.push({f:d.fecha, t:`🗑️ Dirección borró la deuda de ${p.destino}: ${fmtNum(d.cantidad)} ${p.esMelamina?(Number(d.cantidad)===1?'hoja':'hojas'):p.itemNombre} (sin mover material)${d.motivo?` · Motivo: “${String(d.motivo).replace(/</g,'&lt;')}”`:''}`, s:''}));
   });
   return ev.sort((a,b)=>(b.f||'').localeCompare(a.f||'')).slice(0,40);
 }
@@ -12170,14 +12176,35 @@ async function renderTraspHistorial(){
   const otros = [...new Set((prestamos||[]).filter(p=>p.origen===mod||p.destino===mod).map(p=>p.origen===mod?p.destino:p.origen))].sort();
   let h = prestFaltHtml(mod);
   if(vienen.length) h += `<div style="font-weight:900;margin:6px 4px">📥 Te mandaron</div>` + vienen.map(v=>viajeCardHtml(v, true)).join('');
+  const borr = (c, xs, lado) => (esAdmin() && !esSoloLectura()) ? `<div style="margin:4px 0 6px">${xs.map(x=>`<div class="row" style="justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding:5px 0"><span style="font-size:14px">${fmtNum(x.neto)} ${x.etiqueta}</span><button class="btn small" style="background:transparent;color:#dc2626;border:1px solid #dc2626;box-shadow:none;white-space:nowrap" onclick="prestBorrarDeuda('${c.otro}','${String(x.g).replace(/'/g,"\\'")}','${lado}')">🗑️ Borrar</button></div>`).join('')}<p class="hint" style="margin:4px 0 0">🗑️ Borrar = la deuda ya se arregló. No mueve el inventario de nadie.</p></div>` : '';
   h += cu.length ? cu.map(c=>`<div class="card" style="border-left:6px solid ${c.leDebo.length?'#dc2626':'#16a34a'}">
-      ${c.meDeben.length?`<div class="hint" style="margin:0;font-weight:900;letter-spacing:.4px">${c.otro.toUpperCase()} TE DEBE</div><div style="font-size:19px;font-weight:900;color:#16a34a;margin:2px 0 4px">${prestCuentaTxt(c.meDeben)}</div>`:''}
-      ${c.leDebo.length?`<div class="hint" style="margin:${c.meDeben.length?8:0}px 0 0;font-weight:900;letter-spacing:.4px">LE DEBES A ${c.otro.toUpperCase()}</div><div style="font-size:19px;font-weight:900;color:#dc2626;margin:2px 0 4px">${prestCuentaTxt(c.leDebo)}</div>
+      ${c.meDeben.length?`<div class="hint" style="margin:0;font-weight:900;letter-spacing:.4px">${c.otro.toUpperCase()} TE DEBE</div><div style="font-size:19px;font-weight:900;color:#16a34a;margin:2px 0 4px">${prestCuentaTxt(c.meDeben)}</div>${borr(c, c.meDeben, 'me')}`:''}
+      ${c.leDebo.length?`<div class="hint" style="margin:${c.meDeben.length?8:0}px 0 0;font-weight:900;letter-spacing:.4px">LE DEBES A ${c.otro.toUpperCase()}</div><div style="font-size:19px;font-weight:900;color:#dc2626;margin:2px 0 4px">${prestCuentaTxt(c.leDebo)}</div>${borr(c, c.leDebo, 'yo')}
         <button class="btn" style="width:100%;margin-top:6px;background:#0e7490" onclick="traspDestino='${c.otro}';traspSub='nuevo';renderTrasp()">📤 Mandar a ${c.otro}</button>`:''}</div>`).join('')
     : `<div class="card"><strong style="color:#16a34a">✅ ${mod} está a mano con todos los módulos.</strong></div>`;
   if(van.length) h += `<div style="font-weight:900;margin:10px 4px 6px">🚚 Ya mandaste, falta que lo reciban</div>` + van.map(viajeVanHtml).join('');
   if(otros.length) h += `<details class="card"><summary><strong>📋 Historial</strong></summary>${otros.map(o=>{ const ev = prestHistPar(mod, o); return ev.length ? `<div style="margin-top:10px;font-weight:900">${mod} ⇄ ${o}</div>`+ev.map(e=>`<div class="row" style="justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding:6px 0;font-size:13.5px"><span>${fCorta(diaLocal(e.f))} · ${e.t}</span><span class="hint" style="margin:0;white-space:nowrap">${e.s}</span></div>`).join('') : ''; }).join('')}</details>`;
   $('#trasp-body').innerHTML = h;
+}
+// v308 (pedido por el usuario): Dirección borra una deuda entre módulos que ya se saldó por fuera.
+// Solo cierra la cuenta (eventos 'saldaDir'); no crea movimientos, así que no cambia el inventario de nadie.
+async function prestBorrarDeuda(otro, g, lado){
+  if(!esAdmin() || esSoloLectura()) return;
+  await cargarPrestamos(); const mod = modulo();
+  const acre = lado==='me' ? mod : otro, deu = lado==='me' ? otro : mod;
+  const ps = (prestamos||[]).filter(p=>['pendiente','parcial'].includes(p.estado) && Number(p.pendiente)>0.0005 && p.origen===acre && p.destino===deu && grupoDeuda(p.itemId)===g)
+    .sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+  if(!ps.length) return alert('Esa deuda ya no está pendiente.');
+  if(ps.some(p=>prestEnCam(p)>0.0005)) return alert(deu+' ya mandó un pago de esto que va en camino. Primero que lo reciban (o cancélalo) y luego bórrala.');
+  const tot = fmtNum(ps.reduce((a,p)=>a+Number(p.pendiente),0)), et = ps[0].esMelamina ? 'hojas de melamina' : ps[0].itemNombre;
+  let motivo = prompt(`🗑️ Borrar deuda\n\n${deu} le debe a ${acre}: ${tot} ${et}\n\nLa deuda se da por pagada. NO se mueve el inventario de ${deu} ni de ${acre}.\n\n¿Por qué se borra? (queda en el registro)`, '');
+  if(motivo===null) return; motivo = String(motivo).trim();
+  if(!motivo) return alert('Escribe por qué se borra la deuda. Queda en el registro.');
+  if(!(await pedirPinAdmin('borrar esta deuda'))) return;
+  try{ const fecha = new Date().toISOString();
+    for(const p of ps) await prestEvento(p, {tipo:'saldaDir', cantidad:fmtNum(Number(p.pendiente)), fecha, grupo:g, motivo});
+    await cargarPrestamos(); toast('🗑️ Deuda borrada · el inventario no se movió'); prestRefrescar();
+  }catch(e){ alert('Error: '+e.message); }
 }
 // Inicio del coordinador: lo que le mandaron (para recibir) y lo que debe.
 let _prestHomeT = 0;
@@ -12296,7 +12323,7 @@ async function generarTraspasosPDF(){
   const MOR=[109,40,217], VER=[22,128,74], ROJ=[185,28,28], AMB=[180,83,9];
   const ev = [];
   ps.forEach(p=>{ if(enRango(p.fecha)) ev.push({f:p.fecha, tipo:'t', p, q:p.cantidad, art:p.itemNombre});
-    (p.devoluciones||[]).forEach(d=>{ if(enRango(d.fecha)) ev.push({f:d.fecha, tipo:d.compensacion?'c':'d', p, q:d.cantidad, art:d.compensacion?(p.esMelamina?'Melamina (cualquier color)':p.itemNombre)+' · se cruzó con la deuda contraria, sin mover material':(d.itemNombre||p.itemNombre)}); }); });
+    (p.devoluciones||[]).forEach(d=>{ if(enRango(d.fecha) && !d.saldado) ev.push({f:d.fecha, tipo:d.compensacion?'c':'d', p, q:d.cantidad, art:d.compensacion?(p.esMelamina?'Melamina (cualquier color)':p.itemNombre)+' · se cruzó con la deuda contraria, sin mover material':(d.itemNombre||p.itemNombre)}); }); });
   ev.sort((a,b)=>(a.f||'').localeCompare(b.f||''));
   const pend = ps.filter(p=>p.pendiente>0);
   const grupos = {}; pend.forEach(p=>{ const k = p.destino+'||'+p.origen+'||'+grupoDeuda(p.itemId);
