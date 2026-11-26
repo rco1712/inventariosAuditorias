@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v316';
+const APP_VERSION = 'v317';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9762,7 +9762,51 @@ async function audVGrupos(mod){
 }
 async function audVAbrir(){
   const mod = modulo(); toast('Preparando la auditoría…');
-  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), arm:[], af:{}, armOn:false}; audVArmAbrir(); /* v309: empieza por los armados */ }catch(e){ alert('Error: '+e.message); }
+  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), arm:[], af:{}, armOn:false, pre:null}; audVArmAbrir(); /* v309: empieza por los armados */
+    audPreRevisar(mod).then(x=>{ if(audV && audV.mod===mod){ audV.pre = x; audVPintar(); } }).catch(()=>{}); }catch(e){ alert('Error: '+e.message); }
+}
+// v317 (pedido por el usuario): antes de contar, la app revisa que no quede nada «flotando» en el módulo
+// (por aprobar, por verificar, sin decidir, en camino, hoja de corte que no cuadra). Solo avisa; no bloquea.
+async function audPreRevisar(mod){
+  const out = [], hoy = fechaHoyLocal(), add = (ic, t, d) => out.push({ic, t, d});
+  const [sm, sl, sp, sh] = await Promise.all([db.collection('movimientos').where('modulo','==',mod).get(), db.collection('instalacionesLog').where('modulo','==',mod).get(),
+    db.collection('piezasPrueba').where('modulo','==',mod).get().catch(()=>({docs:[]})), db.collection('herrMovs').get().catch(()=>({docs:[]}))]);
+  const M = sm.docs.map(d=>({id:d.id, ...d.data()})), L = sl.docs.map(d=>({id:d.id, ...d.data()}));
+  const pm = M.filter(m=>m.estado==='pendiente' && m.tipo!=='instalacion');
+  if(pm.length){ const lotes = new Set(pm.map(m=>m.loteId||m.id)); add('✅', `${lotes.size} captura(s) por aprobar`, [...new Set(pm.map(m=>({merma:'merma', entrada:'entrada', salida:'salida', devolucion:'devolución', ajuste:'ajuste', garantia:'garantía'}[m.tipo]||m.tipo)))].join(', ')+' · en Aprobaciones'); }
+  const reg = new Set(M.filter(m=>m.motivo==='regresoInstalacion' && m.estado!=='rechazado').map(m=>m.instalacionId));
+  const viva = l => l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !reg.has(l.id);
+  const ip = L.filter(l=>l.estado==='pendiente'); if(ip.length) add('🔧', `${ip.length} instalación(es) por aprobar`, 'Se aprueban al verificarlas (✅ Se instaló)');
+  const noSal = L.filter(l=>viva(l) && l.noSalio && (!l.verif || l.verif.puertas==='pendiente'));
+  if(noSal.length) add('🚫', `${noSal.length} «no salió» esperando tu decisión`, noSal.map(l=>(l.calle||String(l.descripcion||'').split(' · ')[0])).join(' · ')+' · si siguen en el taller, que regresen antes de contar');
+  const sv = L.filter(l=>viva(l) && !l.verif && diaValorInst(l) < hoy && !(l.separado && !l.separado.resuelto) && !noSal.includes(l) && diaValorInst(l) >= verifDesde());
+  if(sv.length) add('🔍', `${sv.length} instalación(es) sin verificar`, 'En Verificar');
+  const rech = L.filter(l=>viva(l) && l.verif && l.verif.estado==='no' && ['pendiente','reinstalar'].includes(l.verif.puertas));
+  if(rech.length) add('❌', `${rech.length} rechazada(s) sin resolver por el coordinador`, rech.map(l=>l.calle||'').filter(Boolean).join(' · '));
+  const apa = L.filter(l=>viva(l) && l.separado && !l.separado.resuelto);
+  if(apa.length) add('📌', `${apa.length} instalación(es) apartada(s)`, 'Su material va aparte: no lo cuentes con lo suelto, se revisa en «Material separado»');
+  try{ await cargarPrestamos(); const pe = (prestamos||[]).filter(p=>p.estado==='encamino' && (p.origen===mod || p.destino===mod));
+    if(pe.length) add('🚚', `${pe.length} traspaso(s) en camino`, pe.map(p=>`${p.origen}→${p.destino}: ${fmtNum(p.cantidad)} ${p.itemNombre}`).slice(0,4).join(' · ')); }catch(e){}
+  const fer = sh.docs.map(d=>d.data()).filter(m=>m.tipo==='ferEnvio' && m.estado==='encamino' && m.modulo===mod);
+  if(fer.length) add('📦', `${fer.length} envío(s) de ferretería del almacén sin recibir`, 'Si ya llegó, que lo acepten antes de contar');
+  const P = sp.docs.map(d=>({id:d.id, ...d.data()}));
+  const dif = P.filter(x=>(x.tipo==='hojaDia' || x.tipo==='audVerif') && (x.difs||[]).some(d=>!(x.resol||{})[d.k])).reduce((t,x)=>t+(x.difs||[]).filter(d=>!(x.resol||{})[d.k]).length,0);
+  if(dif) add('💰', `${dif} diferencia(s) por decidir`, 'En el inicio del módulo');
+  // Hoja de corte: días con corte en el cierre sin hoja, o con hojas distintas al cierre.
+  try{ if(hcActivo(mod)){ await pzpCargar(mod); const R = pzpCalcular(pzpD); const ds = new Set(), malos = [];
+      let d0 = ''; try{ const rs = await db.collection('resets').doc(mod).get(); if(rs && rs.exists) d0 = diaLocal(rs.data().fecha); }catch(e){}
+      (R.avisos||[]).forEach(a=>{ if(a.falta && a.dia && a.dia <= hoy && a.dia >= d0) ds.add(a.dia); }); // v317: también hoy si ya hubo cierre (la auditoría va después del cierre)
+      (pzpD.dias||[]).filter(x=>x.hojaCoord && x.fecha <= hoy && x.fecha >= d0).forEach(x=>{ const ct = (R.porDia[x.fecha]||{}).cortes||{}; Object.keys(x.corte||{}).forEach(id=>{ const hp = Number((x.corte[id]||{}).hojasPapel)||0, c = Number(ct[id])||0; if(hp>0 && Math.abs(hp-c)>0.01) malos.push(`${fCorta(x.fecha)} ${pzpColor(id)}: cierre ${fmtNum(c)}, hoja ${fmtNum(hp)}`); }); });
+      if(ds.size) add('✂️', `Falta la hoja de corte de ${ds.size} día(s)`, [...ds].sort().map(fCorta).join(' · '));
+      if(malos.length) add('✂️', `Hojas cortadas que no cuadran con el cierre`, malos.join(' · ')+' · corrígelo en el Historial (✏️ Corregir hojas cortadas) o en la hoja'); } }catch(e){}
+  return out;
+}
+function audPreHtml(V){
+  if(!V.pre) return `<div class="hint" style="margin:0 0 8px">🧹 Revisando que no quede nada pendiente…</div>`;
+  if(!V.pre.length) return `<div style="margin:0 0 8px;padding:9px 11px;border-radius:11px;background:rgba(22,163,74,.12);border:1px solid #16a34a;font-weight:900;color:#15803d">✅ Antes de contar: no hay nada pendiente en ${V.mod}.</div>`;
+  return `<details open style="margin:0 0 8px;padding:9px 11px;border-radius:11px;background:rgba(220,38,38,.08);border:2px solid #dc2626"><summary style="cursor:pointer;font-weight:900;color:#b91c1c">⚠️ Antes de contar, resuelve esto (${V.pre.length})</summary>
+    ${V.pre.map(x=>`<div style="margin-top:7px;font-size:13.5px;line-height:1.35"><b>${x.ic} ${x.t}</b>${x.d?`<div class="hint" style="margin:1px 0 0">${x.d}</div>`:''}</div>`).join('')}
+    <div class="hint" style="margin:8px 0 0">Si cuentas sin resolverlo, te puede salir como faltante o sobrante que no es. Puedes cerrar, resolverlo y volver a abrir la auditoría.</div></details>`;
 }
 function audVSet(k, e){ const V = audV; if(V.est[k]===e) delete V.est[k]; else V.est[k] = e; if(e==='no' && V.fis[k]===undefined) V.fis[k] = ''; audVPintar(); }
 function audVSuma(k, d){ const V = audV; const r = audVRow(k); const cur = Number(V.fis[k])||0; V.fis[k] = String(fmtNum(Math.max(0, cur + d))); audVPintar(); }
@@ -9821,6 +9865,7 @@ function audVPintar(){
   if(V.armOn){
     ov.innerHTML = `<div style="width:100%;max-width:520px;background:var(--bg);color:var(--ink);border:2px solid #0e7490;border-radius:18px;padding:12px;margin-top:8px">
       <div style="font-size:18px;font-weight:900">🗄️ Muebles armados · ${V.mod}</div>
+      ${audPreHtml(V)}
       <div style="margin:4px 0 8px;padding:9px 11px;border-radius:11px;background:rgba(14,116,144,.09)"><div style="font-weight:900">Paso 1 de 2 · Cuenta todo lo que ya está armado:</div>
         <div style="font-size:13.5px;margin-top:3px;line-height:1.45">• Cajoneras (de 1, 2, 3, 5 y Emma), con o sin cajones<br>• Cajones y cuadros (con o sin fondo)<br>• Todo lo Max: cajonera, cajón y cuadros<br>• Cajoneras y puertas de espejo · puertas de zapatera</div>
         <div class="hint" style="margin:4px 0 0">La app los desarma en piezas, correderas y jaladeras. Después solo verificas lo suelto.</div></div>
