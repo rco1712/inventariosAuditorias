@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v318';
+const APP_VERSION = 'v319';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9013,7 +9013,9 @@ async function verifCoordCargar(){
     const conf = todos.filter(l=>{ const d = diaValorInst(l); return d <= hoy && d >= desde && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.cambioDe && l.estado==='pendiente') && (!l.verif || verifReinstPend(l)) && !(l.separado && !l.separado.resuelto) && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)); })
       .sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)) || String(a.calle||'').localeCompare(String(b.calle||'')));
     const sep = todos.filter(l=>l.separado && !l.separado.resuelto && l.estado!=='rechazado' && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))).sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)));
-    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp, conf, sep};
+    // v319: instalaciones capturadas para otro día (su material ya se descontó): el coordinador elige qué apartó.
+    const fut = todos.filter(l=>!l.verif && !l.separado && diaValorInst(l) > hoy && l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))).sort((a,b)=>diaValorInst(a).localeCompare(diaValorInst(b)));
+    const antes = JSON.stringify(_verifCoord); _verifCoord = {mod, logs, posp, conf, sep, fut};
     if(JSON.stringify(_verifCoord)!==antes && current==='home' && !esAdmin()) renderHome();
   }catch(e){}
 }
@@ -9254,8 +9256,12 @@ async function actaPDF(id){
 let sepSale = null, sepOtro = null;
 function sepHtml(){
   if(esAdmin() || esSoloLectura() || !_verifCoord || !sisNuevoMod()) return '';
-  const xs = _verifCoord.sep||[]; if(!xs.length) return '';
+  const xs = _verifCoord.sep||[], fu = _verifCoord.fut||[]; if(!xs.length && !fu.length) return '';
   const hoy = fechaHoyLocal();
+  const filaF = l => `<div style="padding:10px;border-radius:12px;border:2px dashed #7c3aed;margin-top:8px;background:var(--card)">
+      <strong>${l.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${calleHtml(l)}
+      <div class="hint" style="margin:2px 0 0">Se instala el ${fCorta(diaValorInst(l))} · ¿qué dejaste apartado y qué se queda en tu inventario?</div>
+      <button class="btn small" style="width:100%;margin:8px 0 0;min-height:44px;background:#7c3aed" onclick="apartarAbrir('${l.id}',true)">📌 Elegir qué aparté</button></div>`;
   const fila = l => { const d = diaValorInst(l), hoyT = d<=hoy;
     return `<div style="padding:10px;border-radius:12px;border:2px solid ${hoyT?'#7c3aed':'var(--line)'};margin-top:8px;background:var(--card)">
       <strong>${l.descripcion.split(' · ').slice(0,3).join(' · ')}</strong>${calleHtml(l)}
@@ -9267,8 +9273,8 @@ function sepHtml(){
       ${sepOtro===l.id?`<div style="display:flex;gap:6px;margin-top:6px"><input type="date" id="sep-f-${l.id}" min="${sumarDiasISO(hoy,1)}" value="${sumarDiasISO(hoy,1)}" style="flex:1;min-width:0;margin:0"><button class="btn small" style="margin:0;background:#ea580c" onclick="sepOtroGuardar('${l.id}')">Guardar</button></div>`:''}</div>`; };
   const nHoy = xs.filter(l=>diaValorInst(l)<=hoy).length;
   return `<details class="card" style="padding:12px;border:2px solid #7c3aed" ${nHoy?'open':''}><summary style="cursor:pointer;list-style:none">
-    <div style="font-size:16px;font-weight:900">📌 Material separado (${xs.length})${nHoy?` · <span style="color:#7c3aed">${nHoy} hoy</span>`:''}</div>
-    <div class="hint" style="margin:2px 0 0">Va aparte de tu inventario, pero está registrado y se cuenta en la auditoría. El día que se instale, toca 🚚 Sale.</div></summary>${xs.map(fila).join('')}</details>`;
+    <div style="font-size:16px;font-weight:900">📌 Material separado (${xs.length+fu.length})${nHoy?` · <span style="color:#7c3aed">${nHoy} hoy</span>`:''}</div>
+    <div class="hint" style="margin:2px 0 0">Va aparte de tu inventario, pero está registrado y se cuenta en la auditoría. El día que se instale, toca 🚚 Sale.</div></summary>${xs.map(fila).join('')}${fu.map(filaF).join('')}</details>`;
 }
 function sepSaleAbrir(id){
   const l = ((_verifCoord && _verifCoord.sep)||[]).find(x=>x.id===id); if(!l) return;
@@ -9692,10 +9698,10 @@ function pasosHtml(){
 }
 // ===== v298 · Apartar una instalación que no se instaló, eligiendo qué se aparta (pedido por el usuario) =====
 let apartV = null;
-async function apartarAbrir(id){
+async function apartarAbrir(id, elegir){
   await cargarInstLog(); const l = (instLog||[]).find(x=>x.id===id); if(!l) return;
   if(regresoDeInstalacion(id)) return alert('Esta instalación ya se regresó al inventario.');
-  apartV = {l, items:{}, fecha:verifManana()}; apartPintar();
+  apartV = {l, items:{}, fecha:elegir?diaValorInst(l):verifManana(), elegir:!!elegir}; apartPintar();
 }
 function apartToggle(itemId){ const m = apartV.items; if(m[itemId]==='cuenta') delete m[itemId]; else m[itemId] = 'cuenta'; apartPintar(); }
 function apartHerrajes(){ paso0Cons(apartV.l).forEach(c=>{ if(!esHojaId(c.itemId)) apartV.items[c.itemId] = 'cuenta'; }); apartPintar(); }
@@ -9706,22 +9712,25 @@ function apartPintar(){
   const l = V.l, cons = paso0Cons(l), nom = id => (CATALOGO.find(i=>i.id===id)||{}).nombre||id, un = id => (CATALOGO.find(i=>i.id===id)||{}).unidad||'';
   const nCu = cons.filter(c=>V.items[c.itemId]==='cuenta').length;
   ov.innerHTML = `<div style="width:100%;max-width:460px;background:var(--card);color:var(--ink);border:2px solid #7c3aed;border-radius:18px;padding:14px;margin-top:8px">
-    <div style="display:flex;justify-content:space-between"><div style="font-size:17px;font-weight:900">📌 Apartar para otro día</div><button onclick="apartV=null;apartPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div style="display:flex;justify-content:space-between"><div style="font-size:17px;font-weight:900">📌 ${V.elegir?'¿Qué apartaste?':'Apartar para otro día'}</div><button onclick="apartV=null;apartPintar()" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <div style="font-weight:800;margin-top:2px">${l.descripcion.split(' · ').slice(0,3).join(' · ')}</div>${calleHtml(l)}
-    <label class="hint" style="display:block;margin-top:10px">¿Qué día se instala?</label><input type="date" min="${verifManana()}" value="${V.fecha}" onchange="apartV.fecha=this.value" style="margin:2px 0 0">
+    ${V.elegir?`<div class="hint" style="margin:6px 0 0">Se instala el <strong>${fCorta(V.fecha)}</strong></div>`:`<label class="hint" style="display:block;margin-top:10px">¿Qué día se instala?</label><input type="date" min="${verifManana()}" value="${V.fecha}" onchange="apartV.fecha=this.value" style="margin:2px 0 0">`}
     <div class="hint" style="margin:10px 0 4px">Toca cada renglón: <strong style="color:#7c3aed">📌 apartado</strong> (se queda para esta instalación) o <strong style="color:#16a34a">📦 a mi inventario</strong>.</div>
     ${cons.map(c=>{ const k = V.items[c.itemId]==='cuenta', pz = esHojaId(c.itemId) ? paso0PzTxt(l, c.itemId) : ''; return `<div onclick="apartToggle('${c.itemId}')" style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;padding:8px 10px;margin-top:4px;border-radius:10px;border:1.5px solid ${k?'#16a34a':'#7c3aed'};background:${k?'rgba(22,163,74,.08)':'rgba(124,58,237,.08)'}"><span>${nom(c.itemId)} <span class="hint" style="margin:0">${fmtNum(c.cantidad)} ${un(c.itemId)}</span>${pz?`<span class="hint" style="display:block;margin:0">${pz}</span>`:''}</span><strong style="color:${k?'#16a34a':'#7c3aed'};white-space:nowrap">${k?'📦 a inventario':'📌 apartado'}</strong></div>`; }).join('')}
     <button class="btn small" style="margin-top:6px;background:transparent;color:#16a34a;border:1px solid var(--line);box-shadow:none" onclick="apartHerrajes()">🔩 Los herrajes a mi inventario, aparto solo la melamina</button>
-    <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:linear-gradient(135deg,#7c3aed,#5b21b6)" onclick="apartGuardar()">📌 Apartar${nCu?` (${nCu} a mi inventario)`:''}</button>
+    <button class="btn" style="width:100%;min-height:52px;margin-top:12px;background:linear-gradient(135deg,#7c3aed,#5b21b6)" onclick="apartGuardar()">📌 ${V.elegir?'Guardar':'Apartar'}${nCu?` (${nCu} a mi inventario)`:''}</button>
     <p class="hint" style="margin:6px 0 0">Lo apartado va aparte, pero sigue registrado y se cuenta en la auditoría. Ese día le das 🚚 Sale en «Material separado».</p></div>`;
 }
 async function apartGuardar(){
   const V = apartV; if(!V) return; const l = V.l, nueva = V.fecha, hoy = fechaHoyLocal();
-  if(!nueva || nueva<=hoy) return alert('Elige un día de mañana en adelante.');
+  if(!V.elegir && (!nueva || nueva<=hoy)) return alert('Elige un día de mañana en adelante.');
+  if(V.elegir && l.separado) return alert('Esta ya tiene su material separado.');
   const cons = paso0Cons(l), quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString(), loteId = cryptoId(), cuenta = {};
   try{
     for(const c of cons){ if(V.items[c.itemId]!=='cuenta') continue; const it = CATALOGO.find(i=>i.id===c.itemId); cuenta[c.itemId] = Number(c.cantidad);
       await db.collection('movimientos').doc(cryptoId()).set({modulo:l.modulo, itemId:it.id, itemNombre:it.nombre, tipo:'devolucion', motivo:'paso0Cuenta', instalacionId:l.id, cantidad:Number(c.cantidad), nota:'No se instaló; se apartó y esto regresa a su inventario · '+l.descripcion+(l.calle?' · 📍 '+l.calle:''), fecha:ahora, estado:estadoNuevoMovimiento(), loteId, creadoPor:quien}); }
+    if(V.elegir){ await db.collection('instalacionesLog').doc(l.id).update({separado:{en:ahora, por:quien, items:V.items, cuenta, deFut:true}});
+      apartV = null; apartPintar(); _verifCoordT = 0; _verifCoord = null; toast('📌 Guardado.'+(Object.keys(cuenta).length?'<br><small>Lo demás regresó a tu inventario.</small>':'')); renderHome(); return; }
     const P = l.pospuesta || {};
     await db.collection('instalacionesLog').doc(l.id).update({separado:{en:ahora, por:quien, items:V.items, cuenta, deVerif:true}, fechaDia:nueva,
       pospuesta:{primero:P.primero||l.fechaDia, a:nueva, veces:(P.veces||0)+1, por:quien, en:ahora, nota:'No se instaló; apartada para el '+fCorta(nueva), historial:(P.historial||[]).concat([{de:l.fechaDia, a:nueva, en:ahora, por:quien}])},
