@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v319';
+const APP_VERSION = 'v320';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9754,7 +9754,9 @@ async function audVGrupos(mod){
       ids.forEach(id=>{ const rows = [];
         Object.keys(R.N).filter(k=>R.N[k].itemId===id).sort((a,b)=>R.N[b].area-R.N[a].area).forEach(k=>{ const N = R.N[k], d = fmtNum(R.T[k]||0);
           // v299: el teórico es TODO lo que debe haber de esa pieza, suelta o armada (el stock armado no se captura).
-          if(Math.abs(d)<0.005) return; const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNormPz(N.dim));
+          // v320: si la app dice que faltan piezas (teórico negativo), eso es del inventario de piezas, no del oficial
+          // (la instalación ya descontó sus hojas): se toma como 0 para no sumar hojas que no existen.
+          if(d<0.005) return; const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNormPz(N.dim));
           rows.push({k:'p_'+k, itemId:id, pk:P?P.key:null, n:/\d×\d/.test(N.n)?N.n:N.n+' '+String(N.dim||'').replace(/ cm$/,''), d, u:'pzas', area:pzpArea(N.dim)}); });
         const rt = (R.ret||{})[id]||0; if(rt > 0.005*PZP_A) rows.push({k:'r_'+id, itemId:id, n:'♻️ Retazo (total)', d:fmtNum(rt/PZP_A), u:'hoja equiv.', ret:true, nota:true});
         if(rows.length) G.push({t:'Piezas · '+pzpColor(id), rows}); }); } }catch(e){}
@@ -9766,13 +9768,57 @@ async function audVGrupos(mod){
   try{ const sn = await db.collection('instalacionesLog').where('modulo','==',mod).get(); const ls = sn.docs.map(d=>({id:d.id, ...d.data()})), hoy = fechaHoyLocal();
     const sep = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
       && ((l.separado && !l.separado.resuelto) || (!l.verif && !l.duplicadoAnulado && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
-    if(sep.length) G.push({t:'📌 Material separado', rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), det:audSepDet(l), d:'', u:'', nota:true, sep:true}))}); }catch(e){}
+    if(sep.length) G.push({t:'📌 Material separado', rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), det:audSepDet(l), d:'', u:'', nota:true, sep:true}))});
+    // v320: lo que se instala HOY ya se descontó; si su material sigue en el taller, va aparte (si no, sale como sobrante).
+    const hoyL = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.separado && !l.separado.resuelto) && !l.noSalio && diaValorInst(l)===hoy && !(l.verif && l.verif.estado==='no') && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)));
+    if(hoyL.length) G.push({t:'🚚 Se instala hoy', rows:hoyL.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), det:'<b>✅ si ya salió o está aparte.</b> Si sigue en el taller, apártalo y no lo cuentes:<br>'+audSepDet(l), d:'', u:'', nota:true, sep:true, hoy:true}))}); }catch(e){}
   return G;
 }
+// v320: la auditoría se guarda en el teléfono mientras cuentas (si se cierra o se recarga la app, no se pierde).
+const audVKey = mod => 'audV_'+mod;
+let _audVJ = '';
+function audVBorrador(){ try{ const V = audV; if(!V) return; const j = JSON.stringify({mod:V.mod, G:V.G, est:V.est, fis:V.fis, nota:V.nota, fecha:V.fecha, arm:V.arm, af:V.af, armOn:V.armOn, vista:V.vista, open:V.open, dia:fechaHoyLocal()});
+  if(j!==_audVJ){ _audVJ = j; localStorage.setItem(audVKey(V.mod), j); } }catch(e){} }
+setInterval(()=>{ if(audV) audVBorrador(); }, 4000);
 async function audVAbrir(){
-  const mod = modulo(); toast('Preparando la auditoría…');
-  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), arm:[], af:{}, armOn:false, pre:null}; audVArmAbrir(); /* v309: empieza por los armados */
-    audPreRevisar(mod).then(x=>{ if(audV && audV.mod===mod){ audV.pre = x; audVPintar(); } }).catch(()=>{}); }catch(e){ alert('Error: '+e.message); }
+  const mod = modulo();
+  try{ const raw = localStorage.getItem(audVKey(mod)), b = raw ? JSON.parse(raw) : null;
+    if(b && b.dia===fechaHoyLocal() && b.G){ const n = Object.keys(b.est||{}).length;
+      if(confirm(`📋 Tienes una auditoría de ${mod} sin guardar (de hoy, ${n} renglones revisados${(b.arm||[]).length?', '+b.arm.length+' armados':''}).\n\n¿Seguir con ella?\n\nAceptar = seguir donde te quedaste\nCancelar = empezar de nuevo`)){
+        audV = Object.assign({pre:null, A:{}}, b); audVArmCalc(audV); audVPintar();
+        audPreRevisar(mod).then(x=>{ if(audV && audV.mod===mod){ audV.pre = x; audVPintar(); } }).catch(()=>{}); return; }
+      localStorage.removeItem(audVKey(mod)); } }catch(e){}
+  audVPreAbrir(mod);
+}
+// v320 (pedido por el usuario): antes de tomar lo que dice la app, una pantalla con lo que hay que resolver y un
+// botón para ir a cada cosa. Lo que debe haber se toma hasta que tocas «Empezar el conteo».
+let audVP = null;
+const AUD_PRE_IR = {'✅':['Ir a Aprobaciones',"irA('apr')"], '🔧':['Ir a Verificar',"irA('verif')"], '🔍':['Ir a Verificar',"irA('verif')"], '🚫':['Ir a Verificar',"irA('verif')"], '❌':['Ir a Verificar',"irA('verif')"],
+  '🚚':['Ir a Traspasos',"irA('trasp')"], '💰':['Ir al inicio del módulo',"setView('home')"], '✂️':['Ir a la Hoja de corte',"irA('hcorte')"]};
+async function audVPreAbrir(mod){ audVP = {mod, pre:null}; audVPrePintar();
+  try{ const x = await audPreRevisar(mod); if(audVP && audVP.mod===mod){ audVP.pre = x; audVPrePintar(); } }catch(e){ if(audVP){ audVP.pre = []; audVPrePintar(); } } }
+function audVPreIr(js){ audVP = null; audVPrePintar(); setTimeout(()=>{ try{ (new Function(js))(); }catch(e){} }, 50); }
+function audVPrePintar(){
+  let ov = document.getElementById('aud-vp'); const V = audVP;
+  if(!V){ if(ov) ov.remove(); return; }
+  if(!ov){ ov = document.createElement('div'); ov.id = 'aud-vp'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto'; document.body.appendChild(ov); }
+  const P = V.pre, info = x => !AUD_PRE_IR[x.ic] && !x.t.includes('no cuadran'), n = P ? P.filter(x=>!info(x)).length : 0;
+  const item = x => { const ir = x.t.includes('no cuadran') ? ['Corregir en el Historial',"irA('movhist')"] : AUD_PRE_IR[x.ic];
+    return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;border:2px solid ${ir?'#dc2626':'#7c3aed'};background:${ir?'rgba(220,38,38,.06)':'rgba(124,58,237,.06)'}"><div style="font-weight:900;font-size:15px">${x.ic} ${x.t}</div>${x.d?`<div class="hint" style="margin:2px 0 0">${x.d}</div>`:''}
+      ${ir?`<button class="btn small" style="width:100%;margin:8px 0 0;min-height:42px;background:#dc2626" onclick="audVPreIr(&quot;${ir[1]}&quot;)">➡️ ${ir[0]}</button>`:`<div class="hint" style="margin:6px 0 0;font-weight:800;color:#7c3aed">👀 Esto lo revisas en el conteo</div>`}</div>`; };
+  ov.innerHTML = `<div style="width:100%;max-width:520px;background:var(--bg);color:var(--ink);border:2px solid #0e7490;border-radius:18px;padding:12px;margin-top:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:18px;font-weight:900">🧹 Antes de contar · ${V.mod}</div><button onclick="audVP=null;audVPrePintar()" style="all:unset;cursor:pointer;font-size:22px;color:var(--sub)">✕</button></div>
+    <div class="hint" style="margin:2px 0 6px">Resuelve esto primero. Toca el botón para ir; al regresar, vuelve a entrar a la auditoría y se revisa otra vez.</div>
+    ${!P?'<p style="margin:14px 0">🔎 Revisando…</p>':(P.length?P.map(item).join(''):'')+(n?'':`<div style="margin-top:8px;padding:12px;border-radius:12px;background:rgba(22,163,74,.12);border:2px solid #16a34a;font-weight:900;color:#15803d">✅ No hay nada pendiente por resolver. Puedes contar.</div>`)}
+    ${P?`<button class="btn small" style="width:100%;margin-top:12px;background:transparent;color:#0e7490;border:1.5px solid #0e7490;box-shadow:none" onclick="audVPreAbrir('${V.mod}')">🔄 Revisar otra vez</button>
+    <button class="btn" style="width:100%;min-height:54px;margin-top:8px;background:${n?'#94a3b8':'linear-gradient(135deg,#0e7490,#155e75)'}" onclick="audVEmpezar()">▶️ Empezar el conteo${n?` (quedan ${n})`:''}</button>
+    <div class="hint" style="margin:6px 0 0">Al empezar se toma lo que dice la app en ese momento. Mientras cuentas, nadie captura nada.</div>`:''}</div>`;
+}
+async function audVEmpezar(){
+  const V = audVP; if(!V || !V.pre) return; const mod = V.mod, pre = V.pre, nP = pre.filter(x=>AUD_PRE_IR[x.ic] || x.t.includes('no cuadran')).length;
+  if(nP && !confirm(`Todavía quedan ${nP} cosa(s) sin resolver.\n\nSi cuentas así, te pueden salir faltantes o sobrantes que no son.\n\n¿Empezar de todos modos?`)) return;
+  audVP = null; audVPrePintar(); toast('Preparando la auditoría…');
+  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), arm:[], af:{}, armOn:false, pre}; audVArmAbrir(); }catch(e){ alert('Error: '+e.message); }
 }
 // v318 (pedido por el usuario): qué debe estar aparte de cada instalación (melamina/MDF en piezas y herrajes);
 // si se apartó, sin lo que el coordinador marcó como «se cuenta».
@@ -9882,6 +9928,7 @@ function audVVista(V){
 function audVPintar(){
   let ov = document.getElementById('aud-v'); const V = audV;
   if(!V){ if(ov) ov.remove(); return; }
+  audVBorrador();
   const top = ov ? ov.scrollTop : 0;
   if(!ov){ ov = document.createElement('div'); ov.id = 'aud-v'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto'; document.body.appendChild(ov); }
   const q = k => String(k).replace(/'/g,"\\'"), idk = k => String(k).replace(/[^a-zA-Z0-9]/g,'_');
@@ -9902,7 +9949,7 @@ function audVPintar(){
   const fila = r => { const e = V.est[r.k], no = e==='no', f = V.fis[r.k], A = Number(AQ[r.k])||0, S = fmtNum(Math.max(0, Number(r.d) - A)), sobra = A > Number(r.d) + 0.0005,
       dif = no && !r.sep && !r.nota && f!=='' && f!==undefined ? fmtNum(Number(f) + A - Number(r.d)) : null;
     return `<div style="padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${e==='si'?'#16a34a':(no?'#dc2626':'var(--line)')};background:${e==='si'?'rgba(22,163,74,.06)':(no?'rgba(220,38,38,.06)':'transparent')}">
-      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700;font-size:14px">${r.n}</strong>${r.det?`<div class="hint" style="margin:2px 0 0;font-size:12.5px;line-height:1.4">Debe estar aparte:<br>${r.det}</div>`:''}${A>0?`<div class="hint" style="margin:0;${sobra?'color:#0369a1;font-weight:800':''}">${sobra?`🗄️ En armados hay ${fmtNum(A)} y debe haber ${fmtNum(r.d)} (sobran ${fmtNum(A-Number(r.d))})`:`Debe haber ${fmtNum(r.d)} = 🗄️ ${fmtNum(A)} armadas + ${S} sueltas`}</div>`:''}</div>
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700;font-size:14px">${r.n}</strong>${r.det?`<div class="hint" style="margin:2px 0 0;font-size:12.5px;line-height:1.4">${r.hoy?'':'Debe estar aparte:<br>'}${r.det}</div>`:''}${A>0?`<div class="hint" style="margin:0;${sobra?'color:#0369a1;font-weight:800':''}">${sobra?`🗄️ En armados hay ${fmtNum(A)} y debe haber ${fmtNum(r.d)} (sobran ${fmtNum(A-Number(r.d))})`:`Debe haber ${fmtNum(r.d)} = 🗄️ ${fmtNum(A)} armadas + ${S} sueltas`}</div>`:''}</div>
         ${r.sep?'':`<div style="text-align:right"><div style="font-size:18px;font-weight:900;line-height:1">${A>0?S:fmtNum(r.d)}</div><div class="hint" style="margin:0;font-size:11px">${A>0?'sueltas':r.u}</div></div>`}
         <button class="btn small" style="margin:0;min-width:40px;min-height:36px;padding:0;background:${e==='si'?'#16a34a':'transparent'};color:${e==='si'?'#fff':'#16a34a'};border:1.5px solid #16a34a;box-shadow:none" onclick="audVSet('${q(r.k)}','si')">✅</button>
         <button class="btn small" style="margin:0;min-width:40px;min-height:36px;padding:0;background:${no?'#dc2626':'transparent'};color:${no?'#fff':'#dc2626'};border:1.5px solid #dc2626;box-shadow:none" onclick="audVSet('${q(r.k)}','no')">❌</button></div>
@@ -9947,7 +9994,7 @@ async function audVGuardar(){
   try{ const AQ = V.A || {}; V.G.forEach(g=>g.rows.forEach(r=>{ if(AQ[r.k]) r.aq = AQ[r.k]; else delete r.aq; }));
   const arm = (V.arm||[]).map(a=>Object.assign({}, a, {descripcion:pzpArmTxt(a)}));
   await db.collection('piezasPrueba').doc(id).set({tipo:'audVerif', modulo:V.mod, fecha:ahora, por:quien, total:tot, grupos:V.G, est:V.est, difs:difs, resol:{}, arm});
-    audV = null; audVPintar(); toast('✅ Auditoría guardada'+(difs.length?'<br><small>Las diferencias te aparecen en el módulo para decidir.</small>':'')); _hdDifs.t = 0; renderHome(); }
+    try{ localStorage.removeItem(audVKey(V.mod)); }catch(e){} audV = null; audVPintar(); toast('✅ Auditoría guardada'+(difs.length?'<br><small>Las diferencias te aparecen en el módulo para decidir.</small>':'')); _hdDifs.t = 0; renderHome(); }
   catch(e){ alert('Error: '+e.message); }
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
