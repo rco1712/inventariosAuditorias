@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v320';
+const APP_VERSION = 'v321';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9777,15 +9777,17 @@ async function audVGrupos(mod){
 // v320: la auditoría se guarda en el teléfono mientras cuentas (si se cierra o se recarga la app, no se pierde).
 const audVKey = mod => 'audV_'+mod;
 let _audVJ = '';
-function audVBorrador(){ try{ const V = audV; if(!V) return; const j = JSON.stringify({mod:V.mod, G:V.G, est:V.est, fis:V.fis, nota:V.nota, fecha:V.fecha, arm:V.arm, af:V.af, armOn:V.armOn, vista:V.vista, open:V.open, dia:fechaHoyLocal()});
+function audVBorrador(){ try{ const V = audV; if(!V || V._act) return; const j = JSON.stringify({mod:V.mod, G:V.G, est:V.est, fis:V.fis, nota:V.nota, fecha:V.fecha, tomado:V.tomado||V.fecha, arm:V.arm, af:V.af, armOn:V.armOn, vista:V.vista, open:V.open, dia:V.dia||fechaHoyLocal()});
   if(j!==_audVJ){ _audVJ = j; localStorage.setItem(audVKey(V.mod), j); } }catch(e){} }
 setInterval(()=>{ if(audV) audVBorrador(); }, 4000);
 async function audVAbrir(){
   const mod = modulo();
   try{ const raw = localStorage.getItem(audVKey(mod)), b = raw ? JSON.parse(raw) : null;
-    if(b && b.dia===fechaHoyLocal() && b.G){ const n = Object.keys(b.est||{}).length;
-      if(confirm(`📋 Tienes una auditoría de ${mod} sin guardar (de hoy, ${n} renglones revisados${(b.arm||[]).length?', '+b.arm.length+' armados':''}).\n\n¿Seguir con ella?\n\nAceptar = seguir donde te quedaste\nCancelar = empezar de nuevo`)){
+    const viejo = b && b.dia ? (Date.parse(fechaHoyLocal())-Date.parse(b.dia))/864e5 : 99;
+    if(b && b.G && viejo <= 3){ const n = Object.keys(b.est||{}).length;
+      if(confirm(`📋 Tienes una auditoría de ${mod} sin guardar (${b.dia===fechaHoyLocal()?'de hoy':'del '+fCorta(b.dia)}, ${n} renglones revisados${(b.arm||[]).length?', '+b.arm.length+' armados':''}).\n\n¿Seguir con ella?\n\nAceptar = seguir donde te quedaste\nCancelar = empezar de nuevo`)){
         audV = Object.assign({pre:null, A:{}}, b); audVArmCalc(audV); audVPintar();
+        if(b.dia!==fechaHoyLocal()) alert('Es de otro día: si algo se movió desde entonces, toca «🔄 Actualizar lo que debe haber» y vuelve a contar lo que se movió.');
         audPreRevisar(mod).then(x=>{ if(audV && audV.mod===mod){ audV.pre = x; audVPintar(); } }).catch(()=>{}); return; }
       localStorage.removeItem(audVKey(mod)); } }catch(e){}
   audVPreAbrir(mod);
@@ -9814,11 +9816,36 @@ function audVPrePintar(){
     <button class="btn" style="width:100%;min-height:54px;margin-top:8px;background:${n?'#94a3b8':'linear-gradient(135deg,#0e7490,#155e75)'}" onclick="audVEmpezar()">▶️ Empezar el conteo${n?` (quedan ${n})`:''}</button>
     <div class="hint" style="margin:6px 0 0">Al empezar se toma lo que dice la app en ese momento. Mientras cuentas, nadie captura nada.</div>`:''}</div>`;
 }
+// v321 (pedido por el usuario): vuelve a tomar lo que debe haber (p. ej. después del cierre del coordinador) sin
+// borrar lo contado. Lo físico no cambia: en cada renglón se guarda cuántas sueltas había y se compara con lo nuevo.
+async function audVActualizar(){
+  const V = audV; if(!V || V._act) return;
+  if(!confirm('🔄 Actualizar lo que debe haber\n\nSe vuelve a tomar lo que dice la app ahora (con el cierre, la hoja de corte y lo aprobado).\n\nLo que ya contaste NO se borra: se queda cuántas sueltas había y se compara con lo nuevo.\n\n¿Actualizar?')) return;
+  V._act = true; toast('Actualizando…');
+  try{ audVArmCalc(V); const A0 = Object.assign({}, V.A||{}), suel = {}, gde = {};
+    V.G.forEach(g=>g.rows.forEach(r=>{ gde[r.k] = g.t; const e = V.est[r.k]; if(!e || r.sep || r.nota) return; const A = Number(A0[r.k])||0;
+      suel[r.k] = e==='si' ? Math.max(0, Number(r.d) - A) : Number(V.fis[r.k]); }));
+    const G = await audVGrupos(V.mod), est = {}, fis = {}, nota = {}, nuevos = new Set();
+    G.forEach(g=>g.rows.forEach(r=>{ nuevos.add(r.k); const e = V.est[r.k]; if(!e) return;
+      if(r.sep || r.nota){ est[r.k] = e; if(V.nota[r.k]) nota[r.k] = V.nota[r.k]; return; }
+      const sv = suel[r.k]; if(sv===undefined || isNaN(sv)){ est[r.k] = e; if(V.fis[r.k]!==undefined) fis[r.k] = V.fis[r.k]; return; }
+      const debe = Math.max(0, Number(r.d) - (Number(A0[r.k])||0));
+      if(e==='si' && Math.abs(debe - sv) < 0.0005) est[r.k] = 'si'; else { est[r.k] = 'no'; fis[r.k] = String(fmtNum(sv)); } }));
+    // Renglones contados que ya no aparecen (ahora la app dice 0): se quedan con lo que contaste.
+    V.G.forEach(g=>g.rows.forEach(r=>{ if(nuevos.has(r.k) || r.sep || r.nota || !V.est[r.k]) return; const sv = suel[r.k]; if(!(sv>0)) return;
+      let gN = G.find(x=>x.t===gde[r.k]); if(!gN){ gN = {t:gde[r.k], rows:[]}; G.push(gN); }
+      gN.rows.push(Object.assign({}, r, {d:0})); est[r.k] = 'no'; fis[r.k] = String(fmtNum(sv)); }));
+    const cambio = G.reduce((t,g)=>t+g.rows.filter(r=>{ const o = audVRow(r.k); return !o || Math.abs(Number(o.d)-Number(r.d))>0.0005; }).length,0);
+    Object.assign(V, {G, est, fis, nota, tomado:new Date().toISOString()}); V._act = false; audVArmCalc(V); audVPintar();
+    audPreRevisar(V.mod).then(x=>{ if(audV===V){ V.pre = x; audVPintar(); } }).catch(()=>{});
+    toast('✅ Actualizado · '+cambio+' renglón(es) cambiaron'+(cambio?'<br><small>Lo que ya contaste se quedó; revisa los que salgan sin marcar.</small>':''));
+  }catch(e){ V._act = false; alert('Error: '+e.message); }
+}
 async function audVEmpezar(){
   const V = audVP; if(!V || !V.pre) return; const mod = V.mod, pre = V.pre, nP = pre.filter(x=>AUD_PRE_IR[x.ic] || x.t.includes('no cuadran')).length;
   if(nP && !confirm(`Todavía quedan ${nP} cosa(s) sin resolver.\n\nSi cuentas así, te pueden salir faltantes o sobrantes que no son.\n\n¿Empezar de todos modos?`)) return;
   audVP = null; audVPrePintar(); toast('Preparando la auditoría…');
-  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), arm:[], af:{}, armOn:false, pre}; audVArmAbrir(); }catch(e){ alert('Error: '+e.message); }
+  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), dia:fechaHoyLocal(), arm:[], af:{}, armOn:false, pre}; audVArmAbrir(); }catch(e){ alert('Error: '+e.message); }
 }
 // v318 (pedido por el usuario): qué debe estar aparte de cada instalación (melamina/MDF en piezas y herrajes);
 // si se apartó, sin lo que el coordinador marcó como «se cuenta».
@@ -9874,7 +9901,7 @@ async function audPreRevisar(mod){
 function audPreHtml(V){
   if(!V.pre) return `<div class="hint" style="margin:0 0 8px">🧹 Revisando que no quede nada pendiente…</div>`;
   if(!V.pre.length) return `<div style="margin:0 0 8px;padding:9px 11px;border-radius:11px;background:rgba(22,163,74,.12);border:1px solid #16a34a;font-weight:900;color:#15803d">✅ Antes de contar: no hay nada pendiente en ${V.mod}.</div>`;
-  return `<details open style="margin:0 0 8px;padding:9px 11px;border-radius:11px;background:rgba(220,38,38,.08);border:2px solid #dc2626"><summary style="cursor:pointer;font-weight:900;color:#b91c1c">⚠️ Antes de contar, resuelve esto (${V.pre.length})</summary>
+  return `<details style="margin:0 0 8px;padding:9px 11px;border-radius:11px;background:rgba(220,38,38,.08);border:2px solid #dc2626"><summary style="cursor:pointer;font-weight:900;color:#b91c1c">⚠️ Quedan ${V.pre.length} pendiente(s) de «Antes de contar» (toca para ver)</summary>
     ${V.pre.map(x=>`<div style="margin-top:7px;font-size:13.5px;line-height:1.35"><b>${x.ic} ${x.t}</b>${x.d?`<div class="hint" style="margin:1px 0 0">${x.d}</div>`:''}</div>`).join('')}
     <div class="hint" style="margin:8px 0 0">Si cuentas sin resolverlo, te puede salir como faltante o sobrante que no es. Puedes cerrar, resolverlo y volver a abrir la auditoría.</div></details>`;
 }
@@ -9958,8 +9985,10 @@ function audVPintar(){
           <span class="hint" style="margin:0">sumar</span><input id="av-add-${idk(r.k)}" type="number" inputmode="decimal" placeholder="+" style="width:64px;min-width:64px;margin:0"><button class="btn small" style="margin:0;padding:0 10px" onclick="audVAdd('${q(r.k)}')">＋</button>
           ${dif!==null?`<strong style="color:${dif<0?'#dc2626':(dif>0?'#0369a1':'#16a34a')}">${dif>0?'+':''}${fmtNum(dif)}</strong>`:''}</div>`) : ''}</div>`; };
   ov.innerHTML = `<div style="width:100%;max-width:480px;background:var(--card);color:var(--ink);border:2px solid #0f172a;border-radius:18px;padding:14px;margin-top:8px">
-    <div style="display:flex;justify-content:space-between"><div style="font-size:18px;font-weight:900">🔍 Auditoría · ${V.mod}</div><button onclick="if(confirm('¿Salir? Lo que llevas se pierde.')){audV=null;audVPintar();}" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    <div style="display:flex;justify-content:space-between"><div style="font-size:18px;font-weight:900">🔍 Auditoría · ${V.mod}</div><button onclick="if(confirm('¿Salir? Lo que llevas contado queda guardado en este celular; al volver a entrar te pregunta si sigues.')){audVBorrador();audV=null;audVPintar();}" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
     <p class="hint" style="margin:2px 0 6px">La app dice lo que <strong>debe haber</strong>. Tú solo verificas: ✅ sí está · ❌ no → cuenta (puedes ir sumando). <strong>${hechos} de ${tot}</strong> revisados.</p>
+    <button class="btn small" style="width:100%;margin:0 0 6px;background:transparent;color:#0e7490;border:1.5px solid #0e7490;box-shadow:none" onclick="audVActualizar()">🔄 Actualizar lo que debe haber <span style="font-weight:600">(no borra lo contado)</span></button>
+    <div class="hint" style="margin:-2px 0 6px">Lo que debe haber es de ${new Date(V.tomado||V.fecha).toLocaleString('es-MX',{weekday:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} · Úsalo después del cierre del coordinador.</div>
     <div style="margin-top:6px;padding:10px;border-radius:12px;border:2px solid #0e7490;background:rgba(14,116,144,.07)">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><div style="font-weight:900">🗄️ 1. Muebles armados</div>
         <div class="hint" style="margin:0">${(V.arm||[]).length?(V.arm||[]).map(a=>`${a.cantidad} × ${pzpArmTxt(a)}`).join(' · '):'Cuéntalos primero: la app los suma en piezas.'}</div></div>
