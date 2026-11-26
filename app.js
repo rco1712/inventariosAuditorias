@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v315';
+const APP_VERSION = 'v316';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5882,7 +5882,8 @@ function movPosibleDuplicado(m){
 function movCorregible(m){
   if(!esAdmin() || m.anulado || m.estado==='pendiente' || m.estado==='rechazado') return false;
   if(!['entrada','salida','merma'].includes(m.tipo)) return false;
-  if(m.motivo || (m.cierreTurno && m.tipo!=='salida')) return false;
+  // v316 (pedido por el usuario): la merma de la hoja de corte también se puede corregir (si ya se aprobó y después se completó la hoja).
+  if((m.motivo && m.motivo!=='hojaCorteDesperdicio') || (m.cierreTurno && m.tipo!=='salida')) return false;
   if(/^(Traspaso|Devolución de préstamo) /.test(m.nota||'') || m.origenTipo==='modulo') return false;
   return true;
 }
