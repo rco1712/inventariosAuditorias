@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v317';
+const APP_VERSION = 'v318';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9476,7 +9476,7 @@ async function hojaDiaGenerar(){
       && l.fechaDia>=d0 && l.fechaDia<hoy && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)) && !(l.verif && l.verif.estado)).sort((a,b)=>String(a.calle||'').localeCompare(String(b.calle||'')));
     if(env.length) G.unshift({t:'🚚 Instalaciones que mandaste', inst:true, rows:env.map(l=>({k:'i_'+l.id, logId:l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:fCorta(l.fechaDia)+' · ¿Salió? Si NO salió y el material sigue en el taller, toca No y sepáralo.', sep:true, inst:true}))});
     const sep = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
-      && ((l.separado && !l.separado.resuelto) || (l.pospuesta && !l.verif && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
+      && ((l.separado && !l.separado.resuelto) || (!l.verif && !l.duplicadoAnulado && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
     if(sep.length) G.push({t:'📌 Material separado', sep:true, rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), t:'', d:'', u:'', det:(l.separado&&!l.separado.resuelto?'Separada · se instala '+fCorta(diaValorInst(l)):(l.noSalio?'No salió · esperando a Dirección':'Apartada · se instala '+fCorta(diaValorInst(l)))), sep:true}))}); }catch(e){}
   // v298 (pedido por el usuario): para que no tarde tanto, lo que NO se movió va agrupado ("sigue igual") y cada día
   // la app escoge 3 renglones al azar de lo que no se movió para contarlos "a ciegas" (sin ver cuánto debe haber).
@@ -9756,8 +9756,8 @@ async function audVGrupos(mod){
     if(sb.length) G.push({t:'🧩 Sobrantes', rows:sb.map(x=>({k:'sb_'+x.id, n:(x.calle?x.calle+' · ':'')+Object.keys(x.restante||{}).map(k=>fmtNum(x.restante[k])+' '+((CATALOGO.find(i=>i.id===k)||{}).nombre||k).replace('Melamina ','')).join(' · '), d:'', u:'', nota:true, sep:true}))}); }catch(e){}
   try{ const sn = await db.collection('instalacionesLog').where('modulo','==',mod).get(); const ls = sn.docs.map(d=>({id:d.id, ...d.data()})), hoy = fechaHoyLocal();
     const sep = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id))
-      && ((l.separado && !l.separado.resuelto) || (l.pospuesta && !l.verif && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
-    if(sep.length) G.push({t:'📌 Material separado', rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), d:'', u:'', nota:true, sep:true}))}); }catch(e){}
+      && ((l.separado && !l.separado.resuelto) || (!l.verif && !l.duplicadoAnulado && diaValorInst(l) > hoy) || (l.noSalio && (!l.verif || l.verif.puertas==='pendiente'))));
+    if(sep.length) G.push({t:'📌 Material separado', rows:sep.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), det:audSepDet(l), d:'', u:'', nota:true, sep:true}))}); }catch(e){}
   return G;
 }
 async function audVAbrir(){
@@ -9765,6 +9765,19 @@ async function audVAbrir(){
   try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), arm:[], af:{}, armOn:false, pre:null}; audVArmAbrir(); /* v309: empieza por los armados */
     audPreRevisar(mod).then(x=>{ if(audV && audV.mod===mod){ audV.pre = x; audVPintar(); } }).catch(()=>{}); }catch(e){ alert('Error: '+e.message); }
 }
+// v318 (pedido por el usuario): qué debe estar aparte de cada instalación (melamina/MDF en piezas y herrajes);
+// si se apartó, sin lo que el coordinador marcó como «se cuenta».
+function audSepDet(l){ try{ const cu = (l.separado && !l.separado.resuelto && l.separado.cuenta) || {};
+  const cs = paso0Cons(l).filter(c=>!(cu[c.itemId]>0)), mel = [], her = [], caj = [];
+  cs.forEach(c=>{ const it = CATALOGO.find(i=>i.id===c.itemId); if(!it) return;
+    if(esHojaId(c.itemId)){ const pz = paso0PzTxt(l, c.itemId); mel.push(`<b>${it.nombre.replace(/^Melamina /,'')}</b>: ${pz || fmtNum(c.cantidad)+' hojas'}`); }
+    else (/corredera|jaladera/i.test(it.nombre) ? caj : her).push(`${fmtNum(c.cantidad)} ${it.nombre}`); });
+  if(caj.length && !caj.some(x=>/corredera/i.test(x))){ her.push(...caj); caj.length = 0; }
+  const out = [];
+  if(mel.length) out.push('🟫 '+mel.join('<br>🟫 '));
+  if(caj.length) out.push('🗄️ <b>Con los cajones</b> (si ya están armados, van puestas): '+caj.join(' · '));
+  if(her.length) out.push('🔩 <b>Sueltos</b>: '+her.join(' · '));
+  return out.join('<br>') || (Object.keys(cu).length?'Todo se regresó a contar':''); }catch(e){ return ''; } }
 // v317 (pedido por el usuario): antes de contar, la app revisa que no quede nada «flotando» en el módulo
 // (por aprobar, por verificar, sin decidir, en camino, hoja de corte que no cuadra). Solo avisa; no bloquea.
 async function audPreRevisar(mod){
@@ -9785,6 +9798,8 @@ async function audPreRevisar(mod){
   if(rech.length) add('❌', `${rech.length} rechazada(s) sin resolver por el coordinador`, rech.map(l=>l.calle||'').filter(Boolean).join(' · '));
   const apa = L.filter(l=>viva(l) && l.separado && !l.separado.resuelto);
   if(apa.length) add('📌', `${apa.length} instalación(es) apartada(s)`, 'Su material va aparte: no lo cuentes con lo suelto, se revisa en «Material separado»');
+  const fut = L.filter(l=>viva(l) && !l.verif && !(l.separado && !l.separado.resuelto) && diaValorInst(l) > hoy);
+  if(fut.length) add('📅', `${fut.length} instalación(es) para otro día`, fut.map(l=>`${fCorta(diaValorInst(l))} ${l.calle||String(l.descripcion||'').split(' · ')[0]}`).slice(0,6).join(' · ')+' · su material ya se descontó: si está en el taller, ponlo aparte y no lo cuentes; se revisa en «Material separado»');
   try{ await cargarPrestamos(); const pe = (prestamos||[]).filter(p=>p.estado==='encamino' && (p.origen===mod || p.destino===mod));
     if(pe.length) add('🚚', `${pe.length} traspaso(s) en camino`, pe.map(p=>`${p.origen}→${p.destino}: ${fmtNum(p.cantidad)} ${p.itemNombre}`).slice(0,4).join(' · ')); }catch(e){}
   const fer = sh.docs.map(d=>d.data()).filter(m=>m.tipo==='ferEnvio' && m.estado==='encamino' && m.modulo===mod);
@@ -9868,7 +9883,8 @@ function audVPintar(){
       ${audPreHtml(V)}
       <div style="margin:4px 0 8px;padding:9px 11px;border-radius:11px;background:rgba(14,116,144,.09)"><div style="font-weight:900">Paso 1 de 2 · Cuenta todo lo que ya está armado:</div>
         <div style="font-size:13.5px;margin-top:3px;line-height:1.45">• Cajoneras (de 1, 2, 3, 5 y Emma), con o sin cajones<br>• Cajones y cuadros (con o sin fondo)<br>• Todo lo Max: cajonera, cajón y cuadros<br>• Cajoneras y puertas de espejo · puertas de zapatera</div>
-        <div class="hint" style="margin:4px 0 0">La app los desarma en piezas, correderas y jaladeras. Después solo verificas lo suelto.</div></div>
+        <div class="hint" style="margin:4px 0 0">La app los desarma en piezas, correderas y jaladeras. Después solo verificas lo suelto.</div>
+        <div style="font-size:13px;margin-top:5px;font-weight:800;color:#b45309">⚠️ No cuentes lo que está aparte para instalaciones: eso se revisa en "📌 Material separado".</div></div>
       ${armSimpleHtml()}
       <button class="btn" style="width:100%;min-height:54px;margin-top:10px;background:#0e7490" onclick="audVArmCerrar()">${(V.arm||[]).length?`✅ Listo, ya conté los armados (${(V.arm||[]).reduce((t,a)=>t+Number(a.cantidad||0),0)}) → verificar`:'➡️ No hay armados · seguir a verificar'}</button></div>`;
     return;
@@ -9877,7 +9893,7 @@ function audVPintar(){
   const fila = r => { const e = V.est[r.k], no = e==='no', f = V.fis[r.k], A = Number(AQ[r.k])||0, S = fmtNum(Math.max(0, Number(r.d) - A)), sobra = A > Number(r.d) + 0.0005,
       dif = no && !r.sep && !r.nota && f!=='' && f!==undefined ? fmtNum(Number(f) + A - Number(r.d)) : null;
     return `<div style="padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${e==='si'?'#16a34a':(no?'#dc2626':'var(--line)')};background:${e==='si'?'rgba(22,163,74,.06)':(no?'rgba(220,38,38,.06)':'transparent')}">
-      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700;font-size:14px">${r.n}</strong>${A>0?`<div class="hint" style="margin:0;${sobra?'color:#0369a1;font-weight:800':''}">${sobra?`🗄️ En armados hay ${fmtNum(A)} y debe haber ${fmtNum(r.d)} (sobran ${fmtNum(A-Number(r.d))})`:`Debe haber ${fmtNum(r.d)} = 🗄️ ${fmtNum(A)} armadas + ${S} sueltas`}</div>`:''}</div>
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700;font-size:14px">${r.n}</strong>${r.det?`<div class="hint" style="margin:2px 0 0;font-size:12.5px;line-height:1.4">Debe estar aparte:<br>${r.det}</div>`:''}${A>0?`<div class="hint" style="margin:0;${sobra?'color:#0369a1;font-weight:800':''}">${sobra?`🗄️ En armados hay ${fmtNum(A)} y debe haber ${fmtNum(r.d)} (sobran ${fmtNum(A-Number(r.d))})`:`Debe haber ${fmtNum(r.d)} = 🗄️ ${fmtNum(A)} armadas + ${S} sueltas`}</div>`:''}</div>
         ${r.sep?'':`<div style="text-align:right"><div style="font-size:18px;font-weight:900;line-height:1">${A>0?S:fmtNum(r.d)}</div><div class="hint" style="margin:0;font-size:11px">${A>0?'sueltas':r.u}</div></div>`}
         <button class="btn small" style="margin:0;min-width:40px;min-height:36px;padding:0;background:${e==='si'?'#16a34a':'transparent'};color:${e==='si'?'#fff':'#16a34a'};border:1.5px solid #16a34a;box-shadow:none" onclick="audVSet('${q(r.k)}','si')">✅</button>
         <button class="btn small" style="margin:0;min-width:40px;min-height:36px;padding:0;background:${no?'#dc2626':'transparent'};color:${no?'#fff':'#dc2626'};border:1.5px solid #dc2626;box-shadow:none" onclick="audVSet('${q(r.k)}','no')">❌</button></div>
