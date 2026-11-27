@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v322';
+const APP_VERSION = 'v323';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -754,6 +754,8 @@ function setView(v){
   if(!['home','actas','cargando','elegirmod'].includes(v) && typeof actaBloquea==='function' && actaBloquea()){ alert((_actaEnt.doc?'📜 Primero firma el Acta de entrega en tu Inicio.':'📋 Primero firma tu Hoja del día en tu Inicio.')+'\n\nHasta firmarla no se puede capturar nada.'); v = 'home'; }
   if(esSoloReportes() && !(v==='repver' && repSec==='rinstDir')){ repSec = 'rinstDir'; if(!repRiDia) repRiDia = fechaHoyLocal(); v = 'repver'; }
   if(enDirModo() && VISTAS_MODULO.includes(v)) return renderElegirModulo(v); // Dirección: primero ¿de qué módulo?
+  // v323: para Dirección, la pestaña 📋 Auditoría abre la auditoría nueva (verificar) en los módulos del sistema nuevo.
+  if(v==='aud' && esAdmin() && typeof sisNuevoMod==='function' && sisNuevoMod(modulo()) && typeof audVAbrir==='function'){ v = 'home'; setTimeout(()=>audVAbrir(), 60); }
   current=v;
   if(esSoloLectura() && ['mov','inst','trasp','pend','mas','pzenc','gas'].includes(v)){
     document.querySelectorAll('#nav button[data-v]').forEach(b=>b.classList.toggle('active',b.dataset.v===v));
@@ -9837,7 +9839,7 @@ async function audVActualizar(){
       if(r.sep || r.nota){ est[r.k] = e; if(V.nota[r.k]) nota[r.k] = V.nota[r.k]; return; }
       const sv = suel[r.k]; if(sv===undefined || isNaN(sv)){ est[r.k] = e; if(V.fis[r.k]!==undefined) fis[r.k] = V.fis[r.k]; return; }
       const debe = Math.max(0, Number(r.d) - (Number(A0[r.k])||0));
-      if(e==='si' && Math.abs(debe - sv) < 0.0005) est[r.k] = 'si'; else { est[r.k] = 'no'; fis[r.k] = String(fmtNum(sv)); } }));
+      if(Math.abs(debe - sv) < 0.0005) est[r.k] = 'si'; /* v323: si ya cuadra, queda en ✅ sola */ else { est[r.k] = 'no'; fis[r.k] = String(fmtNum(sv)); } }));
     // Renglones contados que ya no aparecen (ahora la app dice 0): se quedan con lo que contaste.
     V.G.forEach(g=>g.rows.forEach(r=>{ if(nuevos.has(r.k) || r.sep || r.nota || !V.est[r.k]) return; const sv = suel[r.k]; if(!(sv>0)) return;
       let gN = G.find(x=>x.t===gde[r.k]); if(!gN){ gN = {t:gde[r.k], rows:[]}; G.push(gN); }
@@ -9878,8 +9880,9 @@ async function audPreRevisar(mod){
   if(pm.length){ const lotes = new Set(pm.map(m=>m.loteId||m.id)); add('✅', `${lotes.size} captura(s) por aprobar`, [...new Set(pm.map(m=>({merma:'merma', entrada:'entrada', salida:'salida', devolucion:'devolución', ajuste:'ajuste', garantia:'garantía'}[m.tipo]||m.tipo)))].join(', ')+' · en Aprobaciones'); }
   const reg = new Set(M.filter(m=>m.motivo==='regresoInstalacion' && m.estado!=='rechazado').map(m=>m.instalacionId));
   const viva = l => l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !reg.has(l.id);
-  const ip = L.filter(l=>l.estado==='pendiente'); if(ip.length) add('🔧', `${ip.length} instalación(es) por aprobar`, 'Se aprueban al verificarlas (✅ Se instaló)');
-  const noSal = L.filter(l=>viva(l) && l.noSalio && (!l.verif || l.verif.puertas==='pendiente'));
+  // v323: las de hoy (o de otro día) ya están descontadas y se verifican después: no son pendiente para contar.
+  const ip = L.filter(l=>l.estado==='pendiente' && viva(l) && diaValorInst(l) < hoy); if(ip.length) add('🔧', `${ip.length} instalación(es) por aprobar`, 'Se aprueban al verificarlas (✅ Se instaló)');
+  const noSal = L.filter(l=>viva(l) && l.noSalio && (!l.verif || l.verif.puertas==='pendiente') && diaValorInst(l) < hoy);
   if(noSal.length) add('🚫', `${noSal.length} «no salió» esperando tu decisión`, noSal.map(l=>(l.calle||String(l.descripcion||'').split(' · ')[0])).join(' · ')+' · si siguen en el taller, que regresen antes de contar');
   const sv = L.filter(l=>viva(l) && !l.verif && diaValorInst(l) < hoy && !(l.separado && !l.separado.resuelto) && !noSal.includes(l) && diaValorInst(l) >= verifDesde());
   if(sv.length) add('🔍', `${sv.length} instalación(es) sin verificar`, 'En Verificar');
@@ -9889,7 +9892,9 @@ async function audPreRevisar(mod){
   if(apa.length) add('📌', `${apa.length} instalación(es) apartada(s)`, 'Su material va aparte: no lo cuentes con lo suelto, se revisa en «Material separado»');
   const fut = L.filter(l=>viva(l) && !l.verif && !(l.separado && !l.separado.resuelto) && diaValorInst(l) > hoy);
   if(fut.length) add('📅', `${fut.length} instalación(es) para otro día`, fut.map(l=>`${fCorta(diaValorInst(l))} ${l.calle||String(l.descripcion||'').split(' · ')[0]}`).slice(0,6).join(' · ')+' · su material ya se descontó: si está en el taller, ponlo aparte y no lo cuentes; se revisa en «Material separado»');
-  try{ await cargarPrestamos(); const pe = (prestamos||[]).filter(p=>p.estado==='encamino' && (p.origen===mod || p.destino===mod));
+  try{ await cargarPrestamos(); const pe = (prestamos||[]).filter(p=>p.estado==='encamino' && p.destino===mod), ps = (prestamos||[]).filter(p=>p.estado==='encamino' && p.origen===mod);
+    // v323: lo que este módulo ENVIÓ ya se le descontó: solo aviso (si sigue en el taller, no se cuenta).
+    if(ps.length) add('📤', `${ps.length} envío(s) a otro módulo en camino`, 'Ya se descontó. Si sigue en el taller, no lo cuentes: '+ps.map(p=>`${p.destino}: ${fmtNum(p.cantidad)} ${p.itemNombre}`).slice(0,4).join(' · '));
     if(pe.length) add('🚚', `${pe.length} traspaso(s) en camino`, pe.map(p=>`${p.origen}→${p.destino}: ${fmtNum(p.cantidad)} ${p.itemNombre}`).slice(0,4).join(' · ')); }catch(e){}
   const fer = sh.docs.map(d=>d.data()).filter(m=>m.tipo==='ferEnvio' && m.estado==='encamino' && m.modulo===mod);
   if(fer.length) add('📦', `${fer.length} envío(s) de ferretería del almacén sin recibir`, 'Si ya llegó, que lo acepten antes de contar');
@@ -17856,7 +17861,7 @@ async function pzpCargar(mod){
     db.collection('piezasPrueba').where('modulo','==',mod).get()]);
   const d = s => s.docs.map(x=>Object.assign({id:x.id}, x.data()));
   const pp = d(sP);
-  pzpD = {mod, auds:d(sA), movs:d(sM), logs:d(sL), cfg:pp.find(x=>x.id==='cfg_'+mod)||null, dias:pp.filter(x=>x.tipo==='dia'), chks:pp.filter(x=>x.tipo==='chk')};
+  pzpD = {mod, auds:d(sA), movs:d(sM), logs:d(sL), cfg:pp.find(x=>x.id==='cfg_'+mod)||null, dias:pp.filter(x=>x.tipo==='dia'), chks:pp.filter(x=>x.tipo==='chk'), reclas:pp.filter(x=>x.tipo==='reclas' && !x.anulado)};
   return pzpD;
 }
 function pzpAudsBase(D){ return D.auds.filter(a=>(a.piezasContadas&&a.piezasContadas.length) || (a.armadosContados&&a.armadosContados.length)).sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')); }
@@ -17915,6 +17920,7 @@ function pzpCalcular(D, hasta, borrador){
   // ya quedó dentro del conteo: no se suma otra vez. Se cuenta desde el día siguiente.
   const dIni = c => base.cierreConteo ? c.fecha > d0 : c.fecha >= d0;
   D.dias.forEach(c=>{ if(dIni(c) && (!hasta || c.fecha <= hasta)){ capt[c.fecha] = c; dias.add(c.fecha); } });
+  const recl = (D.reclas||[]).filter(r=>dIni(r) && (!hasta || r.fecha <= hasta)); recl.forEach(r=>dias.add(r.fecha));
   if(borrador && borrador.fecha && dIni(borrador) && (!hasta || borrador.fecha <= hasta)){ capt[borrador.fecha] = borrador; dias.add(borrador.fecha); }
   const lista = [...dias].sort();
   const porDia = {};
@@ -18028,6 +18034,10 @@ function pzpCalcular(D, hasta, borrador){
       }
     });
     if(c && Array.isArray(c.armados)) arm = c.armados.map(a=>Object.assign({}, a));
+    // v323 (pedido por el usuario): Dirección corrige una pieza mal anotada (p. ej. entrepaño normal que era de Max).
+    // Solo cambia de renglón en el inventario de piezas; el inventario oficial (hojas) no se mueve.
+    recl.filter(r=>r.fecha===dia).forEach(r=>{ const De = PIEZAS_AUDIT.find(x=>x.key===r.de), A = PIEZAS_AUDIT.find(x=>x.key===r.a), q = Number(r.q)||0;
+      if(!De || !A || !(q>0) || !r.itemId) return; add(r.itemId, De.dim, -q, De.nombre, 'correccion'); add(r.itemId, A.dim, q, A.nombre, 'correccion'); });
     if(!c && (Object.keys(cutH).length || info.otros.some(m=>!pzpOtroAuto(D, m)))) avisos.push({dia, falta:true, t:'Falta capturar la hoja de corte de este día.'});
     porDia[dia] = info;
   });
@@ -18453,6 +18463,41 @@ function hcMRGuardar(){ const o = hcMR, q = Math.round(Number(o.q)||0), P = PIEZ
   if(o.dest==='aprov' && hcAreaSalio(o.salio) > q*pzpArea(P.dim) + 1) return alert('Lo aprovechado no cabe en lo que se dañó. Revisa.');
   hcCap.mermas.push({id:cryptoId(), itemId:o.itemId, k:o.k, q, nota:String(o.nota||'').trim(), dest:o.dest, salio:o.dest==='aprov'?(o.salio||[]):[]}); hcMR = null; hcBorrGuardar(); toast('✔ Merma agregada · se guarda con la hoja'); hcRender(); }
 function hcQuitar(campo, i){ if(!confirm('¿Quitar ese renglón?')) return; hcCap[campo].splice(i,1); hcBorrGuardar(); hcRender(); }
+// v323: 🔁 Corregir pieza mal anotada (solo Dirección). Se guarda aparte (piezasPrueba tipo 'reclas'), con fecha del día.
+let hcRcl = null;
+function hcReclasHtml(){
+  const xs = ((pzpD && pzpD.reclas)||[]).filter(r=>r.fecha===hcFecha), mel = PIEZAS_AUDIT.filter(x=>x.tipo==='mel');
+  const opt = sel => mel.map(P=>`<option value="${P.key}" ${P.key===sel?'selected':''}>${/\d×\d/.test(P.label)?P.label:P.label+' '+pzpNorm(P.dim)}</option>`).join('');
+  const cols = CATALOGO.filter(i=>esHojaId(i.id)).map(i=>`<option value="${i.id}" ${hcRcl&&hcRcl.itemId===i.id?'selected':''}>${pzpColor(i.id)}</option>`).join('');
+  const lbl = k => { const P = PIEZAS_AUDIT.find(x=>x.key===k); return P ? (/\d×\d/.test(P.label)?P.label:P.label+' '+pzpNorm(P.dim)) : k; };
+  return `<div class="card" style="border-left:6px solid #7c3aed"><div style="font-size:16px;font-weight:900">🔁 Corregir pieza mal anotada <span class="hint" style="margin:0">(solo Dirección)</span></div>
+    <div class="hint" style="margin:2px 0 6px">Para piezas que se anotaron con otro nombre (ej. entrepaño normal que era de Max). Solo cambian de renglón; las hojas del inventario no se mueven.</div>
+    ${xs.map(r=>`<div class="movitem" style="padding-left:10px;box-shadow:inset 4px 0 0 #7c3aed"><span style="min-width:0"><b>${pzpColor(r.itemId)}</b>: ${fmtNum(r.q)} ${lbl(r.de)} → <b>${lbl(r.a)}</b><br><span class="hint" style="margin:0">${r.motivo||''} · ${r.por||''}</span></span><button class="btn small" style="background:#dc2626" onclick="hcReclasQuitar('${r.id}')">🗑️</button></div>`).join('')}
+    ${hcRcl?`<label class="hint" style="display:block;margin-top:8px">Color</label><select onchange="hcRcl.itemId=this.value">${cols}</select>
+      <label class="hint" style="display:block;margin-top:6px">Se anotó como</label><select onchange="hcRcl.de=this.value">${opt(hcRcl.de)}</select>
+      <label class="hint" style="display:block;margin-top:6px">En realidad es</label><select onchange="hcRcl.a=this.value">${opt(hcRcl.a)}</select>
+      <label class="hint" style="display:block;margin-top:6px">¿Cuántas?</label><input type="number" inputmode="decimal" min="0" value="${hcRcl.q||''}" oninput="hcRcl.q=this.value">
+      <label class="hint" style="display:block;margin-top:6px">Motivo</label><input type="text" value="${hcRcl.motivo||''}" oninput="hcRcl.motivo=this.value" placeholder="Ej. en el conteo inicial se anotaron como normales">
+      <div style="display:flex;gap:8px;margin-top:8px"><button class="btn" style="flex:1;background:#7c3aed" onclick="hcReclasGuardar()">💾 Guardar corrección</button><button class="btn" style="background:transparent;color:var(--sub);border:1.5px solid var(--line);box-shadow:none" onclick="hcRcl=null;hcRender()">Cancelar</button></div>`
+    :`<button class="btn small" style="width:100%;margin-top:6px;background:transparent;color:#7c3aed;border:1.5px solid #7c3aed;box-shadow:none" onclick="hcRcl={itemId:hcColor||'',de:'entrepano',a:'entmaxlargo',q:'',motivo:''};hcRender()">➕ Corregir una pieza</button>`}</div>`;
+}
+async function hcReclasGuardar(){
+  if(!esAdmin() || !hcRcl) return; const R = hcRcl, q = Number(R.q);
+  if(!R.itemId) R.itemId = (CATALOGO.find(i=>esHojaId(i.id))||{}).id;
+  if(!(q>0)) return alert('Escribe cuántas piezas.'); if(R.de===R.a) return alert('Elige una pieza distinta.');
+  if(!String(R.motivo||'').trim()) return alert('Escribe el motivo (queda en el historial).');
+  const lbl = k => { const P = PIEZAS_AUDIT.find(x=>x.key===k); return P ? (/\d×\d/.test(P.label)?P.label:P.label+' '+pzpNorm(P.dim)) : k; };
+  if(!confirm(`🔁 ${pzpColor(R.itemId)}\n\n${fmtNum(q)} ${lbl(R.de)}  →  ${lbl(R.a)}\n\nDía: ${pzpFmtDia(hcFecha)}\nLas hojas del inventario no se mueven.\n\n¿Guardar?`)) return;
+  const mod = modulo(), id = 'reclas_'+mod+'_'+Date.now();
+  const doc = {tipo:'reclas', modulo:mod, fecha:hcFecha, itemId:R.itemId, de:R.de, a:R.a, q, motivo:String(R.motivo).trim(), por:getCurrentUserEmail?getCurrentUserEmail():'', en:new Date().toISOString()};
+  try{ await db.collection('piezasPrueba').doc(id).set(doc); }catch(e){ return alert('Error: '+e.message); }
+  (pzpD.reclas = pzpD.reclas||[]).push(Object.assign({id}, doc)); hcRcl = null; toast('✔ Corregido'); hcRender();
+}
+async function hcReclasQuitar(id){
+  if(!esAdmin() || !confirm('¿Quitar esta corrección?')) return;
+  try{ await db.collection('piezasPrueba').doc(id).update({anulado:true, anuladoEn:new Date().toISOString()}); }catch(e){ return alert('Error: '+e.message); }
+  pzpD.reclas = (pzpD.reclas||[]).filter(r=>r.id!==id); hcRender();
+}
 function hcRender(){
   if(!pzpD || pzpD.mod!==modulo()){ hcAbrir(); return; }
   const cfg = pzpD.cfg;
@@ -18486,6 +18531,7 @@ function hcRender(){
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${tabs}</div></div>
     ${hcPuertasHtml(hcPuertasPend())}
     ${cuerpo}
+    ${esAdmin()?hcReclasHtml():''}
     <div class="card"><button class="btn" style="width:100%;min-height:54px;font-size:16px;background:#0e7490" onclick="hcGuardar()">💾 Guardar hoja de corte del ${pzpFmtDia(hcFecha)}</button>
       <button class="btn" style="width:100%;min-height:48px;margin-top:8px;background:transparent;color:#0e7490;border:2px solid #0e7490;box-shadow:none" onclick="hcPDF()">📄 PDF de la hoja del ${pzpFmtDia(hcFecha)}</button></div>`;
 }
@@ -19113,7 +19159,7 @@ function pzpDebeHtml(){
     const fd = (R.FD||{})[k] || {}, dias = Object.keys(fd).sort(); let acum = 0;
     const filas = dias.map(d=>{ const o = fd[d]; let ent = 0, sal = 0, txt = [];
       Object.keys(o).forEach(src=>{ const v = o[src]; if(v>0) ent += v; else sal += v; });
-      if(o.ini) txt.push('conteo inicial'); if(o.corte) txt.push('corte'); if(o.ret) txt.push('de retazo'); if(o.inst) txt.push('instalaciones'); if(o.regreso) txt.push('regresos'); if(o.salida) txt.push('garantía/merma'); if(o.recorte) txt.push('recorte');
+      if(o.ini) txt.push('conteo inicial'); if(o.corte) txt.push('corte'); if(o.ret) txt.push('de retazo'); if(o.inst) txt.push('instalaciones'); if(o.regreso) txt.push('regresos'); if(o.salida) txt.push('garantía/merma'); if(o.recorte) txt.push('recorte'); if(o.correccion) txt.push('corrección de Dirección');
       acum += ent + sal;
       return `<tr><td style="white-space:nowrap">${pzpFmtDia(d)}<div class="hint" style="margin:0">${txt.join(', ')}</div></td><td style="text-align:right;color:#15803d">${ent?'+'+fmtNum(ent):''}</td><td style="text-align:right;color:#b91c1c">${sal?'−'+fmtNum(-sal):''}</td><td style="text-align:right;font-weight:800" class="${fmtNum(acum)<0?'neg':''}">${fmtNum(acum)}</td></tr>`; }).join('');
     return `<details class="card" style="padding:0" ${op?'open':''} ontoggle="if(this.open)pzpDebeAbiertas.add('${k}');else pzpDebeAbiertas.delete('${k}')">
