@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v325';
+const APP_VERSION = 'v326';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -5084,7 +5084,9 @@ const ARMS_TIPOS = [
   {g:'Cajoneras', c:'#2563eb', xs:[['De 3','cajonera','3'],['De 5','cajonera','5'],['Emma','cajonera','emma'],['De 2','cajonera','2'],['De 1','cajonera','1']]},
   {g:'Cajones y cuadros', c:'#ca8a04', xs:[['Cajón','cajon','normal'],['Cajón Emma','cajon','emma'],['Cuadro con fondo','cuadro_fondo','normal'],['Cuadro sin fondo','cuadro_sin','normal']]},
   {g:'Max (todo del color del frente)', c:'#7c3aed', xs:[['Cajonera Max','cajonera','max'],['Cajón Max','cajon','max'],['Cuadro Max con fondo','cuadro_fondo','max'],['Cuadro Max sin fondo','cuadro_sin','max']]},
-  {g:'Espejo y zapatera', c:'#0e7490', xs:[['Cajonera de espejo','cajonera_espejo','normal'],['Puerta de espejo','puerta_espejo','normal'],['Cajonera espejo Max','cajonera_espejo','max'],['Puerta espejo Max','puerta_espejo','max'],['Puerta de zapatera','puerta_zapatera','normal']]}];
+  {g:'Cajonera de espejo', c:'#0e7490', xs:[['Cajonera de espejo','cajonera_espejo','normal'],['Cajonera espejo Max','cajonera_espejo','max']]},
+  // v326 (pedido por el usuario): las puertas y puertitas se cuentan SOLO aquí (con o sin herrajes); ya no en piezas.
+  {g:'🚪 Puertas y puertitas (con o sin herrajes)', c:'#e0742a', xs:[['Puerta de zapatera','puerta_zapatera','normal'],['Puertita de 3','puertita','3'],['Puertita de 5 / Emma','puertita','5'],['Puertita Max','puertita','max'],['Puerta de espejo','puerta_espejo','normal'],['Puerta espejo Max','puerta_espejo','max']]}];
 const ARMS_LISTA = ARMS_TIPOS.flatMap(g=>g.xs.map(x=>({t:x[0], tipo:x[1], v:x[2], c:g.c})));
 function armSLista(){ return (typeof audV!=='undefined' && audV && audV.armOn) ? audV.arm : auditArmados; }
 function armSRepintar(){ if(typeof audV!=='undefined' && audV && audV.armOn) audVPintar(); else renderAud(); }
@@ -5122,6 +5124,7 @@ function armSColGrid(k, titulo){ return `<div style="font-weight:900;font-size:1
 // Qué colores pide cada tipo: [campo, título].
 function armSColores(T){
   if(!T) return [];
+  if(T.tipo==='puertita') return [['cF','🎨 Color de la puertita']];
   if(T.v==='max') return [['cF','🎨 Color (todo el mueble es de un color)']];
   if(T.tipo==='cajonera') return [['cM','🎨 Color de la cajonera'],['cF','🎨 Color del frente']];
   if(T.tipo==='cajon') return [['cM','🎨 Color del cuadro del cajón'],['cF','🎨 Color del frente']];
@@ -5154,6 +5157,7 @@ function armSimpleHtml(){
         if(caj || T.tipo==='cajonera_espejo') h.push(armSHtml_si('fondo','Fondo de MDF', armS.fondo!==false));
         if(pu){ h.push(armSHtml_si('puBis','Bisagras de puertita', armS.puBis)); h.push(armSHtml_si('puJal','Jaladera de puertita', armS.puJal)); }
         if(pe){ h.push(armSHtml_si('peBis','Bisagras', armS.peBis)); h.push(armSHtml_si('peJal','Jaladera', armS.peJal)); }
+        if(T.tipo==='puertita'){ h.push(armSHtml_si('puBis','Bisagra (1 por puertita)', armS.puBis)); h.push(armSHtml_si('puJal', max?'Push (1 por par)':'Jaladera (1 por puertita)', armS.puJal)); }
         if(T.tipo==='puerta_espejo') h.push(armSHtml_si('espejo','Espejo', armS.espejo));
         return h.length ? `<div style="margin-top:10px;padding:8px 10px;border-radius:10px;background:rgba(127,127,127,.08)"><div style="font-weight:900;font-size:13.5px">🔩 ¿Qué trae puesto?</div>${h.join('')}</div>` : ''; })()}
 
@@ -5177,6 +5181,7 @@ function armadoDeForm(f, n){
   const esMax = f.variante==='max';
   if(f.tipo==='cajon'){ a.colorCuadro = esMax ? f.color : f.colorCuadro; if(f.corr===false) a.sinCorr = true; if(f.jalCaj===false && !esMax && f.variante!=='emma') a.sinJalCajon = true; }
   if(f.tipo==='puerta_zapatera'){ if(f.peBisagras===false) a.sinBisagras = true; if(f.peJaladera===false) a.sinJaladera = true; }
+  if(f.tipo==='puertita'){ if(f.puBis===false) a.puSinBis = true; if(f.puJal===false) a.puertitasSinJal = true; }
   if(f.tipo==='puerta_espejo'){ if(f.conEspejo===false) a.sinEspejo = true; if(f.peBisagras===false) a.sinBisagras = true; if(f.peJaladera===false) a.sinJaladera = true; }
   if(f.tipo==='cajonera_espejo'){ if(f.sinFondo) a.sinFondo = true; if(f.colorFrente && f.colorFrente!==f.color && !esMax) a.colorFrente = f.colorFrente; }
   if(f.tipo==='cajonera'){
@@ -7191,6 +7196,12 @@ function piezasDeArmado(a){
     add('Puerta de zapatera', 1, '172×30 cm', a.color);
     if(!a.sinBisagras) add('Bisagra (zapatera)', 1.5, '—', '—');
     if(!a.sinJaladera) add('Jaladera (zapatera)', 1, '—', a.color);
+  } else if(a.tipo==='puertita'){
+    // v326: puertita de cajonera suelta (armada o no): 1 bisagra y 1 jaladera por puertita; las Max llevan push (1 por par).
+    const sp = PUERTITA_CAJONERA[a.variante] || PUERTITA_CAJONERA['3'];
+    add('Puertita de cajonera', 1, sp.dim, a.color);
+    add('Bisagra de puertita de cajonera', 1, '—', '—');
+    if(esMax) add('Push (puertita Max)', 0.5, '—', '—'); else add('Jaladera (puertita de cajonera)', 1, '—', a.color);
   } else if(a.tipo==='corredera'){
     add('Corredera '+(a.variante==='macho'?'macho':'hembra')+sufCorr, 1, '—', '—');
   } else if(a.tipo==='cajon'){
@@ -7227,6 +7238,7 @@ function describirArmado(a){
   if(a.tipo==='corredera') d = 'Corredera suelta · '+(a.variante==='macho'?'macho':'hembra');
   else if(a.tipo==='cajonera') d = (a.conCajones?'Cajonera completa ':'Cajonera sin cajones ')+ARMADO_CAJONERAS[a.variante].toLowerCase()+' · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (zóclos'+(a.puertitas?', puertitas':'')+(a.conCajones?' y frentes':'')+' '+a.colorFrente+')':'')+(a.conCajones&&a.variante!=='max'?' · cuadros '+(a.colorCuadroCaj||a.color):'')+(a.conCajones?' · incluye '+(a.cantidad*((a.variante==='max'||a.variante==='emma')?4:Number(a.variante)))+' cajones':'');
   else if(a.tipo==='cajonera_espejo') d = 'Cajonera de espejo'+(a.variante==='max'?' Max':'')+' (sin puerta) · '+a.color+(a.colorFrente&&a.colorFrente!==a.color?' (zóclos '+a.colorFrente+')':'')+(a.sinFondo?' · sin fondo':'');
+  else if(a.tipo==='puertita') d = 'Puertita '+({'3':'de 3','5':'de 5 / Emma','max':'Max'}[a.variante]||'')+' · '+a.color+(a.puSinBis&&a.puertitasSinJal?' · sin herrajes':(a.puSinBis?' · sin bisagra':(a.puertitasSinJal?(a.variante==='max'?' · sin push':' · sin jaladera'):' · con herrajes')));
   else if(a.tipo==='puerta_zapatera') d = 'Puerta de zapatera · '+a.color+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':' · con bisagras y jaladera')));
   else if(a.tipo==='puerta_espejo') d = 'Puerta de espejo'+(a.variante==='max'?' Max':'')+' · '+a.color+(a.sinEspejo?' · sin espejo':'')+(a.sinBisagras&&a.sinJaladera?' · sin herrajes':(a.sinBisagras?' · sin bisagras':(a.sinJaladera?' · sin jaladera':'')));
   else if(a.tipo==='cajon') d = 'Cajón completo'+(a.variante==='max'?' Max · todo '+a.color:((a.variante==='emma'?' Emma':'')+' · frente '+a.color+' / cuadro '+a.colorCuadro));
@@ -9809,7 +9821,7 @@ async function audVGrupos(mod){
           // v320: si la app dice que faltan piezas (teórico negativo), eso es del inventario de piezas, no del oficial
           // (la instalación ya descontó sus hojas): se toma como 0 para no sumar hojas que no existen.
           if(d<0.005) return; const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNormPz(N.dim));
-          rows.push({k:'p_'+k, itemId:id, pk:P?P.key:null, n:/\d×\d/.test(N.n)?N.n:N.n+' '+String(N.dim||'').replace(/ cm$/,''), d, u:'pzas', area:pzpArea(N.dim)}); });
+          rows.push({k:'p_'+k, itemId:id, pk:P?P.key:null, n:/\d×\d/.test(N.n)?N.n:N.n+' '+String(N.dim||'').replace(/ cm$/,''), d, u:'pzas', area:pzpArea(N.dim), ...(P && AUD_SOLO_ARM.includes(P.key)?{soloArm:true}:{})}); });
         const rt = (R.ret||{})[id]||0; if(rt > 0.005*PZP_A) rows.push({k:'r_'+id, itemId:id, n:'♻️ Retazo (total)', d:fmtNum(rt/PZP_A), u:'hoja equiv.', ret:true, nota:true});
         if(rows.length) G.push({t:'Piezas · '+pzpColor(id), rows}); }); } }catch(e){}
   const corr = otros.filter(r=>/corredera/i.test(r.n)), resto = otros.filter(r=>!/corredera/i.test(r.n));
@@ -9824,12 +9836,19 @@ async function audVGrupos(mod){
     // v320: lo que se instala HOY ya se descontó; si su material sigue en el taller, va aparte (si no, sale como sobrante).
     const hoyL = ls.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !(l.separado && !l.separado.resuelto) && !l.noSalio && diaValorInst(l)===hoy && !(l.verif && l.verif.estado==='no') && !(typeof regresoDeInstalacion==='function' && regresoDeInstalacion(l.id)));
     if(hoyL.length) G.push({t:'🚚 Se instala hoy', rows:hoyL.map(l=>({k:'s_'+l.id, n:l.descripcion.split(' · ').slice(0,2).join(' · ')+(l.calle?' · '+l.calle:''), det:'<b>✅ si ya salió o está aparte.</b> Si sigue en el taller, apártalo y no lo cuentes:<br>'+audSepDet(l), d:'', u:'', nota:true, sep:true, hoy:true}))}); }catch(e){}
+    // v326 (revisión de huecos): garantías de hoy y envíos a otro módulo que siguen en camino ya están descontados;
+    // si su material sigue en el taller, va aparte (si se cuenta, saldría sobrante falso).
+    try{ const sg = await db.collection('garantiasLog').where('modulo','==',mod).get();
+      const gh = sg.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.estado!=='rechazado' && !x.anulado && (x.fechaDia || diaLocal(x.fecha))===fechaHoyLocal());
+      if(gh.length) G.push({t:'🛡️ Garantías de hoy', rows:gh.map(x=>({k:'s_g_'+x.id, n:(x.cliente||'Garantía')+(x.motivo?' · '+x.motivo:''), det:'<b>✅ si ya se entregó o está aparte.</b> Si sigue en el taller, apártalo y no lo cuentes:<br>'+(x.lineas||[]).join('<br>'), d:'', u:'', nota:true, sep:true, hoy:true}))}); }catch(e){}
+    try{ await cargarPrestamos(); const ps = (prestamos||[]).filter(p=>p.estado==='encamino' && p.origen===mod);
+      if(ps.length) G.push({t:'📤 Enviado a otro módulo (en camino)', rows:ps.map(p=>({k:'s_t_'+p.id, n:`${p.destino}: ${fmtNum(p.cantidad)} ${p.itemNombre}`, det:'<b>✅ si ya salió.</b> Ya se le descontó a este módulo: si sigue en el taller, apártalo y no lo cuentes.', d:'', u:'', nota:true, sep:true, hoy:true}))}); }catch(e){}
   return G;
 }
 // v320: la auditoría se guarda en el teléfono mientras cuentas (si se cierra o se recarga la app, no se pierde).
 const audVKey = mod => 'audV_'+mod;
 let _audVJ = '';
-function audVBorrador(){ try{ const V = audV; if(!V || V._act) return; const j = JSON.stringify({mod:V.mod, G:V.G, est:V.est, fis:V.fis, nota:V.nota, fecha:V.fecha, tomado:V.tomado||V.fecha, arm:V.arm, af:V.af, armOn:V.armOn, vista:V.vista, open:V.open, dia:V.dia||fechaHoyLocal()});
+function audVBorrador(){ try{ const V = audV; if(!V || V._act) return; const j = JSON.stringify({mod:V.mod, G:V.G, est:V.est, fis:V.fis, nota:V.nota, fecha:V.fecha, tomado:V.tomado||V.fecha, arm:V.arm, af:V.af, armOn:V.armOn, vista:V.vista, open:V.open, paso:V.paso||null, ex:null, dia:V.dia||fechaHoyLocal()});
   if(j!==_audVJ){ _audVJ = j; localStorage.setItem(audVKey(V.mod), j); } }catch(e){} }
 setInterval(()=>{ if(audV) audVBorrador(); }, 4000);
 async function audVAbrir(){
@@ -9847,6 +9866,7 @@ async function audVAbrir(){
 // v320 (pedido por el usuario): antes de tomar lo que dice la app, una pantalla con lo que hay que resolver y un
 // botón para ir a cada cosa. Lo que debe haber se toma hasta que tocas «Empezar el conteo».
 let audVP = null;
+const AUD_PRE_ROJO = ['📦'];
 const AUD_PRE_IR = {'✅':['Ir a Aprobaciones',"irA('apr')"], '🔧':['Ir a Verificar',"irA('verif')"], '🔍':['Ir a Verificar',"irA('verif')"], '🚫':['Ir a Verificar',"irA('verif')"], '❌':['Ir a Verificar',"irA('verif')"],
   '🚚':['Ir a Traspasos',"irA('trasp')"], '💰':['Ir al inicio del módulo',"setView('home')"], '✂️':['Ir a la Hoja de corte',"irA('hcorte')"]};
 async function audVPreAbrir(mod){ audVP = {mod, pre:null}; audVPrePintar();
@@ -9856,12 +9876,14 @@ function audVPrePintar(){
   let ov = document.getElementById('aud-vp'); const V = audVP;
   if(!V){ if(ov) ov.remove(); return; }
   if(!ov){ ov = document.createElement('div'); ov.id = 'aud-vp'; ov.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:12px;overflow:auto'; document.body.appendChild(ov); }
-  const P = V.pre, info = x => !AUD_PRE_IR[x.ic] && !x.t.includes('no cuadran'), n = P ? P.filter(x=>!info(x)).length : 0;
+  const P = V.pre, info = x => !AUD_PRE_IR[x.ic] && !AUD_PRE_ROJO.includes(x.ic) && !x.t.includes('no cuadran'), n = P ? P.filter(x=>!info(x)).length : 0;
   const item = x => { const ir = x.t.includes('no cuadran') ? ['Corregir en el Historial',"irA('movhist')"] : AUD_PRE_IR[x.ic];
-    return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;border:2px solid ${ir?'#dc2626':'#7c3aed'};background:${ir?'rgba(220,38,38,.06)':'rgba(124,58,237,.06)'}"><div style="font-weight:900;font-size:15px">${x.ic} ${x.t}</div>${x.d?`<div class="hint" style="margin:2px 0 0">${x.d}</div>`:''}
-      ${ir?`<button class="btn small" style="width:100%;margin:8px 0 0;min-height:42px;background:#dc2626" onclick="audVPreIr(&quot;${ir[1]}&quot;)">➡️ ${ir[0]}</button>`:`<div class="hint" style="margin:6px 0 0;font-weight:800;color:#7c3aed">👀 Esto lo revisas en el conteo</div>`}</div>`; };
+    const rojo = ir || AUD_PRE_ROJO.includes(x.ic);
+    return `<div style="margin-top:8px;padding:10px 12px;border-radius:12px;border:2px solid ${rojo?'#dc2626':'#7c3aed'};background:${rojo?'rgba(220,38,38,.06)':'rgba(124,58,237,.06)'}"><div style="font-weight:900;font-size:15px">${x.ic} ${x.t}</div>${x.d?`<div class="hint" style="margin:2px 0 0">${x.d}</div>`:''}
+      ${ir?`<button class="btn small" style="width:100%;margin:8px 0 0;min-height:42px;background:#dc2626" onclick="audVPreIr(&quot;${ir[1]}&quot;)">➡️ ${ir[0]}</button>`:(rojo?`<div class="hint" style="margin:6px 0 0;font-weight:800;color:#b91c1c">🙋 Pídeselo al coordinador (si ya llegó, que lo acepte)</div>`:`<div class="hint" style="margin:6px 0 0;font-weight:800;color:#7c3aed">👀 Esto lo revisas en el conteo</div>`)}</div>`; };
   ov.innerHTML = `<div style="width:100%;max-width:520px;background:var(--bg);color:var(--ink);border:2px solid #0e7490;border-radius:18px;padding:12px;margin-top:8px">
     <div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:18px;font-weight:900">🧹 Antes de contar · ${V.mod}</div><button onclick="audVP=null;audVPrePintar()" style="all:unset;cursor:pointer;font-size:22px;color:var(--sub)">✕</button></div>
+    ${audVPasosHtml(0)}
     <div class="hint" style="margin:2px 0 6px">Resuelve esto primero. Toca el botón para ir; al regresar, vuelve a entrar a la auditoría y se revisa otra vez.</div>
     ${!P?'<p style="margin:14px 0">🔎 Revisando…</p>':(P.length?P.map(item).join(''):'')+(n?'':`<div style="margin-top:8px;padding:12px;border-radius:12px;background:rgba(22,163,74,.12);border:2px solid #16a34a;font-weight:900;color:#15803d">✅ No hay nada pendiente por resolver. Puedes contar.</div>`)}
     ${P?`<button class="btn small" style="width:100%;margin-top:12px;background:transparent;color:#0e7490;border:1.5px solid #0e7490;box-shadow:none" onclick="audVPreAbrir('${V.mod}')">🔄 Revisar otra vez</button>
@@ -9888,16 +9910,75 @@ async function audVActualizar(){
       let gN = G.find(x=>x.t===gde[r.k]); if(!gN){ gN = {t:gde[r.k], rows:[]}; G.push(gN); }
       gN.rows.push(Object.assign({}, r, {d:0})); est[r.k] = 'no'; fis[r.k] = String(fmtNum(sv)); }));
     const cambio = G.reduce((t,g)=>t+g.rows.filter(r=>{ const o = audVRow(r.k); return !o || Math.abs(Number(o.d)-Number(r.d))>0.0005; }).length,0);
-    Object.assign(V, {G, est, fis, nota, tomado:new Date().toISOString()}); V._act = false; audVArmCalc(V); audVPintar();
+    Object.assign(V, {G, est, fis, nota, tomado:new Date().toISOString()}); audVSoloArmEst(V); V._act = false; audVArmCalc(V); audVPintar();
     audPreRevisar(V.mod).then(x=>{ if(audV===V){ V.pre = x; audVPintar(); } }).catch(()=>{});
     toast('✅ Actualizado · '+cambio+' renglón(es) cambiaron'+(cambio?'<br><small>Lo que ya contaste se quedó; revisa los que salgan sin marcar.</small>':''));
   }catch(e){ V._act = false; alert('Error: '+e.message); }
 }
 async function audVEmpezar(){
-  const V = audVP; if(!V || !V.pre) return; const mod = V.mod, pre = V.pre, nP = pre.filter(x=>AUD_PRE_IR[x.ic] || x.t.includes('no cuadran')).length;
+  const V = audVP; if(!V || !V.pre) return; const mod = V.mod, pre = V.pre, nP = pre.filter(x=>AUD_PRE_IR[x.ic] || AUD_PRE_ROJO.includes(x.ic) || x.t.includes('no cuadran')).length;
   if(nP && !confirm(`Todavía quedan ${nP} cosa(s) sin resolver.\n\nSi cuentas así, te pueden salir faltantes o sobrantes que no son.\n\n¿Empezar de todos modos?`)) return;
   audVP = null; audVPrePintar(); toast('Preparando la auditoría…');
-  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), dia:fechaHoyLocal(), arm:[], af:{}, armOn:false, pre}; audVArmAbrir(); }catch(e){ alert('Error: '+e.message); }
+  try{ const G = await audVGrupos(mod); audV = {mod, G, est:{}, fis:{}, nota:{}, open:null, fecha:new Date().toISOString(), dia:fechaHoyLocal(), arm:[], af:{}, armOn:false, pre};
+    // v326 (pedido por el usuario): PRIMERO se revisa lo que NO se cuenta (separado, lo de hoy, sobrantes), para
+    // apartarlo antes de contar; luego armados; luego lo suelto.
+    audVSoloArmEst(audV); const gs = G.findIndex(audVEsSepG); if(gs>=0){ audV.paso = 'sep'; audV.open = gs; audVPintar(); const ov = document.getElementById('aud-v'); if(ov) ov.scrollTop = 0; } else audVArmAbrir(); }catch(e){ alert('Error: '+e.message); }
+}
+// v326 (pedido por el usuario: que le sirva a otro auditor): barra de pasos + guía «¿Cómo se hace?» en cada pantalla.
+const AUD_PASOS = ['🧹 Antes de contar','📦 Lo que no se cuenta','🗄️ Armados','🔍 Lo suelto','📊 Guardar y aplicar'];
+function audVPasosHtml(n){
+  return `<div style="display:flex;gap:3px;margin:8px 0 6px">${AUD_PASOS.map((t,i)=>`<div style="flex:1;text-align:center;padding:5px 2px;border-radius:8px;font-size:10.5px;font-weight:800;line-height:1.15;${i<n?'background:rgba(22,163,74,.15);color:#15803d':i===n?'background:#0e7490;color:#fff':'background:rgba(148,163,184,.15);color:var(--sub)'}">${i<n?'✓ ':''}${i}. ${t.replace(/^\S+ /,'')}</div>`).join('')}</div>
+  <details style="margin:0 0 8px;padding:7px 10px;border-radius:10px;border:1px dashed #0e7490"><summary style="cursor:pointer;font-weight:800;color:#0e7490">📖 ¿Cómo se hace la auditoría?</summary>
+    <ol start="0" style="margin:6px 0 0;padding-left:18px;font-size:13.5px;line-height:1.45">
+      <li><b>Antes de contar:</b> el coordinador ya hizo su cierre y su hoja de corte; ya no sale material. Resuelve lo rojo (aprobar, verificar, hoja de corte) y toca <b>Empezar el conteo</b>.</li>
+      <li><b>Lo que no se cuenta:</b> lo que se instala hoy, lo separado y los sobrantes ya están descontados. ✅ si ya se fue o está aparte; si sigue revuelto, <b>apártalo</b> para no contarlo.</li>
+      <li><b>Armados:</b> cuenta cajoneras, cajones, cuadros, Max y espejos armados. La app los desarma en piezas y herrajes.</li>
+      <li><b>Lo suelto:</b> el número es lo que <b>debe haber suelto</b>. ✅ si está esa cantidad; ❌ y escribe cuántas hay (más o menos). Hojas completas → piezas → correderas → herrajes.</li>
+      <li><b>Guardar y aplicar:</b> si el coordinador cerró después, toca 🔄 Actualizar. Luego <b>📊 Guardar</b>. En el Inicio del módulo, en <b>💰 Diferencias por decidir</b>, toca <b>⚡ Aplicar toda la auditoría</b> (faltantes = deuda, sobrantes = se suman). Si alguna va distinta, decídela antes.</li>
+</ol><div class="hint" style="margin:6px 0 0">💾 Si se cierra la app, <b>no se pierde</b>: al volver a entrar te pregunta si sigues.</div></details>`;
+}
+// v326 (pedido por el usuario): puertas de zapatera y puertitas se cuentan SOLO en Armados (con o sin herrajes).
+const AUD_SOLO_ARM = ['puertazap','puertita3','puertita5','puertitamax'];
+function audVSoloArmEst(V){ V.G.forEach(g=>g.rows.forEach(r=>{ if(r.soloArm){ V.est[r.k] = 'no'; V.fis[r.k] = '0'; } })); }
+// v326 (revisión de huecos): lo que hay en el taller y la app no tiene en la lista (teórico 0) también se registra,
+// si no, ese sobrante se perdería. Se agrega como renglón con teórico 0 y lo que se contó.
+function audVExtraHtml(V){
+  const E = V.ex || null, sel = 'style="margin:4px 0 0"';
+  const tipos = [['o','🔩 Herraje / PVC / otro'],['p','🧩 Pieza cortada'],['h','🟫 Hoja completa']];
+  let f = '';
+  if(E){ const hojasIt = CATALOGO.filter(i=>esHojaId(i.id));
+    f = `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${tipos.map(([k,t])=>`<button type="button" onclick="audV.ex.t='${k}';audVPintar()" style="all:unset;cursor:pointer;padding:7px 10px;border-radius:9px;font-size:12.5px;font-weight:800;border:2px solid #0e7490;${E.t===k?'background:#0e7490;color:#fff':'color:#0e7490'}">${t}</button>`).join('')}</div>
+      ${E.t==='o'?`<select ${sel} onchange="audV.ex.itemId=this.value"><option value="">¿Qué es?</option>${CATALOGO.filter(i=>!esHojaId(i.id)).map(i=>`<option value="${i.id}" ${E.itemId===i.id?'selected':''}>${i.nombre}</option>`).join('')}</select>`:''}
+      ${E.t!=='o'?`<select ${sel} onchange="audV.ex.itemId=this.value"><option value="">Color</option>${hojasIt.map(i=>`<option value="${i.id}" ${E.itemId===i.id?'selected':''}>${pzpColor(i.id)}</option>`).join('')}</select>`:''}
+      ${E.t==='p'?`<select ${sel} onchange="audV.ex.pk=this.value"><option value="">¿Qué pieza?</option>${PIEZAS_AUDIT.filter(x=>x.tipo==='mel' && !AUD_SOLO_ARM.includes(x.key)).map(P=>`<option value="${P.key}" ${E.pk===P.key?'selected':''}>${/\d×\d/.test(P.label)?P.label:P.label+' '+pzpNorm(P.dim)}</option>`).join('')}</select>`:''}
+      <div style="display:flex;gap:6px;margin-top:6px"><input type="number" inputmode="decimal" min="0" placeholder="¿Cuántas hay?" value="${E.q||''}" oninput="audV.ex.q=this.value" style="flex:1;margin:0"><button class="btn small" style="margin:0;background:#0e7490" onclick="audVExtraAdd()">Agregar</button></div>
+      <div class="hint" style="margin:4px 0 0">Las puertas de zapatera y puertitas se cuentan en 🗄️ Armados.</div>`; }
+  return `<details ${E?'open':''} ontoggle="if(!audV||!this.isConnected)return;if(this.open&&!audV.ex){audV.ex={t:'o',q:''};audVPintar();}" style="margin-top:10px;padding:8px 10px;border-radius:12px;border:2px dashed #0e7490">
+    <summary style="cursor:pointer;font-weight:900;color:#0e7490">➕ Encontré algo que no está en la lista</summary>
+    <div class="hint" style="margin:4px 0 0">Si hay algo en el taller que la app no trae (su teórico es 0), agrégalo aquí para que salga como sobrante y no se pierda.</div>${f}</details>`;
+}
+function audVExtraAdd(){
+  const V = audV, E = V && V.ex; if(!E) return; const q = Number(E.q), it = CATALOGO.find(i=>i.id===E.itemId);
+  if(!it) return alert(E.t==='o'?'Elige qué es.':'Elige el color.'); if(!(q>0)) return alert('Escribe cuántas hay.');
+  let k, row, gt;
+  if(E.t==='o'){ k = 'o_'+it.id; row = {k, itemId:it.id, n:it.nombre, d:0, u:it.unidad||''}; gt = /corredera/i.test(it.nombre) ? 'Correderas' : 'Herrajes y otros'; }
+  else if(E.t==='h'){ k = 'h_'+it.id; row = {k, itemId:it.id, n:it.nombre.replace(/^Melamina /,''), d:0, u:'hojas', lado:'completas'}; gt = 'Hojas completas'; }
+  else { const P = PIEZAS_AUDIT.find(x=>x.key===E.pk); if(!P) return alert('Elige la pieza.'); if(AUD_SOLO_ARM.includes(P.key)) return alert('Las puertas de zapatera y puertitas se cuentan en 🗄️ Armados (Puertas y puertitas).');
+    k = 'p_'+pzpKey(it.id, P.dim); row = {k, itemId:it.id, pk:P.key, n:/\d×\d/.test(P.label)?P.label:P.label+' '+pzpNorm(P.dim), d:0, u:'pzas', area:pzpArea(P.dim)}; gt = 'Piezas · '+pzpColor(it.id); }
+  if(audVRow(k)){ V.ex = null; alert('Eso ya está en la lista (con lo que dice la app). Te llevo al renglón: ponle ❌ y escribe cuántas hay.'); return audVIrA(k); }
+  let g = V.G.find(x=>x.t===gt);
+  if(!g){ g = {t:gt, rows:[]}; const i = gt==='Hojas completas' ? 0 : V.G.findIndex(x=>/^(Correderas|Herrajes|🧩|📌|🚚|🛡️|📤)/.test(x.t)); V.G.splice(i<0?V.G.length:i, 0, g); }
+  g.rows.push(row); V.est[k] = 'no'; V.fis[k] = String(q); V.ex = null; toast('➕ Agregado: '+row.n+' · '+fmtNum(q)); audVIrA(k);
+}
+function audVIrA(k){ const V = audV; const VG = audVVista(V); const gi = VG.findIndex(g=>g.rows.some(r=>r.k===k)); if(gi<0) return audVPintar();
+  V.paso = null; V.open = gi; V._flash = k; audVPintar();
+  setTimeout(()=>{ const el = document.getElementById('avr_'+String(k).replace(/[^a-zA-Z0-9]/g,'_')); if(el) el.scrollIntoView({behavior:'smooth', block:'center'}); }, 120);
+  setTimeout(()=>{ if(audV && audV._flash===k){ audV._flash = null; audVPintar(); } }, 4000); }
+function audVEsSepG(g){ return g.rows.length && g.rows.every(r=>r.sep); }
+function audVSepListo(){ const V = audV; if(!V) return;
+  const falt = V.G.filter(audVEsSepG).reduce((t,g)=>t+g.rows.filter(r=>!V.est[r.k]).length,0);
+  if(falt && !confirm(`Te faltan ${falt} por revisar de lo que va aparte.\n\nSi algo de eso sigue revuelto en el taller, apártalo antes de contar.\n\n¿Seguir a los armados de todos modos?`)) return;
+  V.paso = null; V.open = null; audVArmAbrir();
 }
 // v318 (pedido por el usuario): qué debe estar aparte de cada instalación (melamina/MDF en piezas y herrajes);
 // si se apartó, sin lo que el coordinador marcó como «se cuenta».
@@ -9984,7 +10065,9 @@ function audVArmCalc(V){
     if(k.startsWith('p_')){ const I = V._armInfo[k]; if(!I) return; const t = 'Piezas · '+pzpColor(I.itemId); let g = V.G.find(x=>x.t===t);
       if(!g){ g = {t, rows:[]}; const i = V.G.findIndex(x=>/^(Correderas|Herrajes|🧩|📌)/.test(x.t)); V.G.splice(i<0?V.G.length:i, 0, g); }
       const P = PIEZAS_AUDIT.find(x=>x.tipo==='mel' && pzpNorm(x.dim)===pzpNormPz(I.dim));
-      g.rows.push({k, itemId:I.itemId, pk:P?P.key:null, n:/\d×\d/.test(I.n)?I.n:I.n+' '+String(I.dim||'').replace(/ cm$/,''), d:0, u:'pzas', area:pzpArea(I.dim)}); }
+      const so = !!(P && AUD_SOLO_ARM.includes(P.key));
+      g.rows.push({k, itemId:I.itemId, pk:P?P.key:null, n:/\d×\d/.test(I.n)?I.n:I.n+' '+String(I.dim||'').replace(/ cm$/,''), d:0, u:'pzas', area:pzpArea(I.dim), ...(so?{soloArm:true}:{})});
+      if(so){ V.est[k] = 'no'; V.fis[k] = '0'; } }
     else { const id = k.slice(2), it = CATALOGO.find(i=>i.id===id); if(!it) return; const t = /corredera/i.test(it.nombre) ? 'Correderas' : 'Herrajes y otros'; let g = V.G.find(x=>x.t===t);
       if(!g){ g = {t, rows:[]}; const i = V.G.findIndex(x=>/^(🧩|📌)/.test(x.t)); V.G.splice(i<0?V.G.length:i, 0, g); }
       g.rows.push({k, itemId:id, n:it.nombre, d:0, u:it.unidad||''}); } });
@@ -9996,16 +10079,30 @@ function audVRow(k){ for(const g of audV.G) for(const r of g.rows) if(r.k===k) r
 function audVTodoSi(gi){ ((audV._VG||audV.G)[gi]).rows.forEach(r=>{ if(!audV.est[r.k]) audV.est[r.k] = 'si'; }); audVPintar(); }
 // v309 (pedido por el usuario: cuenta por secciones): las piezas se pueden ver por COLOR o por PIEZA (cada pieza con
 // todos sus colores juntos). Es la misma lista; solo cambia cómo se agrupa.
+// v326 (pedido por el usuario: «se me hace revuelto»): dentro de cada grupo, sub-secciones con título.
+// Solo cambia cómo se ve (orden y títulos); lo contado y las diferencias son los mismos.
+const AUD_SUB_CAT = [['Herrajes','🔩 Herrajes'],['PVC','🎞️ PVC'],['Cintilla','📏 Cintilla'],['Pegamento','🧴 Pegamento'],['Stickers','🏷️ Stickers']];
+function audVSubs(G){
+  return G.map(g=>{
+    if(/^Piezas · /.test(g.t)){
+      const fi = r => r.ret ? 99 : (r.pk ? FAMILIAS_PIEZA.indexOf(familiaDePieza(r.pk)) : 98), lb = r => { if(r.ret) return '♻️ Retazo'; if(!r.pk) return '🧩 Otras piezas'; const F = familiaDePieza(r.pk); return F.ic+' '+F.t; };
+      const ki = r => { if(!r.pk) return 0; const F = familiaDePieza(r.pk); return F.keys.indexOf(r.pk); };
+      return Object.assign({}, g, {rows:g.rows.map((r,i)=>Object.assign({}, r, {_sub:lb(r), _o:i})).sort((a,b)=>(fi(a)-fi(b)) || (ki(a)-ki(b)) || (a._o-b._o))}); }
+    if(/^Herrajes/.test(g.t)){
+      const cat = r => { const it = CATALOGO.find(i=>i.id===r.itemId); const c = it ? it.cat : ''; const j = AUD_SUB_CAT.findIndex(x=>x[0]===c); return j<0 ? AUD_SUB_CAT.length : j; };
+      return Object.assign({}, g, {rows:g.rows.map((r,i)=>Object.assign({}, r, {_sub:(AUD_SUB_CAT[cat(r)]||[0,'📦 Otros'])[1], _o:i})).sort((a,b)=>(cat(a)-cat(b)) || (a._o-b._o))}); }
+    return g; });
+}
 function audVVista(V){
-  if(V.vista!=='pieza') return V.G;
+  if(V.vista!=='pieza') return audVSubs(V.G);
   const out = [], fam = {}, otras = [], ret = []; let pos = -1;
   V.G.forEach(g=>{ if(!/^Piezas · /.test(g.t)){ out.push(g); return; } if(pos<0) pos = out.length; const col = g.t.replace(/^Piezas · /,'');
-    g.rows.forEach(r=>{ const w = Object.assign({}, r, {n:`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:13px;height:13px;border-radius:50%;border:1px solid #9ca3af;background:${SWATCH_COLOR[col]||'#ccc'}"></span>${col}</span> · ${r.n}`, _col:col});
+    g.rows.forEach(r=>{ const w = Object.assign({}, r, {_sub:r.n, n:`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:13px;height:13px;border-radius:50%;border:1px solid #9ca3af;background:${SWATCH_COLOR[col]||'#ccc'}"></span>${col}</span> · ${r.n}`, _col:col});
       if(r.ret){ ret.push(w); return; } const F = r.pk ? familiaDePieza(r.pk) : null; if(!F || !F.k){ otras.push(w); return; }
       (fam[F.k] = fam[F.k] || {F, rows:[]}).rows.push(w); }); });
   const gs = FAMILIAS_PIEZA.filter(f=>fam[f.k]).map(f=>({t:`${f.ic} ${f.t} · todos los colores`, rows:fam[f.k].rows.sort((a,b)=>(f.keys.indexOf(a.pk)-f.keys.indexOf(b.pk)) || (b.area-a.area) || a._col.localeCompare(b._col))}));
   if(otras.length) gs.push({t:'🧩 Otras piezas', rows:otras}); if(ret.length) gs.push({t:'♻️ Retazos', rows:ret});
-  out.splice(pos<0?out.length:pos, 0, ...gs); return out;
+  out.splice(pos<0?out.length:pos, 0, ...gs); return audVSubs(out);
 }
 function audVPintar(){
   let ov = document.getElementById('aud-v'); const V = audV;
@@ -10018,9 +10115,10 @@ function audVPintar(){
   if(V.armOn){
     ov.innerHTML = `<div style="width:100%;max-width:520px;background:var(--bg);color:var(--ink);border:2px solid #0e7490;border-radius:18px;padding:12px;margin-top:8px">
       <div style="font-size:18px;font-weight:900">🗄️ Muebles armados · ${V.mod}</div>
+      ${audVPasosHtml(2)}
       ${audPreHtml(V)}
-      <div style="margin:4px 0 8px;padding:9px 11px;border-radius:11px;background:rgba(14,116,144,.09)"><div style="font-weight:900">Paso 1 de 2 · Cuenta todo lo que ya está armado:</div>
-        <div style="font-size:13.5px;margin-top:3px;line-height:1.45">• Cajoneras (de 1, 2, 3, 5 y Emma), con o sin cajones<br>• Cajones y cuadros (con o sin fondo)<br>• Todo lo Max: cajonera, cajón y cuadros<br>• Cajoneras y puertas de espejo · puertas de zapatera</div>
+      <div style="margin:4px 0 8px;padding:9px 11px;border-radius:11px;background:rgba(14,116,144,.09)"><div style="font-weight:900">Cuenta todo lo que ya está armado:</div>
+        <div style="font-size:13.5px;margin-top:3px;line-height:1.45">• Cajoneras (de 1, 2, 3, 5 y Emma), con o sin cajones<br>• Cajones y cuadros (con o sin fondo)<br>• Todo lo Max: cajonera, cajón y cuadros<br>• Cajoneras de espejo<br>• <b>🚪 Todas las puertas de zapatera y puertitas</b> (armadas o sueltas, con o sin herrajes): <b>se cuentan solo aquí</b>, no en piezas<br>• Puertas de espejo armadas (los marcos sueltos van en piezas)</div>
         <div class="hint" style="margin:4px 0 0">La app los desarma en piezas, correderas y jaladeras. Después solo verificas lo suelto.</div>
         <div style="font-size:13px;margin-top:5px;font-weight:800;color:#b45309">⚠️ No cuentes lo que está aparte para instalaciones: eso se revisa en "📌 Material separado".</div></div>
       ${armSimpleHtml()}
@@ -10030,7 +10128,10 @@ function audVPintar(){
   const AQ = V.A || {};
   const fila = r => { const e = V.est[r.k], no = e==='no', f = V.fis[r.k], A = Number(AQ[r.k])||0, S = fmtNum(Math.max(0, Number(r.d) - A)), sobra = A > Number(r.d) + 0.0005,
       dif = no && !r.sep && !r.nota && f!=='' && f!==undefined ? fmtNum(Number(f) + A - Number(r.d)) : null;
-    return `<div style="padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${e==='si'?'#16a34a':(no?'#dc2626':'var(--line)')};background:${e==='si'?'rgba(22,163,74,.06)':(no?'rgba(220,38,38,.06)':'transparent')}">
+    if(r.soloArm){ const dd = fmtNum(A - Number(r.d)); return `<div style="padding:8px 10px;margin-top:4px;border-radius:10px;border:1.5px dashed #e0742a;background:rgba(224,116,42,.06)">
+      <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-weight:700">${r.n}</span><span style="font-weight:900">${fmtNum(r.d)} <span class="hint" style="margin:0">${r.u||''}</span></span></div>
+      <div class="hint" style="margin:2px 0 0">🗄️ Se cuenta en <b>Armados</b> (🚪 Puertas y puertitas): llevas <b>${fmtNum(A)}</b>${Math.abs(dd)>0.0005?` · <b style="color:${dd<0?'#dc2626':'#0369a1'}">${dd>0?'+':''}${dd}</b>`:' · ✅ cuadra'}</div></div>`; }
+    return `<div id="avr_${idk(r.k)}" style="${V._flash===r.k?'box-shadow:0 0 0 4px #f59e0b;':''}padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${e==='si'?'#16a34a':(no?'#dc2626':'var(--line)')};background:${e==='si'?'rgba(22,163,74,.06)':(no?'rgba(220,38,38,.06)':'transparent')}">
       <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700;font-size:14px">${r.n}</strong>${r.det?`<div class="hint" style="margin:2px 0 0;font-size:12.5px;line-height:1.4">${r.hoy?'':'Debe estar aparte:<br>'}${r.det}</div>`:''}${A>0?`<div class="hint" style="margin:0;${sobra?'color:#0369a1;font-weight:800':''}">${sobra?`🗄️ En armados hay ${fmtNum(A)} y debe haber ${fmtNum(r.d)} (sobran ${fmtNum(A-Number(r.d))})`:`Debe haber ${fmtNum(r.d)} = 🗄️ ${fmtNum(A)} armadas + ${S} sueltas`}</div>`:''}</div>
         ${r.sep?'':`<div style="text-align:right"><div style="font-size:18px;font-weight:900;line-height:1">${A>0?S:fmtNum(r.d)}</div><div class="hint" style="margin:0;font-size:11px">${A>0?'sueltas':r.u}</div></div>`}
         <button class="btn small" style="margin:0;min-width:40px;min-height:36px;padding:0;background:${e==='si'?'#16a34a':'transparent'};color:${e==='si'?'#fff':'#16a34a'};border:1.5px solid #16a34a;box-shadow:none" onclick="audVSet('${q(r.k)}','si')">✅</button>
@@ -10041,21 +10142,25 @@ function audVPintar(){
           ${dif!==null?`<strong style="color:${dif<0?'#dc2626':(dif>0?'#0369a1':'#16a34a')}">${dif>0?'+':''}${fmtNum(dif)}</strong>`:''}</div>`) : ''}</div>`; };
   ov.innerHTML = `<div style="width:100%;max-width:480px;background:var(--card);color:var(--ink);border:2px solid #0f172a;border-radius:18px;padding:14px;margin-top:8px">
     <div style="display:flex;justify-content:space-between"><div style="font-size:18px;font-weight:900">🔍 Auditoría · ${V.mod}</div><button onclick="if(confirm('¿Salir? Lo que llevas contado queda guardado en este celular; al volver a entrar te pregunta si sigues.')){audVBorrador();audV=null;audVPintar();}" style="all:unset;cursor:pointer;font-size:20px;color:var(--sub)">✕</button></div>
+    ${audVPasosHtml(V.paso==='sep'?1:(hechos===tot?4:3))}
     <p class="hint" style="margin:2px 0 6px">La app dice lo que <strong>debe haber</strong>. Tú solo verificas: ✅ sí está · ❌ no → cuenta (puedes ir sumando). <strong>${hechos} de ${tot}</strong> revisados.</p>
     <button class="btn small" style="width:100%;margin:0 0 6px;background:transparent;color:#0e7490;border:1.5px solid #0e7490;box-shadow:none" onclick="audVActualizar()">🔄 Actualizar lo que debe haber <span style="font-weight:600">(no borra lo contado)</span></button>
     <div class="hint" style="margin:-2px 0 6px">Lo que debe haber es de ${new Date(V.tomado||V.fecha).toLocaleString('es-MX',{weekday:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})} · Úsalo después del cierre del coordinador.</div>
-    <div style="margin-top:6px;padding:10px;border-radius:12px;border:2px solid #0e7490;background:rgba(14,116,144,.07)">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><div style="font-weight:900">🗄️ 1. Muebles armados</div>
+    ${V.paso==='sep'?`<div style="margin-top:6px;padding:12px;border-radius:12px;border:2px solid #7c3aed;background:rgba(124,58,237,.08)"><div style="font-weight:900;font-size:16px">📦 1. Primero: lo que NO se cuenta</div>
+      <div class="hint" style="margin:4px 0 0">Ya está descontado o va aparte. Revísalo <strong>antes de contar</strong>: ✅ si ya se fue o está aparte. Si algo sigue revuelto en el taller, <strong>apártalo ahora</strong> para no contarlo.</div></div>`:''}
+    ${V.paso==='sep'?'':`<div style="margin-top:6px;padding:10px;border-radius:12px;border:2px solid #0e7490;background:rgba(14,116,144,.07)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><div style="font-weight:900">🗄️ 2. Muebles armados</div>
         <div class="hint" style="margin:0">${(V.arm||[]).length?(V.arm||[]).map(a=>`${a.cantidad} × ${pzpArmTxt(a)}`).join(' · '):'Cuéntalos primero: la app los suma en piezas.'}</div></div>
         <button class="btn small" style="margin:0;background:#0e7490;white-space:nowrap" onclick="audVArmAbrir()">${(V.arm||[]).length?'✏️ Cambiar':'＋ Contar'}</button></div></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px"><div style="font-weight:900">2. Verifica lo suelto</div>
-      <div style="display:flex;gap:4px">${[['color','🎨 Por color'],['pieza','🧩 Por pieza']].map(([k,t])=>{ const on = (V.vista||'color')===k; return `<button type="button" onclick="audV.vista='${k}';audV.open=null;audVPintar()" style="all:unset;cursor:pointer;padding:6px 10px;border-radius:9px;font-size:12.5px;font-weight:800;border:2px solid #0f172a;${on?'background:#0f172a;color:#fff':''}">${t}</button>`; }).join('')}</div></div>
-    ${(V._VG = audVVista(V)).map((g,gi)=>{ const nNo = g.rows.filter(r=>V.est[r.k]==='no').length, nOk = g.rows.filter(r=>V.est[r.k]).length; return `<details ${V.open===gi?'open':''} ontoggle="if(!audV)return;if(this.open){if(audV.open!==${gi}){audV.open=${gi};audVPintar();}}else if(audV.open===${gi}){audV.open=null;}" style="margin-top:8px;border:2px solid ${nNo?'#dc2626':(nOk===g.rows.length?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px"><div style="font-weight:900">3. Verifica lo suelto</div>
+      <div style="display:flex;gap:4px">${[['color','🎨 Por color'],['pieza','🧩 Por pieza']].map(([k,t])=>{ const on = (V.vista||'color')===k; return `<button type="button" onclick="audV.vista='${k}';audV.open=null;audVPintar()" style="all:unset;cursor:pointer;padding:6px 10px;border-radius:9px;font-size:12.5px;font-weight:800;border:2px solid #0f172a;${on?'background:#0f172a;color:#fff':''}">${t}</button>`; }).join('')}</div></div>`}
+    ${(V._VG = audVVista(V)).map((g,gi)=>{ if(V.paso==='sep' && !audVEsSepG(g)) return ''; const nNo = g.rows.filter(r=>V.est[r.k]==='no' && !r.soloArm).length, nOk = g.rows.filter(r=>V.est[r.k]).length; return `<details ${V.open===gi?'open':''} ontoggle="if(!audV||!this.isConnected)return;if(this.open){if(audV.open!==${gi}){audV.open=${gi};audVPintar();}}else if(audV.open===${gi}){audV.open=null;}" style="margin-top:8px;border:2px solid ${nNo?'#dc2626':(nOk===g.rows.length?'#16a34a':'var(--line)')};border-radius:12px;padding:8px 10px">
       <summary style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:900;font-size:14px">${g.t}</span><span style="white-space:nowrap;font-weight:800;color:${nNo?'#dc2626':(nOk===g.rows.length?'#16a34a':'var(--sub)')}">${nNo?'❌ '+nNo+' · ':''}${nOk}/${g.rows.length}</span></summary>
       <button class="btn small" style="margin:6px 0 0;background:transparent;color:#16a34a;border:1px solid #16a34a;box-shadow:none" onclick="audVTodoSi(${gi})">✅ Lo demás de este grupo sí está</button>
-      ${g.t==='Correderas'?`<div class="hint" style="margin:6px 0 0;padding:7px 9px;border-radius:9px;background:rgba(14,116,144,.1);font-weight:600">🔩 Aquí cuentas solo las que están <strong>en caja o sueltas</strong>. Las que traen las cajoneras y cajones armados ya las sumó la app en el paso 1 (🗄️). Un juego = hembra + macho.</div>`:''}
-      ${g.rows.map(fila).join('')}</details>`; }).join('')}
-    <button class="btn" style="width:100%;min-height:54px;margin-top:14px;background:${hechos===tot?'linear-gradient(135deg,#0f172a,#334155)':'#94a3b8'}" onclick="audVGuardar()">${hechos===tot?'📊 Ver teórico vs físico y guardar':`Faltan ${tot-hechos} por revisar`}</button></div>`;
+      ${g.t==='Correderas'?`<div class="hint" style="margin:6px 0 0;padding:7px 9px;border-radius:9px;background:rgba(14,116,144,.1);font-weight:600">🔩 Aquí cuentas solo las que están <strong>en caja o sueltas</strong>. Las que traen las cajoneras y cajones armados ya las sumó la app en el paso 2 (🗄️). Un juego = hembra + macho.</div>`:''}
+      ${g.rows.map((r,i)=>(r._sub && (i===0 || g.rows[i-1]._sub!==r._sub) ? `<div style="margin:12px 0 2px;padding:5px 10px;border-radius:8px;background:rgba(14,116,144,.12);font-weight:900;font-size:13.5px;color:var(--ink)">${r._sub}</div>` : '')+fila(r)).join('')}</details>`; }).join('')}
+    ${V.paso==='sep'?'':audVExtraHtml(V)}
+    ${V.paso==='sep'?`<button class="btn" style="width:100%;min-height:54px;margin-top:14px;background:#7c3aed" onclick="audVSepListo()">➡️ Ya revisé lo que va aparte · seguir a 🗄️ armados</button>`:`<button class="btn" style="width:100%;min-height:54px;margin-top:14px;background:${hechos===tot?'linear-gradient(135deg,#0f172a,#334155)':'#94a3b8'}" onclick="audVGuardar()">${hechos===tot?'📊 Ver teórico vs físico y guardar':`🔎 Faltan ${tot-hechos} por revisar · toca para ir`}</button>`}</div>`;
   ov.scrollTop = top;
 }
 function audVResultado(){
@@ -10067,10 +10172,22 @@ function audVResultado(){
     else { const v = V.fis[r.k], f = (v===''||v===undefined||v===null) ? NaN : Number(v) + A; out.push(Object.assign(base, {fis:isNaN(f)?null:fmtNum(f), dif:isNaN(f)?null:fmtNum(f - Number(r.d))})); } }));
   return out;
 }
+// v326 (pedido por el usuario): «Faltan N» te lleva directo al renglón que falta, sin buscarlo.
+function audVIrFalta(){
+  const V = audV; if(!V) return; const VG = audVVista(V);
+  const gi = VG.findIndex(g=>g.rows.some(r=>!V.est[r.k])); if(gi<0) return;
+  if(V.paso==='sep' && !audVEsSepG(VG[gi])) V.paso = null;
+  const r = VG[gi].rows.find(x=>!V.est[x.k]); V.open = gi; audVPintar();
+  const falt = VG.map(g=>g.rows.filter(x=>!V.est[x.k]).length).reduce((a,b)=>a+b,0);
+  toast(`🔎 ${VG[gi].t}: falta revisar este${falt>1?' (en total faltan '+falt+')':''}`);
+  V._flash = r.k; audVPintar();
+  setTimeout(()=>{ const el = document.getElementById('avr_'+String(r.k).replace(/[^a-zA-Z0-9]/g,'_')); if(el) el.scrollIntoView({behavior:'smooth', block:'center'}); }, 120);
+  setTimeout(()=>{ if(audV && audV._flash===r.k){ audV._flash = null; audVPintar(); } }, 4000);
+}
 async function audVGuardar(){
   const V = audV; if(!V) return; const tot = V.G.reduce((t,g)=>t+g.rows.length,0), hechos = V.G.reduce((t,g)=>t+g.rows.filter(r=>V.est[r.k]).length,0);
-  if(hechos<tot) return alert('Faltan '+(tot-hechos)+' renglones por revisar.');
-  const res = audVResultado(); if(res.some(x=>!x.sep && x.fis===null)) return alert('En los renglones con ❌ escribe cuánto hay en físico.');
+  if(hechos<tot) return audVIrFalta();
+  const res = audVResultado(); { const sinN = res.filter(x=>!x.sep && x.fis===null); if(sinN.length) return alert('🔒 En estos renglones con ❌ falta escribir cuánto hay:\n\n'+sinN.slice(0,12).map(x=>'• '+String(x.grupo||'').replace(/^Piezas · /,'')+' · '+x.n).join('\n')); }
   const difs = res.filter(x=>x.sep || Math.abs(x.dif)>0.0005);
   const txt = difs.length ? difs.slice(0,15).map(x=>`• ${x.grupo.replace('Piezas · ','')} · ${x.n}: ${x.sep?(x.nota||'revisar'):`teórico ${fmtNum(x.teo)} · físico ${fmtNum(x.fis)} (${x.dif>0?'+':''}${fmtNum(x.dif)})`}`).join('\n')+(difs.length>15?`\n… y ${difs.length-15} más`:'') : 'Todo cuadra ✅';
   if(!confirm(`📊 Teórico vs físico · ${V.mod}\n\n${tot} renglones revisados · ${difs.length} diferencia(s)\n\n${txt}\n\n¿Guardar la auditoría?\n(Las diferencias se deciden después: aceptar, deuda o recontar.)`)) return;
@@ -10078,7 +10195,8 @@ async function audVGuardar(){
   try{ const AQ = V.A || {}; V.G.forEach(g=>g.rows.forEach(r=>{ if(AQ[r.k]) r.aq = AQ[r.k]; else delete r.aq; }));
   const arm = (V.arm||[]).map(a=>Object.assign({}, a, {descripcion:pzpArmTxt(a)}));
   await db.collection('piezasPrueba').doc(id).set({tipo:'audVerif', modulo:V.mod, fecha:ahora, por:quien, total:tot, grupos:V.G, est:V.est, difs:difs, resol:{}, arm});
-    try{ localStorage.removeItem(audVKey(V.mod)); }catch(e){} audV = null; audVPintar(); toast('✅ Auditoría guardada'+(difs.length?'<br><small>Las diferencias te aparecen en el módulo para decidir.</small>':'')); _hdDifs.t = 0; renderHome(); }
+    try{ localStorage.removeItem(audVKey(V.mod)); }catch(e){} audV = null; audVPintar(); _hdDifs.t = 0; renderHome();
+    setTimeout(()=>alert(difs.length ? `✅ Auditoría guardada\n\nÚltimo paso: APLICARLA.\n\n1. Aquí en el Inicio del módulo baja a «💰 Diferencias por decidir» (${difs.length}).\n2. Si alguna la quieres distinta (merma sin cobrar o recontar), decídela primero con sus botones.\n3. Toca «⚡ Aplicar toda la auditoría»: faltantes = deuda del coordinador, sobrantes = se suman.\n\nEl PDF está en 📂 Actas firmadas → 🔍 Auditoría.` : '✅ Auditoría guardada\n\nNo hubo diferencias: todo cuadró. El PDF está en 📂 Actas firmadas → 🔍 Auditoría.'), 300); }
   catch(e){ alert('Error: '+e.message); }
 }
 // v294 (pedido por el usuario): con el modo automático, el coordinador confirma sus propias instalaciones.
