@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v328';
+const APP_VERSION = 'v329';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8255,6 +8255,12 @@ async function guardarCambioModelo(n){
   };
   // El coordinador nunca aprueba su propia corrección: Dirección la verifica (la de Dirección queda aprobada).
   const verifNuevo = esAdmin() ? verifParaNuevo(L) : {};
+  // v329: el celular podía ver la instalación «pendiente» cuando Dirección ya la había aprobado; entonces se creaba la
+  // nueva y no se podía borrar la vieja (quedaba descontada dos veces). Se confirma con el servidor antes de decidir.
+  try{ const fl = await db.collection('instalacionesLog').doc(L.id).get(), fd = fl && fl.data && fl.data();
+    if(fd){ if(fd.estado==='rechazado' || fd.cambiadaPor){ alert('Esa instalación ya no se puede cambiar (se rechazó o ya se cambió).'); cancelarCambioModelo(); return; } L.estado = fd.estado; }
+    if(L.estado==='pendiente'){ const qm = await db.collection('movimientos').where('loteId','==',L.id).get(); if(qm.docs.some(x=>x.data().estado==='aprobado')) L.estado = 'aprobado'; }
+  }catch(e){ return alert('Sin conexión: no se pudo confirmar la instalación. Intenta de nuevo.'); }
   try{
     if(L.estado==='pendiente'){
       for(const x of d.descuenta){ const f=calcFormula(x.itemId); if(f.final - x.cantidad < 0) return alert('No alcanza: '+CATALOGO.find(i=>i.id===x.itemId).nombre); }
@@ -8491,7 +8497,7 @@ async function verifCargar(){
   const [snapLog, snapMov] = await Promise.all([db.collection('instalacionesLog').get(), db.collection('movimientos').get()]);
   verifLogs = snapLog.docs.map(d=>({id:d.id,...d.data()}));
   const ms = snapMov.docs.map(d=>({id:d.id,...d.data()}));
-  verifRegresadas = regresadasDe(ms);
+  verifRegresadas = regresadasDe(ms); verifMovsAll = ms;
   _dirVerif = verifCalcDir(verifLogs, ms);
 }
 async function verifGuardar(id, datos){
@@ -8599,6 +8605,46 @@ async function verifRepetida(id){
   }catch(e){ return alert('Error: '+e.message); }
   toast('🗂️ Marcada como repetida'); if(typeof renderVerif==='function') renderVerif(); else render();
 }
+// v329 (revisión con el usuario): un «cambio de modelo» que se hizo cuando el celular aún veía la instalación como
+// pendiente, pero ya estaba aprobada, creó la nueva y NO pudo quitar la vieja: el mueble quedó descontado dos veces.
+// Se detecta así: la nueva dice «Cambio de modelo · antes: X» y no tiene cambioDe; la vieja (mismo módulo, calle, día y
+// modelo X) sigue viva y se aprobó ANTES del cambio, después del último reinicio del módulo.
+let verifMovsAll = [];
+function cambiosRotos(){
+  const L = verifLogs || [], nrm = x => String(x||'').toLowerCase().replace(/\s+/g,' ').trim(), out = [];
+  L.forEach(n=>{ const nt = String(n.nota||''); if(!nt.startsWith('Cambio de modelo · antes: ') || n.cambioDe || n.estado==='rechazado' || !nrm(n.calle)) return;
+    const antes = nt.slice('Cambio de modelo · antes: '.length).split(' · ')[0];
+    const olds = L.filter(o=>o.id!==n.id && o.modulo===n.modulo && nrm(o.calle)===nrm(n.calle) && String(o.descripcion||'').split(' · ')[0]===antes && (o.fecha||'')<(n.fecha||'') && o.estado!=='rechazado' && !o.cambiadaPor && !o.duplicadoAnulado && !o.registroDuplicado && (o.fechaDia||'')===(n.fechaDia||''))
+      .filter(o=>{ const ms = (verifMovsAll||[]).filter(m=>(m.loteId===o.id || m.instalacionId===o.id) && m.tipo==='instalacion' && !m.anulado && m.estado!=='rechazado');
+        const r = (typeof resetMap!=='undefined' && resetMap[o.modulo]) || '';
+        return ms.length && ms.every(m=>(m.fecha||'')>r) && ms.some(m=>(m.revisadoEn||m.fecha||'')<(n.fecha||'') && m.estado==='aprobado'); });
+    if(olds.length) out.push({n, o:olds[0]}); });
+  return out;
+}
+function cambiosRotosHtml(){
+  let xs = []; try{ xs = cambiosRotos(); }catch(e){} if(!xs.length) return '';
+  return `<div class="card" style="border:2px solid #dc2626"><div style="font-size:16px;font-weight:900;color:#b91c1c">🔁 Cambio de modelo sin terminar (${xs.length})</div>
+    <p class="hint" style="margin:2px 0 6px">Se creó el modelo nuevo pero la instalación vieja no se quitó: <b>el mueble está descontado dos veces</b>. Al terminar el cambio, la vieja queda como «cambiada» y sus descuentos se anulan (regresa ese material al inventario).</p>
+    ${xs.map(({n,o})=>{ const ms = (verifMovsAll||[]).filter(m=>(m.loteId===o.id || m.instalacionId===o.id) && m.tipo==='instalacion' && !m.anulado && m.estado!=='rechazado');
+      return `<div style="margin-top:8px;padding:10px;border-radius:12px;border:1.5px solid #fecaca;background:rgba(220,38,38,.05)">
+        <div style="font-weight:800">${o.modulo} · 📍 ${o.calle||''}</div>
+        <div style="font-size:13.5px;margin-top:4px">❌ Vieja (sigue descontando): <b>${o.descripcion.split(' · ').slice(0,3).join(' · ')}</b><br>✅ Nueva: <b>${n.descripcion.split(' · ').slice(0,3).join(' · ')}</b></div>
+        <div class="hint" style="margin:4px 0 0">Regresa al inventario: ${ms.map(m=>fmtNum(m.cantidad)+' '+String(m.itemNombre||'').replace(/^Melamina /,'')).join(' · ')}</div>
+        <button class="btn small" style="width:100%;margin-top:8px;background:#dc2626" onclick="terminarCambioRoto('${o.id}','${n.id}')">🔁 Terminar cambio de modelo</button></div>`; }).join('')}</div>`;
+}
+async function terminarCambioRoto(oldId, newId){
+  if(!esAdmin()) return; const o = (verifLogs||[]).find(x=>x.id===oldId), n = (verifLogs||[]).find(x=>x.id===newId); if(!o || !n) return;
+  const ms = (verifMovsAll||[]).filter(m=>(m.loteId===o.id || m.instalacionId===o.id) && m.tipo==='instalacion' && !m.anulado && m.estado!=='rechazado');
+  if(!confirm(`🔁 Terminar cambio de modelo · ${o.calle||''}\n\nVieja: ${o.descripcion}\nNueva: ${n.descripcion}\n\nSe anulan los ${ms.length} descuentos de la vieja (regresan al inventario de ${o.modulo}):\n${ms.map(m=>'• '+fmtNum(m.cantidad)+' '+m.itemNombre).join('\n')}\n\nLa nueva se queda como está. ¿Terminar el cambio?`)) return;
+  const quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
+  try{
+    for(const m of ms){ const upd = {estado:'rechazado', anulado:true, correccion:{fecha:ahora, por:quien, anulado:true, motivo:'Cambio de modelo sin terminar: la instalación vieja seguía descontando', antes:{itemId:m.itemId, itemNombre:m.itemNombre, cantidad:m.cantidad}}, nota:(m.nota?m.nota+' · ':'')+'🔁 Anulado: se cambió de modelo ('+n.descripcion.split(' · ')[0]+')'};
+      await db.collection('movimientos').doc(m.id).update(upd); Object.assign(m, upd); }
+    await db.collection('instalacionesLog').doc(o.id).update({cambiadaPor:n.id, cambioTerminado:{por:quien, en:ahora, movs:ms.length}}); o.cambiadaPor = n.id;
+    await db.collection('instalacionesLog').doc(n.id).update({cambioDe:o.id}); n.cambioDe = o.id;
+  }catch(e){ return alert('Error: '+e.message); }
+  toast('🔁 Cambio terminado · '+ms.length+' descuentos anulados'); verifPintar();
+}
 async function renderVerif(){
   current = 'verif';
   $('#main').innerHTML = `<div class="card hint">Cargando instalaciones…</div>`;
@@ -8655,7 +8701,7 @@ function verifPintar(){
         <div style="grid-column:1/-1;display:grid">${btn(l.id,'otro','⏳ Se instala otro día','#7c3aed')}</div>
         ${esAdmin()?`<button class="btn small" style="grid-column:1/-1;background:transparent;color:#6b7280;border:1.5px dashed #6b7280;box-shadow:none" onclick="verifRepetida('${l.id}')">🗂️ Es captura repetida (el material no regresa)</button>`:''}</div>
       ${verifPanel && verifPanel.id===l.id ? verifPanelHtml(l) : ''}</div>`; };
-  $('#main').innerHTML = `
+  $('#main').innerHTML = `${esAdmin()?cambiosRotosHtml():''}
     <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
       <div style="font-size:17px;font-weight:900">🔍 Verificar instalaciones</div>
       ${modChips?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${modChips}</div>`:''}
