@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v329';
+const APP_VERSION = 'v330';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9964,9 +9964,12 @@ async function audVAbrir(){
 let audVP = null;
 const AUD_PRE_ROJO = ['📦'];
 const AUD_PRE_IR = {'✅':['Ir a Aprobaciones',"irA('apr')"], '🔧':['Ir a Verificar',"irA('verif')"], '🔍':['Ir a Verificar',"irA('verif')"], '🚫':['Ir a Verificar',"irA('verif')"], '❌':['Ir a Verificar',"irA('verif')"],
-  '🚚':['Ir a Traspasos',"irA('trasp')"], '💰':['Ir al inicio del módulo',"setView('home')"], '✂️':['Ir a la Hoja de corte',"irA('hcorte')"]};
+  '🚚':['Ir a Traspasos',"irA('trasp')"], '💰':['Ir al inicio del módulo',"setView('home')"], '✂️':['Ir a la Hoja de corte',"irA('hcorte')"], '🔁':['Ir a Verificar',"irA('verif')"]};
 async function audVPreAbrir(mod){ audVP = {mod, pre:null}; audVPrePintar();
-  try{ const x = await audPreRevisar(mod); if(audVP && audVP.mod===mod){ audVP.pre = x; audVPrePintar(); } }catch(e){ if(audVP){ audVP.pre = []; audVPrePintar(); } } }
+  try{ const x = await audPreRevisar(mod);
+    // v330: un cambio de modelo sin terminar deja el mueble descontado dos veces → candado antes de contar.
+    try{ await verifCargar(); cambiosRotos().filter(c=>c.o.modulo===mod).forEach(c=>x.push({ic:'🔁', t:'Cambio de modelo sin terminar', d:'📍 '+(c.o.calle||'')+' · está descontado dos veces · toca 🔁 Terminar cambio de modelo'})); }catch(e){}
+    if(audVP && audVP.mod===mod){ audVP.pre = x; audVPrePintar(); } }catch(e){ if(audVP){ audVP.pre = []; audVPrePintar(); } } }
 function audVPreIr(js){ audVP = null; audVPrePintar(); setTimeout(()=>{ try{ (new Function(js))(); }catch(e){} }, 50); }
 function audVPrePintar(){
   let ov = document.getElementById('aud-vp'); const V = audVP;
