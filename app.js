@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v324';
+const APP_VERSION = 'v325';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9613,14 +9613,19 @@ function hdDifsHtml(mod){
 }
 // v324 (pedido por el usuario, como la auditoría de antes): aplica de un jalón lo que quede por decidir de una
 // auditoría: faltantes → deuda del coordinador, sobrantes → se suman, material separado incompleto → recontar.
+let _hdAplicando = false;
 async function hdAplicarAud(hid){
+  if(_hdAplicando) return toast('⏳ Ya se está aplicando, espera…');
   const h = _hdDifs.docs.find(x=>x.id===hid); if(!h) return; const ys = (h.difs||[]).filter(d=>!(h.resol||{})[d.k]); if(!ys.length) return;
   const F = ys.filter(d=>!d.sep && d.dif<0), S = ys.filter(d=>!d.sep && d.dif>0), P = ys.filter(d=>d.sep || Math.abs(d.dif||0)<0.0005);
   if(!confirm(`⚡ Aplicar toda la auditoría de ${h.modulo}\n\n💰 ${F.length} faltante(s): se dan de baja y quedan como DEUDA del coordinador\n✅ ${S.length} sobrante(s): se suman al inventario${P.length?'\n🔁 '+P.length+' de material separado: quedan para recontar':''}\n\n¿Aplicar?`)) return;
-  toast('Aplicando…'); let n = 0;
-  for(const d of F){ await hdResolver(hid, d.k, 'deuda', true); n++; }
-  for(const d of S){ await hdResolver(hid, d.k, 'ok', true); n++; }
-  for(const d of P){ await hdResolver(hid, d.k, 'recontar', true); n++; }
+  _hdAplicando = true; toast('Aplicando… no cierres la app'); let n = 0;
+  try{
+    for(const d of F){ await hdResolver(hid, d.k, 'deuda', true); n++; }
+    for(const d of S){ await hdResolver(hid, d.k, 'ok', true); n++; }
+    for(const d of P){ await hdResolver(hid, d.k, 'recontar', true); n++; }
+  } finally { _hdAplicando = false; }
+  _hdDifs.docs = _hdDifs.docs.filter(x=>(x.difs||[]).some(z=>!(x.resol||{})[z.k]));
   toast('✅ Auditoría aplicada · '+n+' renglón(es)'); renderHome();
 }
 async function hdResolver(hid, k, acc, silencio){
@@ -9630,15 +9635,21 @@ async function hdResolver(hid, k, acc, silencio){
   if(!silencio && !confirm(`${d.n}\n${d.sep?'':'Diferencia: '+(d.dif>0?'+':'')+fmtNum(d.dif)+'\n'}\n${TXT[acc]}\n\n¿Seguir?`)) return;
   if(d.teo!=null && d.d==null){ d.d = d.teo; d.tengo = d.fis; d.motivo = d.motivo || 'Auditoría'; }
   try{
-    if((acc==='ok' || acc==='deuda') && !d.sep && Math.abs(d.dif)>0.0005 && d.itemId){
+    // v325: si este renglón YA tiene su movimiento (p. ej. la marca de "decidido" se perdió), no se repite: solo se marca.
+    let ya = false;
+    if((acc==='ok' || acc==='deuda') && !d.sep && d.itemId){ try{ const sm = await db.collection('movimientos').where('modulo','==',h.modulo).get();
+      ya = sm.docs.map(x=>x.data()).some(m=>m.hojaDiaId===hid && m.estado!=='rechazado' && (m.difK ? m.difK===k : (m.itemId===d.itemId && String(m.nota||'').includes(' · '+d.n+' · ') && ((d.dif<0)===(m.tipo==='merma'))))); }catch(e){} }
+    if(ya && !silencio) toast('Ya estaba aplicada: solo se marca como decidida');
+    if(!ya && (acc==='ok' || acc==='deuda') && !d.sep && Math.abs(d.dif)>0.0005 && d.itemId){
       const esPz = String(k).startsWith('p_'), hojasEq = esPz ? Math.round(Math.abs(d.dif)*(d.area||0)/HD_HOJA*10000)/10000 : Math.abs(d.dif);
-      const base = {modulo:h.modulo, itemId:d.itemId, itemNombre:it.nombre||d.n, fecha:ahora, estado:'aprobado', creadoPor:quien, hojaDiaId:hid, motivo:'hojaDia', nota:`${h.tipo==='audVerif'?'Auditoría':'Hoja del día'} ${fCorta(h.dia||diaLocal(h.fecha))} · ${d.n} · ${d.motivo||''}`};
+      const base = {modulo:h.modulo, itemId:d.itemId, itemNombre:it.nombre||d.n, fecha:ahora, estado:'aprobado', creadoPor:quien, hojaDiaId:hid, difK:k, motivo:'hojaDia', nota:`${h.tipo==='audVerif'?'Auditoría':'Hoja del día'} ${fCorta(h.dia||diaLocal(h.fecha))} · ${d.n} · ${d.motivo||''}`};
       if(d.dif<0){ await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'merma', cantidad:hojasEq, ...(esPz?{lado:'cortado', ...(d.pk?{piezasPz:[{k:d.pk, q:Math.abs(d.dif)}]}:{})}:(d.lado?{lado:d.lado}:{}))})); }
       else if(esPz){ await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'devolucion', motivo:'piezasEncontradas', cantidad:hojasEq, piezasDetalle:[fmtNum(d.dif)+' '+d.n], ...(d.pk?{piezasPz:[{k:d.pk, q:Math.abs(d.dif)}]}:{})})); }
       else { await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'ajuste', cantidad:hojasEq, completasDelta:d.lado==='completas'?hojasEq:0, cortadoDelta:0})); }
       if(acc==='deuda') await db.collection('deudasAuditoria').doc(cryptoId()).set({modulo:h.modulo, hojaDiaId:hid, fechaAuditoria:h.fecha, auditor:h.tipo==='audVerif'?'Auditoría (verificación)':'Hoja del día', itemId:d.itemId, itemNombre:(it.nombre||'')+(esPz?' · '+d.n:''), unidad:esPz?'hojas':(it.unidad||''), lado:esPz?'cortado':(d.lado||null), cantidad:hojasEq, piezas:esPz?Math.abs(d.dif):null, estado:'pendiente', creadoPor:quien, creado:ahora});
     }
-    const resol = Object.assign({}, h.resol||{}, {[k]:{acc, por:quien, en:ahora}}), upd = {resol};
+    let fresco = {}; try{ const g = await db.collection('piezasPrueba').doc(hid).get(); if(g && g.exists) fresco = (g.data().resol)||{}; }catch(e){}
+    const resol = Object.assign({}, fresco, h.resol||{}, {[k]:{acc, por:quien, en:ahora}}), upd = {resol};
     if(acc==='recontar') upd.recontar = [...new Set((h.recontar||[]).concat([k]))];
     await db.collection('piezasPrueba').doc(hid).update(upd); h.resol = resol; if(upd.recontar) h.recontar = upd.recontar;
     if(silencio) return;
