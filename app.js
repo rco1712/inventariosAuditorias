@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v321';
+const APP_VERSION = 'v322';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -9223,10 +9223,17 @@ async function actaPDF(id){
     if(sepx.length) S.tabla([{t:'Material separado / sobrantes que no estan completos',w:182}], sepx.map(x=>[pdfS(x.n+(x.nota?' - '+x.nota:''))]), ROJ);
     if(pos.length){ S.seccion(pdfS('Lo que sobra (diferencia positiva)'), pdfS(pos.length+' renglon(es) con mas de lo que dice la app'), [3,105,161]);
       S.tabla([{t:'Articulo',w:100},{t:'Teorico',w:26},{t:'Fisico',w:26},{t:'Sobra',w:30}], pos.map(x=>[nombreDif(x), String(fmtNum(x.teo)), String(fmtNum(x.fis)), {t:'+'+fmtNum(x.dif), col:[3,105,161], b:true}]), [3,105,161]); }
-    S.seccion(pdfS('Detalle completo'), pdfS('Todo lo que se reviso, renglon por renglon'), C);
-    if((d.arm||[]).length) S.tabla([{t:'Muebles armados contados',w:150},{t:'Cant.',w:32}], d.arm.map(a=>[pdfS(a.descripcion||a.tipo), String(fmtNum(a.cantidad))]), C);
+    // v322 (pedido por el usuario): después de las diferencias, hojas completas (un color), herrajes (otro color)
+    // y al final todo el conteo de piezas (armados + piezas por color + separado).
     const df = {}; (d.difs||[]).forEach(x=>{ df[x.k]=x; });
-    (d.grupos||[]).forEach(g=>S.tabla([{t:pdfS(g.t),w:96},{t:'Teorico',w:24},{t:'Fisico',w:24},{t:'Dif.',w:38}], g.rows.map(r=>{ const x = df[r.k]; return [pdfS(r.n+(r.aq?' (incluye '+fmtNum(r.aq)+' en armados)':'')), r.sep?'':String(fmtNum(r.d)), x?(x.sep?{t:'NO', col:ROJ, b:true}:{t:String(fmtNum(x.fis)), b:true}):{t:'OK', col:VER}, x?{t:pdfS(x.sep?(x.nota||'revisar'):((x.dif>0?'+':'')+fmtNum(x.dif))), col:ROJ, b:true}:'']; }), C));
+    const tablaG = (g, col) => S.tabla([{t:pdfS(g.t),w:96},{t:'Teorico',w:24},{t:'Fisico',w:24},{t:'Dif.',w:38}], g.rows.map(r=>{ const x = df[r.k]; return [pdfS(r.n+(r.aq?' (incluye '+fmtNum(r.aq)+' en armados)':'')), r.sep?'':String(fmtNum(r.d)), x?(x.sep?{t:'NO', col:ROJ, b:true}:{t:String(fmtNum(x.fis)), b:true}):{t:'OK', col:VER}, x?{t:pdfS(x.sep?(x.nota||'revisar'):((x.dif>0?'+':'')+fmtNum(x.dif))), col:x.dif>0?[3,105,161]:ROJ, b:true}:'']; }), col);
+    const GS = d.grupos||[], esH = g => /^Hojas completas/.test(g.t), esHe = g => /^(Correderas|Herrajes)/.test(g.t);
+    const VERD = [21,128,61], AMB = [180,83,9];
+    if(GS.some(esH)){ S.seccion(pdfS('Hojas completas'), pdfS('Melamina y MDF en hojas completas'), VERD); GS.filter(esH).forEach(g=>tablaG(g, VERD)); }
+    if(GS.some(esHe)){ S.seccion(pdfS('Herrajes y otros'), pdfS('Correderas, herrajes, PVC, cintilla, pegamento, stickers...'), AMB); GS.filter(esHe).forEach(g=>tablaG(g, AMB)); }
+    S.seccion(pdfS('Conteo de piezas'), pdfS('Muebles armados, piezas por color y material separado'), C);
+    if((d.arm||[]).length) S.tabla([{t:'Muebles armados contados',w:150},{t:'Cant.',w:32}], d.arm.map(a=>[pdfS(a.descripcion||a.tipo), String(fmtNum(a.cantidad))]), C);
+    GS.filter(g=>!esH(g) && !esHe(g)).forEach(g=>tablaG(g, C));
   } else if(d.tipo==='hojaDia'){
     const df = {}; (d.difs||[]).forEach(x=>{ df[x.k]=x; }); const RS = {ok:'aceptada', deuda:'DEUDA', recontar:'recontar'};
     (d.grupos||[]).forEach(g=>S.tabla([{t:pdfS(g.t),w:84},{t:'Tenia',w:18},{t:'+/-',w:16},{t:'Debe',w:18},{t:'Tiene?',w:46}], g.rows.map(r=>{ const x = df[r.k], rs = (d.resol||{})[r.k], dif = r.sep?'':fmtNum(r.d-r.t);
