@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v326';
+const APP_VERSION = 'v327';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8497,6 +8497,7 @@ async function verifCambiarFecha(id){
     toast('📅 Fecha corregida.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
 }
 function verifEstadoTxt(l){
+  if(l.registroDuplicado) return '<span class="tag" style="color:#6b7280;border-color:#6b7280">🗂️ Repetida · el material se quedó</span>';
   const v = l.verif||{}; const t = VERIF_TAG[v.estado]; if(!t) return '';
   let extra = '';
   if(v.estado==='no') extra = {otrolado:' · ✔ ya se había regresado por otro lado', regreso:' · ↩️ regresó al inventario', pendiente:' · esperando al coordinador', reinstalar:' · 🔁 se vuelven a instalar', reinstalada: v.reEstado==='ok' ? ' · ✅ reinstalación verificada' : ' · 🔁 reinstaladas, por verificar', sobrantes:' · 🧩 a sobrantes', merma:' · 🗑️ a merma', cambio:' · ✏️ el coordinador corrigió el modelo'}[v.puertas]||'';
