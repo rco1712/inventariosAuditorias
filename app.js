@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v323';
+const APP_VERSION = 'v324';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8524,6 +8524,19 @@ function verifBuscarPintar(){
 }
 function verifIrA(id){ const l = (verifLogs||[]).find(x=>x.id===id); if(!l) return; verifMod = l.modulo; verifDia = diaValorInst(l); verifPanel = null; verifPintar();
   setTimeout(()=>{ const el = [...document.querySelectorAll('#main .card, #main .movitem')].find(e=>e.innerText.includes(l.descripcion) && (!l.calle || e.innerText.includes(l.calle)) && !e.closest('#verif-res')); if(el){ el.scrollIntoView({behavior:'smooth', block:'center'}); el.style.outline='3px solid #f59e0b'; setTimeout(()=>el.style.outline='', 2500); } }, 50); }
+// v324 (pedido por el usuario): una instalación capturada dos veces se quita del registro (reportes, verificar,
+// duplicados) SIN regresar material: su descuento se queda (p. ej. porque la auditoría ya lo ajustó).
+async function verifRepetida(id){
+  if(!esAdmin()) return; const l = (verifLogs||[]).find(x=>x.id===id) || (instLog||[]).find(x=>x.id===id); if(!l) return;
+  if(!confirm(`🗂️ Captura repetida\n\n${l.descripcion}${l.calle?'\n📍 '+l.calle:''}\n\n• Se quita de Verificar y del reporte de instalaciones (no cuenta como otra instalación).\n• El material NO regresa: su descuento se queda.\n\nÚsalo solo si el sobrante ya se ajustó (p. ej. aceptado en la auditoría).\n\n¿Marcar como repetida?`)) return;
+  const ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
+  try{
+    const sm = await db.collection('movimientos').where('modulo','==',l.modulo).get();
+    for(const d of sm.docs){ const m = d.data(); if((m.instalacionId===id || m.loteId===id) && m.estado==='pendiente') await db.collection('movimientos').doc(d.id).update({estado:'aprobado', revisadoEn:ahora, revisadoPor:quien}); }
+    await db.collection('instalacionesLog').doc(id).update({estado:'aprobado', registroDuplicado:{por:quien, en:ahora}, verif:{estado:'ok', auto:'repetida', fecha:ahora, por:quien}});
+  }catch(e){ return alert('Error: '+e.message); }
+  toast('🗂️ Marcada como repetida'); if(typeof renderVerif==='function') renderVerif(); else render();
+}
 async function renderVerif(){
   current = 'verif';
   $('#main').innerHTML = `<div class="card hint">Cargando instalaciones…</div>`;
@@ -8577,7 +8590,8 @@ function verifPintar(){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">
         ${btn(l.id,'ok','✅ Se instaló','#16a34a')}${btn(l.id,'parte','🔸 Una parte','#d97706')}
         ${btn(l.id,'no','❌ No se instaló','#dc2626')}${btn(l.id,'modelo','❓ No coincide','#3E5CDE')}
-        <div style="grid-column:1/-1;display:grid">${btn(l.id,'otro','⏳ Se instala otro día','#7c3aed')}</div></div>
+        <div style="grid-column:1/-1;display:grid">${btn(l.id,'otro','⏳ Se instala otro día','#7c3aed')}</div>
+        ${esAdmin()?`<button class="btn small" style="grid-column:1/-1;background:transparent;color:#6b7280;border:1.5px dashed #6b7280;box-shadow:none" onclick="verifRepetida('${l.id}')">🗂️ Es captura repetida (el material no regresa)</button>`:''}</div>
       ${verifPanel && verifPanel.id===l.id ? verifPanelHtml(l) : ''}</div>`; };
   $('#main').innerHTML = `
     <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
@@ -9221,10 +9235,12 @@ async function actaPDF(id){
     const nombreDif = x => pdfS(String(x.grupo||'').replace(/^Piezas[^·]*· /,'')+' · '+x.n);
     const neg = (d.difs||[]).filter(x=>!x.sep && x.dif<0).sort((a,b)=>a.dif-b.dif), pos = (d.difs||[]).filter(x=>!x.sep && x.dif>0), sepx = (d.difs||[]).filter(x=>x.sep);
     S.seccion(pdfS('Lo que falta (diferencia negativa)'), pdfS(neg.length?neg.length+' renglon(es) con menos de lo que dice la app':'No falta nada'), ROJ);
-    if(neg.length) S.tabla([{t:'Articulo',w:100},{t:'Teorico',w:26},{t:'Fisico',w:26},{t:'Falta',w:30}], neg.map(x=>[{t:nombreDif(x), b:true}, String(fmtNum(x.teo)), String(fmtNum(x.fis)), {t:String(fmtNum(x.dif)), col:ROJ, b:true}]), ROJ);
+    // v324: columna con lo que Dirección decidió (Aceptada / Deuda / Recontar / pendiente).
+    const decid = x => { const r = (d.resol||{})[x.k]; return r ? {t:pdfS({ok:'Aceptada', deuda:'Deuda', recontar:'Recontar'}[r.acc]||r.acc), b:true, col:r.acc==='deuda'?ROJ:r.acc==='recontar'?[180,83,9]:VER} : {t:'Por decidir', col:[120,120,120]}; };
+    if(neg.length) S.tabla([{t:'Articulo',w:84},{t:'Teorico',w:22},{t:'Fisico',w:22},{t:'Falta',w:22},{t:'Decision',w:32}], neg.map(x=>[{t:nombreDif(x), b:true}, String(fmtNum(x.teo)), String(fmtNum(x.fis)), {t:String(fmtNum(x.dif)), col:ROJ, b:true}, decid(x)]), ROJ);
     if(sepx.length) S.tabla([{t:'Material separado / sobrantes que no estan completos',w:182}], sepx.map(x=>[pdfS(x.n+(x.nota?' - '+x.nota:''))]), ROJ);
     if(pos.length){ S.seccion(pdfS('Lo que sobra (diferencia positiva)'), pdfS(pos.length+' renglon(es) con mas de lo que dice la app'), [3,105,161]);
-      S.tabla([{t:'Articulo',w:100},{t:'Teorico',w:26},{t:'Fisico',w:26},{t:'Sobra',w:30}], pos.map(x=>[nombreDif(x), String(fmtNum(x.teo)), String(fmtNum(x.fis)), {t:'+'+fmtNum(x.dif), col:[3,105,161], b:true}]), [3,105,161]); }
+      S.tabla([{t:'Articulo',w:84},{t:'Teorico',w:22},{t:'Fisico',w:22},{t:'Sobra',w:22},{t:'Decision',w:32}], pos.map(x=>[nombreDif(x), String(fmtNum(x.teo)), String(fmtNum(x.fis)), {t:'+'+fmtNum(x.dif), col:[3,105,161], b:true}, decid(x)]), [3,105,161]); }
     // v322 (pedido por el usuario): después de las diferencias, hojas completas (un color), herrajes (otro color)
     // y al final todo el conteo de piezas (armados + piezas por color + separado).
     const df = {}; (d.difs||[]).forEach(x=>{ df[x.k]=x; });
@@ -9584,6 +9600,9 @@ function hdDifsHtml(mod){
   if(!xs.length) return '';
   const q = k => String(k).replace(/'/g,"\\'");
   return `<div class="card" style="padding:12px;border:2px solid #ca8a04"><div style="font-size:16px;font-weight:900">💰 Diferencias por decidir (${xs.length})</div><p class="hint" style="margin:2px 0 0">Tú decides cada una. Nada se cobra solo.</p>
+    ${(()=>{ const au = [...new Set(xs.filter(x=>x.h.tipo==='audVerif').map(x=>x.h.id))]; return au.map(id=>{ const ys = xs.filter(x=>x.h.id===id), nF = ys.filter(x=>!x.d.sep && x.d.dif<0).length, nS = ys.filter(x=>!x.d.sep && x.d.dif>0).length;
+      return `<button class="btn" style="width:100%;min-height:50px;margin-top:8px;background:linear-gradient(135deg,#0e7490,#155e75)" onclick="hdAplicarAud('${id}')">⚡ Aplicar toda la auditoría<br><span style="font-size:12.5px;font-weight:600">${nF} faltante(s) → 💰 deuda · ${nS} sobrante(s) → ✅ se suman</span></button>
+        <div class="hint" style="margin:4px 0 0">Si alguna la quieres distinta (merma sin cobrar o recontar), decídela abajo primero; el botón aplica solo las que queden.</div>`; }).join(''); })()}
     ${xs.map(({h,d})=>`<div style="margin-top:8px;padding:10px;border-radius:12px;border:1px solid var(--line)"><strong>${d.grupo.replace(/^Piezas[^·]*· /,'')} · ${d.n}</strong>
       ${h.tipo==='audVerif'?'<div class="hint" style="margin:0;font-weight:800">🔍 Auditoría</div>':''}<div style="font-size:14px">${d.sep?(d.nota?'“'+d.nota+'”':'No está completo'):`Debía tener <strong>${fmtNum(d.d!=null?d.d:d.teo)}</strong> · tiene <strong>${fmtNum(d.tengo!=null?d.tengo:d.fis)}</strong> · <strong style="color:${d.dif<0?'#dc2626':'#16a34a'}">${d.dif>0?'+':''}${fmtNum(d.dif)}</strong>`}</div>
       <div class="hint" style="margin:2px 0 0">${d.motivo?'“'+d.motivo+'” · ':''}${fCorta(h.dia||diaLocal(h.fecha))}</div>
@@ -9592,11 +9611,23 @@ function hdDifsHtml(mod){
         <button class="btn small" style="margin:0;padding:2px;background:#ca8a04" ${d.dif>0||d.sep?'disabled':''} onclick="hdResolver('${h.id}','${q(d.k)}','deuda')">💰 Deuda</button>
         <button class="btn small" style="margin:0;padding:2px;background:#3E5CDE" onclick="hdResolver('${h.id}','${q(d.k)}','recontar')">🔁 Recontar</button></div></div>`).join('')}</div>`;
 }
-async function hdResolver(hid, k, acc){
+// v324 (pedido por el usuario, como la auditoría de antes): aplica de un jalón lo que quede por decidir de una
+// auditoría: faltantes → deuda del coordinador, sobrantes → se suman, material separado incompleto → recontar.
+async function hdAplicarAud(hid){
+  const h = _hdDifs.docs.find(x=>x.id===hid); if(!h) return; const ys = (h.difs||[]).filter(d=>!(h.resol||{})[d.k]); if(!ys.length) return;
+  const F = ys.filter(d=>!d.sep && d.dif<0), S = ys.filter(d=>!d.sep && d.dif>0), P = ys.filter(d=>d.sep || Math.abs(d.dif||0)<0.0005);
+  if(!confirm(`⚡ Aplicar toda la auditoría de ${h.modulo}\n\n💰 ${F.length} faltante(s): se dan de baja y quedan como DEUDA del coordinador\n✅ ${S.length} sobrante(s): se suman al inventario${P.length?'\n🔁 '+P.length+' de material separado: quedan para recontar':''}\n\n¿Aplicar?`)) return;
+  toast('Aplicando…'); let n = 0;
+  for(const d of F){ await hdResolver(hid, d.k, 'deuda', true); n++; }
+  for(const d of S){ await hdResolver(hid, d.k, 'ok', true); n++; }
+  for(const d of P){ await hdResolver(hid, d.k, 'recontar', true); n++; }
+  toast('✅ Auditoría aplicada · '+n+' renglón(es)'); renderHome();
+}
+async function hdResolver(hid, k, acc, silencio){
   const h = _hdDifs.docs.find(x=>x.id===hid); if(!h) return; const d = (h.difs||[]).find(x=>x.k===k); if(!d) return;
   const it = CATALOGO.find(i=>i.id===d.itemId)||{}, quien = getCurrentUserEmail?getCurrentUserEmail():'', ahora = new Date().toISOString();
   const TXT = {ok:d.dif>0?'Aceptar: se SUMA lo que tiene de más':'Aceptar: se da de baja como merma (sin deuda)', deuda:'Deuda: se da de baja y queda como deuda del coordinador', recontar:'Recontar: no se mueve nada; mañana sale marcado para contarlo otra vez'};
-  if(!confirm(`${d.n}\n${d.sep?'':'Diferencia: '+(d.dif>0?'+':'')+fmtNum(d.dif)+'\n'}\n${TXT[acc]}\n\n¿Seguir?`)) return;
+  if(!silencio && !confirm(`${d.n}\n${d.sep?'':'Diferencia: '+(d.dif>0?'+':'')+fmtNum(d.dif)+'\n'}\n${TXT[acc]}\n\n¿Seguir?`)) return;
   if(d.teo!=null && d.d==null){ d.d = d.teo; d.tengo = d.fis; d.motivo = d.motivo || 'Auditoría'; }
   try{
     if((acc==='ok' || acc==='deuda') && !d.sep && Math.abs(d.dif)>0.0005 && d.itemId){
@@ -9610,6 +9641,7 @@ async function hdResolver(hid, k, acc){
     const resol = Object.assign({}, h.resol||{}, {[k]:{acc, por:quien, en:ahora}}), upd = {resol};
     if(acc==='recontar') upd.recontar = [...new Set((h.recontar||[]).concat([k]))];
     await db.collection('piezasPrueba').doc(hid).update(upd); h.resol = resol; if(upd.recontar) h.recontar = upd.recontar;
+    if(silencio) return;
     _hdDifs.docs = _hdDifs.docs.filter(x=>(x.difs||[]).some(z=>!(x.resol||{})[z.k])); toast(acc==='recontar'?'🔁 Sale marcado mañana':'✅ Listo'); renderHome();
   }catch(e){ alert('Error: '+e.message); }
 }
@@ -12812,7 +12844,7 @@ function rpEstado(l, C){
 const rpHora = iso => iso ? new Date(iso).toLocaleTimeString('es-MX',{hour:'numeric', minute:'2-digit'}) : '';
 const rpCuando = iso => iso ? fCorta(diaLocal(iso))+' '+rpHora(iso) : '';
 function rpCalc(C, mod, desde, hasta){
-  const logs = C.logs.filter(l=>l.modulo===mod && l.categoria===rpTipo && !l.duplicadoAnulado && !l.cambiadaPor && (l.fechaDia||diaLocal(l.fecha))>=desde && (l.fechaDia||diaLocal(l.fecha))<=hasta)
+  const logs = C.logs.filter(l=>l.modulo===mod && l.categoria===rpTipo && !l.duplicadoAnulado && !l.registroDuplicado && !l.cambiadaPor && (l.fechaDia||diaLocal(l.fecha))>=desde && (l.fechaDia||diaLocal(l.fecha))<=hasta)
     .sort((a,b)=>(a.fechaDia||'').localeCompare(b.fechaDia||'') || (a.fecha||'').localeCompare(b.fecha||''));
   const ids = new Set(logs.map(l=>l.id));
   const its = (rpTipo==='Puerta' ? RP_HERR : RP_HERR_MUEBLE).map(n=>itemByName(n)).filter(Boolean);
@@ -17637,7 +17669,7 @@ async function dupCargar(){
     const out = []; Object.values(por).forEach(arr=>{ if(arr.length<2) return; arr.sort((a,b)=>(fecha(a)||'').localeCompare(fecha(b)||''));
       let g = [arr[0]]; for(let i=1;i<arr.length;i++){ if(dupCerca(fecha(arr[i]), fecha(g[g.length-1]))) g.push(arr[i]); else { if(g.length>1) out.push(g); g=[arr[i]]; } } if(g.length>1) out.push(g); }); return out; };
   // 1) Instalaciones iguales
-  const vivos = logs.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado);
+  const vivos = logs.filter(l=>l.estado!=='rechazado' && !l.cambiadaPor && !l.duplicadoAnulado && !l.registroDuplicado);
   agrupar(vivos, l=>dupFirma([l.modulo, l.categoria, l.descripcion, l.calle||'', l.fechaDia, (l.consumo||[]).map(c=>c.itemId+':'+c.cantidad).sort()]), l=>l.fecha)
     .forEach(g=>grupos.push({tipo:'inst', modulo:g[0].modulo, items:g, clave:'inst:'+g.map(x=>x.id).sort().join(',')}));
   // 1b) v311 (pedido por el usuario): una instalación apartada / no instalada que el coordinador volvió a capturar
@@ -19636,6 +19668,7 @@ function repModDias(D){
   const estadoTxt = l => {
     if(l.estado==='rechazado') return {t:'Rechazada · no se descontó', c:'#6b7280'};
     if(l.duplicadoAnulado) return {t:'Repetida · anulada', c:'#6b7280'};
+    if(l.registroDuplicado) return {t:'🗂️ Repetida (material se quedó)', c:'#6b7280'};
     if(l.cambiadaPor){ const n = logPorId(l.cambiadaPor); return {t:'Se cambió'+(n?' (nueva captura del '+fCortaRep(n.fecha)+')':'')+' · el descuento se queda aquí', c:'#7c3aed'}; }
     const de = D.logsAll.find(x=>x.cambiadaPor===l.id);
     if(l.verif && l.verif.estado==='no'){ const r = D.regDe(l.id); return r.length ? {t:'No se instaló · REGRESÓ AL INVENTARIO el '+fCortaRep(r[0].fecha), c:'#dc2626'} : {t:'No se instaló · pendiente de regresar', c:'#dc2626'}; }
