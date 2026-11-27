@@ -285,7 +285,7 @@ try{ if(window.ResizeObserver){ const ro = new ResizeObserver(ajustarNavSticky);
 // Se ve en Inicio; si en el servidor ya hay una versión más nueva, sale un aviso para actualizar con
 // un toque (borra lo guardado de la versión vieja y recarga). Cada usuario deja registrada su versión
 // para que Dirección vea quién trae una versión vieja.
-const APP_VERSION = 'v330';
+const APP_VERSION = 'v331';
 const numVersion = v => Number(String(v||'').replace(/\D/g,''))||0;
 let versionServidor = null;
 async function revisarVersion(){
@@ -8552,7 +8552,7 @@ async function verifCambiarFecha(id){
     toast('📅 Fecha corregida.'); verifTrasCambio(); }catch(e){ alert('Error: '+e.message); }
 }
 function verifEstadoTxt(l){
-  if(l.registroDuplicado) return '<span class="tag" style="color:#6b7280;border-color:#6b7280">🗂️ Repetida · el material se quedó</span>';
+  if(l.registroDuplicado) return '<span class="tag" style="color:#6b7280;border-color:#6b7280">🗂️ '+(l.registroDuplicado.regresa?'Capturada dos veces · el material regresó':'Repetida · el material se quedó')+'</span>';
   const v = l.verif||{}; const t = VERIF_TAG[v.estado]; if(!t) return '';
   let extra = '';
   if(v.estado==='no') extra = {otrolado:' · ✔ ya se había regresado por otro lado', regreso:' · ↩️ regresó al inventario', pendiente:' · esperando al coordinador', reinstalar:' · 🔁 se vuelven a instalar', reinstalada: v.reEstado==='ok' ? ' · ✅ reinstalación verificada' : ' · 🔁 reinstaladas, por verificar', sobrantes:' · 🧩 a sobrantes', merma:' · 🗑️ a merma', cambio:' · ✏️ el coordinador corrigió el modelo'}[v.puertas]||'';
@@ -8594,16 +8594,24 @@ function verifIrA(id){ const l = (verifLogs||[]).find(x=>x.id===id); if(!l) retu
   setTimeout(()=>{ const el = [...document.querySelectorAll('#main .card, #main .movitem')].find(e=>e.innerText.includes(l.descripcion) && (!l.calle || e.innerText.includes(l.calle)) && !e.closest('#verif-res')); if(el){ el.scrollIntoView({behavior:'smooth', block:'center'}); el.style.outline='3px solid #f59e0b'; setTimeout(()=>el.style.outline='', 2500); } }, 50); }
 // v324 (pedido por el usuario): una instalación capturada dos veces se quita del registro (reportes, verificar,
 // duplicados) SIN regresar material: su descuento se queda (p. ej. porque la auditoría ya lo ajustó).
-async function verifRepetida(id){
+async function verifRepetida(id, regresa){
   if(!esAdmin()) return; const l = (verifLogs||[]).find(x=>x.id===id) || (instLog||[]).find(x=>x.id===id); if(!l) return;
-  if(!confirm(`🗂️ Captura repetida\n\n${l.descripcion}${l.calle?'\n📍 '+l.calle:''}\n\n• Se quita de Verificar y del reporte de instalaciones (no cuenta como otra instalación).\n• El material NO regresa: su descuento se queda.\n\nÚsalo solo si el sobrante ya se ajustó (p. ej. aceptado en la auditoría).\n\n¿Marcar como repetida?`)) return;
-  const ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():'';
+  // v331 (pedido por el usuario): «se capturó dos veces» = el mueble se instaló UNA vez; el segundo registro se quita
+  // y sus descuentos se anulan (el material regresa al inventario, sin deuda).
+  const txt = regresa ? '• Se quita de Verificar y del reporte de instalaciones.\n• Sus descuentos se ANULAN: el material regresa al inventario (nunca salió).\n\nÚsalo solo si el mueble se instaló UNA vez y se capturó dos.'
+    : '• Se quita de Verificar y del reporte de instalaciones (no cuenta como otra instalación).\n• El material NO regresa: su descuento se queda.\n\nÚsalo solo si el descuento ya se ajustó (por ejemplo en la auditoría).';
+  if(!confirm(`🗂️ ${regresa?'Se capturó dos veces':'Captura repetida'}\n\n${l.descripcion}${l.calle?'\n📍 '+l.calle:''}\n\n${txt}`)) return;
+  const ahora = new Date().toISOString(), quien = getCurrentUserEmail?getCurrentUserEmail():''; let n = 0;
   try{
     const sm = await db.collection('movimientos').where('modulo','==',l.modulo).get();
-    for(const d of sm.docs){ const m = d.data(); if((m.instalacionId===id || m.loteId===id) && m.estado==='pendiente') await db.collection('movimientos').doc(d.id).update({estado:'aprobado', revisadoEn:ahora, revisadoPor:quien}); }
-    await db.collection('instalacionesLog').doc(id).update({estado:'aprobado', registroDuplicado:{por:quien, en:ahora}, verif:{estado:'ok', auto:'repetida', fecha:ahora, por:quien}});
+    for(const d of sm.docs){ const m = d.data(); if(!(m.instalacionId===id || m.loteId===id) || m.anulado || m.estado==='rechazado') continue;
+      if(regresa){ if(m.tipo!=='instalacion') continue; n++;
+        await db.collection('movimientos').doc(d.id).update({estado:'rechazado', anulado:true, correccion:{fecha:ahora, por:quien, anulado:true, motivo:'Instalación capturada dos veces: se anuló el segundo registro', antes:{itemId:m.itemId, itemNombre:m.itemNombre, cantidad:m.cantidad}}, nota:(m.nota?m.nota+' · ':'')+'🗂️ Anulado: capturada dos veces'}); }
+      else if(m.estado==='pendiente') await db.collection('movimientos').doc(d.id).update({estado:'aprobado', revisadoEn:ahora, revisadoPor:quien}); }
+    await db.collection('instalacionesLog').doc(id).update({estado:'aprobado', registroDuplicado:{por:quien, en:ahora, ...(regresa?{regresa:true, movs:n}:{})}, verif:{estado:'ok', auto:'repetida', fecha:ahora, por:quien}});
+    try{ (movs||[]).forEach(m=>{ if(regresa && (m.instalacionId===id || m.loteId===id) && m.tipo==='instalacion'){ m.estado='rechazado'; m.anulado=true; } }); }catch(e){}
   }catch(e){ return alert('Error: '+e.message); }
-  toast('🗂️ Marcada como repetida'); if(typeof renderVerif==='function') renderVerif(); else render();
+  toast(regresa?'🗂️ Quitada · '+n+' descuentos anulados':'🗂️ Marcada como repetida'); if(typeof renderVerif==='function') renderVerif(); else render();
 }
 // v329 (revisión con el usuario): un «cambio de modelo» que se hizo cuando el celular aún veía la instalación como
 // pendiente, pero ya estaba aprobada, creó la nueva y NO pudo quitar la vieja: el mueble quedó descontado dos veces.
@@ -8699,7 +8707,7 @@ function verifPintar(){
         ${btn(l.id,'ok','✅ Se instaló','#16a34a')}${btn(l.id,'parte','🔸 Una parte','#d97706')}
         ${btn(l.id,'no','❌ No se instaló','#dc2626')}${btn(l.id,'modelo','❓ No coincide','#3E5CDE')}
         <div style="grid-column:1/-1;display:grid">${btn(l.id,'otro','⏳ Se instala otro día','#7c3aed')}</div>
-        ${esAdmin()?`<button class="btn small" style="grid-column:1/-1;background:transparent;color:#6b7280;border:1.5px dashed #6b7280;box-shadow:none" onclick="verifRepetida('${l.id}')">🗂️ Es captura repetida (el material no regresa)</button>`:''}</div>
+        ${esAdmin()?`<button class="btn small" style="grid-column:1/-1;background:transparent;color:#6b7280;border:1.5px dashed #6b7280;box-shadow:none" onclick="verifRepetida('${l.id}',true)">🗂️ Se capturó dos veces (el material regresa)</button><button class="btn small" style="grid-column:1/-1;background:transparent;color:#6b7280;border:1.5px dashed #6b7280;box-shadow:none" onclick="verifRepetida('${l.id}')">🗂️ Es captura repetida (el material no regresa)</button>`:''}</div>
       ${verifPanel && verifPanel.id===l.id ? verifPanelHtml(l) : ''}</div>`; };
   $('#main').innerHTML = `${esAdmin()?cambiosRotosHtml():''}
     <div class="card" style="padding:12px;border:2px solid ${rojo?'#dc2626':'#0e7490'}">
@@ -9751,6 +9759,10 @@ async function hdResolver(hid, k, acc, silencio){
     if(!ya && (acc==='ok' || acc==='deuda') && !d.sep && Math.abs(d.dif)>0.0005 && d.itemId){
       const esPz = String(k).startsWith('p_'), hojasEq = esPz ? Math.round(Math.abs(d.dif)*(d.area||0)/HD_HOJA*10000)/10000 : Math.abs(d.dif);
       const base = {modulo:h.modulo, itemId:d.itemId, itemNombre:it.nombre||d.n, fecha:ahora, estado:'aprobado', creadoPor:quien, hojaDiaId:hid, difK:k, motivo:'hojaDia', nota:`${h.tipo==='audVerif'?'Auditoría':'Hoja del día'} ${fCorta(h.dia||diaLocal(h.fecha))} · ${d.n} · ${d.motivo||''}`};
+      // v331: media que faltó de juegos completos → primero se separan esos juegos (su pareja queda suelta).
+      if(d.dif<0 && Number(d.rompe)>0 && d.rompeIds){ const n = Number(d.rompe), R = d.rompeIds;
+        for(const [iid, q] of [[R.juego,-n],[R.hembra,n],[R.macho,n]]){ const I = CATALOGO.find(i=>i.id===iid)||{};
+          await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {itemId:iid, itemNombre:I.nombre||iid, tipo:'ajuste', motivo:'separarJuegos', cantidad:q, completasDelta:q, cortadoDelta:0, difK:k+'#separa', nota:base.nota+' · se separaron '+fmtNum(n)+' juego(s)'})); } }
       if(d.dif<0){ await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'merma', cantidad:hojasEq, ...(esPz?{lado:'cortado', ...(d.pk?{piezasPz:[{k:d.pk, q:Math.abs(d.dif)}]}:{})}:(d.lado?{lado:d.lado}:{}))})); }
       else if(esPz){ await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'devolucion', motivo:'piezasEncontradas', cantidad:hojasEq, piezasDetalle:[fmtNum(d.dif)+' '+d.n], ...(d.pk?{piezasPz:[{k:d.pk, q:Math.abs(d.dif)}]}:{})})); }
       else { await db.collection('movimientos').doc(cryptoId()).set(Object.assign({}, base, {tipo:'ajuste', cantidad:hojasEq, completasDelta:d.lado==='completas'?hojasEq:0, cortadoDelta:0})); }
@@ -9907,7 +9919,7 @@ async function audVGrupos(mod){
   const hojas = [], otros = [];
   CATALOGO.forEach(i=>{ const f = calcFormulaHasta(i.id, null);
     if(esHoja(i)){ const d = fmtNum(f.completas); if(Math.abs(d)<0.005) return; hojas.push({k:'h_'+i.id, itemId:i.id, n:i.nombre.replace(/^Melamina /,''), d, u:'hojas', lado:'completas'}); }
-    else { const d = fmtNum(f.final); if(Math.abs(d)<0.005) return; otros.push({k:'o_'+i.id, itemId:i.id, n:i.nombre, d, u:i.unidad||''}); } });
+    else { const d = fmtNum(f.final); if(Math.abs(d)<0.005 && !(i.nombre==='Juego de corredera' || i.nombre==='Correderas de extensión' || /^Corredera (ext\. )?(hembra|macho) \(sin pareja\)$/.test(i.nombre))) return; otros.push({k:'o_'+i.id, itemId:i.id, n:i.nombre, d, u:i.unidad||''}); } });
   if(hojas.length) G.push({t:'Hojas completas', rows:hojas});
   try{ await pzpCargar(mod); const R = pzpCalcular(pzpD);
     if(R){ const ids = [...new Set(Object.values(R.N).map(n=>n.itemId))].sort((a,b)=>pzpColor(a).localeCompare(pzpColor(b)));
@@ -10231,7 +10243,7 @@ function audVPintar(){
       <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-weight:700">${r.n}</span><span style="font-weight:900">${fmtNum(r.d)} <span class="hint" style="margin:0">${r.u||''}</span></span></div>
       <div class="hint" style="margin:2px 0 0">🗄️ Se cuenta en <b>Armados</b> (🚪 Puertas y puertitas): llevas <b>${fmtNum(A)}</b>${Math.abs(dd)>0.0005?` · <b style="color:${dd<0?'#dc2626':'#0369a1'}">${dd>0?'+':''}${dd}</b>`:' · ✅ cuadra'}</div></div>`; }
     return `<div id="avr_${idk(r.k)}" style="${V._flash===r.k?'box-shadow:0 0 0 4px #f59e0b;':''}padding:7px 8px;margin-top:4px;border-radius:10px;border:1.5px solid ${e==='si'?'#16a34a':(no?'#dc2626':'var(--line)')};background:${e==='si'?'rgba(22,163,74,.06)':(no?'rgba(220,38,38,.06)':'transparent')}">
-      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700;font-size:14px">${r.n}</strong>${r.det?`<div class="hint" style="margin:2px 0 0;font-size:12.5px;line-height:1.4">${r.hoy?'':'Debe estar aparte:<br>'}${r.det}</div>`:''}${A>0?`<div class="hint" style="margin:0;${sobra?'color:#0369a1;font-weight:800':''}">${sobra?`🗄️ En armados hay ${fmtNum(A)} y debe haber ${fmtNum(r.d)} (sobran ${fmtNum(A-Number(r.d))})`:`Debe haber ${fmtNum(r.d)} = 🗄️ ${fmtNum(A)} armadas + ${S} sueltas`}</div>`:''}</div>
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><strong style="font-weight:700;font-size:14px">${r.n}</strong>${audVCorrHint(r)}${r.det?`<div class="hint" style="margin:2px 0 0;font-size:12.5px;line-height:1.4">${r.hoy?'':'Debe estar aparte:<br>'}${r.det}</div>`:''}${A>0?`<div class="hint" style="margin:0;${sobra?'color:#0369a1;font-weight:800':''}">${sobra?`🗄️ En armados hay ${fmtNum(A)} y debe haber ${fmtNum(r.d)} (sobran ${fmtNum(A-Number(r.d))})`:`Debe haber ${fmtNum(r.d)} = 🗄️ ${fmtNum(A)} armadas + ${S} sueltas`}</div>`:''}</div>
         ${r.sep?'':`<div style="text-align:right"><div style="font-size:18px;font-weight:900;line-height:1">${A>0?S:fmtNum(r.d)}</div><div class="hint" style="margin:0;font-size:11px">${A>0?'sueltas':r.u}</div></div>`}
         <button class="btn small" style="margin:0;min-width:40px;min-height:36px;padding:0;background:${e==='si'?'#16a34a':'transparent'};color:${e==='si'?'#fff':'#16a34a'};border:1.5px solid #16a34a;box-shadow:none" onclick="audVSet('${q(r.k)}','si')">✅</button>
         <button class="btn small" style="margin:0;min-width:40px;min-height:36px;padding:0;background:${no?'#dc2626':'transparent'};color:${no?'#fff':'#dc2626'};border:1.5px solid #dc2626;box-shadow:none" onclick="audVSet('${q(r.k)}','no')">❌</button></div>
@@ -10262,6 +10274,32 @@ function audVPintar(){
     ${V.paso==='sep'?`<button class="btn" style="width:100%;min-height:54px;margin-top:14px;background:#7c3aed" onclick="audVSepListo()">➡️ Ya revisé lo que va aparte · seguir a 🗄️ armados</button>`:`<button class="btn" style="width:100%;min-height:54px;margin-top:14px;background:${hechos===tot?'linear-gradient(135deg,#0f172a,#334155)':'#94a3b8'}" onclick="audVGuardar()">${hechos===tot?'📊 Ver teórico vs físico y guardar':`🔎 Faltan ${tot-hechos} por revisar · toca para ir`}</button>`}</div>`;
   ov.scrollTop = top;
 }
+// v331 (pedido por el usuario): en la auditoría las hembras y machos sueltos se juntan solos en juegos antes de
+// comparar (igual que la calculadora del cierre). Se compara lo que hay de verdad: juegos + medias sin pareja, sin
+// faltantes ni sobrantes falsos por contar una pareja suelta como hembra y macho.
+function audVCorrHint(r){ const nm = ((CATALOGO.find(i=>i.id===r.itemId)||{}).nombre)||'';
+  return CORR_TIPOS.some(t=>t.hembra===nm || t.macho===nm) ? '<div class="hint" style="margin:2px 0 0;font-size:12.5px;color:#0e7490">🔩 Pon las sueltas como estén: la app las junta con su pareja y solo marca lo que de verdad falta o sobra.</div>' : ''; }
+function audVCorrJuntar(V, out){
+  const eps = 0.0005, J = (h,m) => Math.max(0, Math.min(h,m));
+  CORR_TIPOS.forEach(t=>{ const ids = [t.juego, t.hembra, t.macho].map(n=>(itemByName(n)||{}).id); if(ids.some(x=>!x)) return;
+    const rows = ids.map(id=>{ for(const g of V.G) for(const r of g.rows) if(r.itemId===id && /^o_/.test(r.k)) return {g, r}; return null; }); if(rows.some(x=>!x)) return;
+    const teo = rows.map(x=>Number(x.r.d)||0);
+    const fis = rows.map((x,i)=>{ const o = out.find(y=>y.k===x.r.k); if(o) return o.sep ? NaN : (o.fis===null ? NaN : Number(o.fis)); return V.est[x.r.k]==='si' ? Math.max(teo[i], Number((V.A||{})[x.r.k])||0) : NaN; });
+    if(fis.some(isNaN)) return;
+    // Se compara por mitades: cuántas hembras y cuántos machos hay en total (juegos + sueltas). Lo que falta o sobra
+    // de los dos a la vez es «juego»; lo demás, la media que corresponde. Así una pareja suelta nunca sale como diferencia.
+    const pf = J(fis[1],fis[2]);
+    let dh = (fis[0]+fis[1])-(teo[0]+teo[1]), dm = (fis[0]+fis[2])-(teo[0]+teo[2]);
+    const D = [0,0,0]; if(dh*dm>0){ const c = Math.sign(dh)*Math.min(Math.abs(dh),Math.abs(dm)); D[0] = c; dh -= c; dm -= c; }
+    // Si falta una media (p. ej. hembras) y no hay sueltas en el inventario, salió de juegos: al aplicar, esos juegos se
+    // separan (su pareja queda suelta) y solo se da de baja la media que falta. Faltante real, inventario exacto.
+    const R = [0,0,0]; [[dh,1],[dm,2]].forEach(([r,i])=>{ D[i] += r; if(r<-eps) R[i] = Math.max(0, -r - Math.max(0, teo[i])); });
+    rows.forEach((x,i)=>{ const ix = out.findIndex(y=>y.k===x.r.k); if(ix>=0) out.splice(ix,1);
+      if(Math.abs(D[i])<=eps) return; const rp = R[i] > eps, tt = rp ? teo[0]+teo[i] : teo[i];
+      out.push({grupo:x.g.t, k:x.r.k, itemId:x.r.itemId, pk:null, area:0, lado:null, n:x.r.n.replace(' (sin pareja)', rp?' (contando las de los juegos)':' (sin pareja)'), u:x.r.u, teo:fmtNum(tt), arm:Number((V.A||{})[x.r.k])||0, fis:fmtNum(tt+D[i]), dif:fmtNum(D[i]), juntado:true,
+        ...(rp ? {rompe:fmtNum(R[i]), rompeIds:{juego:ids[0], hembra:ids[1], macho:ids[2]}} : {})}); }); });
+  return out;
+}
 function audVResultado(){
   const V = audV, out = [];
   const AQ = V.A || {};
@@ -10269,6 +10307,7 @@ function audVResultado(){
     if(V.est[r.k]!=='no'){ if(V.est[r.k]==='si' && !r.sep && !r.nota && A > 0 && A > Number(r.d) + 0.0005) out.push(Object.assign(base, {fis:A, dif:fmtNum(A - Number(r.d))})); return; }
     if(r.sep || r.nota) out.push({grupo:g.t, k:r.k, n:r.n, nota:V.nota[r.k]||'', sep:true});
     else { const v = V.fis[r.k], f = (v===''||v===undefined||v===null) ? NaN : Number(v) + A; out.push(Object.assign(base, {fis:isNaN(f)?null:fmtNum(f), dif:isNaN(f)?null:fmtNum(f - Number(r.d))})); } }));
+  try{ audVCorrJuntar(V, out); }catch(e){}
   return out;
 }
 // v326 (pedido por el usuario): «Faltan N» te lleva directo al renglón que falta, sin buscarlo.
@@ -10582,6 +10621,22 @@ async function verifCambioTrasNo(id){
   setView('inst'); await cargarInstLog(); iniciarCambioModelo(id);
 }
 // Aviso si el coordinador captura otra vez algo que Dirección marcó como no instalado o por reinstalar.
+// v331 (pedido por el usuario): si ya hay un mueble IGUAL capturado en la misma calle (aunque esté mal escrita) en los
+// últimos 3 días, se pregunta antes de descontar otra vez. Así no se descuenta dos veces por recapturar.
+function calleParecida(a, b){ const A = calleNorm(a), B = calleNorm(b); if(!A || !B) return false; if(A===B) return true;
+  const nums = t => (t.match(/\d+/g)||[]).join(' '); if(nums(A)!==nums(B)) return false;
+  const la = A.replace(/\d+/g,'').replace(/\s+/g,''), lb = B.replace(/\d+/g,'').replace(/\s+/g,''); if(!la || !lb || la.includes(lb) || lb.includes(la)) return true;
+  const d = Array.from({length:lb.length+1}, (_, k)=>k); for(let i=1;i<=la.length;i++){ let prev = d[0]; d[0] = i; for(let j=1;j<=lb.length;j++){ const t = d[j]; d[j] = Math.min(d[j]+1, d[j-1]+1, prev+(la[i-1]===lb[j-1]?0:1)); prev = t; } }
+  return d[lb.length] <= Math.max(2, Math.floor(Math.max(la.length, lb.length)/4)); }
+async function avisoMismoMueble(calle, desc){
+  try{ await cargarInstLog(); }catch(e){ return true; }
+  const lim = new Date(Date.now()-3*864e5).toISOString(), k = String(desc||'').split(' · ').slice(0,3).join(' · ');
+  const xs = (instLog||[]).filter(l=>l.modulo===modulo() && (l.fecha||'')>lim && l.estado!=='rechazado' && !l.cambiadaPor && !l.registroDuplicado && !l.duplicadoAnulado
+    && String(l.descripcion||'').split(' · ').slice(0,3).join(' · ')===k && calleParecida(l.calle, calle));
+  if(!xs.length) return true;
+  const h = t => { try{ return new Date(t).toLocaleString('es-MX',{weekday:'short', hour:'numeric', minute:'2-digit'}); }catch(e){ return ''; } };
+  return confirm(`⚠️ ESTE MUEBLE YA ESTÁ CAPTURADO\n\n${xs.slice(0,4).map(l=>'• '+k+'\n   📍 '+(l.calle||'')+' · '+h(l.fecha)+(l.estado==='pendiente'?' · pendiente':'')).join('\n')}\n\nSi te equivocaste en la calle o en algo, NO lo captures otra vez: corrígelo en el que ya está.\n\n¿De verdad se instaló OTRO igual (${xs.length+1} en total)?\n\nAceptar = sí, es otro · Cancelar = no capturar`);
+}
 async function verifAvisoRecaptura(categoria, modeloKey){
   try{ await cargarInstLog(); }catch(e){ return true; }
   const xs = (instLog||[]).filter(l=>l.verif && l.categoria===categoria && (l.verif.puertas==='reinstalar' || l.verif.puertas==='pendiente'));
@@ -11430,6 +11485,7 @@ async function confirmarInst(){
   const calle = exigirCalle('i'); if(!calle) return; // v182
   if(!(await avisoPospuesta(calle, `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`))) return; // v210 / v311
   if(!(await verifAvisoRecaptura('Mueble', instPreview.modeloKey||null))) return; // v181
+  if(!(await avisoMismoMueble(calle, `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`))) return; // v331
   const fechaDia = $('#i-fecha').value || new Date().toISOString().slice(0,10);
   const mod = modulo();
   const desc = `${instPreview.modeloNombre} · ${instPreview.color}${instPreview.colorCajonera?(' · Cajonera '+instPreview.colorCajonera):''}`;
@@ -11970,6 +12026,7 @@ async function registrarPuerta(tipo, alto, ancho){
   if(instCambio) return guardarCambioModelo({categoria:'Puerta', desc, nota, modeloKey:'Puerta '+tipo, esMax:false, extras:0, consumo:puertaPreview.consumo, piezasMel:puertaPreview.piezasMel||null});
   const calle = exigirCalle('p'); if(!calle) return; // v182
   if(!(await avisoPospuesta(calle, desc))) return; // v210 / v311
+  if(!(await avisoMismoMueble(calle, desc))) return; // v331
   if(!(await verifAvisoRecaptura('Puerta'))) return; // v181
   try{
     // Re-valida en el último momento antes de escribir, y escribe todo o nada
