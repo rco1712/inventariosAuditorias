@@ -11,8 +11,11 @@ export function getCurrentUserEmail(){ return currentUser ? currentUser.email : 
 export async function getSession(){
   if (!supabaseReady) return null;
   const sb = getSupabase();
-  const { data } = await sb.auth.getSession();
-  currentUser = data?.session?.user || null;
+  // v332: con señal débil, renovar la sesión podía tardar mucho y la app no abría. Si en 4 s no
+  // contesta, se entra con el usuario guardado en el celular (Supabase la renueva sola después).
+  const guardado = () => { try{ for (const k of Object.keys(localStorage)) if (/^sb-.*-auth-token$/.test(k)) { const v = JSON.parse(localStorage.getItem(k)); const u = v && (v.user || (v.currentSession && v.currentSession.user)); if (u) return u; } }catch(e){} return null; };
+  const r = await Promise.race([ sb.auth.getSession().then(({ data }) => ({ u: data?.session?.user || null })).catch(() => null), new Promise((ok) => setTimeout(() => ok(null), 4000)) ]);
+  currentUser = r ? r.u : guardado();
   return currentUser;
 }
 
@@ -47,11 +50,13 @@ const PROFILE_CACHE_KEY = 'am_perfil';
 export async function getMyProfile(){
   if (!supabaseReady || !currentUser) return null;
   const sb = getSupabase();
+  // v332: si ya hay un perfil guardado en el celular se usa al instante y se actualiza por detrás
+  // (antes la app esperaba a internet para abrir).
+  const pedir = async () => { const { data, error } = await sb.from('perfiles').select('rol, modulo, email').eq('user_id', currentUser.id).single();
+    if (error || !data) throw error || new Error('sin perfil'); localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data)); return data; };
+  try { const c = JSON.parse(localStorage.getItem(PROFILE_CACHE_KEY) || 'null'); if (c && c.rol && (!c.email || c.email === currentUser.email)) { pedir().catch(() => {}); return c; } } catch (e) {}
   try {
-    const { data, error } = await sb.from('perfiles').select('rol, modulo, email').eq('user_id', currentUser.id).single();
-    if (error || !data) throw error || new Error('sin perfil');
-    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data));
-    return data;
+    return await pedir();
   } catch (e) {
     // Sin internet (o el perfil aún no existe): usa el último conocido, si hay.
     const cached = localStorage.getItem(PROFILE_CACHE_KEY);
