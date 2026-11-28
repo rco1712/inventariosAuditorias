@@ -1,6 +1,6 @@
 // Service worker: cachea el "app shell" para que la app abra y funcione sin internet.
 // Los datos van por src/db.js (IndexedDB + sync a Supabase), no por aquí.
-const CACHE = 'auditoriamodulos-v331';
+const CACHE = 'auditoriamodulos-v332';
 const APP_SHELL = [
   './',
   './index.html',
@@ -53,12 +53,22 @@ self.addEventListener('fetch', (event) => {
   const mismoSitio = url.origin === self.location.origin;
 
   if (mismoSitio) {
-    event.respondWith(
-      fetch(req, { cache: 'no-cache' }).then((res) => {
-        if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
-        return res;
-      }).catch(() => caches.match(req).then((c) => c || caches.match('./index.html')))
-    );
+    // v332 (pedido por el usuario: con datos tardaba mucho o no abría): se pide a internet, pero si en
+    // 3 segundos no contesta (señal débil) se abre con la copia guardada; la descarga sigue y la versión
+    // nueva queda lista para la próxima vez que se abra.
+    const red = fetch(req, { cache: 'no-cache' }).then((res) => {
+      if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return res;
+    });
+    const guardada = () => caches.match(req).then((c) => c || (req.mode === 'navigate' ? caches.match('./index.html') : undefined));
+    event.respondWith(new Promise((resolve) => {
+      let listo = false;
+      const usarGuardada = () => guardada().then((c) => { if (listo) return; if (c) { listo = true; resolve(c); } });
+      const t = setTimeout(usarGuardada, 3000);
+      red.then((res) => { clearTimeout(t); if (!listo) { listo = true; resolve(res); } })
+         .catch(() => { clearTimeout(t); guardada().then((c) => { if (!listo) { listo = true; resolve(c || Response.error()); } }); });
+    }));
+    event.waitUntil(red.catch(() => {}));
     return;
   }
 
